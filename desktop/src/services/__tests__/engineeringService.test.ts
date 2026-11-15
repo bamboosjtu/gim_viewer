@@ -83,6 +83,19 @@ beforeEach(() => {
 });
 
 describe('session-owned production engineering build', () => {
+  it('batches reachable CBM siblings and their DEV pointers on a semantic cache fallback',async()=>{
+    const app=state(),port=new LoopbackPort(),rows=Array.from({length:48},(_,i)=>`u${i}`);
+    const files=new Map<string,File>([
+      ['project.cbm',new File([rows.map((name,i)=>`SUBSYSTEM${i}=${name}.cbm`).join('\n')],'project.cbm')],
+      ...rows.flatMap(name=>[[name+'.cbm',new File([`OBJECTMODELPOINTER=${name}.dev`],name+'.cbm')],[name+'.dev',new File(['TYPE=GIS'],name+'.dev')]] as [string,File][]),
+      ['unrelated.dev',new File(['TYPE=OTHER'],'unrelated.dev')],
+    ]);
+    await beginEngineeringBuild(app,files,{createWorker:portFactory(port)});
+    const sent=port.sourceInputs.flatMap(input=>input.batches.flatMap(batch=>batch.entries.map(e=>e.path)));
+    expect(app.engineeringSnapshot?.entities).toHaveLength(48);
+    expect(new Set(sent).size).toBe(sent.length);expect(sent).not.toContain('unrelated.dev');
+    expect(port.sourceInputs.length).toBeLessThanOrEqual(6);
+  });
   it('reads only reachable physical documents once before and after semantic extraction',async()=>{
     const app=state(),port=new LoopbackPort(),files=sourceFiles();port.holdExtract=true;
     for(const name of ['unrelated.cbm','unrelated.dev'])files.set(name,new File(['UNUSED=1'],name));

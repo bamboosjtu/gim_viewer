@@ -1,6 +1,8 @@
 # AGENTS.md — 编码助手工作约定
 
-本项目是 GIM 文件浏览器：`desktop/` 为 Tauri 2 桌面端（变电、线路、独立设备），`app/` 为 Android 线路端。当前运行面、目录所有权和依赖方向见[架构](docs/architecture.md)与[分层](docs/architecture/layers.md)；格式事实见[Schema](docs/schema/README.md)。不要把研究材料直接当成已验证契约。
+本项目是 GIM 文件浏览器，解决 GIM、IFC、DEV 等工程数据的解析、语义归一化、几何编译和高性能展示。
+
+`desktop/` 为 Tauri 2 桌面端（变电、线路、独立设备），`app/` 为 Android 线路端。当前运行面、目录所有权和依赖方向见[架构](docs/architecture.md)与[分层](docs/architecture/layers.md)；格式事实见[Schema](docs/schema/README.md)。不要把研究材料直接当成已验证契约。
 
 ## 工作区和证据
 
@@ -16,6 +18,8 @@
 - `tools/` 中的小工具须独立运行和打包，不导入、调用或在运行/构建时读取 `gim_viewer` 主程序及 `desktop/` 资源。工具持有自己的实现和词典副本，通过数据版本、契约用例与本地结果对照验证一致性；不通过调用主程序验证主程序自身。
 
 - `desktop/src/engineering/` 是纯领域；`gim/` 做来源解析与适配；`services/` 编排；`viewer/` 管理渲染；`ui/` 管理 DOM；`measurement/` 是探针和只读证据。测量核心在 `packages/measurement-core/`，不得依赖 DOM、Tauri 或 Three。新跨端能力先确认是否属于现有 `packages/` 或 `crates/` 契约。
+- 测试按被测模块归属组织：TS 单元测试放模块旁的 `__tests__/`，共享包测试归共享包；Node 脚本测试与脚本同目录，Python 工具区分 `tests/unit/` 与 `tests/local/`。源码搬迁或契约变更时，同步更新测试、夹具、发现入口和文档引用；用 `npm run test:module -- <模块路径>` 选择模块及其跨模块依赖测试，不能只跑新目录而遗漏消费者。具体规则见[测试组织](docs/validation.md#测试组织)。
+- 不为旧测试保留产品已不用的入口；测试组合器放在模块测试支持文件中，并调用实际生产路径。清理前核对动态导入、Worker、平台入口和公开数据契约；不能把故障回退或暂未被 UI 消费的约定接口直接当成死代码。
 - `gim/` 不依赖 services/viewer/ui；`viewer/` 不依赖 services/ui；`ui/` 不直接访问数据库或原生 IPC。入口与打开服务不能静态引入 Three、web-ifc、MapLibre。变更后运行 `desktop/` 下的 `npm run check:engineering-boundaries`。
 - 源 SHA 和 magic 决定输入身份，缓存不能覆盖源事实。工程实体、来源 occurrence 与几何表示保持独立；表示只按来源 ID 绑定，不靠同名、邻近或数组序号补配。会话、几何批次和选择请求均须拒绝旧结果提交。具体语义见[架构](docs/architecture.md)及[验证不变量](docs/validation.md)。
 - 全包路径/引用索引按源文件 Map 共享。逐节点、逐 DEV/PHM、逐属性或逐几何请求不得重新枚举整包；文件物化仅替换值，路径键集合变化使用新 Map。相关变更用扫描/读取次数回归验证，不使用绝对耗时阈值。

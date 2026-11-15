@@ -55,7 +55,7 @@
 
 ## 对象证据
 
-`standardCatalog.json` 从用户维护的 `research/实体识别/变电三维设计建模规范_索引表类.xlsx` 生成，设备、材料、构件及部件的当前范围见生成数据的 `coverage`，由 `npm run check:engineering-catalog` 核对工作簿与工具副本。分类目录和展开顺序直接取四张索引表，新增项在工作簿标黄。常用 IFC 梁、柱、门窗、屋面和杆件映射到建筑物相应条目，普通 IFC 梁柱不自动推断为钢。内部用途/边界码与目录类别、名称分开，不再用旧目录替代工作簿层级。
+`standardCatalog.json` 从用户维护的 `docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx` 生成，设备、材料、构件及部件的当前范围见生成数据的 `coverage`，由 `npm run check:engineering-catalog` 核对工作簿与工具副本。分类目录和展开顺序直接取四张索引表，新增项在工作簿标黄。常用 IFC 梁、柱、门窗、屋面和杆件映射到建筑物相应条目，普通 IFC 梁柱不自动推断为钢。内部用途/边界码与目录类别、名称分开，不再用旧目录替代工作簿层级。
 
 0.2.3 将来源清单、已解析证据与工程快照分开。`ModelEvidenceProvider` 的元数据快照和有界详情查询不触发 IO；宿主通过显式物化请求取得 FAM 属性，识别只消费所需的已解析来源。物理目录在 FAM 物化和实体归一化之前可用。清单完整、属性解析完成和工程输入处理完成是不同范围，不用当前属性条数推断全包属性总数。
 
@@ -65,7 +65,7 @@
 
 属性记录由原始键值、分段/容器地址、Parsed Value 和可选 Semantic Value 组成；`sourceId`、`rawSection`、`containerId`、`rawContainerName` 和 `applicability` 保留对象、阶段、原始 Pset 名及实例/类型范围，未知范围显式为 unknown。冲突只比较同一对象、文档、规范属性、阶段、容器和适用范围。未知单位不推定，只有物理量和明确单位相容时才执行有版本的转换。重复原始行独立保留，共享 FAM 的记录与 occurrence 赋值分开。IFC 外露属性仍是部分投影。当前 `readEntry()` 是上限 16 MiB 的整条目读取，尚未提供大文件分块访问；超过上限的 IFC 不能通过此接口完整读取。未来 `readEntryRange()` 属于接口预留，不代表已实现 Validator 来源访问。
 
-`categoryStatus` 表达工程目录类别状态，`equipmentType`、`componentType`、`purpose`、`objectRole` 各有独立状态和证据；既有 `meaning` 保留对象角色，既有 `role` 保留盖板/侧壁等组成子角色。油浸式 TYPE 可确认 `oil_immersed_transformer`，没有明确用途时类别保持 E-T/candidate、purpose unresolved；标准断路器 TYPE 支持 `ACPorcelainCircuitBreaker`。仅名称推断或名称细分保持候选。分类已确认不自动确认整体边界。
+`categoryStatus` 表达工程目录类别状态，`equipmentType`、`componentType`、`purpose`、`objectRole` 各有独立状态和证据；既有 `meaning` 保留对象角色，既有 `role` 保留盖板/侧壁等组成子角色。油浸式 TYPE 可确认 `oil_immersed_transformer`，没有明确用途时目录类别为 E01/confirmed、purpose unresolved；E-T 仅作为内部用途待定角色；标准断路器 TYPE 支持 `ACPorcelainCircuitBreaker`。仅名称推断或名称细分保持候选。分类已确认不自动确认整体边界。
 
 PARTINDEX 只赋予属性：在当前父装配子树内唯一匹配才赋值，多候选保留歧义，无匹配保留来源和未决别名，不回退创建物理根。证据查询分别返回 confirmed、带全部 candidateSourceIds 的 ambiguous 和空候选 unresolved；同一 FAM 的不同引用用途分开保留。确认的 FAM 绑定在实际赋值处记录，不能从包含祖先上下文的 sources 清单推导继承。同一 DEV 的其他真实物理引用正常保留；PARTINDEX 标记是引用用途事实，不是工程层级推断。
 
@@ -86,7 +86,7 @@ PARTINDEX 只赋予属性：在当前父装配子树内唯一匹配才赋值，�
 | `sourceId` | 包内 occurrence 身份 |
 | `name` | 当前对象名称；前缀“主变模型1_”等作为组成片段处理 |
 | `assemblyParentId` | 真实装配父 |
-| `typeCategory` | 设备/IFC 类型枚举的目录映射 |
+| `typeCategory` | 适配后的内部识别/归属角色；不等于公开的目录 category |
 | `propertyCategories` | 已解释为当前对象类别的有效属性，带证据地址；服务对象/用途上下文不无条件成为自身类别 |
 | `objectRoles` | 明确内部组成或独立角色属性；桩身等基础组件保留角色 |
 | `subtypeNames` / `phaseLabels` | 当前对象的子类声明/类型细类、相别，用于细分与成组冲突检查 |
@@ -212,4 +212,4 @@ EntityRelationship { from, to, kind: 'associated_with', evidence }
 
 `sourceVocabulary.keywordDictionary` 的词条由同一工作簿的中文名称、英文名称和设备部件表生成；来源只记录工作簿 SHA、工作表及单元格，不需要 PDF 复核标记。词条 mapped/confirmed 表示索引类型已识别，不是模型交付校核通过。未识别、歧义、无明确宿主的对象仍保留候选或待归。中文 GIS/HGIS 与英文匹配统一大小写；词典内容指纹只重建实体/导航缓存，不失效物理目录或几何模板。
 
-TypeScript 的纯 DTO 一致性用例实际启动独立 Python runner，比较逐来源 ownerId、类别及状态、成员状态、待归原因和诊断；工具 CI 执行 `test_standard.py`。实际工程和合成来源文件装配检查仍留在开发者本地，不作为远程工程验收。
+TypeScript 的纯 DTO 一致性用例实际启动独立 Python runner，比较逐来源 ownerId、类别及状态、成员状态、待归原因和诊断；契约数据放在工具的 `tests/contracts/`，工具 CI 自动发现 `tests/unit/` 中的 `test_standard_recognition.py` 等模块单测。实际工程和合成来源文件装配检查位于 `tests/local/`，仍留在开发者本地，不作为远程工程验收。

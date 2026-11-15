@@ -1,5 +1,5 @@
 import rules from './catalogRules.json';
-import { categoryLabel } from './catalogLabels.js';
+import { recognitionLabel as categoryLabel } from './catalogLabels.js';
 
 const patterns = rules.subtypeRules as Record<string,string[][]>;
 const subtypeRules = new Map(Object.entries(patterns).map(([code,rows])=>[code,rows.map(([id,label,pattern])=>({id,label,regex:new RegExp(pattern,'i')}))]));

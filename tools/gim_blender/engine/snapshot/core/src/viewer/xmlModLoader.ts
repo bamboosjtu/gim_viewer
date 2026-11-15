@@ -1,0 +1,430 @@
+/**
+ * 变电 XML MOD 文件加载入口。
+ *
+ * 把 MOD 文件 buffer 转换为 Three.js Group。
+ *
+ * 与 IFC 加载器（ifcEntryLoader）的差异：
+ * - 不使用 OBC Fragments（IFC 专用）
+ * - 直接添加到 ctx.world.scene.three（与 IFC fragments 共存于同一 scene）
+ * - 独立跟踪（state.loadedXmlModGroups），不与 IFC loadedModels 混用
+ *
+ * 引用链：CBM → DEV → PHM → MOD
+ * - Entity 内部 TransformMatrix 由 entityToMesh 应用（primitive 局部坐标 → MOD 局部空间）
+ * - CBM/DEV/SUBDEVICE/PHM 外部矩阵由调用方累积后应用（MOD 局部空间 → 工程坐标）
+ * - MOD Group 在 xmlModDocumentToGroup 中统一从毫米缩放到 IFC 场景米量级
+ *
+ * P0 范围：
+ * - 仅处理 currentFiles 非空场景（首次打开）
+ * - 缓存命中场景（currentFiles=null）由 P2 实现
+ */
+
+import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { parseXmlMod } from '../gim/geometry/xmlModParser.js';
+import { applyPhmColorOverride, collectBakedGeometriesByMaterial, collectBakedGeometriesByMaterialAsync, disposeOwnedXmlModMaterials, gimMatrixToMatrix4, MOD_MM_TO_SCENE_UNIT, resolveOpacity } from './xmlModGeometry.js';
+import type { XmlModDocument } from '../gim/geometry/xmlModParser.js';
+import type { XmlModColor } from '../gim/geometry/ir.js';
+import { getFileByPath } from '../gim/fileLookup.js';
+
+export type XmlModGeometryStatus = 'empty' | 'renderable' | 'partial' | 'unsupported';
+
+export interface XmlModGeometryDiagnostics {
+  status: XmlModGeometryStatus;
+  entityCount: number;
+  renderableEntityCount: number;
+  malformedEntityCount: number;
+  unsupportedEntityCount: number;
+  unsupportedPrimitiveTypeCounts: Record<string, number>;
+  failedVisibleRoots?: import('./xmlModGeometry.js').BakedGeometryFailure[];
+  simplifiedBooleans?: number;
+  representationPolicy?: 'outline' | 'detailed';
+  approximatedBooleans?: Record<'Union' | 'Difference' | 'Intersection', number>;
+  omittedSmallParts?: number;
+  omittedMaxExtentMm?: number;
+}
+
+export const XML_MOD_GEOMETRY_DIAGNOSTICS_KEY = '__gimXmlModDiagnostics';
+
+// re-export 共享 Material / Geometry 释放函数（项目切换时由 projectCleanupService 调用）
+export {
+  disposeSharedXmlModMaterials,
+  disposeSharedXmlModGeometries,
+  disposeOwnedXmlModMaterials,
+  applyPhmColorOverride,
+} from './xmlModGeometry.js';
+
+const RENDERABLE_MOD_PRIMITIVE_RE = /<(Cylinder|Cuboid|Sphere|TruncatedCone|Ring|CircularGasket|StretchedBody|PorcelainBushing|TerminalBlock|Wire|Cable|RotationalEllipsoid|BeamChannel|H|Boolean|OffsetRectangularTable|RectangularFixedPlate|RectangularRing|Insulator|VTypeInsulator|ConePorcelainBushing|EccentricTruncatedCone|EllipticRing|BendingCylindrical|CircularFixedPlate|SquareGasket|TableGasket)\b/i;
+const GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT = 0.001;
+
+/**
+ * Wire/Cable 的真实管径在远景只有亚像素宽度；单独叠一条 1px 中心线，
+ * 既保留真实直径，又保证电气连接在所有 LOD 都可辨认。线只作为视觉辅助，
+ * 不参与拾取/尺寸测量。
+ *
+ * 每条 Wire/Cable 一条 Line 会多一个 draw object；超过阈值时按颜色合并成
+ * LineSegments，避免数千条线时 draw calls 线性膨胀。
+ */
+function addElectricalConnectionLines(group: THREE.Group, doc: XmlModDocument): void {
+  const lines: THREE.Line[] = [];
+  for (const entity of doc.entities) {
+    if (!entity.visible) continue;
+    const primitive = entity.primitive;
+    const flat = primitive.type === 'Wire' ? primitive.fitPoints
+      : primitive.type === 'Cable' ? primitive.inflectionPoints : null;
+    if (!flat || flat.length < 6) continue;
+    const matrix = new THREE.Matrix4()
+      .makeScale(MOD_MM_TO_SCENE_UNIT, MOD_MM_TO_SCENE_UNIT, MOD_MM_TO_SCENE_UNIT)
+      .multiply(gimMatrixToMatrix4(entity.transformMatrix));
+    const points: THREE.Vector3[] = [];
+    for (let i = 0; i + 2 < flat.length; i += 3) {
+      points.push(new THREE.Vector3(flat[i], flat[i + 1], flat[i + 2]).applyMatrix4(matrix));
+    }
+    if (points.length < 2) continue;
+    const color = entity.color
+      ? new THREE.Color(entity.color.r / 255, entity.color.g / 255, entity.color.b / 255)
+      : new THREE.Color(0x4ade80);
+    // 与 Mesh 完全复用同一 A=0 不透明哨兵与百分制/字节制规则。
+    const { opacity, transparent } = resolveOpacity(entity.color?.a ?? 100, doc.colorMaxA);
+    const material = new THREE.LineBasicMaterial({
+      color,
+      transparent,
+      opacity,
+      depthTest: true,
+      depthWrite: false,
+    });
+    material.userData.__gimOwnedInstanceMaterial = true;
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), material);
+    line.name = `xml-wire-line:${entity.id}`;
+    line.renderOrder = 1;
+    line.userData.electricalConnection = true;
+    lines.push(line);
+  }
+
+  group.userData.electricalConnectionLineCount = lines.length;
+  if (lines.length > 1000) {
+    mergeElectricalConnectionLines(group, lines);
+    group.userData.electricalConnectionMerged = true;
+  } else {
+    for (const line of lines) group.add(line);
+    group.userData.electricalConnectionMerged = false;
+  }
+}
+
+function mergeElectricalConnectionLines(group: THREE.Group, lines: THREE.Line[]): void {
+  const buckets = new Map<string, { positions: number[]; material: THREE.LineBasicMaterial }>();
+  for (const line of lines) {
+    const material = line.material as THREE.LineBasicMaterial;
+    const key = `${material.color.getHexString()}_${material.opacity}_${material.transparent}`;
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = {
+        positions: [],
+        material: new THREE.LineBasicMaterial({
+          color: material.color.clone(), opacity: material.opacity,
+          transparent: material.transparent, depthTest: true, depthWrite: false,
+        }),
+      };
+      bucket.material.userData.__gimOwnedInstanceMaterial = true;
+      buckets.set(key, bucket);
+    }
+    const positions = line.geometry.getAttribute('position');
+    for (let i = 0; i + 1 < positions.count; i++) {
+      bucket.positions.push(
+        positions.getX(i), positions.getY(i), positions.getZ(i),
+        positions.getX(i + 1), positions.getY(i + 1), positions.getZ(i + 1),
+      );
+    }
+    line.geometry.dispose();
+    material.dispose();
+  }
+  for (const bucket of buckets.values()) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(bucket.positions, 3));
+    const segments = new THREE.LineSegments(geometry, bucket.material);
+    segments.name = 'xml-wire-lines';
+    segments.renderOrder = 1;
+    segments.userData.electricalConnection = true;
+    group.add(segments);
+  }
+}
+
+/**
+ * 从 XML 文本加载 MOD 文件并转换为 Three.js Group。
+ *
+ * 内部步骤：
+ * 1. parseXmlMod → XmlModDocument
+ * 2. xmlModDocumentToGroup → THREE.Group（Entity 内部 TransformMatrix 已应用，单位已缩放）
+ *
+ * @param modText MOD 文件 XML 文本
+ * @param modPath MOD 文件路径（如 "MOD/abc.mod"），用于 Group.name 与错误消息
+ * @returns THREE.Group（已应用 Entity 内部 TransformMatrix；外部矩阵待应用）
+ * @throws XML 解析失败时抛错（由调用方 try/catch）
+ */
+/**
+ * 按 Material 分组合并 XmlModDocument 中所有 entity 的 Geometry（方案 B：mergeGeometries 静态合并）。
+ *
+ * 直接从 entity 数据烘焙 TransformMatrix + mm→m 缩放到顶点，不创建中间 Mesh 对象：
+ * - 避免 Object3D.applyMatrix4 → decompose → compose 精度损失（修复变压器位置偏离）
+ * - 省去 77000+ 个 Mesh 对象的构造和 GC 开销（性能提升）
+ * - mm→m 缩放烘焙到顶点，group.scale 保持 1，避免后续 applyPlacementTransform 的
+ *   decompose 在 placement 含缩放分量时 corrupt group.scale（修复 GIS 设备位置偏离）
+ *
+ * 共享的 BufferGeometry（来自 _sharedGeometryCache）仅被 clone，不会被修改。
+ * 共享的 Material 仍然复用（不 clone）。
+ *
+ * @param doc parseXmlMod 返回的 XmlModDocument
+ * @returns 合并后的 Group（按 Material 分组，每组一个 merged Mesh；顶点已含 entity.transform + mm→m）
+ */
+function flattenDocumentToGroup(
+  doc: XmlModDocument,
+  byMaterial = collectBakedGeometriesByMaterial(doc),
+): THREE.Group {
+  const merged = new THREE.Group();
+  merged.name = `xml-mod:${doc.modPath}`;
+  merged.userData.modPath = doc.modPath;
+
+  const unsupportedPrimitiveTypeCounts: Record<string, number> = {};
+  // Keep the current renderer's primitive policy, but expose its degradation
+  // explicitly to cache/pipeline callers. A non-rendered primitive is not an
+  // empty source.
+  const renderableTypes = new Set([
+    'Cuboid', 'Cylinder', 'Sphere', 'TruncatedCone', 'Ring',
+    'CircularGasket', 'StretchedBody', 'PorcelainBushing', 'TerminalBlock', 'Wire', 'Cable',
+    'RotationalEllipsoid', 'BeamChannelLike', 'Boolean', 'OffsetRectangularTable',
+    'RectangularFixedPlate', 'RectangularRing', 'ChannelSteel', 'Table',
+  ]);
+  let unsupportedEntityCount = doc.malformedEntityCount;
+  for (const entity of doc.entities) {
+    if (renderableTypes.has(entity.primitive.type)) continue;
+    unsupportedEntityCount++;
+    const type = entity.primitive.type === 'Unsupported'
+      ? entity.primitive.sourceType
+      : entity.primitive.type;
+    unsupportedPrimitiveTypeCounts[type] = (unsupportedPrimitiveTypeCounts[type] ?? 0) + 1;
+  }
+
+  for (const [mat, geos] of byMaterial) {
+    if (geos.length === 0) continue;
+    const combined = mergeGeometries(geos, false);
+    if (combined) {
+      merged.add(new THREE.Mesh(combined, mat));
+      for (const g of geos) g.dispose();
+    } else {
+      // mergeGeometries 失败（attributes 不一致等）：回退到独立 Mesh，避免 entity 丢失
+      console.warn(`[xmlModLoader] mergeGeometries 失败，回退到独立 Mesh: ${doc.modPath}`, {
+        geoCount: geos.length,
+        attributes: geos.map(g => Object.keys(g.attributes)),
+      });
+      for (const g of geos) {
+        merged.add(new THREE.Mesh(g, mat));
+        // 不 dispose g — 已交给 Mesh 使用
+      }
+    }
+  }
+
+  addElectricalConnectionLines(merged, doc);
+
+  let renderableEntityCount = 0;
+  merged.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (mesh.isMesh && mesh.geometry?.getAttribute?.('position')?.count > 0) {
+      renderableEntityCount++;
+    }
+  });
+  const hasRenderable = renderableEntityCount > 0;
+  const status: XmlModGeometryStatus = doc.declaredEntityCount === 0 || (!hasRenderable && unsupportedEntityCount === 0 && byMaterial.failures.length === 0)
+    ? 'empty'
+    : hasRenderable
+      ? (unsupportedEntityCount > 0 || byMaterial.failures.length > 0 ? 'partial' : 'renderable')
+      : 'unsupported';
+  merged.userData[XML_MOD_GEOMETRY_DIAGNOSTICS_KEY] = {
+    status,
+    entityCount: doc.declaredEntityCount,
+    renderableEntityCount,
+    malformedEntityCount: doc.malformedEntityCount,
+    unsupportedEntityCount,
+    unsupportedPrimitiveTypeCounts,
+    failedVisibleRoots: byMaterial.failures,
+    simplifiedBooleans: byMaterial.simplifiedBooleans,
+    representationPolicy: byMaterial.representationPolicy,
+    approximatedBooleans: byMaterial.approximatedBooleans,
+    omittedSmallParts: byMaterial.omittedSmallParts,
+    omittedMaxExtentMm: byMaterial.omittedMaxExtentMm,
+  } satisfies XmlModGeometryDiagnostics;
+
+  // 不设置 group.scale：mm→m 缩放已在 collectBakedGeometriesByMaterial 中烘焙到顶点
+  // 保持 group.scale = 1，避免后续 applyPlacementTransformToSceneUnits 的 decompose corrupt scale
+  return merged;
+}
+
+export function loadXmlModFromText(
+  modText: string,
+  modPath: string,
+  phmColor?: XmlModColor,
+  phmColorMaxA?: number,
+): THREE.Group {
+  const doc = parseXmlMod(modText, modPath);
+  const group = flattenDocumentToGroup(doc);
+  applyPhmColorOverride(group, phmColor, phmColorMaxA);
+  return group;
+}
+
+/**
+ * 从 GIM 解压文件集合加载 MOD 文件。
+ *
+ * @param modPath 完整路径（如 "MOD/abc.mod"）
+ * @param files GIM 解压后的文件集合
+ * @returns THREE.Group；找不到文件或解析失败返回 null
+ */
+export async function loadXmlModFromFiles(
+  modPath: string,
+  files: Map<string, File>,
+  phmColor?: XmlModColor,
+  phmColorMaxA?: number,
+  options?: { strict?: boolean; parseXml?: typeof parseXmlMod; lod?: import('./xmlModGeometry.js').DeviceLod; timings?: Record<string, number>; outline?: import('./xmlModGeometry.js').OutlineGeometryOptions; onStage?:import('../measurement/core.js').StageObserver },
+): Promise<THREE.Group | null> {
+  const strict = options?.strict === true;
+  const file = getFileByPath(files, modPath);
+  if (!file) {
+    const kind = /\.gl$/i.test(modPath) ? 'GL' : 'MOD';
+    const message = `[xmlModLoader] ${kind} 文件不存在: ${modPath}`;
+    if (strict) throw new Error(message);
+    console.warn(message);
+    return null;
+  }
+  // 使用 arrayBuffer + TextDecoder 而非 file.text()，确保跨运行时（浏览器/jsdom）兼容
+  const text = await file.text();
+  try {
+    // 空 MOD 是已知的合法占位文件；其他不含当前可渲染 primitive 的内容
+    // 仍交给 XML parser 校验，不能把损坏文件静默伪装成空模型。
+    if (!RENDERABLE_MOD_PRIMITIVE_RE.test(text) && /<Device\b[^>]*>\s*<Entities\s*\/\s*>\s*<\/Device>\s*$/i.test(text)) {
+      const group = new THREE.Group();
+      group.name = `xml-mod:${modPath}`;
+      group.userData[XML_MOD_GEOMETRY_DIAGNOSTICS_KEY] = {
+        status: 'empty',
+        entityCount: 0,
+        renderableEntityCount: 0,
+        malformedEntityCount: 0,
+        unsupportedEntityCount: 0,
+        unsupportedPrimitiveTypeCounts: {},
+      } satisfies XmlModGeometryDiagnostics;
+      applyPhmColorOverride(group, phmColor, phmColorMaxA);
+      return group;
+    }
+    const doc = (options?.parseXml ?? parseXmlMod)(text, modPath);
+    const baked = await collectBakedGeometriesByMaterialAsync(doc, options?.lod, options?.timings, options?.outline,options?.onStage);
+    const mergeStarted = performance.now();
+    const group = flattenDocumentToGroup(doc, baked);
+    if (options?.timings) options.timings.mergeMs = (options.timings.mergeMs ?? 0) + performance.now() - mergeStarted;
+    applyPhmColorOverride(group, phmColor, phmColorMaxA);
+    return group;
+  } catch (err) {
+    const kind = /\.gl$/i.test(modPath) ? 'GL' : 'MOD';
+    const message = `${kind} 解析失败: ${modPath}`;
+    if (strict) {
+      const detail = err instanceof Error ? err.message : String(err);
+      const strictError = new Error(`${message}: ${detail}`);
+      // ErrorOptions.cause is not part of this ES2020 build target. Preserve
+      // the original exception for diagnostics without widening the runtime
+      // lib requirement.
+      (strictError as Error & { cause?: unknown }).cause = err;
+      throw strictError;
+    }
+    console.error(`[xmlModLoader] ${message}`, err);
+    return null;
+  }
+}
+
+/**
+ * GIM DEV/PHM 变换矩阵 → Three.js Matrix4。
+ *
+ * 样本研究结论：GIM 矩阵实际为列主序展开，平移在 m[12]/m[13]/m[14]，
+ * 等同于 Three.js Matrix4.elements 数组布局。使用 fromArray 直接加载。
+ *
+ * 长度不为 16 时返回单位矩阵。
+ */
+export function columnMajorToMatrix4(arr: number[]): THREE.Matrix4 {
+  const m = new THREE.Matrix4();
+  if (!Array.isArray(arr) || arr.length !== 16) return m;
+  m.fromArray(arr);
+  return m;
+}
+
+/**
+ * 应用已累积的 CBM/DEV/SUBDEVICE/PHM 放置矩阵（顶点烘焙版）。
+ *
+ * 关键修复：改为遍历 group 的 mesh，直接对 geometry.applyMatrix4(matrix)
+ * 烘焙到顶点，避免 Object3D.applyMatrix4 的 premultiply + decompose 链路。
+ *
+ * 修复背景：当 placement matrix 含缩放分量 s 时，group.applyMatrix4(matrix)
+ * 会执行 `this.matrix.premultiply(matrix)` + `this.matrix.decompose(...)`，
+ * decompose 从 `matrix × group.matrix` 提取 scale，导致 group.scale 被错误修改
+ *（如 s≠1 时 group.scale 从 1 变为 s，几何被错误缩放）。
+ *
+ * 顶点烘焙直接变换 BufferGeometry 的 position attribute，数学上精确，
+ * 不会触发 decompose，因此 placement 的旋转/平移/缩放/剪切都能正确应用到几何。
+ *
+ * 单位处理：MOD/STL 顶点已在加载阶段烘焙 mm→m 缩放（顶点单位为米），
+ * placement 平移量单位为毫米，这里 × 0.001 转为米后烘焙到顶点，单位一致。
+ */
+export function applyPlacementTransformToSceneUnits(
+  group: THREE.Group,
+  transformMatrix: number[] | null | undefined,
+): void {
+  if (!Array.isArray(transformMatrix) || transformMatrix.length !== 16) return;
+  const matrix = columnMajorToMatrix4(transformMatrix);
+  matrix.elements[12] *= GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT;
+  matrix.elements[13] *= GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT;
+  matrix.elements[14] *= GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT;
+  // 烘焙到顶点：避免 Object3D.applyMatrix4 + decompose 在 placement 含缩放时 corrupt group.scale
+  group.traverse((obj) => {
+    const object = obj as THREE.Mesh | THREE.Line;
+    const geometry = object.geometry;
+    if (!geometry) return;
+    geometry.applyMatrix4(matrix);
+    if (!(object as THREE.Mesh).isMesh) return;
+    // A baked reflection reverses orientation; Object3D's determinant-based
+    // front-face handling no longer sees it after the matrix becomes vertices.
+    if (matrix.determinant() < 0) {
+      if (geometry.index) {
+        const index = geometry.index;
+        for (let i = 0; i < index.count; i += 3) {
+          const b = index.getX(i + 1);
+          index.setX(i + 1, index.getX(i + 2)); index.setX(i + 2, b);
+        }
+        index.needsUpdate = true;
+      } else {
+        for (const attribute of Object.values(geometry.attributes)) {
+          for (let i = 0; i < attribute.count; i += 3) {
+            for (let c = 0; c < attribute.itemSize; c++) {
+              const b = attribute.getComponent(i + 1, c);
+              attribute.setComponent(i + 1, c, attribute.getComponent(i + 2, c));
+              attribute.setComponent(i + 2, c, b);
+            }
+          }
+          attribute.needsUpdate = true;
+        }
+      }
+    }
+  });
+}
+
+/**
+ * 从 Group 中移除 mesh 并 dispose merged geometry。
+ *
+ * 方案 B（mergeGeometries 静态合并）后，每个 MOD Group 的 merged geometry 是 unique 的
+ *（合并时 clone+烘焙，不再共享），需要在移除时逐 mesh dispose。
+ * Material 仍共享（_sharedMaterialCache），不在此处 dispose。
+ * Base geometry 缓存（_sharedGeometryCache）仍存在，由 disposeSharedXmlModGeometries 统一释放。
+ *
+ * 此函数由 projectCleanupService 调用。
+ */
+export function disposeXmlModGroup(group: THREE.Group): void {
+  group.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    mesh.geometry?.dispose?.();
+  });
+  // PHM 颜色覆盖产生的材质是 Group 私有 clone；共享 XML MOD 材质仍由
+  // disposeSharedXmlModMaterials 统一释放，避免重复 dispose。
+  disposeOwnedXmlModMaterials(group);
+}

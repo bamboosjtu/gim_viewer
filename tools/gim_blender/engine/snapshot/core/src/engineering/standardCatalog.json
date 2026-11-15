@@ -1,0 +1,3589 @@
+{
+  "version": "substation-standard-index-1",
+  "source": {
+    "kind": "workbook",
+    "path": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+    "sha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145"
+  },
+  "coverage": {
+    "equipment": 52,
+    "material": 39,
+    "construction": 40,
+    "parts": 42
+  },
+  "items": [
+    {
+      "id": "equipment:oilimmersedtransformer",
+      "kind": "equipment",
+      "label": "油浸式变压器",
+      "term": "OilImmersedTransformer",
+      "category": "E01",
+      "recognitionCode": "E-T",
+      "catalogCategory": "变压器",
+      "catalogGroup": "设备",
+      "order": 0,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A2",
+        "nameCell": "B2",
+        "termCells": [
+          "C2"
+        ],
+        "cellRange": "A2:C2",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A2:C2"
+      }
+    },
+    {
+      "id": "equipment:drytypetransformer",
+      "kind": "equipment",
+      "label": "干式变压器",
+      "term": "DryTypeTransformer",
+      "category": "E01",
+      "recognitionCode": "E-T",
+      "catalogCategory": "变压器",
+      "catalogGroup": "设备",
+      "order": 1,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A3",
+        "nameCell": "B3",
+        "termCells": [
+          "C3"
+        ],
+        "cellRange": "A3:C3",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A3:C3"
+      }
+    },
+    {
+      "id": "equipment:convertertransformer",
+      "kind": "equipment",
+      "label": "换流变压器",
+      "term": "ConverterTransformer",
+      "category": "E01",
+      "recognitionCode": "E-T",
+      "catalogCategory": "变压器",
+      "catalogGroup": "设备",
+      "order": 2,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A4",
+        "nameCell": "B4",
+        "termCells": [
+          "C4"
+        ],
+        "cellRange": "A4:C4",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A4:C4"
+      }
+    },
+    {
+      "id": "equipment:oilimmersedreactor",
+      "kind": "equipment",
+      "label": "油浸式电抗器",
+      "term": "OilImmersedReactor",
+      "category": "E02",
+      "recognitionCode": "E-R",
+      "catalogCategory": "电抗器",
+      "catalogGroup": "设备",
+      "order": 3,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A5",
+        "nameCell": "B5",
+        "termCells": [
+          "C5"
+        ],
+        "cellRange": "A5:C5",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A5:C5"
+      }
+    },
+    {
+      "id": "equipment:drytypereactor",
+      "kind": "equipment",
+      "label": "干式电抗器",
+      "term": "DryTypeReactor",
+      "category": "E02",
+      "recognitionCode": "E-R",
+      "catalogCategory": "电抗器",
+      "catalogGroup": "设备",
+      "order": 4,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A6",
+        "nameCell": "B6",
+        "termCells": [
+          "C6"
+        ],
+        "cellRange": "A6:C6",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A6:C6"
+      }
+    },
+    {
+      "id": "equipment:electromagneticta",
+      "kind": "equipment",
+      "label": "电磁式电流互感器",
+      "term": "ElectromagneticTa",
+      "category": "E03",
+      "recognitionCode": "E13",
+      "catalogCategory": "电流互感器",
+      "catalogGroup": "设备",
+      "order": 5,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A7",
+        "nameCell": "B7",
+        "termCells": [
+          "C7"
+        ],
+        "cellRange": "A7:C7",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A7:C7"
+      }
+    },
+    {
+      "id": "equipment:electronicta",
+      "kind": "equipment",
+      "label": "电子式电流互感器",
+      "term": "ElectronicTa",
+      "category": "E03",
+      "recognitionCode": "E13",
+      "catalogCategory": "电流互感器",
+      "catalogGroup": "设备",
+      "order": 6,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A8",
+        "nameCell": "B8",
+        "termCells": [
+          "C8"
+        ],
+        "cellRange": "A8:C8",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A8:C8"
+      }
+    },
+    {
+      "id": "equipment:electromagnetictv",
+      "kind": "equipment",
+      "label": "电磁式电压互感器",
+      "term": "ElectromagneticTv",
+      "category": "E04",
+      "recognitionCode": "E14",
+      "catalogCategory": "电压互感器",
+      "catalogGroup": "设备",
+      "order": 7,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A9",
+        "nameCell": "B9",
+        "termCells": [
+          "C9"
+        ],
+        "cellRange": "A9:C9",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A9:C9"
+      }
+    },
+    {
+      "id": "equipment:capacitivetv",
+      "kind": "equipment",
+      "label": "电容式电压互感器",
+      "term": "CapacitiveTv",
+      "category": "E04",
+      "recognitionCode": "E14",
+      "catalogCategory": "电压互感器",
+      "catalogGroup": "设备",
+      "order": 8,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A10",
+        "nameCell": "B10",
+        "termCells": [
+          "C10"
+        ],
+        "cellRange": "A10:C10",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A10:C10"
+      }
+    },
+    {
+      "id": "equipment:electronictv",
+      "kind": "equipment",
+      "label": "电子式电压互感器",
+      "term": "ElectronicTv",
+      "category": "E04",
+      "recognitionCode": "E14",
+      "catalogCategory": "电压互感器",
+      "catalogGroup": "设备",
+      "order": 9,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A11",
+        "nameCell": "B11",
+        "termCells": [
+          "C11"
+        ],
+        "cellRange": "A11:C11",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A11:C11"
+      }
+    },
+    {
+      "id": "equipment:couplingcapacitor",
+      "kind": "equipment",
+      "label": "耦合电容器",
+      "term": "CouplingCapacitor",
+      "category": "E04",
+      "recognitionCode": "E22",
+      "catalogCategory": "电压互感器",
+      "catalogGroup": "设备",
+      "order": 10,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A12",
+        "nameCell": "B12",
+        "termCells": [
+          "C12"
+        ],
+        "cellRange": "A12:C12",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A12:C12"
+      }
+    },
+    {
+      "id": "equipment:voltagemeasuringdevice",
+      "kind": "equipment",
+      "label": "直流电压测量装置",
+      "term": "VoltageMeasuringDevice",
+      "category": "E04",
+      "recognitionCode": "E23",
+      "catalogCategory": "电压互感器",
+      "catalogGroup": "设备",
+      "order": 11,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A13",
+        "nameCell": "B13",
+        "termCells": [
+          "C13"
+        ],
+        "cellRange": "A13:C13",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A13:C13"
+      }
+    },
+    {
+      "id": "equipment:gis",
+      "kind": "equipment",
+      "label": "组合电器 GIS",
+      "term": "GIS",
+      "category": "E05",
+      "recognitionCode": "E05",
+      "catalogCategory": "组合电器",
+      "catalogGroup": "设备",
+      "order": 12,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A14",
+        "nameCell": "B14",
+        "termCells": [
+          "C14"
+        ],
+        "cellRange": "A14:C14",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A14:C14"
+      }
+    },
+    {
+      "id": "equipment:hgis",
+      "kind": "equipment",
+      "label": "组合电器 HGIS",
+      "term": "HGIS",
+      "category": "E05",
+      "recognitionCode": "E05",
+      "catalogCategory": "组合电器",
+      "catalogGroup": "设备",
+      "order": 13,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A15",
+        "nameCell": "B15",
+        "termCells": [
+          "C15"
+        ],
+        "cellRange": "A15:C15",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A15:C15"
+      }
+    },
+    {
+      "id": "equipment:acporcelaincircuitbreaker",
+      "kind": "equipment",
+      "label": "交流瓷柱式断路器",
+      "term": "ACPorcelainCircuitBreaker",
+      "category": "E06",
+      "recognitionCode": "E06",
+      "catalogCategory": "断路器",
+      "catalogGroup": "设备",
+      "order": 14,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A16",
+        "nameCell": "B16",
+        "termCells": [
+          "C16"
+        ],
+        "cellRange": "A16:C16",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A16:C16"
+      }
+    },
+    {
+      "id": "equipment:actankbreaker",
+      "kind": "equipment",
+      "label": "交流罐式断路器",
+      "term": "ACTankBreaker",
+      "category": "E06",
+      "recognitionCode": "E06",
+      "catalogCategory": "断路器",
+      "catalogGroup": "设备",
+      "order": 15,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A17",
+        "nameCell": "B17",
+        "termCells": [
+          "C17"
+        ],
+        "cellRange": "A17:C17",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A17:C17"
+      }
+    },
+    {
+      "id": "equipment:dcbypassswitch",
+      "kind": "equipment",
+      "label": "直流旁路开关",
+      "term": "DCBypassSwitch",
+      "category": "E06",
+      "recognitionCode": "E24",
+      "catalogCategory": "断路器",
+      "catalogGroup": "设备",
+      "order": 16,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A18",
+        "nameCell": "B18",
+        "termCells": [
+          "C18"
+        ],
+        "cellRange": "A18:C18",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A18:C18"
+      }
+    },
+    {
+      "id": "equipment:dcconversionswitch",
+      "kind": "equipment",
+      "label": "直流转换开关",
+      "term": "DCConversionSwitch",
+      "category": "E06",
+      "recognitionCode": "E24",
+      "catalogCategory": "断路器",
+      "catalogGroup": "设备",
+      "order": 17,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A19",
+        "nameCell": "B19",
+        "termCells": [
+          "C19"
+        ],
+        "cellRange": "A19:C19",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A19:C19"
+      }
+    },
+    {
+      "id": "equipment:acisolatingswitch",
+      "kind": "equipment",
+      "label": "交流隔离开关",
+      "term": "ACIsolatingSwitch",
+      "category": "E07",
+      "recognitionCode": "E07",
+      "catalogCategory": "隔离开关",
+      "catalogGroup": "设备",
+      "order": 18,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A20",
+        "nameCell": "B20",
+        "termCells": [
+          "C20"
+        ],
+        "cellRange": "A20:C20",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A20:C20"
+      }
+    },
+    {
+      "id": "equipment:acgroundswitch",
+      "kind": "equipment",
+      "label": "交流接地开关",
+      "term": "ACGroundSwitch",
+      "category": "E07",
+      "recognitionCode": "E08",
+      "catalogCategory": "隔离开关",
+      "catalogGroup": "设备",
+      "order": 19,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A21",
+        "nameCell": "B21",
+        "termCells": [
+          "C21"
+        ],
+        "cellRange": "A21:C21",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A21:C21"
+      }
+    },
+    {
+      "id": "equipment:dcisolatingswitch",
+      "kind": "equipment",
+      "label": "直流隔离开关",
+      "term": "DCIsolatingSwitch",
+      "category": "E07",
+      "recognitionCode": "E07",
+      "catalogCategory": "隔离开关",
+      "catalogGroup": "设备",
+      "order": 20,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A22",
+        "nameCell": "B22",
+        "termCells": [
+          "C22"
+        ],
+        "cellRange": "A22:C22",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A22:C22"
+      }
+    },
+    {
+      "id": "equipment:dcgroundswitch",
+      "kind": "equipment",
+      "label": "直流接地开关",
+      "term": "DCGroundSwitch",
+      "category": "E07",
+      "recognitionCode": "E08",
+      "catalogCategory": "隔离开关",
+      "catalogGroup": "设备",
+      "order": 21,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A23",
+        "nameCell": "B23",
+        "termCells": [
+          "C23"
+        ],
+        "cellRange": "A23:C23",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A23:C23"
+      }
+    },
+    {
+      "id": "equipment:convertervalve",
+      "kind": "equipment",
+      "label": "换流阀",
+      "term": "ConverTervalve",
+      "category": "E08",
+      "recognitionCode": "E25",
+      "catalogCategory": "换流阀",
+      "catalogGroup": "设备",
+      "order": 22,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A24",
+        "nameCell": "B24",
+        "termCells": [
+          "C24"
+        ],
+        "cellRange": "A24:C24",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A24:C24"
+      }
+    },
+    {
+      "id": "equipment:insulatedgatebipolartransistor",
+      "kind": "equipment",
+      "label": "IGBT 阀",
+      "term": "InsulatedGateBipolarTransistor",
+      "category": "E08",
+      "recognitionCode": "E25",
+      "catalogCategory": "换流阀",
+      "catalogGroup": "设备",
+      "order": 23,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A25",
+        "nameCell": "B25",
+        "termCells": [
+          "C25"
+        ],
+        "cellRange": "A25:C25",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A25:C25"
+      }
+    },
+    {
+      "id": "equipment:groundtransformer/arcextinguishingcoil",
+      "kind": "equipment",
+      "label": "消弧线圈/接地变压器成套装置",
+      "term": "GroundTransformer/ArcExtinguishingCoil",
+      "category": "E09",
+      "recognitionCode": "E04",
+      "catalogCategory": "中性点成套设备",
+      "catalogGroup": "设备",
+      "order": 24,
+      "supplemental": false,
+      "aliases": [
+        "消弧线圈",
+        "接地变压器成套装置"
+      ],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A26",
+        "nameCell": "B26",
+        "termCells": [
+          "C26"
+        ],
+        "cellRange": "A26:C26",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A26:C26"
+      }
+    },
+    {
+      "id": "equipment:groundresistance",
+      "kind": "equipment",
+      "label": "接地电阻成套装置",
+      "term": "GroundResistance",
+      "category": "E09",
+      "recognitionCode": "E04",
+      "catalogCategory": "中性点成套设备",
+      "catalogGroup": "设备",
+      "order": 25,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A27",
+        "nameCell": "B27",
+        "termCells": [
+          "C27"
+        ],
+        "cellRange": "A27:C27",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A27:C27"
+      }
+    },
+    {
+      "id": "equipment:opengroundingequipment/neutralpointequipment",
+      "kind": "equipment",
+      "label": "中性点成套设备",
+      "term": "OpenGroundingEquipment/NeutralPointEquipment",
+      "category": "E09",
+      "recognitionCode": "E04",
+      "catalogCategory": "中性点成套设备",
+      "catalogGroup": "设备",
+      "order": 26,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A28",
+        "nameCell": "B28",
+        "termCells": [
+          "C28"
+        ],
+        "cellRange": "A28:C28",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A28:C28"
+      }
+    },
+    {
+      "id": "equipment:dcblockingdevice",
+      "kind": "equipment",
+      "label": "隔直装置",
+      "term": "DCBlockingDevice",
+      "category": "E09",
+      "recognitionCode": "E26",
+      "catalogCategory": "中性点成套设备",
+      "catalogGroup": "设备",
+      "order": 27,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A29",
+        "nameCell": "B29",
+        "termCells": [
+          "C29"
+        ],
+        "cellRange": "A29:C29",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A29:C29"
+      }
+    },
+    {
+      "id": "equipment:framecapacitor",
+      "kind": "equipment",
+      "label": "框架式电容器组",
+      "term": "FrameCapacitor",
+      "category": "E10",
+      "recognitionCode": "E10",
+      "catalogCategory": "电容器",
+      "catalogGroup": "设备",
+      "order": 28,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A30",
+        "nameCell": "B30",
+        "termCells": [
+          "C30"
+        ],
+        "cellRange": "A30:C30",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A30:C30"
+      }
+    },
+    {
+      "id": "equipment:collectivecapacitor",
+      "kind": "equipment",
+      "label": "集合式电容器组",
+      "term": "CollectiveCapacitor",
+      "category": "E10",
+      "recognitionCode": "E10",
+      "catalogCategory": "电容器",
+      "catalogGroup": "设备",
+      "order": 29,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A31",
+        "nameCell": "B31",
+        "termCells": [
+          "C31"
+        ],
+        "cellRange": "A31:C31",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A31:C31"
+      }
+    },
+    {
+      "id": "equipment:seriescompensation",
+      "kind": "equipment",
+      "label": "串补电容器成套装置",
+      "term": "SeriesCompensation",
+      "category": "E10",
+      "recognitionCode": "E27",
+      "catalogCategory": "电容器",
+      "catalogGroup": "设备",
+      "order": 30,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A32",
+        "nameCell": "B32",
+        "termCells": [
+          "C32"
+        ],
+        "cellRange": "A32:C32",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A32:C32"
+      }
+    },
+    {
+      "id": "equipment:bucksvg",
+      "kind": "equipment",
+      "label": "降压式 SVG",
+      "term": "BuckSVG",
+      "category": "E10",
+      "recognitionCode": "E12",
+      "catalogCategory": "电容器",
+      "catalogGroup": "设备",
+      "order": 31,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A33",
+        "nameCell": "B33",
+        "termCells": [
+          "C33"
+        ],
+        "cellRange": "A33:C33",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A33:C33"
+      }
+    },
+    {
+      "id": "equipment:straighthangingsvg",
+      "kind": "equipment",
+      "label": "直挂式 SVG",
+      "term": "StraightHangingSVG",
+      "category": "E10",
+      "recognitionCode": "E12",
+      "catalogCategory": "电容器",
+      "catalogGroup": "设备",
+      "order": 32,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A34",
+        "nameCell": "B34",
+        "termCells": [
+          "C34"
+        ],
+        "cellRange": "A34:C34",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A34:C34"
+      }
+    },
+    {
+      "id": "equipment:svc",
+      "kind": "equipment",
+      "label": "SVC",
+      "term": "SVC",
+      "category": "E10",
+      "recognitionCode": "E12",
+      "catalogCategory": "电容器",
+      "catalogGroup": "设备",
+      "order": 33,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A35",
+        "nameCell": "B35",
+        "termCells": [
+          "C35"
+        ],
+        "cellRange": "A35:C35",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A35:C35"
+      }
+    },
+    {
+      "id": "equipment:filtercapacitor",
+      "kind": "equipment",
+      "label": "滤波器电容器",
+      "term": "FilterCapacitor",
+      "category": "E10",
+      "recognitionCode": "E10",
+      "catalogCategory": "电容器",
+      "catalogGroup": "设备",
+      "order": 34,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A36",
+        "nameCell": "B36",
+        "termCells": [
+          "C36"
+        ],
+        "cellRange": "A36:C36",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A36:C36"
+      }
+    },
+    {
+      "id": "equipment:dccouplingcapacitor",
+      "kind": "equipment",
+      "label": "直流耦合电容器",
+      "term": "DCCouplingCapacitor",
+      "category": "E10",
+      "recognitionCode": "E22",
+      "catalogCategory": "电容器",
+      "catalogGroup": "设备",
+      "order": 35,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A37",
+        "nameCell": "B37",
+        "termCells": [
+          "C37"
+        ],
+        "cellRange": "A37:C37",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A37:C37"
+      }
+    },
+    {
+      "id": "equipment:resistor",
+      "kind": "equipment",
+      "label": "电阻器",
+      "term": "Resistor",
+      "category": "E11",
+      "recognitionCode": "E28",
+      "catalogCategory": "电阻器",
+      "catalogGroup": "设备",
+      "order": 36,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A38",
+        "nameCell": "B38",
+        "termCells": [
+          "C38"
+        ],
+        "cellRange": "A38:C38",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A38:C38"
+      }
+    },
+    {
+      "id": "equipment:hvswitchcabinet",
+      "kind": "equipment",
+      "label": "高压开关柜",
+      "term": "HVSwitchCabinet",
+      "category": "E12",
+      "recognitionCode": "E09",
+      "catalogCategory": "开关柜",
+      "catalogGroup": "设备",
+      "order": 37,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A39",
+        "nameCell": "B39",
+        "termCells": [
+          "C39"
+        ],
+        "cellRange": "A39:C39",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A39:C39"
+      }
+    },
+    {
+      "id": "equipment:lvswitchcabinet",
+      "kind": "equipment",
+      "label": "低压开关柜",
+      "term": "LVSwitchCabinet",
+      "category": "E12",
+      "recognitionCode": "E09",
+      "catalogCategory": "开关柜",
+      "catalogGroup": "设备",
+      "order": 38,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A40",
+        "nameCell": "B40",
+        "termCells": [
+          "C40"
+        ],
+        "cellRange": "A40:C40",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A40:C40"
+      }
+    },
+    {
+      "id": "equipment:fuse",
+      "kind": "equipment",
+      "label": "熔断器",
+      "term": "Fuse",
+      "category": "E13",
+      "recognitionCode": "E29",
+      "catalogCategory": "熔断器",
+      "catalogGroup": "设备",
+      "order": 39,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A41",
+        "nameCell": "B41",
+        "termCells": [
+          "C41"
+        ],
+        "cellRange": "A41:C41",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A41:C41"
+      }
+    },
+    {
+      "id": "equipment:lightningarrester",
+      "kind": "equipment",
+      "label": "交流避雷器",
+      "term": "LightningArrester",
+      "category": "E14",
+      "recognitionCode": "E15",
+      "catalogCategory": "避雷器",
+      "catalogGroup": "设备",
+      "order": 40,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A42",
+        "nameCell": "B42",
+        "termCells": [
+          "C42"
+        ],
+        "cellRange": "A42:C42",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A42:C42"
+      }
+    },
+    {
+      "id": "equipment:dcarrester/filterarrester",
+      "kind": "equipment",
+      "label": "直流避雷器/ 直流滤波避雷器",
+      "term": "DCArrester/FilterArrester",
+      "category": "E14",
+      "recognitionCode": "E15",
+      "catalogCategory": "避雷器",
+      "catalogGroup": "设备",
+      "order": 41,
+      "supplemental": false,
+      "aliases": [
+        "直流避雷器",
+        "直流滤波避雷器"
+      ],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A43",
+        "nameCell": "B43",
+        "termCells": [
+          "C43"
+        ],
+        "cellRange": "A43:C43",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A43:C43"
+      }
+    },
+    {
+      "id": "equipment:acpillarinsulator",
+      "kind": "equipment",
+      "label": "交流支柱绝缘子",
+      "term": "ACPillarInsulator",
+      "category": "E15",
+      "recognitionCode": "E20",
+      "catalogCategory": "支柱绝缘子",
+      "catalogGroup": "设备",
+      "order": 42,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A44",
+        "nameCell": "B44",
+        "termCells": [
+          "C44"
+        ],
+        "cellRange": "A44:C44",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A44:C44"
+      }
+    },
+    {
+      "id": "equipment:dcpillarinsulator",
+      "kind": "equipment",
+      "label": "直流支柱绝缘子",
+      "term": "DCPillarInsulator",
+      "category": "E15",
+      "recognitionCode": "E20",
+      "catalogCategory": "支柱绝缘子",
+      "catalogGroup": "设备",
+      "order": 43,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A45",
+        "nameCell": "B45",
+        "termCells": [
+          "C45"
+        ],
+        "cellRange": "A45:C45",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A45:C45"
+      }
+    },
+    {
+      "id": "equipment:acwallbushing",
+      "kind": "equipment",
+      "label": "交流穿墙套管",
+      "term": "ACWallBushing",
+      "category": "E16",
+      "recognitionCode": "E21",
+      "catalogCategory": "穿墙套管",
+      "catalogGroup": "设备",
+      "order": 44,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A46",
+        "nameCell": "B46",
+        "termCells": [
+          "C46"
+        ],
+        "cellRange": "A46:C46",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A46:C46"
+      }
+    },
+    {
+      "id": "equipment:dcwallbushing",
+      "kind": "equipment",
+      "label": "直流穿墙套管",
+      "term": "DCWallBushing",
+      "category": "E16",
+      "recognitionCode": "E21",
+      "catalogCategory": "穿墙套管",
+      "catalogGroup": "设备",
+      "order": 45,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A47",
+        "nameCell": "B47",
+        "termCells": [
+          "C47"
+        ],
+        "cellRange": "A47:C47",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A47:C47"
+      }
+    },
+    {
+      "id": "equipment:secondarycabinet",
+      "kind": "equipment",
+      "label": "二次屏柜/控制柜/控制屏/测控柜/保护屏/保护柜/继电保护柜",
+      "term": "SecondaryCabinet",
+      "category": "E17",
+      "recognitionCode": "E16",
+      "catalogCategory": "二次屏柜",
+      "catalogGroup": "设备",
+      "order": 46,
+      "supplemental": false,
+      "aliases": [
+        "二次屏柜",
+        "控制柜",
+        "控制屏",
+        "测控柜",
+        "保护屏",
+        "保护柜",
+        "继电保护柜"
+      ],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A48",
+        "nameCell": "B48",
+        "termCells": [
+          "C48"
+        ],
+        "cellRange": "A48:C48",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A48:C48"
+      }
+    },
+    {
+      "id": "equipment:linewarningmeasuringdevice",
+      "kind": "equipment",
+      "label": "线路故障测量装置",
+      "term": "LineWarningMeasuringDevice",
+      "category": "E18",
+      "recognitionCode": "E30",
+      "catalogCategory": "线路故障测量装置",
+      "catalogGroup": "设备",
+      "order": 47,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A49",
+        "nameCell": "B49",
+        "termCells": [
+          "C49"
+        ],
+        "cellRange": "A49:C49",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A49:C49"
+      }
+    },
+    {
+      "id": "equipment:groupbattery",
+      "kind": "equipment",
+      "label": "蓄电池组",
+      "term": "GroupBattery",
+      "category": "E19",
+      "recognitionCode": "E16.battery_set",
+      "catalogCategory": "蓄电池组",
+      "catalogGroup": "设备",
+      "order": 48,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A50",
+        "nameCell": "B50",
+        "termCells": [
+          "C50"
+        ],
+        "cellRange": "A50:C50",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A50:C50"
+      }
+    },
+    {
+      "id": "equipment:prefabricatedcabin",
+      "kind": "equipment",
+      "label": "预制舱体",
+      "term": "PrefabricatedCabin",
+      "category": "E20",
+      "recognitionCode": "E18",
+      "catalogCategory": "预制舱体",
+      "catalogGroup": "设备",
+      "order": 49,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A51",
+        "nameCell": "B51",
+        "termCells": [
+          "C51"
+        ],
+        "cellRange": "A51:C51",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A51:C51"
+      }
+    },
+    {
+      "id": "equipment:securitysystem",
+      "kind": "equipment",
+      "label": "安防设备",
+      "term": "SecuritySystem",
+      "category": "E21",
+      "recognitionCode": "E31",
+      "catalogCategory": "安防设备",
+      "catalogGroup": "设备",
+      "order": 50,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A52",
+        "nameCell": "B52",
+        "termCells": [
+          "C52"
+        ],
+        "cellRange": "A52:C52",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A52:C52"
+      }
+    },
+    {
+      "id": "equipment:firealarmsystem",
+      "kind": "equipment",
+      "label": "火灾报警设备",
+      "term": "FireAlarmSystem",
+      "category": "E22",
+      "recognitionCode": "E32",
+      "catalogCategory": "火灾报警设备",
+      "catalogGroup": "设备",
+      "order": 51,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "电气设备模型索引表",
+        "categoryCell": "A53",
+        "nameCell": "B53",
+        "termCells": [
+          "C53"
+        ],
+        "cellRange": "A53:C53",
+        "verification": "verified",
+        "sourceLocation": "电气设备模型索引表!A53:C53"
+      }
+    },
+    {
+      "id": "material:flexiblecircuitconductor",
+      "kind": "material",
+      "label": "软导线",
+      "term": "FlexibleCircuitConductor",
+      "category": "M01",
+      "recognitionCode": "M01",
+      "catalogCategory": "导体",
+      "catalogGroup": "材料",
+      "order": 52,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A2",
+        "nameCell": "B2",
+        "termCells": [
+          "C2"
+        ],
+        "cellRange": "A2:C2",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A2:C2"
+      }
+    },
+    {
+      "id": "material:tubularbus",
+      "kind": "material",
+      "label": "管形母线",
+      "term": "TubularBus",
+      "category": "M01",
+      "recognitionCode": "M02",
+      "catalogCategory": "导体",
+      "catalogGroup": "材料",
+      "order": 53,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A3",
+        "nameCell": "B3",
+        "termCells": [
+          "C3"
+        ],
+        "cellRange": "A3:C3",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A3:C3"
+      }
+    },
+    {
+      "id": "material:rectangularbus",
+      "kind": "material",
+      "label": "矩形母线",
+      "term": "RectangularBus",
+      "category": "M01",
+      "recognitionCode": "M02",
+      "catalogCategory": "导体",
+      "catalogGroup": "材料",
+      "order": 54,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A4",
+        "nameCell": "B4",
+        "termCells": [
+          "C4"
+        ],
+        "cellRange": "A4:C4",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A4:C4"
+      }
+    },
+    {
+      "id": "material:enclosedbus",
+      "kind": "material",
+      "label": "封闭母线",
+      "term": "EnclosedBus",
+      "category": "M01",
+      "recognitionCode": "M02",
+      "catalogCategory": "导体",
+      "catalogGroup": "材料",
+      "order": 55,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A5",
+        "nameCell": "B5",
+        "termCells": [
+          "C5"
+        ],
+        "cellRange": "A5:C5",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A5:C5"
+      }
+    },
+    {
+      "id": "material:insulatorssring",
+      "kind": "material",
+      "label": "绝缘子串",
+      "term": "InsulatorsSring",
+      "category": "M02",
+      "recognitionCode": "M04",
+      "catalogCategory": "绝缘子串",
+      "catalogGroup": "材料",
+      "order": 56,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A6",
+        "nameCell": "B6",
+        "termCells": [
+          "C6"
+        ],
+        "cellRange": "A6:C6",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A6:C6"
+      }
+    },
+    {
+      "id": "material:equilibriumloadsshieldingdevice",
+      "kind": "material",
+      "label": "均压屏蔽装置",
+      "term": "EquilibriumLoadsShieldingDevice",
+      "category": "M02",
+      "recognitionCode": "M03",
+      "catalogCategory": "绝缘子串",
+      "catalogGroup": "材料",
+      "order": 57,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A7",
+        "nameCell": "B7",
+        "termCells": [
+          "C7"
+        ],
+        "cellRange": "A7:C7",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A7:C7"
+      }
+    },
+    {
+      "id": "material:supporttubebus",
+      "kind": "material",
+      "label": "支持式管形母线",
+      "term": "SupportTubeBus",
+      "category": "M03",
+      "recognitionCode": "M03",
+      "catalogCategory": "金具",
+      "catalogGroup": "材料",
+      "order": 58,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A8",
+        "nameCell": "B8",
+        "termCells": [
+          "C8"
+        ],
+        "cellRange": "A8:C8",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A8:C8"
+      }
+    },
+    {
+      "id": "material:suspendedtubebus",
+      "kind": "material",
+      "label": "悬挂式管形母线",
+      "term": "SuspendedTubeBus",
+      "category": "M03",
+      "recognitionCode": "M03",
+      "catalogCategory": "金具",
+      "catalogGroup": "材料",
+      "order": 59,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A9",
+        "nameCell": "B9",
+        "termCells": [
+          "C9"
+        ],
+        "cellRange": "A9:C9",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A9:C9"
+      }
+    },
+    {
+      "id": "material:roadcrossinghardware",
+      "kind": "material",
+      "label": "跨道路金具",
+      "term": "RoadCrossingHardware",
+      "category": "M03",
+      "recognitionCode": "M03",
+      "catalogCategory": "金具",
+      "catalogGroup": "材料",
+      "order": 60,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A10",
+        "nameCell": "B10",
+        "termCells": [
+          "C10"
+        ],
+        "cellRange": "A10:C10",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A10:C10"
+      }
+    },
+    {
+      "id": "material:bussupportfixed",
+      "kind": "material",
+      "label": "母线支撑固定",
+      "term": "BusSupportFixed",
+      "category": "M03",
+      "recognitionCode": "M03",
+      "catalogCategory": "金具",
+      "catalogGroup": "材料",
+      "order": 61,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A11",
+        "nameCell": "B11",
+        "termCells": [
+          "C11"
+        ],
+        "cellRange": "A11:C11",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A11:C11"
+      }
+    },
+    {
+      "id": "material:busplugginghardware",
+      "kind": "material",
+      "label": "母线封堵金具",
+      "term": "BusPluggingHardware",
+      "category": "M03",
+      "recognitionCode": "M03",
+      "catalogCategory": "金具",
+      "catalogGroup": "材料",
+      "order": 62,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A12",
+        "nameCell": "B12",
+        "termCells": [
+          "C12"
+        ],
+        "cellRange": "A12:C12",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A12:C12"
+      }
+    },
+    {
+      "id": "material:busbarconnectionleadsdownhardware",
+      "kind": "material",
+      "label": "母线连接引下金具",
+      "term": "BusbarConnectionLeadsDownHardware",
+      "category": "M03",
+      "recognitionCode": "M03",
+      "catalogCategory": "金具",
+      "catalogGroup": "材料",
+      "order": 63,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A13",
+        "nameCell": "B13",
+        "termCells": [
+          "C13"
+        ],
+        "cellRange": "A13:C13",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A13:C13"
+      }
+    },
+    {
+      "id": "material:suspendedwireclamp",
+      "kind": "material",
+      "label": "悬垂线夹",
+      "term": "SuspendedWireClamp",
+      "category": "M03",
+      "recognitionCode": "M03",
+      "catalogCategory": "金具",
+      "catalogGroup": "材料",
+      "order": 64,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A14",
+        "nameCell": "B14",
+        "termCells": [
+          "C14"
+        ],
+        "cellRange": "A14:C14",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A14:C14"
+      }
+    },
+    {
+      "id": "material:tensionclamp",
+      "kind": "material",
+      "label": "耐张线夹",
+      "term": "TensionClamp",
+      "category": "M03",
+      "recognitionCode": "M03",
+      "catalogCategory": "金具",
+      "catalogGroup": "材料",
+      "order": 65,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A15",
+        "nameCell": "B15",
+        "termCells": [
+          "C15"
+        ],
+        "cellRange": "A15:C15",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A15:C15"
+      }
+    },
+    {
+      "id": "material:equipmentcableclamp",
+      "kind": "material",
+      "label": "设备线夹",
+      "term": "EquipmentCableClamp",
+      "category": "M03",
+      "recognitionCode": "M03",
+      "catalogCategory": "金具",
+      "catalogGroup": "材料",
+      "order": 66,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A16",
+        "nameCell": "B16",
+        "termCells": [
+          "C16"
+        ],
+        "cellRange": "A16:C16",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A16:C16"
+      }
+    },
+    {
+      "id": "material:tconnectionfittings",
+      "kind": "material",
+      "label": "T接金具",
+      "term": "TConnectionFittings",
+      "category": "M03",
+      "recognitionCode": "M03",
+      "catalogCategory": "金具",
+      "catalogGroup": "材料",
+      "order": 67,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A17",
+        "nameCell": "B17",
+        "termCells": [
+          "C17"
+        ],
+        "cellRange": "A17:C17",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A17:C17"
+      }
+    },
+    {
+      "id": "material:spacer",
+      "kind": "material",
+      "label": "间隔棒",
+      "term": "Spacer",
+      "category": "M03",
+      "recognitionCode": "M03",
+      "catalogCategory": "金具",
+      "catalogGroup": "材料",
+      "order": 68,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A18",
+        "nameCell": "B18",
+        "termCells": [
+          "C18"
+        ],
+        "cellRange": "A18:C18",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A18:C18"
+      }
+    },
+    {
+      "id": "material:expansionjoint",
+      "kind": "material",
+      "label": "伸缩节",
+      "term": "ExpansionJoint",
+      "category": "M03",
+      "recognitionCode": "M03",
+      "catalogCategory": "金具",
+      "catalogGroup": "材料",
+      "order": 69,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A19",
+        "nameCell": "B19",
+        "termCells": [
+          "C19"
+        ],
+        "cellRange": "A19:C19",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A19:C19"
+      }
+    },
+    {
+      "id": "material:voltageequalizationshieldingdevice",
+      "kind": "material",
+      "label": "均压屏蔽装置",
+      "term": "VoltageEqualizationShieldingDevice",
+      "category": "M03",
+      "recognitionCode": "M03",
+      "catalogCategory": "金具",
+      "catalogGroup": "材料",
+      "order": 70,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A20",
+        "nameCell": "B20",
+        "termCells": [
+          "C20"
+        ],
+        "cellRange": "A20:C20",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A20:C20"
+      }
+    },
+    {
+      "id": "material:cableclamp",
+      "kind": "material",
+      "label": "电缆卡具",
+      "term": "CableClamp",
+      "category": "M03",
+      "recognitionCode": "M03",
+      "catalogCategory": "金具",
+      "catalogGroup": "材料",
+      "order": 71,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A21",
+        "nameCell": "B21",
+        "termCells": [
+          "C21"
+        ],
+        "cellRange": "A21:C21",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A21:C21"
+      }
+    },
+    {
+      "id": "material:anchoringdevice",
+      "kind": "material",
+      "label": "锚固装置",
+      "term": "AnchoringDevice",
+      "category": "M03",
+      "recognitionCode": "M03",
+      "catalogCategory": "金具",
+      "catalogGroup": "材料",
+      "order": 72,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A22",
+        "nameCell": "B22",
+        "termCells": [
+          "C22"
+        ],
+        "cellRange": "A22:C22",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A22:C22"
+      }
+    },
+    {
+      "id": "material:terminalbox",
+      "kind": "material",
+      "label": "端子箱",
+      "term": "TerminalBox",
+      "category": "M04",
+      "recognitionCode": "M10",
+      "catalogCategory": "端子箱",
+      "catalogGroup": "材料",
+      "order": 73,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A23",
+        "nameCell": "B23",
+        "termCells": [
+          "C23"
+        ],
+        "cellRange": "A23:C23",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A23:C23"
+      }
+    },
+    {
+      "id": "material:lamps",
+      "kind": "material",
+      "label": "灯具",
+      "term": "Lamps",
+      "category": "M05",
+      "recognitionCode": "M11",
+      "catalogCategory": "照明及动力",
+      "catalogGroup": "材料",
+      "order": 74,
+      "supplemental": true,
+      "aliases": [
+        "灯具",
+        "照明灯",
+        "泛光灯",
+        "吊灯",
+        "投光灯",
+        "吸顶灯",
+        "格栅灯",
+        "路灯"
+      ],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A24",
+        "nameCell": "B24",
+        "termCells": [
+          "C24"
+        ],
+        "cellRange": "A24:D24",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A24:D24"
+      }
+    },
+    {
+      "id": "material:powerbox/lightingbox/maintenancebox",
+      "kind": "material",
+      "label": "动力箱/照明箱/检修箱",
+      "term": "PowerBox/LightingBox/MaintenanceBox",
+      "category": "M05",
+      "recognitionCode": "M12",
+      "catalogCategory": "照明及动力",
+      "catalogGroup": "材料",
+      "order": 75,
+      "supplemental": false,
+      "aliases": [
+        "动力箱",
+        "照明箱",
+        "检修箱"
+      ],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A25",
+        "nameCell": "B25",
+        "termCells": [
+          "C25"
+        ],
+        "cellRange": "A25:C25",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A25:C25"
+      }
+    },
+    {
+      "id": "material:switch",
+      "kind": "material",
+      "label": "开关",
+      "term": "Switch",
+      "category": "M05",
+      "recognitionCode": "M13",
+      "catalogCategory": "照明及动力",
+      "catalogGroup": "材料",
+      "order": 76,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A26",
+        "nameCell": "B26",
+        "termCells": [
+          "C26"
+        ],
+        "cellRange": "A26:C26",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A26:C26"
+      }
+    },
+    {
+      "id": "material:plug",
+      "kind": "material",
+      "label": "插座",
+      "term": "Plug",
+      "category": "M05",
+      "recognitionCode": "M13",
+      "catalogCategory": "照明及动力",
+      "catalogGroup": "材料",
+      "order": 77,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A27",
+        "nameCell": "B27",
+        "termCells": [
+          "C27"
+        ],
+        "cellRange": "A27:C27",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A27:C27"
+      }
+    },
+    {
+      "id": "material:groundingmaterial",
+      "kind": "material",
+      "label": "接地材料",
+      "term": "GroundingMaterial",
+      "category": "M06",
+      "recognitionCode": "M06",
+      "catalogCategory": "接地材料",
+      "catalogGroup": "材料",
+      "order": 78,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A28",
+        "nameCell": "B28",
+        "termCells": [
+          "C28"
+        ],
+        "cellRange": "A28:C28",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A28:C28"
+      }
+    },
+    {
+      "id": "material:cable",
+      "kind": "material",
+      "label": "电缆",
+      "term": "Cable",
+      "category": "M07",
+      "recognitionCode": "M05",
+      "catalogCategory": "电缆及其附件",
+      "catalogGroup": "材料",
+      "order": 79,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A29",
+        "nameCell": "B29",
+        "termCells": [
+          "C29"
+        ],
+        "cellRange": "A29:C29",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A29:C29"
+      }
+    },
+    {
+      "id": "material:cabletermination",
+      "kind": "material",
+      "label": "电缆终端",
+      "term": "CableTermination",
+      "category": "M07",
+      "recognitionCode": "M05",
+      "catalogCategory": "电缆及其附件",
+      "catalogGroup": "材料",
+      "order": 80,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A30",
+        "nameCell": "B30",
+        "termCells": [
+          "C30"
+        ],
+        "cellRange": "A30:C30",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A30:C30"
+      }
+    },
+    {
+      "id": "material:cableauxiliaryfacilities",
+      "kind": "material",
+      "label": "电缆辅助设施",
+      "term": "CableAuxiliaryFacilities",
+      "category": "M07",
+      "recognitionCode": "M08",
+      "catalogCategory": "电缆及其附件",
+      "catalogGroup": "材料",
+      "order": 81,
+      "supplemental": true,
+      "aliases": [
+        "电缆桥架",
+        "桥架"
+      ],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A31",
+        "nameCell": "B31",
+        "termCells": [
+          "C31"
+        ],
+        "cellRange": "A31:D31",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A31:D31"
+      }
+    },
+    {
+      "id": "material:cableditchfirewall",
+      "kind": "material",
+      "label": "电缆沟防火墙",
+      "term": "CableDitchFireWall",
+      "category": "M08",
+      "recognitionCode": "M09",
+      "catalogCategory": "防火材料",
+      "catalogGroup": "材料",
+      "order": 82,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A32",
+        "nameCell": "B32",
+        "termCells": [
+          "C32"
+        ],
+        "cellRange": "A32:C32",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A32:C32"
+      }
+    },
+    {
+      "id": "material:usteel",
+      "kind": "material",
+      "label": "槽钢",
+      "term": "USteel",
+      "category": "M09",
+      "recognitionCode": "M14",
+      "catalogCategory": "安装材料",
+      "catalogGroup": "材料",
+      "order": 83,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A33",
+        "nameCell": "B33",
+        "termCells": [
+          "C33"
+        ],
+        "cellRange": "A33:C33",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A33:C33"
+      }
+    },
+    {
+      "id": "material:anglesteel",
+      "kind": "material",
+      "label": "角钢",
+      "term": "AngleSteel",
+      "category": "M09",
+      "recognitionCode": "M14",
+      "catalogCategory": "安装材料",
+      "catalogGroup": "材料",
+      "order": 84,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A34",
+        "nameCell": "B34",
+        "termCells": [
+          "C34"
+        ],
+        "cellRange": "A34:C34",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A34:C34"
+      }
+    },
+    {
+      "id": "material:ibeam",
+      "kind": "material",
+      "label": "工字钢",
+      "term": "IBeam",
+      "category": "M09",
+      "recognitionCode": "M14",
+      "catalogCategory": "安装材料",
+      "catalogGroup": "材料",
+      "order": 85,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A35",
+        "nameCell": "B35",
+        "termCells": [
+          "C35"
+        ],
+        "cellRange": "A35:C35",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A35:C35"
+      }
+    },
+    {
+      "id": "material:steelsheet",
+      "kind": "material",
+      "label": "钢板",
+      "term": "SteelSheet",
+      "category": "M09",
+      "recognitionCode": "M14",
+      "catalogCategory": "安装材料",
+      "catalogGroup": "材料",
+      "order": 86,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A36",
+        "nameCell": "B36",
+        "termCells": [
+          "C36"
+        ],
+        "cellRange": "A36:C36",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A36:C36"
+      }
+    },
+    {
+      "id": "material:metalfence",
+      "kind": "material",
+      "label": "金属围栏",
+      "term": "MetalFence",
+      "category": "M09",
+      "recognitionCode": "M09",
+      "catalogCategory": "安装材料",
+      "catalogGroup": "材料",
+      "order": 87,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A37",
+        "nameCell": "B37",
+        "termCells": [
+          "C37"
+        ],
+        "cellRange": "A37:C37",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A37:C37"
+      }
+    },
+    {
+      "id": "material:electricburiedpipe",
+      "kind": "material",
+      "label": "电气埋管",
+      "term": "ElectricBuriedPipe",
+      "category": "M09",
+      "recognitionCode": "M09",
+      "catalogCategory": "安装材料",
+      "catalogGroup": "材料",
+      "order": 88,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A38",
+        "nameCell": "B38",
+        "termCells": [
+          "C38"
+        ],
+        "cellRange": "A38:C38",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A38:C38"
+      }
+    },
+    {
+      "id": "material:airduct",
+      "kind": "material",
+      "label": "风管",
+      "term": "Airduct",
+      "category": "M10",
+      "recognitionCode": "M15",
+      "catalogCategory": "水暖材料",
+      "catalogGroup": "材料",
+      "order": 89,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A39",
+        "nameCell": "B39",
+        "termCells": [
+          "C39"
+        ],
+        "cellRange": "A39:C39",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A39:C39"
+      }
+    },
+    {
+      "id": "material:plumbing",
+      "kind": "material",
+      "label": "水管",
+      "term": "Plumbing",
+      "category": "M10",
+      "recognitionCode": "M15",
+      "catalogCategory": "水暖材料",
+      "catalogGroup": "材料",
+      "order": 90,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "材料模型索引表",
+        "categoryCell": "A40",
+        "nameCell": "B40",
+        "termCells": [
+          "C40"
+        ],
+        "cellRange": "A40:C40",
+        "verification": "verified",
+        "sourceLocation": "材料模型索引表!A40:C40"
+      }
+    },
+    {
+      "id": "construction:site",
+      "kind": "construction",
+      "label": "场地",
+      "term": "Site",
+      "category": "C01",
+      "recognitionCode": "C-C6",
+      "catalogCategory": "场地设施",
+      "catalogGroup": "构件",
+      "order": 91,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A2",
+        "nameCell": "B2",
+        "termCells": [
+          "C2"
+        ],
+        "cellRange": "A2:C2",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A2:C2"
+      }
+    },
+    {
+      "id": "construction:stationoutroadways",
+      "kind": "construction",
+      "label": "进站道路",
+      "term": "StationOutRoadWays",
+      "category": "C01",
+      "recognitionCode": "C-C5",
+      "catalogCategory": "场地设施",
+      "catalogGroup": "构件",
+      "order": 92,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A3",
+        "nameCell": "B3",
+        "termCells": [
+          "C3"
+        ],
+        "cellRange": "A3:C3",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A3:C3"
+      }
+    },
+    {
+      "id": "construction:stationinroadways",
+      "kind": "construction",
+      "label": "站内道路",
+      "term": "StationInRoadWays",
+      "category": "C01",
+      "recognitionCode": "C-C5",
+      "catalogCategory": "场地设施",
+      "catalogGroup": "构件",
+      "order": 93,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A4",
+        "nameCell": "B4",
+        "termCells": [
+          "C4"
+        ],
+        "cellRange": "A4:C4",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A4:C4"
+      }
+    },
+    {
+      "id": "construction:fences",
+      "kind": "construction",
+      "label": "围墙",
+      "term": "Fences",
+      "category": "C01",
+      "recognitionCode": "C-C4",
+      "catalogCategory": "场地设施",
+      "catalogGroup": "构件",
+      "order": 94,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A5",
+        "nameCell": "B5",
+        "termCells": [
+          "C5"
+        ],
+        "cellRange": "A5:C5",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A5:C5"
+      }
+    },
+    {
+      "id": "construction:gate",
+      "kind": "construction",
+      "label": "大门",
+      "term": "Gate",
+      "category": "C01",
+      "recognitionCode": "C-C4",
+      "catalogCategory": "场地设施",
+      "catalogGroup": "构件",
+      "order": 95,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A6",
+        "nameCell": "B6",
+        "termCells": [
+          "C6"
+        ],
+        "cellRange": "A6:C6",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A6:C6"
+      }
+    },
+    {
+      "id": "construction:retainingwall",
+      "kind": "construction",
+      "label": "支挡结构",
+      "term": "RetainingWall",
+      "category": "C01",
+      "recognitionCode": "C-C7",
+      "catalogCategory": "场地设施",
+      "catalogGroup": "构件",
+      "order": 96,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A7",
+        "nameCell": "B7",
+        "termCells": [
+          "C7"
+        ],
+        "cellRange": "A7:C7",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A7:C7"
+      }
+    },
+    {
+      "id": "construction:trench",
+      "kind": "construction",
+      "label": "沟道",
+      "term": "Trench",
+      "category": "C01",
+      "recognitionCode": "C-C8",
+      "catalogCategory": "场地设施",
+      "catalogGroup": "构件",
+      "order": 97,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A8",
+        "nameCell": "B8",
+        "termCells": [
+          "C8"
+        ],
+        "cellRange": "A8:C8",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A8:C8"
+      }
+    },
+    {
+      "id": "construction:tunnel",
+      "kind": "construction",
+      "label": "隧道",
+      "term": "Tunnel",
+      "category": "C01",
+      "recognitionCode": "C-C8",
+      "catalogCategory": "场地设施",
+      "catalogGroup": "构件",
+      "order": 98,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A9",
+        "nameCell": "B9",
+        "termCells": [
+          "C9"
+        ],
+        "cellRange": "A9:C9",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A9:C9"
+      }
+    },
+    {
+      "id": "construction:transporttrackfoundation",
+      "kind": "construction",
+      "label": "变压器搬运轨道",
+      "term": "TransportTrackFoundation",
+      "category": "C01",
+      "recognitionCode": "C-C9",
+      "catalogCategory": "场地设施",
+      "catalogGroup": "构件",
+      "order": 99,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A10",
+        "nameCell": "B10",
+        "termCells": [
+          "C10"
+        ],
+        "cellRange": "A10:C10",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A10:C10"
+      }
+    },
+    {
+      "id": "construction:primarycomponents",
+      "kind": "construction",
+      "label": "主要构件",
+      "term": "PrimaryComponents",
+      "category": "C02",
+      "recognitionCode": "C-A11",
+      "catalogCategory": "建筑物",
+      "catalogGroup": "构件",
+      "order": 100,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A11",
+        "nameCell": "B11",
+        "termCells": [
+          "C11"
+        ],
+        "cellRange": "A11:C11",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A11:C11"
+      }
+    },
+    {
+      "id": "construction:beam",
+      "kind": "construction",
+      "label": "梁",
+      "term": "Beam",
+      "category": "C02",
+      "recognitionCode": "C-A4",
+      "catalogCategory": "建筑物",
+      "catalogGroup": "构件",
+      "order": 101,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A12",
+        "nameCell": "B12",
+        "termCells": [
+          "C12"
+        ],
+        "cellRange": "A12:C12",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A12:C12"
+      }
+    },
+    {
+      "id": "construction:column",
+      "kind": "construction",
+      "label": "柱",
+      "term": "Column",
+      "category": "C02",
+      "recognitionCode": "C-A3",
+      "catalogCategory": "建筑物",
+      "catalogGroup": "构件",
+      "order": 102,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A13",
+        "nameCell": "B13",
+        "termCells": [
+          "C13"
+        ],
+        "cellRange": "A13:C13",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A13:C13"
+      }
+    },
+    {
+      "id": "construction:steelbeam",
+      "kind": "construction",
+      "label": "钢梁",
+      "term": "SteelBeam",
+      "category": "C02",
+      "recognitionCode": "C-A4.steel",
+      "catalogCategory": "建筑物",
+      "catalogGroup": "构件",
+      "order": 103,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A14",
+        "nameCell": "B14",
+        "termCells": [
+          "C14"
+        ],
+        "cellRange": "A14:C14",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A14:C14"
+      }
+    },
+    {
+      "id": "construction:steelcolumn",
+      "kind": "construction",
+      "label": "钢柱",
+      "term": "SteelColumn",
+      "category": "C02",
+      "recognitionCode": "C-A3.steel",
+      "catalogCategory": "建筑物",
+      "catalogGroup": "构件",
+      "order": 104,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A15",
+        "nameCell": "B15",
+        "termCells": [
+          "C15"
+        ],
+        "cellRange": "A15:C15",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A15:C15"
+      }
+    },
+    {
+      "id": "construction:steelstructure",
+      "kind": "construction",
+      "label": "钢结构",
+      "term": "SteelStructure",
+      "category": "C02",
+      "recognitionCode": "C-A14",
+      "catalogCategory": "建筑物",
+      "catalogGroup": "构件",
+      "order": 105,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A16",
+        "nameCell": "B16",
+        "termCells": [
+          "C16"
+        ],
+        "cellRange": "A16:C16",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A16:C16"
+      }
+    },
+    {
+      "id": "construction:door",
+      "kind": "construction",
+      "label": "门",
+      "term": "Door",
+      "category": "C02",
+      "recognitionCode": "C-A7",
+      "catalogCategory": "建筑物",
+      "catalogGroup": "构件",
+      "order": 106,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A17",
+        "nameCell": "B17",
+        "termCells": [
+          "C17"
+        ],
+        "cellRange": "A17:C17",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A17:C17"
+      }
+    },
+    {
+      "id": "construction:window",
+      "kind": "construction",
+      "label": "窗",
+      "term": "Window",
+      "category": "C02",
+      "recognitionCode": "C-A8",
+      "catalogCategory": "建筑物",
+      "catalogGroup": "构件",
+      "order": 107,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A18",
+        "nameCell": "B18",
+        "termCells": [
+          "C18"
+        ],
+        "cellRange": "A18:C18",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A18:C18"
+      }
+    },
+    {
+      "id": "construction:roof",
+      "kind": "construction",
+      "label": "屋面",
+      "term": "Roof",
+      "category": "C02",
+      "recognitionCode": "C-A6",
+      "catalogCategory": "建筑物",
+      "catalogGroup": "构件",
+      "order": 108,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A19",
+        "nameCell": "B19",
+        "termCells": [
+          "C19"
+        ],
+        "cellRange": "A19:C19",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A19:C19"
+      }
+    },
+    {
+      "id": "construction:structuralmember",
+      "kind": "construction",
+      "label": "结构杆件",
+      "term": "StructuralMember",
+      "category": "C02",
+      "recognitionCode": "C-A15",
+      "catalogCategory": "建筑物",
+      "catalogGroup": "构件",
+      "order": 109,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A20",
+        "nameCell": "B20",
+        "termCells": [
+          "C20"
+        ],
+        "cellRange": "A20:C20",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A20:C20"
+      }
+    },
+    {
+      "id": "construction:railing",
+      "kind": "construction",
+      "label": "栏杆",
+      "term": "Railing",
+      "category": "C02",
+      "recognitionCode": "C-A9.railing",
+      "catalogCategory": "建筑物",
+      "catalogGroup": "构件",
+      "order": 110,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A21",
+        "nameCell": "B21",
+        "termCells": [
+          "C21"
+        ],
+        "cellRange": "A21:C21",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A21:C21"
+      }
+    },
+    {
+      "id": "construction:flooring",
+      "kind": "construction",
+      "label": "板",
+      "term": "Flooring",
+      "category": "C02",
+      "recognitionCode": "C-A5",
+      "catalogCategory": "建筑物",
+      "catalogGroup": "构件",
+      "order": 111,
+      "supplemental": false,
+      "aliases": [
+        "楼板"
+      ],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A22",
+        "nameCell": "B22",
+        "termCells": [
+          "C22"
+        ],
+        "cellRange": "A22:C22",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A22:C22"
+      }
+    },
+    {
+      "id": "construction:wall",
+      "kind": "construction",
+      "label": "围护结构",
+      "term": "Wall",
+      "category": "C02",
+      "recognitionCode": "C-A1",
+      "catalogCategory": "建筑物",
+      "catalogGroup": "构件",
+      "order": 112,
+      "supplemental": false,
+      "aliases": [
+        "墙体"
+      ],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A23",
+        "nameCell": "B23",
+        "termCells": [
+          "C23"
+        ],
+        "cellRange": "A23:C23",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A23:C23"
+      }
+    },
+    {
+      "id": "construction:stairs",
+      "kind": "construction",
+      "label": "楼梯",
+      "term": "Stairs",
+      "category": "C02",
+      "recognitionCode": "C-A9",
+      "catalogCategory": "建筑物",
+      "catalogGroup": "构件",
+      "order": 113,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A24",
+        "nameCell": "B24",
+        "termCells": [
+          "C24"
+        ],
+        "cellRange": "A24:C24",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A24:C24"
+      }
+    },
+    {
+      "id": "construction:walkway",
+      "kind": "construction",
+      "label": "巡视走道",
+      "term": "WalkWay",
+      "category": "C02",
+      "recognitionCode": "C-A9",
+      "catalogCategory": "建筑物",
+      "catalogGroup": "构件",
+      "order": 114,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A25",
+        "nameCell": "B25",
+        "termCells": [
+          "C25"
+        ],
+        "cellRange": "A25:C25",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A25:C25"
+      }
+    },
+    {
+      "id": "construction:supplementarycomponents",
+      "kind": "construction",
+      "label": "辅助构件",
+      "term": "SupplementaryComponents",
+      "category": "C02",
+      "recognitionCode": "C-A12",
+      "catalogCategory": "建筑物",
+      "catalogGroup": "构件",
+      "order": 115,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A26",
+        "nameCell": "B26",
+        "termCells": [
+          "C26"
+        ],
+        "cellRange": "A26:C26",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A26:C26"
+      }
+    },
+    {
+      "id": "construction:foundation",
+      "kind": "construction",
+      "label": "基础",
+      "term": "Foundation",
+      "category": "C02",
+      "recognitionCode": "C-B3",
+      "catalogCategory": "建筑物",
+      "catalogGroup": "构件",
+      "order": 116,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A27",
+        "nameCell": "B27",
+        "termCells": [
+          "C27"
+        ],
+        "cellRange": "A27:C27",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A27:C27"
+      }
+    },
+    {
+      "id": "construction:basement",
+      "kind": "construction",
+      "label": "地下室",
+      "term": "Basement",
+      "category": "C02",
+      "recognitionCode": "C-A13",
+      "catalogCategory": "建筑物",
+      "catalogGroup": "构件",
+      "order": 117,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A28",
+        "nameCell": "B28",
+        "termCells": [
+          "C28"
+        ],
+        "cellRange": "A28:C28",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A28:C28"
+      }
+    },
+    {
+      "id": "construction:equipment",
+      "kind": "construction",
+      "label": "建筑设备",
+      "term": "Equipment",
+      "category": "C02",
+      "recognitionCode": "C-D7",
+      "catalogCategory": "建筑物",
+      "catalogGroup": "构件",
+      "order": 118,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A29",
+        "nameCell": "B29",
+        "termCells": [
+          "C29"
+        ],
+        "cellRange": "A29:C29",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A29:C29"
+      }
+    },
+    {
+      "id": "construction:gantriescomponents",
+      "kind": "construction",
+      "label": "构架构件",
+      "term": "GantriesComponents",
+      "category": "C03",
+      "recognitionCode": "C-B7",
+      "catalogCategory": "构支架",
+      "catalogGroup": "构件",
+      "order": 119,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A30",
+        "nameCell": "B30",
+        "termCells": [
+          "C30"
+        ],
+        "cellRange": "A30:C30",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A30:C30"
+      }
+    },
+    {
+      "id": "construction:joints",
+      "kind": "construction",
+      "label": "连接节点",
+      "term": "Joints",
+      "category": "C03",
+      "recognitionCode": "C-B8",
+      "catalogCategory": "构支架",
+      "catalogGroup": "构件",
+      "order": 120,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A31",
+        "nameCell": "B31",
+        "termCells": [
+          "C31"
+        ],
+        "cellRange": "A31:C31",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A31:C31"
+      }
+    },
+    {
+      "id": "construction:gantriesfoundation",
+      "kind": "construction",
+      "label": "构架基础",
+      "term": "GantriesFoundation",
+      "category": "C03",
+      "recognitionCode": "C-B9",
+      "catalogCategory": "构支架",
+      "catalogGroup": "构件",
+      "order": 121,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A32",
+        "nameCell": "B32",
+        "termCells": [
+          "C32"
+        ],
+        "cellRange": "A32:C32",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A32:C32"
+      }
+    },
+    {
+      "id": "construction:trussescomponents",
+      "kind": "construction",
+      "label": "支架构件",
+      "term": "TrussesComponents",
+      "category": "C03",
+      "recognitionCode": "C-B1",
+      "catalogCategory": "构支架",
+      "catalogGroup": "构件",
+      "order": 122,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A33",
+        "nameCell": "B33",
+        "termCells": [
+          "C33"
+        ],
+        "cellRange": "A33:C33",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A33:C33"
+      }
+    },
+    {
+      "id": "construction:trussesfoundation",
+      "kind": "construction",
+      "label": "支架基础",
+      "term": "TrussesFoundation",
+      "category": "C03",
+      "recognitionCode": "C-B9",
+      "catalogCategory": "构支架",
+      "catalogGroup": "构件",
+      "order": 123,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A34",
+        "nameCell": "B34",
+        "termCells": [
+          "C34"
+        ],
+        "cellRange": "A34:C34",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A34:C34"
+      }
+    },
+    {
+      "id": "construction:equipmentfoundation",
+      "kind": "construction",
+      "label": "设备基础",
+      "term": "EquipmentFoundation",
+      "category": "C04",
+      "recognitionCode": "C-B2",
+      "catalogCategory": "设备基础",
+      "catalogGroup": "构件",
+      "order": 124,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A35",
+        "nameCell": "B35",
+        "termCells": [
+          "C35"
+        ],
+        "cellRange": "A35:C35",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A35:C35"
+      }
+    },
+    {
+      "id": "construction:lightingrod",
+      "kind": "construction",
+      "label": "避雷针",
+      "term": "LightingRod",
+      "category": "C05",
+      "recognitionCode": "C-B7",
+      "catalogCategory": "避雷针/避雷线塔",
+      "catalogGroup": "构件",
+      "order": 125,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A36",
+        "nameCell": "B36",
+        "termCells": [
+          "C36"
+        ],
+        "cellRange": "A36:C36",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A36:C36"
+      }
+    },
+    {
+      "id": "construction:lightingwiretower",
+      "kind": "construction",
+      "label": "避雷线塔",
+      "term": "LightingWireTower",
+      "category": "C05",
+      "recognitionCode": "C-B7",
+      "catalogCategory": "避雷针/避雷线塔",
+      "catalogGroup": "构件",
+      "order": 126,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A37",
+        "nameCell": "B37",
+        "termCells": [
+          "C37"
+        ],
+        "cellRange": "A37:C37",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A37:C37"
+      }
+    },
+    {
+      "id": "construction:firewall",
+      "kind": "construction",
+      "label": "防火墙（含基础）",
+      "term": "FireWall",
+      "category": "C06",
+      "recognitionCode": "C-A1",
+      "catalogCategory": "其他设施",
+      "catalogGroup": "构件",
+      "order": 127,
+      "supplemental": false,
+      "aliases": [
+        "防火墙"
+      ],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A38",
+        "nameCell": "B38",
+        "termCells": [
+          "C38"
+        ],
+        "cellRange": "A38:C38",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A38:C38"
+      }
+    },
+    {
+      "id": "construction:oilpool",
+      "kind": "construction",
+      "label": "油池",
+      "term": "OilPool",
+      "category": "C06",
+      "recognitionCode": "C-C3",
+      "catalogCategory": "其他设施",
+      "catalogGroup": "构件",
+      "order": 128,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A39",
+        "nameCell": "B39",
+        "termCells": [
+          "C39"
+        ],
+        "cellRange": "A39:C39",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A39:C39"
+      }
+    },
+    {
+      "id": "construction:pool",
+      "kind": "construction",
+      "label": "水池",
+      "term": "Pool",
+      "category": "C06",
+      "recognitionCode": "C-C3",
+      "catalogCategory": "其他设施",
+      "catalogGroup": "构件",
+      "order": 129,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A40",
+        "nameCell": "B40",
+        "termCells": [
+          "C40"
+        ],
+        "cellRange": "A40:C40",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A40:C40"
+      }
+    },
+    {
+      "id": "construction:hydraulicandhvacequipmentfoundation",
+      "kind": "construction",
+      "label": "水暖设备基础",
+      "term": "HydraulicAndHVACEquipmentFoundation",
+      "category": "C06",
+      "recognitionCode": "C-B2",
+      "catalogCategory": "其他设施",
+      "catalogGroup": "构件",
+      "order": 130,
+      "supplemental": false,
+      "aliases": [],
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "d39529867bb5c49d6216ca985a53f0b551f10ee19073858a2415203012b35145",
+        "sheet": "构件模型索引表",
+        "categoryCell": "A41",
+        "nameCell": "B41",
+        "termCells": [
+          "C41"
+        ],
+        "cellRange": "A41:C41",
+        "verification": "verified",
+        "sourceLocation": "构件模型索引表!A41:C41"
+      }
+    }
+  ]
+}

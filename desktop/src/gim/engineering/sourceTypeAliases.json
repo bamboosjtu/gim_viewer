@@ -62,9 +62,9 @@
     "chaininsulation": "M04",
     "postinsulator": "E20",
     "insulatorssring": "M04",
-    "acpillarinsulator": "M04",
+    "acpillarinsulator": "E20",
     "walltubeinsulator": "E21",
-    "acwallbushing": "M07",
+    "acwallbushing": "E21",
     "combinationapparatusgis": "E05",
     "combinationapparatus": "E05",
     "transformer": "E-T",
@@ -80,7 +80,9 @@
     "steelcolumn": "C-A3.steel",
     "steelstructure": "C-A14",
     "structuralmember": "C-A15",
-    "protectiondevice": "part"
+    "protectiondevice": "part",
+    "dcpillarinsulator": "E20",
+    "dcwallbushing": "E21"
   },
   "ifcPredefined": {
     "IFCPROTECTIVEDEVICE.CIRCUITBREAKER": "E06",

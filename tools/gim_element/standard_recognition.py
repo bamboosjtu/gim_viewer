@@ -4,24 +4,45 @@ All rules and vocabularies are bundled beside this module. No Viewer process,
 JavaScript runtime, repository checkout or desktop source import is required.
 """
 from pathlib import Path
-import sys,json,re,hashlib,collections,unicodedata
+import sys,json,re,hashlib,collections,unicodedata,functools
 from standard_sources import Reader,identity
 
 HOME=Path(sys._MEIPASS) if getattr(sys,'frozen',False) else Path(__file__).resolve().parent
 def asset(name):return json.loads((HOME/(name+'.json')).read_text(encoding='utf-8'))
 CATALOG=asset('catalog');STANDARD=asset('standardCatalog');RULES=asset('catalogRules');VOCAB=asset('sourceVocabulary');ALIASES=asset('sourceTypeAliases');PROXIES=asset('proxyCategories')
-LABELS={c['code']:c['label'] for c in CATALOG['semanticCodes']};TERMS=collections.defaultdict(list)
+LABELS={c['code']:c['label'] for c in CATALOG['recognitionCodes']};TERMS=collections.defaultdict(list)
 def norm(value):return re.sub(r'\s+','',unicodedata.normalize('NFKC',value)).casefold()
 for item in STANDARD['items']:
     names=[item['term'],item['label'],*item['term'].split('/'),*item['aliases']]
     for name in names:
         key=norm(name)
         if item not in TERMS[key]:TERMS[key].append(item)
+NAME_TERMS=sorted({norm(label) for item in STANDARD['items'] for label in [item['label'],*item['aliases']] if len(label)>=2 and re.search('[\u3400-\u9fff]',label)},key=lambda label:(-len(label),label))
+NAME_EXPRESSION=re.compile('|'.join(re.escape(label) for label in NAME_TERMS))
+def named_catalog(text):
+    exact=TERMS.get(norm(text),[])
+    if exact:return exact
+    hits=list(NAME_EXPRESSION.finditer(text))
+    if not hits:return []
+    longest=max(len(hit[0]) for hit in hits)
+    return list({item['id']:item for hit in hits if len(hit[0])==longest for item in TERMS[hit[0]]}.values())
 NAME_RULES=[(cat,re.compile(pattern,re.I)) for cat,pattern in RULES['nameRules']]
-REFINEMENTS={'E-T':['E01','E03'],'E-R':['E02','E11'],'E16':['E16.terminal_box','E16.panel_cabinet','E16.control_cabinet','E16.battery_set'],'C-B4':['C-B2','C-B3','C-B9'],'C-B5':['C-B6','C-B7'],'C-A1':['C-C1','C-C4'],'C-A2':['C-C1','C-C5','C-B3'],'C-A5':['C-C1','M08'],'C-A4':['C-A4.steel'],'C-A3':['C-A3.steel']}
+REFINEMENTS={'E-T':['E01','E03'],'E-R':['E02','E11'],'E16':['E16.panel_cabinet','E16.control_cabinet'],'C-B4':['C-B2','C-B3','C-B9'],'C-B5':['C-B6','C-B7'],'C-A1':['C-C1','C-C4'],'C-A2':['C-C1','C-C5','C-B3'],'C-A5':['C-C1','M08'],'C-A4':['C-A4.steel'],'C-A3':['C-A3.steel']}
 def compatible(coarse,fine):return coarse==fine or fine in REFINEMENTS.get(coarse,[])
 COMPONENTS={**VOCAB['components'],**{k:v['componentType'] for k,v in VOCAB['keywordDictionary']['entries'].items() if 'componentType' in v}}
+COMPONENT_WORDS=sorted((word for word in COMPONENTS if len(word)>=3 and re.search('[\u3400-\u9fff]',word)),key=lambda w:-len(w))
+DIRECTORY_ROLES={c['code']:next(i['recognitionCode'] for i in STANDARD['items'] if i['category']==c['code']) for c in CATALOG['categories']}
+DIRECTORY_BY_CODE={key:c for c in CATALOG['categories'] for key in [c['code'],c['label']]}
+DIRECTORY_ROLES.update(E01='E-T',E02='E-R')
+class EvidenceRecord(dict):
+    """Occurrence-local key index; never serialized or attached to raw evidence."""
+    def __init__(self,row):
+        super().__init__(row);self.by_key=collections.defaultdict(list)
+        for at,p in enumerate(row['properties']):
+            if p['value'].strip() in ('','-','/','-100','软件自动生成'):continue
+            for key in {k.upper() for k in p['keys']}:self.by_key[key].append(at)
 def values(row,*keys):
+    if isinstance(row,EvidenceRecord):return [row['properties'][at] for at in sorted({at for key in keys for at in row.by_key.get(key.upper(),[])})]
     labels={k.upper() for k in keys};return [p for p in row['properties'] if any(k.upper() in labels for k in p['keys']) and p['value'].strip() not in ('','-','/','-100','软件自动生成')]
 def proof(row,p):return identity([row['id'],p.get('path',row['source']),p.get('line',0),p['keys']])
 def main_number(value):
@@ -30,6 +51,7 @@ def main_number(value):
 def numbered(value):
     text=re.sub(r'(?:AC|DC)?\d+(?:\.\d+)?\s*(?:kV|千伏)|模型\d+|\d+(?:[x×*]\d+)+','',value,flags=re.I)
     return bool(re.search(r'#\s*\d+|\d+\s*(?:号|#)|(?:主变|组合电器|避雷器|互感器|电抗器组|电容器组|开关柜|屏柜|设备|装置|支架|基础)\s*\d+|[ⅠⅡⅢⅣⅤ]',text))
+@functools.lru_cache(maxsize=4096)
 def name_category(name,standard_fallback=True):
     text=unicodedata.normalize('NFKC',name);text=re.sub(RULES['nameModifiers'],'',text,flags=re.I)
     text=re.sub(r'_DEV$|\d+(?:\.\d+)?\s*(?:mm|cm|毫米)\b|\d+(?:\.\d+)?(?:[x×*]\d+(?:\.\d+)?)+','',text,flags=re.I);text=re.sub(r'\s+','',text);hits=[]
@@ -44,13 +66,9 @@ def name_category(name,standard_fallback=True):
             if hit[1]-hit[0]>groups[-1][1]-groups[-1][0]:groups[-1]=hit
         else:groups.append(hit)
     category=groups[-1][2] if groups else 'U-OBJECT'
-    matches=TERMS.get(norm(text),[])
-    if not matches:
-        matches=[item for item in STANDARD['items'] if len(item['label'])>=2 and item['label'] in text]
-        if matches:
-            longest=max(len(i['label']) for i in matches);matches=[i for i in matches if len(i['label'])==longest]
+    matches=named_catalog(text) if standard_fallback else []
     if standard_fallback and len({i['id'] for i in matches})==1 and (category=='U-OBJECT' or category==name_category(matches[0]['label'],False)):
-        coarse=matches[0]['category']
+        coarse=matches[0]['recognitionCode']
         if not category.startswith(coarse+'.'):return coarse
     if category!='U-OBJECT':return category
     if re.fullmatch(r'(?:CT|PT)[-_\d]*',text,re.I):return 'E13' if text.upper().startswith('CT') else 'E14'
@@ -59,22 +77,26 @@ def name_category(name,standard_fallback=True):
     if re.match(r'^JW\d',text,re.I):return 'E08'
     return 'E16.panel_cabinet' if re.search(r'[柜屏]$',text) else 'E17' if text.endswith('箱') else 'U-OBJECT'
 def category_value(value,allow_name=False):
-    if value in LABELS:return value
-    items=TERMS.get(norm(value),[]);categories={i['category'] for i in items}
+    if value in DIRECTORY_BY_CODE:return DIRECTORY_ROLES[DIRECTORY_BY_CODE[value]['code']]
+    items=TERMS.get(norm(value),[]);categories={i['recognitionCode'] for i in items}
     if len(categories)==1:return next(iter(categories))
     alias=ALIASES['dev'].get(value.casefold(),ALIASES['ifc'].get(value.upper()))
     return ('E-T' if alias=='E01' else alias) if alias else name_category(value) if allow_name else 'U-OBJECT'
 def interpret(row,has_children=False):
+    if not isinstance(row,EvidenceRecord):row=EvidenceRecord(row)
     type=row['source_type'];props=values(row,'TYPE','DEVICETYPE','EQUIPMENTTYPE','设备类型','设备类别','材料类型','构件类型','MATERIALTYPE','SYSCLASSIFYNAME','PARTNAME')
     props=[dict(p,confidence='candidate') if any(k.upper() in ('SYSCLASSIFYNAME','PARTNAME') for k in p['keys']) and not (VOCAB['keywordDictionary']['entries'].get(p['value'].strip().casefold(),{}).get('evidence',{}).get('verification')=='verified' and VOCAB['keywordDictionary']['entries'].get(p['value'].strip().casefold(),{}).get('evidence',{}).get('sourceLocation')) else p for p in props]
     declarations=[{'keys':['source_type'],'value':type,'path':row['source'],'line':0},*props]
-    standard=[(item,p) for p in declarations for item in TERMS.get(norm(p['value']),[])];unique={i['id']:i for i,p in standard}
+    def declared_items(value):
+        exact=TERMS.get(norm(value),[]);family=DIRECTORY_BY_CODE.get(value)
+        return exact or ([{'id':'category:'+family['code'],'kind':family['kind'],'label':family['label'],'term':family['code'],'category':family['code'],'recognitionCode':DIRECTORY_ROLES[family['code']],'catalogCategory':family['label'],'catalogGroup':family['groupLabel']}] if family else [])
+    standard=[(item,p) for p in declarations for item in declared_items(p['value'])];unique={i['id']:i for i,p in standard}
     component=[(COMPONENTS[p['value'].strip().casefold()],p) for p in declarations if p['value'].strip().casefold() in COMPONENTS]
     typed=category_value(type);structured=[(category_value(p['value'],not any(k.upper() in ('SYSCLASSIFYNAME','PARTNAME') for k in p['keys'])),p) for p in props];structured=[(c,p) for c,p in structured if c not in ('U-OBJECT','part')]
     if type=='IFCBUILDINGELEMENTPROXY':
         structured += [(PROXIES['categories'][p['value'].strip()],p) for p in values(row,'类别(Category)','类别','Category') if p['value'].strip() in PROXIES['categories']]
     if not component and typed=='U-OBJECT' and not standard and not TERMS.get(norm(row['name'])):
-        candidate=COMPONENTS.get(row['name'].strip().casefold()) or COMPONENTS.get(re.split(r'[_－:：]',row['name'])[-1].strip().casefold())
+        candidate=COMPONENTS.get(row['name'].strip().casefold()) or COMPONENTS.get(re.split(r'[_－:：]',row['name'])[-1].strip().casefold()) or next((COMPONENTS[word] for word in COMPONENT_WORDS if word in row['name']),None)
         if candidate:component=[(candidate,{'keys':['Name'],'value':row['name'],'path':row['source'],'line':0,'confidence':'candidate'})]
     if typed=='E01' and type!='E01':typed='E-T'
     for p in values(row,'IFC.PredefinedType'):
@@ -125,6 +147,10 @@ def interpret(row,has_children=False):
         contexts={(p.get('section'),p.get('containerId'),p.get('applicability')) for item,p in standard if item['kind']=='equipment'}
         category=typed if len(contexts)>1 and typed!='U-OBJECT' else 'U-OBJECT';basis='contextual_type_candidates' if len(contexts)>1 else 'attribute_conflict';status='candidate' if category!='U-OBJECT' else 'unresolved'
     if status=='confirmed' and typed=='U-OBJECT' and structured and all(p.get('confidence')=='candidate' for c,p in structured):status='candidate'
+    per_declaration={}
+    for item,p in standard:
+        key=proof(row,p);previous=per_declaration.get(key);per_declaration[key]=item['category']
+        if previous and previous!=item['category']:category='U-OBJECT';basis='standard_category_ambiguous';status='unresolved';break
     result={'category':category,'meaning':meaning,'basis':basis,'conflict':'object_attributes_conflict' if basis=='attribute_conflict' else '', 'classificationStatus':status,'categoryStatus':status,'classificationEvidence':list(dict.fromkeys(evidence)), 'sourceName':row['name']}
     if len(unique)==1:
         item=next(iter(unique.values()));result['standardClass']={**{k:item[k] for k in ['id','kind','term','label','category','catalogCategory','catalogGroup']},'status':'candidate' if all(p.get('confidence')=='candidate' for i,p in standard) else 'confirmed','evidence':[proof(row,p) for i,p in standard]}
@@ -132,7 +158,7 @@ def interpret(row,has_children=False):
     return result
 
 def normalize(rows,scope):
-    rows=sorted(rows,key=lambda r:r['id']);raw={r['id']:r for r in rows};children=collections.defaultdict(list)
+    rows=sorted((r if isinstance(r,EvidenceRecord) else EvidenceRecord(r) for r in rows),key=lambda r:r['id']);raw={r['id']:r for r in rows};children=collections.defaultdict(list)
     for r in rows:
         if r['parent']:children[r['parent']].append(r)
     if len(raw)!=len(rows):raise ValueError('Duplicate source occurrence identity')
@@ -145,6 +171,12 @@ def normalize(rows,scope):
         return id
     def bundle(source,reason,seed=None):
         id='pending:'+identity([scope,source if seed is None else seed]);pending.setdefault(id,{'id':id,'reason':reason,'sourceIds':[]});owners[source]=id;return id
+    def accepts_host(meaning,host):
+        component=PART_BY_ID.get((meaning.get('componentType') or {}).get('id'),{})
+        required=component.get('hostCategory')
+        if not required:return True
+        directory=dict(host);publish_category(directory)
+        return next((c['label'] for c in CATALOG['categories'] if c['code']==directory['category']),None)==required
     # Explicit single-phase designations, never common names or directories.
     banks=collections.defaultdict(list)
     for r in rows:
@@ -163,6 +195,8 @@ def normalize(rows,scope):
         if id in visiting:raise ValueError('Source assembly cycle: '+id)
         visiting.add(id);r=raw[id];m=meanings[id];above=assign(r['parent']) if r['parent'] in raw else None;cat=entities.get(above,{}).get('category');role={p['value'].casefold() for p in values(r,'OBJECTROLE','对象角色','COMPONENTROLE','组件角色')};independent=bool(role&{'independent','独立'})
         if m['basis']=='attribute_conflict':bundle(id,'object_attributes_conflict')
+        elif above in entities and m.get('componentType') and not accepts_host(m,entities[above]):
+            bundle(id,'component_host_incompatible');m['membershipStatus']='unresolved';diagnostics.append({'kind':'component_host_incompatible','identity':id,'name':r['name']})
         elif m['meaning']=='neutral_set':
             if cat in ('E01','E-T','E03'):owners[id]=above
             else:bundle(id,'neutral_set_main_unresolved')
@@ -203,7 +237,7 @@ def normalize(rows,scope):
         direct=[owners.get(s) for s in r.get('declaredHosts',[])]
         constraints=[{owner} if owner in entities and entities[owner]['category'].startswith(('E','M')) else set() for owner in direct]+[codes[host_key(p['value'])] for p in explicit_codes]+[names[host_key(p['value'])] for p in proposed]
         if not constraints:continue
-        candidates=set.intersection(*(set(v) for v in constraints));evidence=[r.get('declaredHostEvidence',{}).get(s,'PARTINDEX:'+str(s)) for s in r.get('declaredHosts',[])]+[proof(r,p) for p in explicit_codes+proposed]
+        candidates={id for id in set.intersection(*(set(v) for v in constraints)) if accepts_host(m,entities[id])};evidence=[r.get('declaredHostEvidence',{}).get(s,'PARTINDEX:'+str(s)) for s in r.get('declaredHosts',[])]+[proof(r,p) for p in explicit_codes+proposed]
         resolved=[v for v in constraints if v];conflicting=len(resolved)>1 and not set.intersection(*(set(v) for v in resolved))
         if len(candidates)==1:
             target=next(iter(candidates))
@@ -229,10 +263,27 @@ def normalize(rows,scope):
         id=r['id'];owner=owners.get(id);m=meanings[id];target=entities.get(owner) or pending.get(owner)
         if target:target['sourceIds'].append(id)
         members.append({'sourceId':id,'ownerId':owner,'interpretation':m,'disposition':'whole_member' if owner in entities else 'pending_whole_member' if owner in pending else 'source_only'})
+    for e in entities.values():publish_category(e)
+    for m in members:publish_category(m['interpretation'])
     return {'scope':scope,'evidenceBinding':{'scope':scope,'sourceRevision':0},'rulesVersion':'gim-element-standard-recognition-1|'+STANDARD['version']+'|'+ALIASES['version'],'entities':sorted(entities.values(),key=lambda e:e['id']),'pending':sorted(pending.values(),key=lambda e:e['id']),'memberships':members,'relationships':[],'aliases':[],'diagnostics':diagnostics}
 
-def scan_standard(root,scope=None):
-    reader=Reader(root);records=reader.scan()
+def publish_category(value):
+    code=value['category'];value['recognitionCode']=code
+    if code=='U-OBJECT' or not code:return
+    specific=value.get('standardClass');definition=SEMANTIC_BY_CODE.get(code,{})
+    matches=[i for i in STANDARD['items'] if i['recognitionCode']==code]
+    preferred=INDEX_BY_ID.get(definition.get('catalogId'))
+    categories={i['category'] for i in matches};family=definition.get('catalogFamily',{})
+    fallback=next((c['code'] for c in CATALOG['categories'] if c['kind']==family.get('kind') and c['label']==family.get('label')),'U-OBJECT')
+    value['category']=specific['category'] if specific else preferred['category'] if preferred else next(iter(categories)) if len(categories)==1 else fallback
+    if value['category']=='U-OBJECT':
+        value['classificationStatus']='unresolved';value['categoryStatus']='unresolved'
+    if 'classificationState' in value:value['classificationState']='unknown' if value['category']=='U-OBJECT' else 'identified'
+    if value['category']!='U-OBJECT' and specific and specific['status']=='confirmed' and not value.get('conflict'):
+        value['classificationStatus']='confirmed';value['categoryStatus']='confirmed'
+
+def scan_standard(root,scope=None,files=None,entry_count=None):
+    reader=Reader(root,files=files);records=reader.scan()
     if scope is None:
         digest=hashlib.sha256()
         for path in sorted(reader.files):
@@ -241,25 +292,25 @@ def scan_standard(root,scope=None):
         scope=digest.hexdigest()
     snapshot=normalize(records,scope)
     reasons=(['source-cycle'] if reader.diagnostics else [])+(['source-reference-unresolved'] if any(r['status'] not in ('resolved','entry-fallback') for r in reader.references) else [])
-    return {'schema':'gim-element-standard-v1','scope':scope,'engine':{'implementation':'independent-python','rulesVersion':snapshot['rulesVersion'],'standardCatalogVersion':STANDARD['version']},'snapshot':snapshot,'sources':[{k:r.get(k,'') for k in ['id','track','name','source','parent','source_type','attributeOnly','attributeContextId']} for r in records],'sourceAliases':reader.aliases,'sourceReferences':reader.references,'sourceDiagnostics':reader.diagnostics,'complete':not reasons,'incompleteReasons':reasons,'inventory':{**{ext:sum(p.lower().endswith('.'+ext) for p in reader.files) for ext in ['cbm','dev','fam','ifc']},'physicalDevRoots':sum(r['track']=='dev' and not r['parent'] and not r.get('attributeOnly') for r in records),'attributeSources':sum(bool(r.get('attributeOnly')) for r in records),'entries':len(reader.files)}}
+    return {'schema':'gim-element-standard-v1','scope':scope,'engine':{'implementation':'independent-python','rulesVersion':snapshot['rulesVersion'],'standardCatalogVersion':STANDARD['version']},'snapshot':snapshot,'sources':[{k:r.get(k,'') for k in ['id','track','name','source','parent','source_type','attributeOnly','attributeContextId']} for r in records],'sourceAliases':reader.aliases,'sourceReferences':reader.references,'sourceDiagnostics':reader.diagnostics,'complete':not reasons,'incompleteReasons':reasons,'inventory':{**{ext:sum(p.lower().endswith('.'+ext) for p in reader.files) for ext in ['cbm','dev','fam','ifc']},'physicalDevRoots':sum(r['track']=='dev' and not r['parent'] and not r.get('attributeOnly') for r in records),'attributeSources':sum(bool(r.get('attributeOnly')) for r in records),'entries':entry_count if entry_count is not None else len(reader.files)}}
 
 INDEX_BY_ID={row['id']:row for row in STANDARD['items']}
-SEMANTIC_BY_CODE={row['code']:row for row in CATALOG['semanticCodes']}
+SEMANTIC_BY_CODE={row['code']:row for row in CATALOG['recognitionCodes']}
 PART_BY_ID={row['id']:row for row in CATALOG['components']}
 PART_BY_TERM={row['term'].lower():row for row in CATALOG['components']}
 def catalog_location(entity):
-    code=entity.get('category','U-PENDING');definition=SEMANTIC_BY_CODE.get(code,{})
+    code=entity.get('category','U-PENDING')
     item=INDEX_BY_ID.get((entity.get('standardClass') or {}).get('id'))
-    if item and not (item['category']==code or item['category'].startswith(code+'.') or code.startswith(item['category']+'.') or item['category']=='E-T' and code in ('E01','E03') or item['category']=='E-R' and code in ('E02','E11')):item=None
+    if item and item['category']!=code:item=None
     if code.startswith('U'):item=None
-    if not item:item=INDEX_BY_ID.get(definition.get('catalogId'))
     matches=[row for row in STANDARD['items'] if row['category']==code]
     if not item and len(matches)==1:item=matches[0]
     if item:return {'kind':item['kind'],'group':item['catalogGroup'],'category':item['catalogCategory'],'label':item['label'],'id':item['id'],'order':item['order']}
-    family=definition.get('catalogFamily')
+    row=next((c for c in CATALOG['categories'] if c['code']==code),None)
+    family={'kind':row['kind'],'label':row['label']} if row else None
     if matches and len({(row['kind'],row['catalogCategory']) for row in matches})==1:family={'kind':matches[0]['kind'],'label':matches[0]['catalogCategory']}
     if family:return {'kind':family['kind'],'group':{'equipment':'设备','material':'材料','construction':'构件'}[family['kind']],'category':family['label'],'label':'类型待确认','id':code,'order':999}
-    kind={'equipment':'equipment','materials':'material','components':'construction'}.get(definition.get('group'),'unknown')
+    kind='unknown'
     return {'kind':kind,'group':{'equipment':'设备','material':'材料','construction':'构件','unknown':'其他'}[kind],'category':'类别待确认','label':'类型待确认','id':code,'order':999}
 
 def ledger_from_standard(data):
@@ -287,4 +338,4 @@ def ledger_from_standard(data):
         if key not in buckets:row['template']=template;row['entityIds']=[row['entityId']];buckets[key]=row;continue
         old=buckets[key];old['dev']+=row['dev'];old['ifc']+=row['ifc'];old['total']+=row['total'];old['samples']+=row['samples'];old['files']+=row['files'];old['entityIds'].append(row['entityId'])
         for status,count in row['st'].items():old['st'][status]=old['st'].get(status,0)+count
-    return {'rows':list(buckets.values()),'totals':totals,'entityTree':tree,'recognition':data,'stats':{'cbm文件':data['inventory']['cbm'],'dev文件':data['inventory']['dev'],'fam文件':data['inventory']['fam'],'ifc文件':data['inventory']['ifc'],'来源对象':len(sources),'整体':len(snapshot['entities']),'待归整体':len(snapshot['pending']),'仅来源':sum(m['disposition']=='source_only' for m in snapshot['memberships'])}}
+    return {'rows':sorted(buckets.values(),key=lambda r:(groups.index(r['group']),r['catalogOrder'],r['modelOrder'],r['template'])),'totals':totals,'entityTree':tree,'recognition':data,'stats':{'cbm文件':data['inventory']['cbm'],'dev文件':data['inventory']['dev'],'fam文件':data['inventory']['fam'],'ifc文件':data['inventory']['ifc'],'来源对象':len(sources),'整体':len(snapshot['entities']),'待归整体':len(snapshot['pending']),'仅来源':sum(m['disposition']=='source_only' for m in snapshot['memberships'])}}

@@ -15,7 +15,7 @@ ENDSEC;END-ISO-10303-21;`;
   const index=buildSubstationSpatialIndexFromTexts([{entry,text}],null,[],undefined,ENGINEERING_EVIDENCE_FIELDS),object=index.objects.find(o=>o.expressId===1)!;
   expect(object.propertyDataDeferred).toBe(true);expect(object.propertySets?.[0]).toMatchObject({name:'设计',applicability:'instance',truncated:true});
   expect(object.propertySets?.flatMap(p=>p.values.map(v=>v.name))).toEqual(['设备类型']);
-  expect(interpretObject(toObjectEvidence(ifcSourceRecords([object])[0])).category).toBe('C-C5');
+  expect(interpretObject(toObjectEvidence(ifcSourceRecords([object])[0])).category).toBe('C01');
 });
 it('exposes an inherited IFC predefined type without inventing an AC/DC or porcelain subtype',()=>{
   const text=`ISO-10303-21;HEADER;ENDSEC;DATA;

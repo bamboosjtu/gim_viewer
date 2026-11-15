@@ -32,7 +32,7 @@ class Reader:
     def norm(path):return posixpath.normpath(path.replace('\\','/').strip()).lower().lstrip('/')
     def resolve(self,owner,key,value):
         value=re.sub(r'\.ifc\$$','.ifc',value,flags=re.I);hits=[]
-        for candidate in [posixpath.join(posixpath.dirname(owner),value),value]:
+        for candidate in [posixpath.join(posixpath.dirname(owner.replace('\\','/')),value),value]:
             hits=self.exact.get(self.norm(candidate),[])
             if hits:break
         if not hits:hits=self.bases.get(self.norm(value).rsplit('/',1)[-1],[])
@@ -139,31 +139,37 @@ def ifc_string(value):
         except (ValueError,UnicodeError):return m[0]
     return re.sub(r'\\X([24])\\([0-9a-fA-F]+)\\X0\\',unicode_block,value)
 def read_ifc(text,path):
-    # Statements can span lines; quoted semicolons are retained by the scanner.
-    entities={};start=None;quoted=False;i=0
-    while i<len(text):
-        c=text[i]
-        if c=="'":
-            if quoted and i+1<len(text) and text[i+1]=="'":i+=2;continue
-            quoted=not quoted
-        elif not quoted:
-            if c=='#' and start is None:start=i
-            elif c==';' and start is not None:
-                match=re.match(r'#(\d+)\s*=\s*(IFC\w+)\s*\((.*)\)\s*;',text[start:i+1],re.S|re.I)
-                if match:entities[int(match[1])]=(match[2].upper(),split_args(match[3]))
-                start=None
-        i+=1
+    # Lex once in the regex engine. Geometry statements never need argument
+    # materialization in this semantic-only tool. Strings/comments are tokens,
+    # so a quoted semicolon or '#123=IFC...' is never an entity boundary.
+    resources=re.compile(r'^IFC(?:REL|MATERIAL|PROPERTY|QUANTITY|SHAPE|REPRESENTATION|BOOLEAN|CARTESIAN|DIRECTION|LOCALPLACEMENT|AXIS|PROFILE|EXTRUDED|GEOMETRIC|OWNER|PERSON|ORGANIZATION|APPLICATION|SIUNIT|UNITASSIGNMENT|PRESENTATION|SURFACE|COLOUR|STYLE|INDEXED|POLY|EDGE|FACE|VERTEX|SHELL|FACETED|CLOSED|OPEN|TEXTURE|TRIANGULATED|ADVANCED|CIRCLE|ELLIPSE|VECTOR|LINE|BSPLINE|SWEPT|MAPPED|COMPOSITE|ARBITRARY|RECTANGLE|CARTESIANTRANSFORMATION|PLANE|AXIS2|AXIS1)')
+    relations={'IFCRELAGGREGATES','IFCRELNESTS','IFCRELVOIDSELEMENT','IFCRELCONNECTSPORTTOELEMENT','IFCRELDEFINESBYPROPERTIES','IFCRELDEFINESBYTYPE'}
+    evidence={'IFCPROPERTYSET','IFCELEMENTQUANTITY','IFCPROPERTYSINGLEVALUE'}
+    tokens=re.compile(r"'(?:''|[^'])*'|/\*.*?\*/|#(\d+)\s*=\s*(IFC\w+)\s*\(|;",re.S|re.I)
+    entities={};current=None
+    for token in tokens.finditer(text):
+        if token[1]:
+            kind=token[2].upper();feature=bool(re.match(r'^IFC(?:OPENING|VOIDING|FEATUREELEMENT|PROJECTIONELEMENT|DISTRIBUTIONPORT|PORT)',kind))
+            current=(int(token[1]),kind,token.end()) if kind in relations|evidence or kind.endswith(('TYPE','STYLE')) or feature or not resources.match(kind) else None
+        elif token[0]==';' and current is not None:
+            id,kind,start=current;body=text[start:token.start()].rstrip()
+            if body.endswith(')'):entities[id]=(kind,split_args(body[:-1]))
+            current=None
     def refs(value):return [int(n) for n in re.findall(r'#(\d+)',value)]
+    property_cache={}
     def prop(id,seen=None):
+        if id in property_cache:return property_cache[id]
         seen=set() if seen is None else seen
         if id in seen or id not in entities:return []
         seen=seen|{id};kind,args=entities[id]
         if kind in ('IFCPROPERTYSET','IFCELEMENTQUANTITY'):
             section=ifc_string(args[2]) if len(args)>2 else ''
-            return [dict(p,section=section,containerId=f'{path}#{id}') for child in refs(args[-1]) for p in prop(child,seen)]
+            result=[dict(p,section=section,containerId=f'{path}#{id}') for child in refs(args[-1]) for p in prop(child,seen)]
+            property_cache[id]=result;return result
         if kind=='IFCPROPERTYSINGLEVALUE' and len(args)>2:
             raw=args[2];typed=re.fullmatch(r'IFC\w+\((.*)\)',raw,re.S|re.I)
-            return [{'keys':[ifc_string(args[0])],'value':ifc_string(typed[1] if typed else raw),'path':path,'line':id,'rawLine':raw}]
+            result=[{'keys':[ifc_string(args[0])],'value':ifc_string(typed[1] if typed else raw),'path':path,'line':id,'rawLine':raw}]
+            property_cache[id]=result;return result
         return []
     parents={};hosts={};properties=collections.defaultdict(list)
     for id,(kind,args) in entities.items():
@@ -191,7 +197,6 @@ def read_ifc(text,path):
     raw=Reader.norm(path).encode('utf-16-le')
     for at in range(0,len(raw),2):model_hash=((model_hash^int.from_bytes(raw[at:at+2],'little'))*0x100000001b3)&0xffffffffffffffff
     model='ifc_'+format(model_hash,'016x');out=[]
-    resources=re.compile(r'^IFC(?:REL|MATERIAL|PROPERTY|QUANTITY|SHAPE|REPRESENTATION|BOOLEAN|CARTESIAN|DIRECTION|LOCALPLACEMENT|AXIS|PROFILE|EXTRUDED|GEOMETRIC|OWNER|PERSON|ORGANIZATION|APPLICATION|SIUNIT|UNITASSIGNMENT|PRESENTATION|SURFACE|COLOUR|STYLE|INDEXED|POLY|EDGE|FACE|VERTEX|SHELL|FACETED|CLOSED|OPEN|TEXTURE|TRIANGULATED|ADVANCED|CIRCLE|ELLIPSE|VECTOR|LINE|BSPLINE|SWEPT|MAPPED|COMPOSITE|ARBITRARY|RECTANGLE|CARTESIANTRANSFORMATION|PLANE|AXIS2|AXIS1)')
     for id,(kind,args) in entities.items():
         feature=bool(re.match(r'^IFC(?:OPENING|VOIDING|FEATUREELEMENT|PROJECTIONELEMENT|DISTRIBUTIONPORT|PORT)',kind))
         product_hint=len(args)>=7 and (args[5].startswith('#') or args[6].startswith('#'))

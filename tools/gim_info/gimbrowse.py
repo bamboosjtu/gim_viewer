@@ -656,24 +656,7 @@ class Index:
             push(k, v)
         return out
 
-    def cbm_edges(self, rel):
-        """层级边 → [(key, target, 层名, 是否存在)]，未下载的 cbm 也保留（期望路径）。"""
-        out, seen = [], set()
-        for k, v in self._cbm_edge_values(rel):
-            tgt, st = self.resolve(rel, v)
-            if st == 'missing':
-                tgt = self.expected_rel(v, rel)
-            identity = (rel, k, tgt)
-            if identity in seen:
-                continue
-            seen.add(identity)
-            ok = tgt in self.files
-            out.append((k, tgt, self.level_name(tgt) if ok else '', ok))
-        return out
 
-    def cbm_children(self, rel):
-        """已下载的下级 cbm → [(key, target, 层名)]（兼容旧调用）。"""
-        return [(k, t, lv) for k, t, lv, ok in self.cbm_edges(rel) if ok]
 
     def level_name(self, rel):
         """cbm 的层名：读 ENTITYNAME（F1System/F2System/…/PARTINDEX），否则按扩展名。"""
@@ -685,52 +668,10 @@ class Index:
             return n
         return KIND_NAME.get(e.ext, e.ext)
 
-    def model_ptr(self, rel):
-        """cbm → dev（模型边 OBJECTMODELPOINTER）。"""
-        v = self.read(rel).get('OBJECTMODELPOINTER') or ''
-        if not is_pointer_value(v):
-            return None
-        tgt, st = self.resolve(rel, v)
-        return tgt if st in ('ok', 'cross') else None
 
-    def attr_ptr(self, rel):
-        """任意文件 → fam（属性边 BASEFAMILY）。"""
-        v = self.read(rel).get('BASEFAMILY') or ''
-        if not is_pointer_value(v):
-            return None
-        tgt, st = self.resolve(rel, v)
-        return tgt if st in ('ok', 'cross') else None
 
-    def geo_edges(self, rel):
-        """dev/phm → 子装配与几何（SOLIDMODELn / SUBDEVICEn）。
 
-        → [(key, target, 类别, 是否存在)]；未下载的几何也保留（期望路径）。
-        """
-        out = []
-        for k, v in self.read(rel).items():
-            if RX_NUMKEY.search(k) or not is_pointer_value(v):
-                continue
-            if not k.upper().startswith(('SOLIDMODEL', 'SUBDEVICE')):
-                continue
-            tgt, st = self.resolve(rel, v)
-            if st == 'missing':
-                tgt = self.expected_rel(v, rel)
-            out.append((k, tgt, ext_of(v).lstrip('.'), tgt in self.files))
-        return out
 
-    def geo_children(self, rel):
-        """已下载的几何 → [(key, target, 类别)]（兼容旧调用）。"""
-        return [(k, t, c) for k, t, c, ok in self.geo_edges(rel) if ok]
-
-    def _ptr_edge(self, rel, key, how):
-        """单条具名指针边（模型 / 属性）→ (how, key, target, 存在) 或 None。"""
-        v = self.read(rel).get(key) or ''
-        if not is_pointer_value(v):
-            return None
-        tgt, st = self.resolve(rel, v)
-        if st == 'missing':
-            tgt = self.expected_rel(v, rel)
-        return (how, key, tgt, tgt in self.files)
 
     def edges(self, rel):
         """某文件的**全部指针出边** → [(指针类型, 键, 目标/期望路径, 是否存在)]。

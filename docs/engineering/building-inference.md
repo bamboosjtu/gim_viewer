@@ -77,7 +77,7 @@
 ## 验证
 
 - `desktop/src/engineering/__tests__/compositionTemplate.test.ts`：占位名回退、房间嵌套、独立小建筑、声明建筑；
-- `desktop/src/gim/__tests__/engineeringCompositionContexts.test.ts`：IFC 空间证据到组成上下文；
+- `desktop/src/gim/engineering/__tests__/compositionContexts.test.ts`：IFC 空间证据到组成上下文；
 - `desktop/src/services/__tests__/compositionProjection.test.ts`：建筑/区域投影；
 - 真实工程回归由开发者通过[本地样本测试](../../desktop/local-tests/README.md)与[Benchmark CLI](../benchmark.md)执行。
 

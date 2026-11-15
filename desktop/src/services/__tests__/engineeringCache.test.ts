@@ -4,7 +4,7 @@ import vocabulary from '../../gim/engineering/sourceVocabulary.json';
 import {projectEngineeringNavigation} from '../../gim/engineering/navigation.js';
 import {encodeEngineeringNavigation} from '../engineeringNavigationCache.js';
 import { extractEngineeringSourceGraph } from '../../gim/engineering/sourceGraph.js';
-import { buildEngineeringSources } from '../../gim/engineering/buildSources.js';
+import {buildTestEngineeringSources} from '../../gim/engineering/__tests__/fixtures.js';
 import { decodeEngineeringArtifact,encodeEngineeringArtifact,decodeEngineeringEntities, decodeEngineeringSources, encodeEngineeringEntities, encodeEngineeringSources, engineeringCacheEntry, engineeringSourceCacheMatchesFiles } from '../engineeringCacheCodec.js';
 import {packEngineeringSource} from '../engineeringSourceCodec.js';
 import { markCacheFailure } from '../engineeringWorker.js';
@@ -15,7 +15,7 @@ async function fixture(extra: Record<string, string> = {}) {
   const files: Record<string, string> = { 'project.cbm': 'OBJECTMODELPOINTER=unit.dev', 'unit.dev': 'SYMBOLNAME=主变压器\nSUBDEVICE0=terminal.dev',
     'terminal.dev': 'SYMBOLNAME=测控柜', ...extra };
   const graph = await extractEngineeringSourceGraph({ paths: Object.keys(files), readText: async p => files[p] });
-  return buildEngineeringSources(id.sourceSha256, graph, [], []);
+  return buildTestEngineeringSources(id.sourceSha256, graph, [], []);
 }
 
 describe('independent source and entity cache contracts', () => {

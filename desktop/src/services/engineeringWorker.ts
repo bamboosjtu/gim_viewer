@@ -37,15 +37,34 @@ export function createEngineeringWorkerHandler(loadSources?:(paths:string[])=>Pr
   const sourceErrors=new Map<string,string>();
   const pendingSources=new Map<string,{promise:Promise<void>;resolve:()=>void}>();
   const sourceQueue:string[]=[];let sourceReads=0,sourceScheduled=false;
-  const installSources=(input:EngineeringSourceInput)=>{
+  const installSources=async(input:EngineeringSourceInput,wanted:readonly string[])=>{
     for(const batch of input.batches){batches.add(batch);for(const entry of batch.entries)sourceErrors.delete(entry.path);}
     for(const file of input.files){files.set(file.path,file.blob);sourceErrors.delete(file.path);}
     for(const error of input.errors)sourceErrors.set(error.path,error.message);
+    // Wake current consumers before awaiting their shared document promises.
+    for(const path of wanted)pendingSources.get(path)?.resolve();
+    // Decode each received carrier once into the shared document cache. CBM
+    // siblings expose their DEV pointers as a batch instead of one round trip
+    // per occurrence. Do not expand speculative DEV trees or read FAM/IFC here.
+    const paths=wanted.filter(path=>/\.(cbm|dev)$/i.test(path)&&!sourceErrors.has(path));
+    lastSourceYield=performance.now();
+    const parsed=await Promise.allSettled(paths.map(path=>documents.read(path)));
+    const pointers:string[]=[];
+    for(let i=0;i<paths.length;i++){
+      const path=paths[i],result=parsed[i];if(result.status!=='fulfilled')continue;
+      const doc=result.value;
+      if(!/\.cbm$/i.test(path)||!entryIndex)continue;
+      for(const field of doc.fields)if(/^OBJECTMODELPOINTER$/i.test(field.keys[0])&&/\.dev$/i.test(field.value)){
+        const target=entryIndex.resolve(field.value,path);if(target&&!documents.has(target))pointers.push(target);
+      }
+    }
+    const room=ENGINEERING_SOURCE_BATCH_FILES*2-sourceQueue.length;
+    if(room>0&&pointers.length)void ensureSources(pointers.slice(0,room)).catch(()=>{/* Demand reads retain the failure evidence. */});
   };
   const drainSources=()=>{
     while(loadSources&&sourceReads<2&&sourceQueue.length){
       const wanted=sourceQueue.splice(0,ENGINEERING_SOURCE_BATCH_FILES);sourceReads++;
-      void loadSources(wanted).then(installSources).catch(error=>{for(const path of wanted)sourceErrors.set(path,String(error));})
+      void loadSources(wanted).then(input=>installSources(input,wanted)).catch(error=>{for(const path of wanted)sourceErrors.set(path,String(error));})
         .finally(()=>{for(const path of wanted){pendingSources.get(path)?.resolve();pendingSources.delete(path);}sourceReads--;drainSources();});
     }
   };
@@ -197,7 +216,8 @@ export function createEngineeringWorkerHandler(loadSources?:(paths:string[])=>Pr
         if(stage!==lastStage||now-lastProgress>=1000){lastProgress=now;lastStage=stage;reportProgress(stage,completed);}
       };
       try{graph=await trace.measure('engineering.extract',()=>{entryIndex??=createEntryIndex([...paths].sort());return extractEngineeringSourceGraph({paths,entryIndex,
-        readText:path=>readFamily(path,trace),readDocument:async path=>{const doc=await documents.read(path);progress('source-traverse');return doc;}},
+        readText:path=>readFamily(path,trace),readDocument:async path=>{const doc=await documents.read(path);progress('source-traverse');return doc;},
+        prefetchDocuments:loadSources?wanted=>{const room=ENGINEERING_SOURCE_BATCH_FILES*2-sourceQueue.length;if(room>0)void ensureSources(wanted.filter(path=>!documents.has(path)).slice(0,room)).catch(()=>{});}:undefined},
         {deferFamilies:true,onProgress:progress});});}finally{
         documents.clear();entryIndex=undefined;
         const needed=new Set(graph?.familyAssignments?.map(a=>a.path)??[]);

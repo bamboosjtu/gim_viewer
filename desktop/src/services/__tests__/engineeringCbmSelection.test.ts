@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppState } from '../../app/state.js';
 import { extractEngineeringSourceGraph } from '../../gim/engineering/sourceGraph.js';
-import { buildEngineeringSources } from '../../gim/engineering/buildSources.js';
+import {buildTestEngineeringSources} from '../../gim/engineering/__tests__/fixtures.js';
 import { projectEngineeringNavigation } from '../../gim/engineering/navigation.js';
 
 beforeEach(() => {
@@ -13,7 +13,7 @@ async function fixture(shared = false) {
     'unit.cbm': 'ENTITYNAME=F2System\nOBJECTMODELPOINTER=root.dev\nSUBSYSTEM0=alias.cbm', 'root.dev': 'SYMBOLNAME=主变压器\nSUBDEVICE0=box.dev',
     'box.dev': 'SYMBOLNAME=测控柜', 'alias.cbm': 'ENTITYNAME=PARTINDEX\nOBJECTMODELPOINTER=box.dev' };
   const graph = await extractEngineeringSourceGraph({ paths: Object.keys(raw), readText: async path => raw[path] });
-  const built = buildEngineeringSources('package', graph, [], []), state = new AppState(); state.activateProject(1, 'package'); state.currentProjectType = 'substation';
+  const built = buildTestEngineeringSources('package', graph, [], []), state = new AppState(); state.activateProject(1, 'package'); state.currentProjectType = 'substation';
   state.engineeringSources = built.sources; state.engineeringSnapshot = built.snapshot; state.engineeringNavigation = projectEngineeringNavigation(built.sources, built.snapshot);
   return { state, ...built };
 }
@@ -22,7 +22,7 @@ describe('source address links use the engineering identity chain', () => {
     const f = await fixture(), { selectEngineeringCbmSource } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../engineeringCbmSelection.js'); });
     const request = f.state.beginSelection({ kind: 'engineering-source', key: 'alias.cbm' });
     expect(await selectEngineeringCbmSource(f.state, 'alias.cbm', request)).toBe(true);
-    const box = f.snapshot.entities.find(entity => entity.category === 'E16.control_cabinet')!;
+    const box = f.snapshot.entities.find(entity => entity.category === 'E17')!;
     expect(f.state.selectionRequest?.target).toEqual({ kind: 'engineering', key: box.id });
     expect(document.querySelector('.props-header')?.textContent).toBe('测控柜');
   });

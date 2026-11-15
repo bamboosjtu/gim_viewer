@@ -1,7 +1,7 @@
 import {beforeEach,expect,it,vi} from 'vitest';
 import {AppState} from '../../app/state.js';
 import {extractEngineeringSourceGraph} from '../../gim/engineering/sourceGraph.js';
-import {buildEngineeringSources} from '../../gim/engineering/buildSources.js';
+import {buildTestEngineeringSources} from '../../gim/engineering/__tests__/fixtures.js';
 import {projectEngineeringNavigation} from '../../gim/engineering/navigation.js';
 const evidence=vi.hoisted(()=>({ensure:vi.fn(),query:vi.fn()}));
 vi.mock('../engineeringService.js',()=>({ensureEngineeringEvidence:evidence.ensure,queryEngineeringEvidence:evidence.query}));
@@ -15,7 +15,7 @@ beforeEach(()=>{
 async function select(owner:boolean){
   const raw:Record<string,string>={'project.cbm':'OBJECTMODELPOINTER=a.dev','a.dev':'TYPE=GIS\nBASEFAMILY=a.fam','a.fam':'[设计]\n设备名称=DEVICENAME=GIS'};
   const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async p=>raw[p]});
-  const built=buildEngineeringSources('scope',graph,[],[]),state=new AppState();state.activateProject(1,'scope');state.currentProjectType='substation';
+  const built=buildTestEngineeringSources('scope',graph,[],[]),state=new AppState();state.activateProject(1,'scope');state.currentProjectType='substation';
   if(!owner){built.snapshot.entities=[];built.snapshot.pending=[];built.snapshot.memberships=built.snapshot.memberships.map(m=>({...m,ownerId:null,disposition:'source_only'}));}
   state.engineeringSources=built.sources;state.engineeringSnapshot=built.snapshot;state.engineeringNavigation=projectEngineeringNavigation(built.sources,built.snapshot);
   const {configurePresentation}=await import('../../app/presentationBindings.js');configurePresentation();

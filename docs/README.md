@@ -117,7 +117,7 @@
 | 命令与工作区约定 | [开发指南](development.md) |
 | 验证证据规则 | [验证](validation.md) |
 | 性能开发约束与按方向防回退 | [性能门禁](performance/gates.md)及方向文档；性能接受仍由开发者决定 |
-| 目录编码与生成表 | `desktop/src/engineering/catalog.json` 与[机器目录索引](engineering/catalogs/catalog-index.md) |
+| 实体目录维护源与运行时配置 | [实体索引表](engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx)；由维护导入器生成 JSON 配置与[机器目录索引](engineering/catalogs/catalog-index.md) |
 | 术语定义 | [术语表](glossary.md) |
 
 ## 写作约定
@@ -136,7 +136,7 @@
 - 修改内部机制：更新对应 `architecture/` 文档，并确认[分层](architecture/layers.md)/[缓存](architecture/caches.md)是否受影响。
 - 修改分类/目录：更新 `engineering/catalogs/` 与领域测试，不把新规则写进 UI 或 parser。
 - 修改 XML primitive：更新[XML primitive](schema/xml-primitives.md)与[XML MOD](schema/substation-mod.md)，保留“解析成功≠可渲染”的边界。
-- 修改持久化含义：只 bump 受影响域，更新[缓存域](architecture/caches.md)，不复制旧版本。
+- 修改持久化含义：项目自有开发契约保持 v1，只失效受影响域；由开发者删除旧开发缓存并重建，更新[缓存域](architecture/caches.md)，不维护迁移或旧格式兼容。
 - 修改用户可见行为：更新[桌面软件规格](software-spec.md)或[移动端规格](mobile-spec.md)，并同步[问题与限制](open-issues.md)。
 - 修改样本或性能口径：更新[样本台账](schema/sample-corpus.md)/[性能测试指南](performance-guide.md)；权威实测结果由开发者本地 `tmp/gim-bench/` 报告保存，`output/` 默认只放匿名派生视图（显式非匿名 survey 例外）。
 

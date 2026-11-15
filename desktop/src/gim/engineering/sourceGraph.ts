@@ -11,6 +11,7 @@ export interface SourceFileReader {
   paths: readonly string[];
   entryIndex?:EntryIndex;
   readDocument?(path:string):Promise<SourceDocument>;
+  prefetchDocuments?(paths:readonly string[]):void;
   readText(path: string): Promise<string>;
 }
 export interface SourceReference {
@@ -55,6 +56,11 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
     ifcPaths: files.paths.filter(p => /\.ifc$/i.test(p)).sort(ordered), diagnostics: [], familyAssignments: [] };
   options.onProgress?.('source-index');
   const entryIndex=files.entryIndex??createEntryIndex([...files.paths].sort(ordered));
+  const prefetch=(doc:SourceDocument,fields:SourceDocument['fields'],offset=0)=>{
+    files.prefetchDocuments?.(fields.slice(offset,offset+256).flatMap(field=>{
+      const target=entryIndex.resolve(field.value,doc.path);return target?[target]:[];
+    }));
+  };
   function resolve(owner: string, field: string, value: string): string | null {
     const candidates=entryIndex.candidates(value.replace(/\.ifc\$$/i,'.ifc'),owner);
     const target = candidates.length === 1 ? candidates[0] : null;
@@ -138,6 +144,8 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
     if (ancestry.has(path)) { result.diagnostics.push({ kind: 'cycle', source: id }); return []; }
     let doc:SourceDocument;
     try{doc=await document(path);}catch(error){if(options.signal?.aborted||/Engineering source unavailable/.test(String(error)))throw error;result.diagnostics.push({kind:'read-failed',source:path});return [];}
+    const edges=doc.fields.filter(p=>/^SUBDEVICE\d+$/i.test(p.keys[0])&&/\.dev$/i.test(p.value));
+    prefetch(doc,edges);
     const cbmDoc = await document(cbm.documentPath);
     assignFamilies(doc,id);
     if(!parent)assignFamilies(cbmDoc,id);
@@ -154,7 +162,9 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
     const next = new Set(ancestry); next.add(path);
     const keyCounts=new Map<string,number>();
     for(const field of doc.fields){const key=field.keys[0].toUpperCase();keyCounts.set(key,(keyCounts.get(key)??0)+1);}
-    for (const field of doc.fields.filter(p => /^SUBDEVICE\d+$/i.test(p.keys[0]) && /\.dev$/i.test(p.value))) {
+    for (let i=0;i<edges.length;i++) {
+      if(i>0&&i%128===0)prefetch(doc,edges,i);
+      const field=edges[i];
       const target = resolve(path, field.keys[0], field.value);
       const duplicateKey = (keyCounts.get(field.keys[0].toUpperCase())??0)>1;
       const edgeId = `${field.keys[0].toUpperCase()}${duplicateKey ? `@line:${field.line}` : ''}`;
@@ -179,6 +189,8 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
     if (ancestors.has(path)) { result.diagnostics.push({ kind: 'cycle', source: id }); return; }
     let doc:SourceDocument;
     try{doc=await document(path);}catch(error){if(parentId===null||options.signal?.aborted||/Engineering source unavailable/.test(String(error)))throw error;result.diagnostics.push({kind:'read-failed',source:path});return;}
+    const edges=doc.fields.filter(p=>/^(?:SUBSYSTEM\d*|SUBDEVICE\d+)$/i.test(p.keys[0])&&/\.cbm$/i.test(p.value));
+    prefetch(doc,[...doc.fields.filter(p=>/^OBJECTMODELPOINTER$/i.test(p.keys[0])&&/\.dev$/i.test(p.value)),...edges]);
     const entityName = scalar(doc, 'ENTITYNAME')?.trim() || undefined;
     referencedFamilies(doc);
     const node = { id, documentPath: path, parentId, viaField, ...(entityName ? { entityName } : {}) };
@@ -230,10 +242,11 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
     }
     for (const field of doc.fields.filter(p => /^(?:IFCFILE|IFC\d+)$/i.test(p.keys[0]) && p.value)) resolve(path, field.keys[0], field.value);
     const next = new Set(ancestors); next.add(path);
-    const edges = doc.fields.filter(p => /^(?:SUBSYSTEM\d*|SUBDEVICE\d+)$/i.test(p.keys[0]) && /\.cbm$/i.test(p.value));
     const edgeCounts=new Map<string,number>();
     for(const field of edges){const key=field.keys[0].toUpperCase();edgeCounts.set(key,(edgeCounts.get(key)??0)+1);}
-    for (const field of edges) {
+    for (let i=0;i<edges.length;i++) {
+      if(i>0&&i%128===0)prefetch(doc,edges,i);
+      const field=edges[i];
       const child = resolve(path, field.keys[0], field.value);
       const duplicateKey = (edgeCounts.get(field.keys[0].toUpperCase())??0)>1;
       const edgeId = `${field.keys[0].toUpperCase()}${duplicateKey ? `@line:${field.line}` : ''}`;

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
 import { extractEngineeringSourceGraph } from '../../gim/engineering/sourceGraph.js';
-import { buildEngineeringSources } from '../../gim/engineering/buildSources.js';
+import {buildTestEngineeringSources} from '../../gim/engineering/__tests__/fixtures.js';
 import { projectEngineeringNavigation } from '../../gim/engineering/navigation.js';
 import { encodeEngineeringWorkerResultAsync, decodeEngineeringWorkerResult, engineeringWorkerResultTransfers } from '../engineeringWorkerTransport.js';
 
@@ -10,7 +10,7 @@ async function fixture() {
     'main.dev': 'SYMBOLNAME=主变压器\nSUBDEVICE0=terminal.dev\nSUBDEVICE1=radiator.dev',
     'terminal.dev': 'SYMBOLNAME=本体端子箱', 'radiator.dev': 'SYMBOLNAME=散热器' };
   const graph = await extractEngineeringSourceGraph({ paths: Object.keys(raw), readText: async path => raw[path] });
-  const built = buildEngineeringSources('sample', graph, [], []);
+  const built = buildTestEngineeringSources('sample', graph, [], []);
   return { ...built, navigation: projectEngineeringNavigation(built.sources, built.snapshot) };
 }
 

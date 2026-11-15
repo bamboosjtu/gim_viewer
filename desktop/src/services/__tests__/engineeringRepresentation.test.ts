@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { AppState } from '../../app/state.js';
 import { extractEngineeringSourceGraph } from '../../gim/engineering/sourceGraph.js';
-import { buildEngineeringSources } from '../../gim/engineering/buildSources.js';
+import {buildTestEngineeringSources} from '../../gim/engineering/__tests__/fixtures.js';
 import { getEngineeringRepresentations } from '../engineeringRepresentationService.js';
 import { selectEngineeringTarget, reconcileEngineeringSelection } from '../engineeringSelection.js';
 import { projectEngineeringNavigation } from '../../gim/engineering/navigation.js';
@@ -26,7 +26,7 @@ async function fixture(shared = false, declaredBuilding = false) {
   };
   if (declaredBuilding) data['building.cbm'] = 'SYSTEMNAME1=建筑物系统\nSYSTEMNAME2=生产建筑物\nSYSTEMNAME3=主控通信楼01';
   const graph = await extractEngineeringSourceGraph({ paths: Object.keys(data), readText: async p => data[p] });
-  const built = buildEngineeringSources('package', graph, [], []), state = new AppState();
+  const built = buildTestEngineeringSources('package', graph, [], []), state = new AppState();
   state.activateProject(1, 'package'); state.engineeringSources = built.sources; state.engineeringSnapshot = built.snapshot;
   state.engineeringNavigation = projectEngineeringNavigation(built.sources, built.snapshot);
   state.currentCbmTree = node('project.cbm', [node('unit.cbm')]);
@@ -36,7 +36,7 @@ async function fixture(shared = false, declaredBuilding = false) {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial()); group.add(mesh); root.add(group); return mesh; };
   const body = mesh(''), box = mesh('sub:0'), radiator = mesh('sub:1');
   state.loadedXmlModGroups.set('physical', root);
-  const main = built.snapshot.entities.find(e => e.category === 'E01')!, terminal = built.snapshot.entities.find(e => e.category === 'E16.control_cabinet')!;
+  const main = built.snapshot.entities.find(e => e.category === 'E01')!, terminal = built.snapshot.entities.find(e => e.category === 'E17')!;
   return { state, graph, rootId, root, body, box, radiator, main, terminal };
 }
 
@@ -45,9 +45,9 @@ describe('source-to-physical representation adapter and filters', () => {
     const raw:Record<string,string>={'project.cbm':'SUBSYSTEM0=gis.cbm\nSUBSYSTEM1=free.cbm','gis.cbm':'OBJECTMODELPOINTER=gis.dev',
       'gis.dev':'TYPE=GIS\nSYMBOLNAME=组合电器GIS\nSUBDEVICE0=actuator.dev\nSUBDEVICE1=terminal.dev',
       'actuator.dev':'SYMBOLNAME=操动机构箱','terminal.dev':'SYMBOLNAME=端子箱','free.cbm':'OBJECTMODELPOINTER=free.dev','free.dev':'SYMBOLNAME=端子箱模型01:Null:2754317'};
-    const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async p=>raw[p]}),built=buildEngineeringSources('p',graph,[],[]),state=new AppState();
+    const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async p=>raw[p]}),built=buildTestEngineeringSources('p',graph,[],[]),state=new AppState();
     state.activateProject(1,'p');state.engineeringSources=built.sources;state.engineeringSnapshot=built.snapshot;state.engineeringNavigation=projectEngineeringNavigation(built.sources,built.snapshot);
-    const gis=built.snapshot.entities.find(e=>e.category==='E05')!,free=built.snapshot.entities.find(e=>e.category==='M10')!;
+    const gis=built.snapshot.entities.find(e=>e.category==='E05')!,free=built.snapshot.entities.find(e=>e.category==='M04')!;
     const mesh=(root:THREE.Group,assemblyPath:string)=>{const wrapper=new THREE.Group();wrapper.userData.assemblyPath=assemblyPath;const value=new THREE.Mesh(new THREE.BoxGeometry(),new THREE.MeshBasicMaterial());wrapper.add(value);root.add(wrapper);return value;};
     const gisRoot=new THREE.Group();gisRoot.userData.rootOccurrence=graph.records.find(r=>r.source==='gis.dev')!.id;
     const body=mesh(gisRoot,''),actuator=mesh(gisRoot,'sub:0'),terminal=mesh(gisRoot,'sub:1');

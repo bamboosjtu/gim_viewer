@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { AppState } from '../../app/state.js';
 import { extractEngineeringSourceGraph } from '../../gim/engineering/sourceGraph.js';
-import { buildEngineeringSources } from '../../gim/engineering/buildSources.js';
+import {buildTestEngineeringSources} from '../../gim/engineering/__tests__/fixtures.js';
 import { projectEngineeringNavigation } from '../../gim/engineering/navigation.js';
 import { projectEngineeringComposition } from '../../engineering/composition.js';
 import type { IfcSpatialObject } from '../../gim/ifcSpatialParser.js';
@@ -30,7 +30,7 @@ async function fixture(){
   const state=new AppState();state.activateProject(1,'p');
   const graph=await extractEngineeringSourceGraph({paths:['project.cbm','建筑.ifc'],readText:async()=>''});
   const objects:IfcSpatialObject[]=['墙','楼板','柱'].map((name,i)=>({key:`m#${i+1}`,modelId:'m',expressId:i+1,ifcType:['IFCWALL','IFCSLAB','IFCCOLUMN'][i],name,globalId:`g${i}`,geometryStatus:'unrepresented',parentObjectKey:null,childObjectKeys:[],relationshipCount:0,hostObjectKey:null,spatialKey:null,spatialKeys:[],spatialContainment:null,sourcePath:'建筑.ifc'}));
-  const built=buildEngineeringSources('p',graph,objects,[]);
+  const built=buildTestEngineeringSources('p',graph,objects,[]);
   built.sources.incompleteReasons=[];state.engineeringStatus='ready';built.sources.models=[{modelId:'m',path:'建筑.ifc'}];state.engineeringSnapshot=built.snapshot;state.engineeringSources=built.sources;
   state.engineeringNavigation=projectEngineeringNavigation(built.sources,built.snapshot);
   state.ifcRegionalRuntimes.set('m',{index:{objects:objects.map(o=>({...o,bounds:[0,0,-10,10,4,0]}))},release:vi.fn()} as never);

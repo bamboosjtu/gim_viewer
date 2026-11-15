@@ -1,6 +1,7 @@
 import type { EngineeringEntity, EngineeringSnapshot, EvidenceValue } from './types.js';
 import type { CompositionAssignment, CompositionGroup, CompositionDeclaration } from './composition.js';
 import { mainNumber } from './classify.js';
+import {recognitionCategory} from './catalogLabels.js';
 
 /** Format-neutral declarations describe project context, never entity identity. */
 export interface CompositionContextEvidence {
@@ -194,7 +195,7 @@ export function assignEngineeringComposition(snapshot: EngineeringSnapshot, evid
     const purposes = new Set(contexts.map(context=>`${context.purpose}:${context.voltage ?? ''}`));
     const nearest = purposes.size === 1 ? contexts[0] : undefined;
     let chosen: DeclaredContext | undefined = nearest;
-    const category = entity.category;
+    const category = recognitionCategory(entity);
     const ownPurpose = purpose(entity.name) ?? (category === 'E19' && /风机|风口|暖气|制冷/.test(entity.name) ? 'hvac' : null);
     const ownFacility = ownPurpose && systems[ownPurpose as Exclude<Purpose, 'distribution'>]?.civil ? ownPurpose : null;
     const hostIds = [...new Set(input?.hostEntityIds ?? [])].filter(id => id !== entity.id && entities.has(id));

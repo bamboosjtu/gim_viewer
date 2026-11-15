@@ -1,65 +1,18 @@
 # -*- coding: utf-8 -*-
 """Standalone standard recognition: container input, orchestration and reports."""
-import os,json,shutil,tempfile,time
+import os,json,time,re
 import entity_std as S
 G_DEV,G_MAT,G_STR,G_OTH='设备','材料','构件','其他'
 T_DEV,T_IFC='dev','ifc'
 TRACK_NAME={T_DEV:'dev 轨道',T_IFC:'ifc 轨道'}
+_IFC_ADDRESS=re.compile(r'(\.ifc)#\d+$',re.I)
 
-MAGIC_7Z = b'7z\xbc\xaf\x27\x1c'
-
-
-def sniff(path):
-    with open(path, 'rb') as f:
-        head = f.read(8)
-    magic = head.rstrip(b'\x00')
-    if magic.startswith(b'GIMPKG'):
-        return 'gimpkg'
-    if head.startswith(MAGIC_7Z):
-        return 'raw7z'
-    if head.startswith(b'PK'):
-        return 'zip'
-    return 'unknown'
+def source_file_paths(sources):
+    """Display actual file paths, excluding IFC object address suffixes."""
+    return sorted({_IFC_ADDRESS.sub(r'\1',source) for source in sources if source},key=lambda path:(path.casefold(),path))
 
 
-def unpack(path, out_dir):
-    """把 .gim 解开到 out_dir，返回 (kind, note)。"""
-    kind = sniff(path)
-    os.makedirs(out_dir, exist_ok=True)
-    if kind == 'zip':
-        import zipfile
-        with zipfile.ZipFile(path) as z:
-            z.extractall(out_dir)
-        return kind, ''
-    if kind == 'gimpkg':
-        with open(path, 'rb') as f:
-            buf = f.read(8192)
-        off = buf.find(MAGIC_7Z)
-        if off < 0:
-            raise ValueError('未找到 7z 签名，容器可能损坏或加密')
-        payload = os.path.join(out_dir, '_payload.7z')
-        with open(path, 'rb') as f, open(payload, 'wb') as o:
-            f.seek(off)
-            shutil.copyfileobj(f, o)
-        src = payload
-    elif kind == 'raw7z':
-        src = path
-    else:
-        raise ValueError('无法识别的容器格式（既非 GIMPKGS 头也非 7z/zip）')
-    import py7zr
-    with py7zr.SevenZipFile(src) as z:
-        if z.needs_password():
-            raise ValueError('压缩包已加密，暂不支持')
-        z.extractall(out_dir)
-    if kind == 'gimpkg':
-        try:
-            os.remove(payload)
-        except OSError:
-            pass
-    return kind, ''
-
-
-def scan(path, progress=None, work_dir=None, cleanup=True):
+def scan(path, progress=None):
     """解析一个 GIM 工程或单体设备包。
 
     path: .gim 文件或已解包目录
@@ -67,38 +20,34 @@ def scan(path, progress=None, work_dir=None, cleanup=True):
     """
     prog = progress or (lambda m: None)
     t0 = time.time()
-    tmp = work_dir or tempfile.mkdtemp(prefix='gimelem_')
-    own = work_dir is None
-    try:
-        container, note = '', ''
-        if os.path.isfile(path):
-            prog('解包 %s…' % os.path.basename(path))
-            container, note = unpack(path, tmp)
-            root = tmp
-        else:
-            root = path
+    container, note = '', ''
+    files=None;entry_count=None
+    if os.path.isfile(path):
+        prog('读取 %s 中的实体来源…' % os.path.basename(path))
+        from source_archive import read_archive
+        container,files,entry_count=read_archive(path)
+        root=os.path.dirname(os.path.abspath(path))
+    else:
+        root = path
 
-        from standard_recognition import scan_standard, ledger_from_standard
-        import hashlib
-        scope = None
-        if os.path.isfile(path):
-            digest = hashlib.sha256()
-            with open(path, 'rb') as source:
-                for block in iter(lambda: source.read(1024 * 1024), b''):
-                    digest.update(block)
-            scope = digest.hexdigest()
-        prog('运行工具内置标准实体识别算法…')
-        data = scan_standard(root, scope)
-        result = ledger_from_standard(data)
-        result['meta'] = {'source': os.path.abspath(path), 'kind': 'gim文件' if os.path.isfile(path) else '解包目录',
-                          'container': container, 'containerNote': note, 'elapsed': round(time.time() - t0, 1),
-                          'engine': 'independent-python', 'engineRulesVersion': data['engine']['rulesVersion'],
-                          'complete': data['complete'], 'incompleteReasons': data['incompleteReasons']}
-        prog('标准实体识别完成；整体 %s，待归 %s' % (result['stats']['整体'], result['stats']['待归整体']))
-        return result
-    finally:
-        if own and cleanup:
-            shutil.rmtree(tmp, ignore_errors=True)
+    from standard_recognition import scan_standard, ledger_from_standard
+    import hashlib
+    scope = None
+    if os.path.isfile(path):
+        digest = hashlib.sha256()
+        with open(path, 'rb') as source:
+            for block in iter(lambda: source.read(1024 * 1024), b''):
+                digest.update(block)
+        scope = digest.hexdigest()
+    prog('运行工具内置标准实体识别算法…')
+    data = scan_standard(root, scope,files=files,entry_count=entry_count)
+    result = ledger_from_standard(data)
+    result['meta'] = {'source': os.path.abspath(path), 'kind': 'gim文件' if os.path.isfile(path) else '解包目录',
+                      'container': container, 'containerNote': note, 'elapsed': round(time.time() - t0, 1),
+                      'engine': 'independent-python', 'engineRulesVersion': data['engine']['rulesVersion'],
+                      'complete': data['complete'], 'incompleteReasons': data['incompleteReasons']}
+    prog('标准实体识别完成；整体 %s，待归 %s' % (result['stats']['整体'], result['stats']['待归整体']))
+    return result
 
 
 _STYLE = """
@@ -154,7 +103,7 @@ def build_html(result):
             continue
         # 按维护工作簿中的类别/名称顺序展示，识别码仅供诊断。
         sub.sort(key=lambda r:(r.get('catalogOrder',999),r.get('modelOrder',999),r['template']))
-        out.append('<h2>%s</h2><table><tr><th>内部识别码</th><th>类别</th><th>子类</th>'
+        out.append('<h2>%s</h2><table><tr><th>目录编号</th><th>类别</th><th>子类</th>'
                    '<th>名称模板</th><th class="n">dev 轨道</th><th class="n">ifc 轨道</th>'
                    '<th class="n">合计</th><th>状态</th></tr>' % g)
         for r in sub:

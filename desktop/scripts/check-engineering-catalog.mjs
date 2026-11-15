@@ -5,16 +5,16 @@ import {createHash} from 'node:crypto';
 const repo=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
 const load=path=>JSON.parse(readFileSync(resolve(repo,path),'utf8'));
 const catalog=load('desktop/src/engineering/catalog.json'),standard=load('desktop/src/engineering/standardCatalog.json');
-const codes=new Set(catalog.semanticCodes.map(c=>c.code));
-if(codes.size!==catalog.semanticCodes.length||new Set(standard.items.map(i=>i.id)).size!==standard.items.length||standard.items.some(i=>!codes.has(i.category)))throw Error('Catalog IDs / semantic code mapping mismatch');
+const codes=new Set(catalog.categories.map(c=>c.code)),roles=new Set(catalog.recognitionCodes.map(c=>c.code));
+if(codes.size!==catalog.categories.length||new Set(standard.items.map(i=>i.id)).size!==standard.items.length||standard.items.some(i=>!codes.has(i.category)||!roles.has(i.recognitionCode)))throw Error('Catalog IDs / directory and recognition role mapping mismatch');
 for(const file of ['catalog.json','standardCatalog.json'])if(JSON.stringify(load('desktop/src/engineering/'+file))!==JSON.stringify(load('tools/gim_element/'+file)))throw Error('Standalone catalog copy differs: '+file);
 if(JSON.stringify(load('desktop/src/gim/engineering/sourceVocabulary.json'))!==JSON.stringify(load('tools/gim_element/sourceVocabulary.json')))throw Error('Standalone vocabulary copy differs');
 const source=resolve(repo,catalog.source.path);
 if(existsSync(source)&&createHash('sha256').update(readFileSync(source)).digest('hex')!==catalog.source.sha256)throw Error('XLSX changed; run generate:engineering-catalog');
 const path='docs/engineering/catalogs/catalog-index.md';
-const doc='# 工作簿目录索引\n\n唯一维护源：[`变电三维设计建模规范_索引表类.xlsx`](../../../'+catalog.source.path+')。本文件和运行时数据由生成命令导出，不单独维护目录。新增项在工作簿标黄。内部识别/用途码不作为目录层级。\n\n'+['equipment','material','construction'].map(kind=>{
+const doc='# 工作簿目录索引\n\n唯一维护源：[`变电三维设计建模规范_实体索引表.xlsx`](变电三维设计建模规范_实体索引表.xlsx)。本文件和运行时数据由生成命令导出。运行和打包只消费 JSON 配置，不读取 XLSX。新增项在工作簿标黄。目录编号按各表类别首次出现顺序生成，内部用途/归属角色不参与目录排序。\n\n'+['equipment','material','construction'].map(kind=>{
  const title={equipment:'设备',material:'材料',construction:'构件'}[kind];
- return '## '+title+'\n\n| 类别 | 名称 | 英文名称 | 单元格 | 补充项 |\n|---|---|---|---|---|\n'+standard.items.filter(i=>i.kind===kind).map(i=>`| ${i.catalogCategory} | ${i.label} | ${i.term} | ${i.evidence.sheet}!${i.evidence.cellRange} | ${i.supplemental?'是':''} |`).join('\n');
+ return '## '+title+'\n\n| 编号 | 类别 | 名称 | 英文名称 | 单元格 | 补充项 |\n|---|---|---|---|---|---|\n'+standard.items.filter(i=>i.kind===kind).map(i=>`| ${i.category} | ${i.catalogCategory} | ${i.label} | ${i.term} | ${i.evidence.sheet}!${i.evidence.cellRange} | ${i.supplemental?'是':''} |`).join('\n');
 }).join('\n\n')+'\n\n## 设备部件\n\n| 名称 | 英文名称 | 单元格 |\n|---|---|---|\n'+catalog.components.map(i=>`| ${i.label} | ${i.term} | ${i.evidence.sheet}!${i.evidence.cellRange} |`).join('\n')+'\n';
 if(process.argv.includes('--write'))writeFileSync(resolve(repo,path),doc);else if(readFileSync(resolve(repo,path),'utf8').replace(/\r\n/g,'\n')!==doc)throw Error('Generated catalog documentation is stale');
 console.log('Generated catalogs, semantic mappings, standalone copies and documentation agree.'+(existsSync(source)?' Workbook SHA checked.':' Workbook absent: source freshness was not checked.'));

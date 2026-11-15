@@ -2,7 +2,7 @@ import rules from './catalogRules.json';
 import { classificationDetails } from './classificationDetails.js';
 import type { ObjectEvidence, ObjectInterpretation, SourceComponentRole } from './types.js';
 import {standardTermsFromName,standardEquipmentId,STANDARD_CATALOG_VERSION} from './standardCatalog.js';
-import {categoryLabel} from './catalogLabels.js';
+import {recognitionLabel as categoryLabel,publishDirectoryClassification} from './catalogLabels.js';
 
 export const ENGINEERING_RULES_VERSION = `${rules.version}|${STANDARD_CATALOG_VERSION}|membership-recovery-1`;
 const nameRules=rules.nameRules.map(([category,pattern])=>({category,regex:new RegExp(pattern,'gi')}));
@@ -59,7 +59,7 @@ export function isNumberedDesignation(value:string):boolean {
   return /#\s*\d+|\d+\s*(?:号|#)|(?:主变|组合电器|避雷器|互感器|电抗器组|电容器组|开关柜|屏柜|设备|装置|支架|基础)\s*\d+(?![\p{L}\p{N}_])|[ⅠⅡⅢⅣⅤ]/u.test(text);
 }
 const refinements:Record<string,string[]>={
-  'E-T':['E01','E03'],'E-R':['E02','E11'],E16:['E16.terminal_box','E16.panel_cabinet','E16.control_cabinet','E16.battery_set'],
+  'E-T':['E01','E03'],'E-R':['E02','E11'],E16:['E16.panel_cabinet','E16.control_cabinet'],
   'C-B4':['C-B2','C-B3','C-B9'],'C-B5':['C-B6','C-B7'],
   'C-A1':['C-C1','C-C4'],'C-A2':['C-C1','C-C5','C-B3'],'C-A5':['C-C1','M08'],'C-A4':['C-A4.steel'],'C-A3':['C-A3.steel'],
 };
@@ -146,10 +146,13 @@ function interpretClassification(object:ObjectEvidence,hasChildren=false):Object
 }
 
 /** Category, vocabulary type and engineering purpose have independent evidence. */
-export function interpretObject(object:ObjectEvidence,hasChildren=false):ObjectInterpretation {
+export function interpretRecognitionObject(object:ObjectEvidence,hasChildren=false):ObjectInterpretation {
   const result=interpretClassification(object,hasChildren);
   result.sourceName=object.name;
   const classes=object.standardClasses??[],unique=new Map(classes.map(c=>[c.id,c]));
+  const perDeclaration=new Map<string,string>();
+  const ambiguous=classes.some(item=>{const previous=perDeclaration.get(item.evidenceId);perDeclaration.set(item.evidenceId,item.category);return previous!==undefined&&previous!==item.category;});
+  if(ambiguous){result.category='U-OBJECT';result.classificationStatus='unresolved';result.basis='standard_category_ambiguous';result.classificationEvidence=[...new Set(classes.map(c=>c.evidenceId))];}
   if(unique.size===1){
     const item=[...unique.values()][0];result.standardClass={...item,status:classes.every(c=>c.confidence==='candidate')?'candidate':'confirmed',evidence:[...new Set(classes.map(c=>c.evidenceId))]};
     if(item.kind!=='equipment'&&item.label!==categoryLabel(result.category)&&(!result.subtype||result.subtype==='unresolved'||result.subtype==='body')){
@@ -164,7 +167,7 @@ export function interpretObject(object:ObjectEvidence,hasChildren=false):ObjectI
     if(names.length===1&&(namedCategory==='U-OBJECT'||namedCategory===categoryFromName(names[0].label))){const item=names[0],evidenceId=object.names?.find(n=>n.value===object.name)?.evidenceId??`name:${object.sourceId}`;
       result.standardClass={...item,kind:item.kind as 'equipment'|'material'|'construction',value:item.term,evidenceId,status:'candidate',evidence:[evidenceId]};
       if(!object.typeCategory&&!object.propertyCategories?.length){
-        if(!result.category.startsWith(`${item.category}.`))result.category=item.category;
+        if(!result.category.startsWith(`${item.recognitionCode}.`))result.category=item.recognitionCode;
         result.classificationStatus='candidate';result.basis='standard_name_candidate';
       }
       if(item.kind==='equipment'&&!object.equipmentType&&!object.equipmentTypeCandidates?.length)result.equipmentType={id:standardEquipmentId(item),status:'candidate',evidence:[evidenceId]};
@@ -201,4 +204,10 @@ export function interpretObject(object:ObjectEvidence,hasChildren=false):ObjectI
   const roleEvidence=object.objectRoles?.map(p=>p.evidenceId)??[];
   result.objectRole={id:result.meaning,status:result.basis==='attribute_conflict'?'unresolved':roleEvidence.length||object.traits.nonphysical||object.traits.fastener||object.typeCategory==='part'?'confirmed':'candidate',evidence:roleEvidence};
   return result;
+}
+
+/** Public classification uses only workbook family codes; purpose stays independent. */
+export function interpretObject(object:ObjectEvidence,hasChildren=false):ObjectInterpretation {
+  const result=interpretRecognitionObject(object,hasChildren);
+  return publishDirectoryClassification(result);
 }

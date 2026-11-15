@@ -1,0 +1,1254 @@
+{
+  "version": "recognition-policy-v1",
+  "description": "Private identity/purpose/assembly roles. These are not workbook directory codes. Directory codes are generated only from workbook family order.",
+  "recognitionCodes": [
+    {
+      "code": "E01",
+      "label": "主变压器",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "变压器"
+      }
+    },
+    {
+      "code": "E02",
+      "label": "高压并联电抗器",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "电抗器"
+      }
+    },
+    {
+      "code": "E03",
+      "label": "站用变压器",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "变压器"
+      }
+    },
+    {
+      "code": "E04",
+      "label": "消弧线圈、小电阻及接地变成套装置",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "中性点成套设备"
+      }
+    },
+    {
+      "code": "E05",
+      "label": "组合电器 GIS/HGIS",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "组合电器"
+      }
+    },
+    {
+      "code": "E06",
+      "label": "断路器",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "断路器"
+      }
+    },
+    {
+      "code": "E07",
+      "label": "隔离开关",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "隔离开关"
+      }
+    },
+    {
+      "code": "E08",
+      "label": "接地开关",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "隔离开关"
+      }
+    },
+    {
+      "code": "E09",
+      "label": "开关柜",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "开关柜"
+      }
+    },
+    {
+      "code": "E10",
+      "label": "并联电容器成套装置",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "电容器"
+      }
+    },
+    {
+      "code": "E11",
+      "label": "低压并联电抗器",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "电抗器"
+      }
+    },
+    {
+      "code": "E12",
+      "label": "静止无功发生器 SVG",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "电容器"
+      }
+    },
+    {
+      "code": "E13",
+      "label": "电流互感器",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "电流互感器"
+      }
+    },
+    {
+      "code": "E14",
+      "label": "电压互感器",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "电压互感器"
+      }
+    },
+    {
+      "code": "E15",
+      "label": "避雷器",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "避雷器"
+      }
+    },
+    {
+      "code": "E16",
+      "label": "二次设备",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "equipment:secondarycabinet",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "二次屏柜"
+      }
+    },
+    {
+      "code": "E17",
+      "label": "动力辅助设备",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog."
+    },
+    {
+      "code": "E18",
+      "label": "预制舱开关设备",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "equipment:prefabricatedcabin",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "预制舱体"
+      }
+    },
+    {
+      "code": "E19",
+      "label": "水工暖通设备",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:equipment"
+    },
+    {
+      "code": "M01",
+      "label": "导线",
+      "group": "materials",
+      "grain": "segment",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "material:flexiblecircuitconductor",
+      "catalogFamily": {
+        "kind": "material",
+        "label": "导体"
+      }
+    },
+    {
+      "code": "M02",
+      "label": "母线",
+      "group": "materials",
+      "grain": "segment",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "material",
+        "label": "导体"
+      }
+    },
+    {
+      "code": "M03",
+      "label": "金具",
+      "group": "materials",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "material",
+        "label": "金具"
+      }
+    },
+    {
+      "code": "M04",
+      "label": "绝缘子",
+      "group": "materials",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "material:insulatorssring",
+      "catalogFamily": {
+        "kind": "material",
+        "label": "绝缘子串"
+      }
+    },
+    {
+      "code": "M05",
+      "label": "电缆",
+      "group": "materials",
+      "grain": "segment",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "material",
+        "label": "电缆及其附件"
+      }
+    },
+    {
+      "code": "M06",
+      "label": "接地材料",
+      "group": "materials",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "material:groundingmaterial",
+      "catalogFamily": {
+        "kind": "material",
+        "label": "接地材料"
+      }
+    },
+    {
+      "code": "M07",
+      "label": "套管",
+      "group": "materials",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog."
+    },
+    {
+      "code": "M08",
+      "label": "槽盒",
+      "group": "materials",
+      "grain": "segment",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "material:cableauxiliaryfacilities",
+      "catalogFamily": {
+        "kind": "material",
+        "label": "电缆及其附件"
+      }
+    },
+    {
+      "code": "M09",
+      "label": "其他材料",
+      "group": "materials",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog."
+    },
+    {
+      "code": "C-A1",
+      "label": "墙体",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:wall",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "建筑物"
+      }
+    },
+    {
+      "code": "C-A2",
+      "label": "楼板",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:flooring",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "建筑物"
+      }
+    },
+    {
+      "code": "C-A3",
+      "label": "柱",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:column",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "建筑物"
+      }
+    },
+    {
+      "code": "C-A4",
+      "label": "梁",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:beam",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "建筑物"
+      }
+    },
+    {
+      "code": "C-A5",
+      "label": "板",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:flooring",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "建筑物"
+      }
+    },
+    {
+      "code": "C-A6",
+      "label": "屋面",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:roof",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "建筑物"
+      }
+    },
+    {
+      "code": "C-A7",
+      "label": "门",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:door",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "建筑物"
+      }
+    },
+    {
+      "code": "C-A8",
+      "label": "窗",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:window",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "建筑物"
+      }
+    },
+    {
+      "code": "C-A9",
+      "label": "楼梯与栏杆",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "建筑物"
+      }
+    },
+    {
+      "code": "C-A10",
+      "label": "面层与装修",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:supplementarycomponents",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "建筑物"
+      }
+    },
+    {
+      "code": "C-B1",
+      "label": "设备支架",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:trussescomponents",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "构支架"
+      }
+    },
+    {
+      "code": "C-B2",
+      "label": "设备基础",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "设备基础"
+      }
+    },
+    {
+      "code": "C-B3",
+      "label": "建筑物基础",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:foundation",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "建筑物"
+      }
+    },
+    {
+      "code": "C-B4",
+      "label": "基础（未分）",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog."
+    },
+    {
+      "code": "C-B5",
+      "label": "型钢与钢板",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:structuralmember",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "建筑物"
+      }
+    },
+    {
+      "code": "C-B6",
+      "label": "檩条",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:structuralmember",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "建筑物"
+      }
+    },
+    {
+      "code": "C-B7",
+      "label": "构架与支撑",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "构支架"
+      }
+    },
+    {
+      "code": "C-C1",
+      "label": "电缆沟",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:trench",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "场地设施"
+      }
+    },
+    {
+      "code": "C-C2",
+      "label": "排水沟",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:trench",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "场地设施"
+      }
+    },
+    {
+      "code": "C-C3",
+      "label": "检查井与池",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "场地设施"
+      }
+    },
+    {
+      "code": "C-C4",
+      "label": "围墙与围栏",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:fences",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "场地设施"
+      }
+    },
+    {
+      "code": "C-C5",
+      "label": "道路与地坪",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "场地设施"
+      }
+    },
+    {
+      "code": "C-D1",
+      "label": "照明器具",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "material:lamps"
+    },
+    {
+      "code": "C-D2",
+      "label": "消防设施",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:equipment"
+    },
+    {
+      "code": "C-D3",
+      "label": "安防监控",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "equipment:securitysystem"
+    },
+    {
+      "code": "C-D4",
+      "label": "暖通设施",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:equipment"
+    },
+    {
+      "code": "C-D5",
+      "label": "给排水设施",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:equipment"
+    },
+    {
+      "code": "C-D6",
+      "label": "其他附属设施",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:supplementarycomponents"
+    },
+    {
+      "code": "E-T",
+      "label": "变压器（用途待确认）",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "变压器"
+      }
+    },
+    {
+      "code": "E16.terminal_box",
+      "label": "端子箱",
+      "group": "equipment",
+      "parent": "E16",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "material:terminalbox"
+    },
+    {
+      "code": "E16.panel_cabinet",
+      "label": "屏柜",
+      "group": "equipment",
+      "parent": "E16",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "equipment:secondarycabinet"
+    },
+    {
+      "code": "E16.control_cabinet",
+      "label": "控制柜",
+      "group": "equipment",
+      "parent": "E16",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "equipment:secondarycabinet"
+    },
+    {
+      "code": "E16.battery_set",
+      "label": "蓄电池组",
+      "group": "equipment",
+      "parent": "E16",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "equipment:groupbattery"
+    },
+    {
+      "code": "U-OBJECT",
+      "label": "待识别对象",
+      "group": "unknown",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog."
+    },
+    {
+      "code": "E-R",
+      "label": "电抗器（用途待确认）",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "电抗器"
+      }
+    },
+    {
+      "code": "E20",
+      "label": "支柱绝缘子",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "支柱绝缘子"
+      }
+    },
+    {
+      "code": "E21",
+      "label": "穿墙套管",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "穿墙套管"
+      }
+    },
+    {
+      "code": "E22",
+      "label": "耦合电容器",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "电压互感器"
+      }
+    },
+    {
+      "code": "E23",
+      "label": "直流电压测量装置",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "equipment:voltagemeasuringdevice",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "电压互感器"
+      }
+    },
+    {
+      "code": "E24",
+      "label": "直流旁路与转换开关",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "断路器"
+      }
+    },
+    {
+      "code": "E25",
+      "label": "换流阀",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "换流阀"
+      }
+    },
+    {
+      "code": "E26",
+      "label": "隔直装置",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "equipment:dcblockingdevice",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "中性点成套设备"
+      }
+    },
+    {
+      "code": "E27",
+      "label": "串联补偿装置",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "equipment:seriescompensation",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "电容器"
+      }
+    },
+    {
+      "code": "E28",
+      "label": "电阻器",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "equipment:resistor",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "电阻器"
+      }
+    },
+    {
+      "code": "E29",
+      "label": "熔断器",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "equipment:fuse",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "熔断器"
+      }
+    },
+    {
+      "code": "E30",
+      "label": "线路故障测量装置",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "equipment:linewarningmeasuringdevice",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "线路故障测量装置"
+      }
+    },
+    {
+      "code": "E31",
+      "label": "安防设备",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "equipment:securitysystem",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "安防设备"
+      }
+    },
+    {
+      "code": "E32",
+      "label": "火灾报警设备",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "equipment:firealarmsystem",
+      "catalogFamily": {
+        "kind": "equipment",
+        "label": "火灾报警设备"
+      }
+    },
+    {
+      "code": "M10",
+      "label": "端子箱",
+      "group": "materials",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "material:terminalbox",
+      "catalogFamily": {
+        "kind": "material",
+        "label": "端子箱"
+      }
+    },
+    {
+      "code": "M11",
+      "label": "灯具材料",
+      "group": "materials",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "material:lamps",
+      "catalogFamily": {
+        "kind": "material",
+        "label": "照明及动力"
+      }
+    },
+    {
+      "code": "M12",
+      "label": "动力、照明与检修箱",
+      "group": "materials",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "material:powerbox/lightingbox/maintenancebox",
+      "catalogFamily": {
+        "kind": "material",
+        "label": "照明及动力"
+      }
+    },
+    {
+      "code": "M13",
+      "label": "开关与插座材料",
+      "group": "materials",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "material",
+        "label": "照明及动力"
+      }
+    },
+    {
+      "code": "M14",
+      "label": "安装钢材",
+      "group": "materials",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "material",
+        "label": "安装材料"
+      }
+    },
+    {
+      "code": "M15",
+      "label": "水暖材料",
+      "group": "materials",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "material",
+        "label": "水暖材料"
+      }
+    },
+    {
+      "code": "C-A11",
+      "label": "建筑主要构件",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:primarycomponents",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "建筑物"
+      }
+    },
+    {
+      "code": "C-A12",
+      "label": "建筑辅助构件",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:supplementarycomponents",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "建筑物"
+      }
+    },
+    {
+      "code": "C-A13",
+      "label": "地下室",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:basement",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "建筑物"
+      }
+    },
+    {
+      "code": "C-B8",
+      "label": "连接节点",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:joints",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "构支架"
+      }
+    },
+    {
+      "code": "C-C6",
+      "label": "场地",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:site",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "场地设施"
+      }
+    },
+    {
+      "code": "C-C7",
+      "label": "支挡结构",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:retainingwall",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "场地设施"
+      }
+    },
+    {
+      "code": "C-C8",
+      "label": "沟道与隧道",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "场地设施"
+      }
+    },
+    {
+      "code": "C-C9",
+      "label": "变压器搬运轨道",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:transporttrackfoundation",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "场地设施"
+      }
+    },
+    {
+      "code": "C-D7",
+      "label": "建筑设备（专业待确认）",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:equipment"
+    },
+    {
+      "code": "C-B9",
+      "label": "构架与支架基础",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "构支架"
+      }
+    },
+    {
+      "code": "C-A4.steel",
+      "label": "钢梁",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "parent": "C-A4",
+      "catalogId": "construction:steelbeam",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "建筑物"
+      }
+    },
+    {
+      "code": "C-A3.steel",
+      "label": "钢柱",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "parent": "C-A3",
+      "catalogId": "construction:steelcolumn",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "建筑物"
+      }
+    },
+    {
+      "code": "C-A14",
+      "label": "钢结构",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:steelstructure",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "建筑物"
+      }
+    },
+    {
+      "code": "C-A15",
+      "label": "结构杆件",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "catalogId": "construction:structuralmember",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "建筑物"
+      }
+    },
+    {
+      "code": "C-A9.railing",
+      "label": "栏杆",
+      "group": "components",
+      "grain": "item",
+      "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
+      "parent": "C-A9",
+      "catalogId": "construction:railing",
+      "catalogFamily": {
+        "kind": "construction",
+        "label": "建筑物"
+      }
+    }
+  ],
+  "terms": {
+    "oilimmersedtransformer": "E-T",
+    "drytypetransformer": "E-T",
+    "convertertransformer": "E-T",
+    "oilimmersedreactor": "E-R",
+    "drytypereactor": "E-R",
+    "electromagneticta": "E13",
+    "electronicta": "E13",
+    "electromagnetictv": "E14",
+    "capacitivetv": "E14",
+    "electronictv": "E14",
+    "couplingcapacitor": "E22",
+    "voltagemeasuringdevice": "E23",
+    "gis": "E05",
+    "hgis": "E05",
+    "acporcelaincircuitbreaker": "E06",
+    "actankbreaker": "E06",
+    "dcbypassswitch": "E24",
+    "dcconversionswitch": "E24",
+    "acisolatingswitch": "E07",
+    "acgroundswitch": "E08",
+    "dcisolatingswitch": "E07",
+    "dcgroundswitch": "E08",
+    "convertervalve": "E25",
+    "insulatedgatebipolartransistor": "E25",
+    "groundtransformer/arcextinguishingcoil": "E04",
+    "groundresistance": "E04",
+    "opengroundingequipment/neutralpointequipment": "E04",
+    "dcblockingdevice": "E26",
+    "framecapacitor": "E10",
+    "collectivecapacitor": "E10",
+    "seriescompensation": "E27",
+    "bucksvg": "E12",
+    "straighthangingsvg": "E12",
+    "svc": "E12",
+    "filtercapacitor": "E10",
+    "dccouplingcapacitor": "E22",
+    "resistor": "E28",
+    "hvswitchcabinet": "E09",
+    "lvswitchcabinet": "E09",
+    "fuse": "E29",
+    "lightningarrester": "E15",
+    "dcarrester/filterarrester": "E15",
+    "acpillarinsulator": "E20",
+    "dcpillarinsulator": "E20",
+    "acwallbushing": "E21",
+    "dcwallbushing": "E21",
+    "secondarycabinet": "E16",
+    "linewarningmeasuringdevice": "E30",
+    "groupbattery": "E16.battery_set",
+    "prefabricatedcabin": "E18",
+    "securitysystem": "E31",
+    "firealarmsystem": "E32",
+    "flexiblecircuitconductor": "M01",
+    "tubularbus": "M02",
+    "rectangularbus": "M02",
+    "enclosedbus": "M02",
+    "insulatorssring": "M04",
+    "equilibriumloadsshieldingdevice": "M03",
+    "supporttubebus": "M03",
+    "suspendedtubebus": "M03",
+    "roadcrossinghardware": "M03",
+    "bussupportfixed": "M03",
+    "busplugginghardware": "M03",
+    "busbarconnectionleadsdownhardware": "M03",
+    "suspendedwireclamp": "M03",
+    "tensionclamp": "M03",
+    "equipmentcableclamp": "M03",
+    "tconnectionfittings": "M03",
+    "spacer": "M03",
+    "expansionjoint": "M03",
+    "voltageequalizationshieldingdevice": "M03",
+    "cableclamp": "M03",
+    "anchoringdevice": "M03",
+    "terminalbox": "M10",
+    "lamps": "M11",
+    "powerbox/lightingbox/maintenancebox": "M12",
+    "switch": "M13",
+    "plug": "M13",
+    "groundingmaterial": "M06",
+    "cable": "M05",
+    "cabletermination": "M05",
+    "cableauxiliaryfacilities": "M08",
+    "cableditchfirewall": "M09",
+    "usteel": "M14",
+    "anglesteel": "M14",
+    "ibeam": "M14",
+    "steelsheet": "M14",
+    "metalfence": "M09",
+    "electricburiedpipe": "M09",
+    "airduct": "M15",
+    "plumbing": "M15",
+    "site": "C-C6",
+    "stationoutroadways": "C-C5",
+    "stationinroadways": "C-C5",
+    "fences": "C-C4",
+    "gate": "C-C4",
+    "retainingwall": "C-C7",
+    "trench": "C-C8",
+    "tunnel": "C-C8",
+    "transporttrackfoundation": "C-C9",
+    "primarycomponents": "C-A11",
+    "beam": "C-A4",
+    "column": "C-A3",
+    "steelbeam": "C-A4.steel",
+    "steelcolumn": "C-A3.steel",
+    "steelstructure": "C-A14",
+    "door": "C-A7",
+    "window": "C-A8",
+    "roof": "C-A6",
+    "structuralmember": "C-A15",
+    "railing": "C-A9.railing",
+    "flooring": "C-A5",
+    "wall": "C-A1",
+    "stairs": "C-A9",
+    "walkway": "C-A9",
+    "supplementarycomponents": "C-A12",
+    "foundation": "C-B3",
+    "basement": "C-A13",
+    "equipment": "C-D7",
+    "gantriescomponents": "C-B7",
+    "joints": "C-B8",
+    "gantriesfoundation": "C-B9",
+    "trussescomponents": "C-B1",
+    "trussesfoundation": "C-B9",
+    "equipmentfoundation": "C-B2",
+    "lightingrod": "C-B7",
+    "lightingwiretower": "C-B7",
+    "firewall": "C-A1",
+    "oilpool": "C-C3",
+    "pool": "C-C3",
+    "hydraulicandhvacequipmentfoundation": "C-B2"
+  },
+  "componentIds": {
+    "body": "body",
+    "expansiontank": "expansion_tank",
+    "tapchanger": "tap_changer",
+    "hvbushing": "hv_bushing",
+    "mvbushing": "mv_bushing",
+    "lvbushing": "lv_bushing",
+    "neutralbushing": "neutral_bushing",
+    "terminalboards": "terminal_boards",
+    "radiator": "radiator",
+    "groundingterminal": "grounding_terminal",
+    "terminalbox": "terminal_box",
+    "ladder": "ladder",
+    "respirator": "respirator",
+    "meter": "meter",
+    "relay": "relay",
+    "onlinemonitoring": "online_monitoring",
+    "pressurereliefdevice": "pressure_relief_device",
+    "oillevelthermostat": "oil_level_thermostat",
+    "moistureabsorber": "moisture_absorber",
+    "civilinterface": "civil_interface",
+    "junctionbox": "junction_box",
+    "densityrelay": "density_relay",
+    "oillevelmeter": "oil_level_meter",
+    "operatingmechanismbox": "operating_mechanism_box",
+    "controlcabinet": "control_cabinet",
+    "centralcontrolbox": "central_control_box",
+    "onoffindicator": "on_off_indicator",
+    "parallelresistance": "parallel_resistance",
+    "cabinet": "cabinet",
+    "groundresistance": "ground_resistance",
+    "gridding": "gridding",
+    "devicesincubicle": "devices_in_cubicle",
+    "counter/onlinemonitor": "counter_online_monitor",
+    "capacitorunit": "capacitor_unit",
+    "dampedreactor": "damped_reactor",
+    "imbalancedta": "imbalance_dta",
+    "valvegroup": "valve_group",
+    "gridsidebushing": "grid_side_bushing",
+    "valvesidebushing": "valve_side_bushing",
+    "sparkgap": "spark_gap",
+    "tcrgd": "tcrgd",
+    "devices": "devices",
+    "保护装置": "devices",
+    "protectiondevice": "devices",
+    "ifcprotectivedevice": "devices"
+  },
+  "equipmentAliases": {
+    "oilfilledtransformer": "oil_immersed_transformer",
+    "porcelainpillarcircuitbreaker": "ac_porcelain_circuit_breaker"
+  },
+  "objectRoles": {}
+}

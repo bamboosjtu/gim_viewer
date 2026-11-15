@@ -1,3 +1,4 @@
+import {recognitionCategory} from '../../engineering/catalogLabels.js';
 import type { EngineeringSnapshot } from '../../engineering/types.js';
 import type { CompositionAssignment, CompositionGroup, CompositionDeclaration } from '../../engineering/composition.js';
 import { assignEngineeringComposition, buildingPaths, canonicalBuildingName, isRoomBuildingName, supportTitle } from '../../engineering/compositionTemplate.js';
@@ -50,7 +51,7 @@ export function projectSpatialComposition(snapshot:EngineeringSnapshot,facts:rea
   // footprint across contiguous elevations is a source-backed wall stack.
   const wallStacks=new Map<string,Array<{id:string;box:Box;file:string}>>();
   for(const entity of snapshot.entities){
-    if(entity.category!=='C-A1')continue;
+    if(recognitionCategory(entity)!=='C-A1')continue;
     const box=boxes.get(entity.id);
     if(!box)continue;
     const width=Math.min(box[3]-box[0],box[4]-box[1]),length=Math.max(box[3]-box[0],box[4]-box[1]);
@@ -72,22 +73,22 @@ export function projectSpatialComposition(snapshot:EngineeringSnapshot,facts:rea
     diagnostics?.firewallStacks?.push({bounds:ordered.map(row=>row.box).reduce(union),members:ids.length});
   }
   const anchors = snapshot.entities.flatMap(e => {
-    if (!e.category.startsWith('E')) return [];
+    if (!recognitionCategory(e).startsWith('E')) return [];
     const groups = new Map((assignment.get(e.id)?.paths ?? []).flatMap(path => path.filter(g => g.kind === 'system' && (g.key === 'main' || g.key.startsWith('distribution:')))).map(g => [g.key,g]));
     if (groups.size !== 1) return [];
     const points = boxes.has(e.id) ? [center(boxes.get(e.id)!)] : evidence.get(e.id)?.positions ?? [];
     return points.filter(p => p.length === 3 && p.every(Number.isFinite)).map(point => ({point, group:[...groups.values()][0], id:e.id}));
   });
   const areaPath = (entity:EngineeringSnapshot['entities'][number], group:CompositionGroup):CompositionGroup[] => {
-    const foundation = ['C-B2','C-B3','C-B4'].includes(entity.category) || /基础|杯口|承台|垫层/.test(entity.name) && !/支架|构架/.test(entity.name);
+    const foundation = ['C-B2','C-B3','C-B4'].includes(recognitionCategory(entity)) || /基础|杯口|承台|垫层/.test(entity.name) && !/支架|构架/.test(entity.name);
     const firewall = !foundation && (firewallMembers.has(entity.id)||evidence.get(entity.id)?.deliveryStructureNames?.some(n=>n.value==='防火墙')
-      || entity.category==='C-A1' && /防火墙|防火.*墙|墙.*防火/.test(entity.name));
-    const title = firewall ? '防火墙' : foundation ? '基础' : supportTitle(entity, entity.category);
+      || recognitionCategory(entity)==='C-A1' && /防火墙|防火.*墙|墙.*防火/.test(entity.name));
+    const title = firewall ? '防火墙' : foundation ? '基础' : supportTitle(entity, recognitionCategory(entity));
     return [civil,{key:`area:${group.key}`,title:group.key==='main'?'主变区域':`${group.title}区域`,kind:'area',order:20},
       {key:`area:${group.key}:${firewall?'firewall':foundation?'foundation':title}`,title,kind:'structure',order:firewall?30:foundation?20:10}];
   };
   const architecturalSeeds=new Set(['C-A1','C-A2','C-A3','C-A4','C-A5','C-A6']);
-  const seeds=snapshot.entities.filter(e=>architecturalSeeds.has(e.category)&&boxes.has(e.id)&&
+  const seeds=snapshot.entities.filter(e=>architecturalSeeds.has(recognitionCategory(e))&&boxes.has(e.id)&&
     (evidence.get(e.id)?.sourceHints??[]).some(p=>/建筑|配电.*楼|辅助用房|主控.*楼|警卫|门卫/.test(p))&&
     boxes.get(e.id)![5]>policy.minTop);
   const parents=seeds.map((_,i)=>i),find=(i:number):number=>parents[i]===i?i:parents[i]=find(parents[i]);
@@ -100,7 +101,7 @@ export function projectSpatialComposition(snapshot:EngineeringSnapshot,facts:rea
   const footprints=[...components.values()].filter(c=>c.ids.length>=policy.minMembers&&area(c.box)>=policy.minArea&&Math.min(c.box[3]-c.box[0],c.box[4]-c.box[1])>=policy.minWidth);
   const buildings=footprints.map((c,index)=>{
     const names=new Map<string,CompositionGroup>();
-    const contained=snapshot.entities.filter(e=>e.category.startsWith('C-A')&&boxes.has(e.id)&&contains(c.box,center(boxes.get(e.id)!)));
+    const contained=snapshot.entities.filter(e=>recognitionCategory(e).startsWith('C-A')&&boxes.has(e.id)&&contains(c.box,center(boxes.get(e.id)!)));
     for(const e of contained)for(const path of buildingPaths(evidence.get(e.id))) {const building=path.find(p=>p.kind==='building');if(building)names.set(building.key,building);}
     let name=names.size===1?[...names.values()][0]:undefined;const voteCounts:Array<[string,number]>=[];
     let declaredName=false,fallbackName:CompositionGroup|undefined;
@@ -124,7 +125,7 @@ export function projectSpatialComposition(snapshot:EngineeringSnapshot,facts:rea
     }
     // Anonymous physical building remains visible, without inventing a use.
     const main = anchors.filter(a=>a.group.key==='main'&&contains(c.box,a.point));
-    const roof = contained.some(e=>e.category==='C-A6' || e.category==='C-A2' && area(boxes.get(e.id)!)>=area(c.box)*0.2 && boxes.get(e.id)![2]>policy.minTop);
+    const roof = contained.some(e=>recognitionCategory(e)==='C-A6' || recognitionCategory(e)==='C-A2' && area(boxes.get(e.id)!)>=area(c.box)*0.2 && boxes.get(e.id)![2]>policy.minTop);
     const outdoor = !name && names.size===0 && new Set(main.map(a=>a.id)).size>=2 && !roof;
     return {...c,area:outdoor?main[0].group:undefined,declaredName,fallbackName,
       names:[...names.values()].map(n=>n.title),votes:voteCounts,
@@ -137,7 +138,7 @@ export function projectSpatialComposition(snapshot:EngineeringSnapshot,facts:rea
     diagnostics?.footprints.push({bounds:building.box,members:building.ids.length,names:building.names,votes:building.votes,chosen:building.area?'主变区域':building.name.title});
   }
   for(const e of snapshot.entities){
-    if(!/^C-A|^C-B/.test(e.category)||!boxes.has(e.id))continue;
+    if(!/^C-A|^C-B/.test(recognitionCategory(e))||!boxes.has(e.id))continue;
     const b=boxes.get(e.id)!,p=center(b),hits=buildings.filter(c=>!c.ambiguous&&contains(c.box,p,policy.joinMargin)&&b[0]>=c.box[0]-policy.containmentMargin&&b[3]<=c.box[3]+policy.containmentMargin&&b[1]>=c.box[1]-policy.containmentMargin&&b[4]<=c.box[4]+policy.containmentMargin);
     if(hits.length!==1)continue;
     const building=hits[0],old=assignment.get(e.id)!;
@@ -158,7 +159,7 @@ export function projectSpatialComposition(snapshot:EngineeringSnapshot,facts:rea
   // Room/MEP delivery files which only expose a room name can be placed under a
   // single physical building when their source bounds are fully contained.
   for(const e of snapshot.entities){
-    if(!boxes.has(e.id)||/^C-A|^C-B/.test(e.category))continue;
+    if(!boxes.has(e.id)||/^C-A|^C-B/.test(recognitionCategory(e)))continue;
     const room=(evidence.get(e.id)?.spaces??[]).map(space=>canonicalBuildingName(space.building.value)||space.building.value).find(name=>isRoomBuildingName(name));
     if(!room)continue;
     const semantic=buildingPaths(evidence.get(e.id));
@@ -173,7 +174,7 @@ export function projectSpatialComposition(snapshot:EngineeringSnapshot,facts:rea
   }
   for(const e of snapshot.entities){
     const old=assignment.get(e.id)!, b=boxes.get(e.id);
-    if(!b || !/^C-B|^C-A[1345]$/.test(e.category) || old.paths.some(p=>p[0]?.key!=='unclassified'))continue;
+    if(!b || !/^C-B|^C-A[1345]$/.test(recognitionCategory(e)) || old.paths.some(p=>p[0]?.key!=='unclassified'))continue;
     const distances=new Map<string,{distance:number;group:CompositionGroup;id:string}>();
     for(const anchor of anchors){
       const distance=Math.hypot(Math.max(b[0]-anchor.point[0],0,anchor.point[0]-b[3]),Math.max(b[1]-anchor.point[1],0,anchor.point[1]-b[4]));

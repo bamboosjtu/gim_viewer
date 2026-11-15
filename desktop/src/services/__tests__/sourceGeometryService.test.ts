@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { AppState } from '../../app/state.js';
 import { extractEngineeringSourceGraph } from '../../gim/engineering/sourceGraph.js';
 import { collectSourceGeometryOccurrences } from '../../gim/engineering/geometryOccurrences.js';
-import { buildEngineeringSources } from '../../gim/engineering/buildSources.js';
+import {buildTestEngineeringSources} from '../../gim/engineering/__tests__/fixtures.js';
 import { hydrateSubstationGeometryGraph } from '../../gim/geometry/substationSourceGraph.js';
 import { discoverGeometriesFromDevPath } from '../modGeometryDiscovery.js';
 import { getSourceGeometryOccurrences } from '../sourceGeometryService.js';
@@ -43,7 +43,7 @@ it('renders repeated actual source instances without a CBM display tree or entit
   expect(placed.map(g => g.userData.rootOccurrence)).toEqual(roots.map(r => r.id));
   expect(placed.map(g => new THREE.Box3().setFromObject(g).getCenter(new THREE.Vector3()).x)).toEqual([1, 5]);
 
-  const built = buildEngineeringSources('sha', graph, [], []); state.engineeringSources = built.sources; state.engineeringSnapshot = built.snapshot;
+  const built = buildTestEngineeringSources('sha', graph, [], []); state.engineeringSources = built.sources; state.engineeringSnapshot = built.snapshot;
   const index = getEngineeringRepresentations(state)!.index;
   for (const root of roots) {
     const body = index.resolveDev(root.id, { assemblyPath: '' }), box = index.resolveDev(root.id, { assemblyPath: 'sub:2' });

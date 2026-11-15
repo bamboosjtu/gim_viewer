@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#08131d" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <link rel="icon" href="data:," />
+  <title>220kV 变电站 · 第一人称漫游</title>
+  <link rel="stylesheet" href="./css/style.css?v=20261115-composite-nav-v6" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three.module.js",
+        "three/addons/": "./vendor/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="app">
+    <canvas id="scene" tabindex="0" aria-label="变电站第一人称漫游"></canvas>
+  </div>
+
+  <div id="loading" class="overlay loading-overlay">
+    <div class="loader-panel">
+      <div class="brand-mark">GIM<span>/</span>SUBSTATION</div>
+      <h1>模型加载中</h1>
+      <p class="loader-sub">正在加载本站模型与漫游数据</p>
+      <div class="progress"><div id="progress-bar"></div></div>
+      <div class="loader-row"><span id="progress-text">0%</span><span id="loader-status">读取工程数据…</span></div>
+      <div class="loader-tip">准备场地、建筑、设备与门的交互</div>
+    </div>
+  </div>
+
+  <div id="hud" class="hidden">
+    <header id="topbar">
+      <div class="brand">
+        <div class="brand-mark">GIM<span>/</span>SUBSTATION</div>
+        <div class="brand-sub">220kV 变电站 · 第一人称漫游</div>
+        <div id="build-badge" class="build-badge">BUILD 2026.11.15-composite-nav-v6</div>
+      </div>
+      <div id="compass" class="compass"><canvas id="compass-canvas" width="420" height="44"></canvas><div class="compass-needle"></div></div>
+      <div class="top-actions">
+        <button id="map-btn" class="icon-btn" title="整站地图 (M)">图</button>
+        <button id="home-btn" class="icon-btn" title="返回整站大门 (R)">⌂</button>
+        <button id="help-btn" class="icon-btn" title="帮助 (H)">?</button>
+        <button id="sound-btn" class="icon-btn" title="声音">♪</button>
+        <button id="fullscreen-btn" class="icon-btn" title="全屏">⛶</button>
+      </div>
+    </header>
+
+    <section id="mission" class="panel mission-panel">
+      <div class="panel-kicker">当前任务</div>
+      <h2 id="mission-title">进入变电站</h2>
+      <p id="mission-desc">沿入口走向整站大门，按 E 开启大门。</p>
+      <div class="mission-waypoint">
+        <span class="wp-arrow" id="wp-arrow">➤</span>
+        <span id="wp-distance">—</span>
+      </div>
+      <ol id="mission-steps" class="mission-steps"></ol>
+    </section>
+
+    <section id="minimap-panel" class="panel minimap-panel">
+      <div class="minimap-head"><span>园区平面</span><span id="zone-label">室外</span></div>
+      <canvas id="minimap" width="240" height="240"></canvas>
+      <div class="minimap-foot"><span id="coords">X 0.0 · Y 0.0</span><span id="fps">-- FPS</span></div>
+    </section>
+
+    <div id="crosshair"><span></span><span></span></div>
+
+    <div id="prompt" class="prompt hidden">
+      <span class="key">E</span>
+      <span id="prompt-text">开门</span>
+    </div>
+
+    <section id="controls" class="panel controls-panel">
+      <div class="control-row"><span><b>W A S D</b> 行走</span><span><b>鼠标</b> 环顾</span></div>
+      <div class="control-row"><span><b>Shift</b> 加速</span><span><b>E</b> 开门 / 关门</span></div>
+      <div class="control-row"><span><b>F</b> 手电筒</span><span><b>L</b> 地标</span><span><b>H</b> 帮助</span></div>
+      <div class="control-row"><span><b>Space</b> 跳跃</span><span><b>M</b> 整站地图</span><span><b>R</b> 返回大门</span></div>
+      <div class="control-row"><span><b>Q</b> 关卡选择</span><span><b>Esc</b> 暂停</span></div>
+    </section>
+
+    <div id="toast" class="toast hidden"></div>
+    <div id="location-tag" class="location-tag hidden">室外 · 变电站园区</div>
+  </div>
+
+  <div id="pause" class="overlay pause-overlay hidden">
+    <div class="pause-card">
+      <div class="panel-kicker">已暂停</div>
+      <h2>漫游暂停</h2>
+      <p>点击继续，重新锁定鼠标。</p>
+      <button id="resume-btn" class="primary-btn">继续漫游</button>
+      <button id="pause-help-btn" class="ghost-btn">查看操作说明</button>
+    </div>
+  </div>
+
+  <div id="help" class="overlay help-overlay hidden">
+    <div class="help-card">
+      <button id="help-close" class="close-btn">×</button>
+      <div class="panel-kicker">操作指南</div>
+      <h2>如何在变电站里漫游</h2>
+      <div class="help-grid">
+        <div><b>W A S D</b><span>前后左右行走</span></div>
+        <div><b>鼠标</b><span>环顾四周</span></div>
+        <div><b>Shift</b><span>加速奔跑</span></div>
+        <div><b>E</b><span>开启 / 关闭附近的门</span></div>
+        <div><b>F</b><span>开关手电筒</span></div>
+        <div><b>H</b><span>打开 / 关闭本帮助</span></div>
+        <div><b>Space</b><span>跳跃，落地后可再次跳跃</span></div>
+        <div><b>M</b><span>打开 / 关闭整站地图</span></div>
+        <div><b>R / Home</b><span>返回整站大门</span></div>
+        <div><b>Q</b><span>返回关卡选择</span></div>
+        <div><b>L</b><span>隐藏 / 显示地标标签</span></div>
+        <div><b>Esc</b><span>暂停并释放鼠标</span></div>
+      </div>
+      <p class="help-note">当前关卡支持在地面、楼板与楼梯上行走；墙体和关闭的门会阻挡通行。</p>
+    </div>
+  </div>
+
+  <div id="map-overlay" class="overlay map-overlay hidden">
+    <section class="map-card">
+      <div class="map-toolbar"><h2>整站地图</h2><div><button id="map-home" class="ghost-btn">返回大门 (R)</button><button id="map-close" class="ghost-btn">关闭地图 (M)</button></div></div>
+      <canvas id="station-map" width="1000" height="760"></canvas>
+      <p>蓝色箭头为当前位置，橙色标记为大门。打开地图时暂停行走。</p>
+    </section>
+  </div>
+  <div id="mobile-controls" class="mobile-controls hidden">
+    <div id="joystick" class="joystick"><div id="joystick-knob"></div></div>
+    <button id="mobile-interact" class="mobile-btn">E</button>
+    <button id="mobile-torch" class="mobile-btn">F</button>
+    <button id="mobile-jump" class="mobile-btn">跳</button>
+    <button id="mobile-map" class="mobile-btn">图</button>
+  </div>
+
+  <script type="module" src="./js/main.js?v=20261115-composite-nav-v6"></script>
+</body>
+</html>

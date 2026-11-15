@@ -81,11 +81,6 @@ function* unpackSourceNodes(value: unknown,consume=false): Generator<void, unkno
   return values[packed.root];
 }
 
-export function unpackEngineeringSource(value: unknown): unknown {
-  const nodes = unpackSourceNodes(value);
-  for (;;) { const next = nodes.next(); if (next.done) return next.value; }
-}
-
 /** Hydration shares interned family facts and yields between bounded node
  * batches. A switched project never receives a partially decoded result. */
 export async function unpackEngineeringSourceAsync(value: unknown, isCurrent: () => boolean,

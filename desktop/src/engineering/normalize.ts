@@ -1,6 +1,6 @@
-import { ENGINEERING_RULES_VERSION, explicitMain, interpretObject, isNumberedDesignation, categoryFromName } from './classify.js';
+import { ENGINEERING_RULES_VERSION, explicitMain, interpretRecognitionObject as interpretObject, isNumberedDesignation, categoryFromName } from './classify.js';
 import { assertEngineeringPartition } from './validate.js';
-import { categoryDefinition } from './catalogLabels.js';
+import { categoryDefinition,publishDirectoryClassification,componentAcceptsHost } from './catalogLabels.js';
 import { classificationDetails } from './classificationDetails.js';
 import {recoverComponentMembership} from './recoverMembership.js';
 import type { EngineeringEntity, EngineeringSnapshot, ObjectEvidence, PendingWhole, SourceAlias } from './types.js';
@@ -159,6 +159,10 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
     };
     if (m.basis === 'attribute_conflict') {
       bundle(sourceId,'object_attributes_conflict',[sourceId]);
+    } else if(above&&entities.has(above)&&m.componentType&& !componentAcceptsHost(m,entities.get(above)!)){
+      bundle(sourceId,'component_host_incompatible',[sourceId]);
+      m.membershipStatus='unresolved';
+      diagnostics.push({kind:'component_host_incompatible',identity:sourceId,name:row.name});
     } else if (m.meaning === 'neutral_set') {
       // Resolve external attachments after all bodies and their identities exist.
       if (transformer(aboveCategory)) owners.set(sourceId, above);
@@ -270,12 +274,17 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
       componentCandidates: [...alias.candidates] };
   });
   const snapshot: EngineeringSnapshot = {
-    recognitionCoverage:{inputSourceIds:ordered.map(r=>r.sourceId),processed:ordered.length,confirmed:memberships.filter(m=>m.interpretation.categoryStatus==='confirmed').length,complete:true},
+    recognitionCoverage:{inputSourceIds:ordered.map(r=>r.sourceId),processed:ordered.length,confirmed:0,complete:true},
     scope, evidenceBinding:{scope,sourceRevision:0},rulesVersion: ENGINEERING_RULES_VERSION,
     entities: [...entities.values()].sort((a, b) => compare(a.id, b.id)),
     memberships, pending: [...pending.values()].sort((a, b) => compare(a.id, b.id)),
     relationships: relationships.sort((a, b) => compare(JSON.stringify(a), JSON.stringify(b))), aliases: wholeAliases, diagnostics,
   };
+  for(const entity of snapshot.entities){Object.assign(entity,publishDirectoryClassification(entity));entity.classificationState=entity.category==='U-OBJECT'?'unknown':'identified';}
+  for(const member of snapshot.memberships){
+    Object.assign(member.interpretation,publishDirectoryClassification(member.interpretation));
+    if(member.interpretation.categoryStatus==='confirmed')snapshot.recognitionCoverage!.confirmed++;
+  }
   assertEngineeringPartition(snapshot, ordered.map(row => row.sourceId));
   return snapshot;
 }

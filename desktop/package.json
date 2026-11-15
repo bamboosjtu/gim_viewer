@@ -24,6 +24,7 @@
     "tauri:build": "node scripts/tauri-wrapper.mjs build",
     "posttauri:build": "node scripts/package-portable.mjs",
     "test": "node scripts/with-workspace-temp.mjs node_modules/vitest/vitest.mjs run",
+    "test:module": "node scripts/with-workspace-temp.mjs scripts/test-module.mjs",
     "test:sqlite": "node scripts/with-workspace-temp.mjs node_modules/vitest/vitest.mjs run --config vitest.sqlite.config.ts",
     "local-tests:check": "node scripts/with-workspace-temp.mjs scripts/local-tests/cli.mjs check",
     "test:local": "node scripts/with-workspace-temp.mjs scripts/local-tests/cli.mjs run",

@@ -24,7 +24,7 @@ describe('engineering representation membership', () => {
     expect(index.includesDev('physical', { assemblyPath: '' }, selected)).toBe(true);
     expect(index.includesDev('physical', { assemblyPath: 'sub:1/sub:2' }, selected)).toBe(true);
     expect(index.includesDev('physical', { assemblyPath: 'sub:0' }, selected)).toBe(false);
-    expect(index.resolveDev('physical', { assemblyPath: 'sub:0' }).ownerIds).toEqual([snapshot.entities.find(e => e.category === 'E16.control_cabinet')!.id]);
+    expect(index.resolveDev('physical', { assemblyPath: 'sub:0' }).ownerIds).toEqual([snapshot.entities.find(e => e.category === 'E17')!.id]);
   });
   it('keeps an unseparated mixed representation ambiguous', () => {
     const { index, snapshot } = fixture();

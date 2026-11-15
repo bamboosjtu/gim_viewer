@@ -1,6 +1,6 @@
 // @vitest-environment node
 import {expect,it} from 'vitest';
-import {packEngineeringSource,unpackEngineeringSource,unpackEngineeringSourceAsync} from '../engineeringSourceCodec.js';
+import {packEngineeringSource,unpackEngineeringSourceAsync} from '../engineeringSourceCodec.js';
 import {engineeringTableChunks,parseEngineeringTable,releaseEngineeringBytes,stringifyEngineeringTable} from '../engineeringTableJson.js';
 
 it('keeps the exact canonical bytes and shared references across bounded UTF-8 batches',async()=>{
@@ -11,13 +11,13 @@ it('keeps the exact canonical bytes and shared references across bounded UTF-8 b
   expect(bytes).toEqual(expected);expect(writes).toBeGreaterThan(0);
   const parsed=await parseEngineeringTable(bytes,()=>true,async()=>{reads++;});
   expect(parsed).toEqual(table);expect(reads).toBeGreaterThan(0);
-  const restored=unpackEngineeringSource(parsed) as typeof value;
+  const restored=await unpackEngineeringSourceAsync(parsed,()=>true) as typeof value;
   expect(restored).toEqual(value);expect(restored.rows[0].shared).toBe(restored.shared);
 });
 it('round trips empty collections, scalars, escape sequences and unpaired surrogates',async()=>{
   for(const value of [null,false,0,{},[],{empty:[],text:'\ud800😀\n\r\t\\\\"'}]){
     const table=packEngineeringSource(value),bytes=await stringifyEngineeringTable(table,10000);
-    expect(unpackEngineeringSource(await parseEngineeringTable(bytes))).toEqual(value);
+    expect(await unpackEngineeringSourceAsync(await parseEngineeringTable(bytes),()=>true)).toEqual(value);
   }
 });
 it('preserves the exact navigation dependency digest input without one model-sized string',async()=>{

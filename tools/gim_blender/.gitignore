@@ -1,0 +1,6 @@
+.venv/
+_build/
+dist/
+data/
+assets/node/
+assets/runtime/

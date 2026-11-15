@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { extractEngineeringSourceGraph } from '../../gim/engineering/sourceGraph.js';
-import { buildEngineeringSources } from '../../gim/engineering/buildSources.js';
+import {buildTestEngineeringSources} from '../../gim/engineering/__tests__/fixtures.js';
 import { projectEngineeringNavigation } from '../../gim/engineering/navigation.js';
 import { decodeEngineeringSources, encodeEngineeringSources } from '../engineeringCacheCodec.js';
 import { applyNavigationCacheProjection, createNavigationCacheProjection, decodeEngineeringNavigation, encodeEngineeringNavigation } from '../engineeringNavigationCache.js';
@@ -10,7 +10,7 @@ async function fixture() {
   const raw: Record<string, string> = { 'project.cbm': 'OBJECTMODELPOINTER=unit.dev', 'unit.dev': 'SYMBOLNAME=主变压器\nSUBDEVICE0=terminal.dev', 'terminal.dev': 'SYMBOLNAME=端子箱' };
   const id = { sourceSha256: 'a'.repeat(64), parserVersion: 'test', entries: Object.keys(raw) };
   const graph = await extractEngineeringSourceGraph({ paths: id.entries, readText: async path => raw[path] });
-  const built = buildEngineeringSources(id.sourceSha256, graph, [], []), view = projectEngineeringNavigation(built.sources, built.snapshot);
+  const built = buildTestEngineeringSources(id.sourceSha256, graph, [], []), view = projectEngineeringNavigation(built.sources, built.snapshot);
   const encoded = await encodeEngineeringSources(built.sources, id), source = await decodeEngineeringSources(encoded.bytes, id);
   return { ...built, view, id, source };
 }

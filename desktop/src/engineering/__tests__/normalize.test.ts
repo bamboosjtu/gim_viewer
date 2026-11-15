@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeEngineeringModel } from '../normalize.js';
-import { interpretObject, isNumberedDesignation } from '../classify.js';
+import { interpretRecognitionObject as interpretObject, isNumberedDesignation } from '../classify.js';
 import { assertEngineeringPartition } from '../validate.js';
 import type { ObjectEvidence } from '../types.js';
 
@@ -13,7 +13,7 @@ const build = (rows: ObjectEvidence[]) => normalizeEngineeringModel('test-packag
 describe('construction and operation engineering wholes', () => {
   it('prefers secondary type over a transformer name and family identity',()=>{
     const model=build([source('cabinet','2号主变压器测控柜',{typeCategory:'E16',identityNames:[value('主变压器')],designations:[value('2号主变')]} )]);
-    expect(model.entities[0].category).toBe('E16.control_cabinet');
+    expect(model.entities[0].recognitionCode).toBe('E16.control_cabinet');
     expect(model.entities[0].name).toBe('2号主变压器测控柜');
   });
   it('uses object-owned designations for body and neutral sources without a file level',()=>{
@@ -39,7 +39,7 @@ describe('construction and operation engineering wholes', () => {
     expect(fine.entities.map(e => [e.id, e.category])).toEqual(coarse.entities.map(e => [e.id, e.category]));
     expect(fine.entities.find(e => e.category === 'E01')?.sourceIds).toEqual(['main', 'radiator', 'terminal', 'wrapper']);
     expect(fine.entities).toHaveLength(1);
-    expect(build([source('box','独立端子箱')]).entities[0].category).toBe('M10');
+    expect(build([source('box','独立端子箱')]).entities[0].recognitionCode).toBe('M10');
   });
 
   it('keeps operating boxes and terminal boxes in actual equipment assemblies while preserving standalone boxes',()=>{
@@ -51,12 +51,12 @@ describe('construction and operation engineering wholes', () => {
       source('attached','端子箱',{assemblyParentId:'wrapper'}),
       source('standalone','端子箱模型01:Null:2754317'),
     ]);
-    expect(model.entities.map(e=>e.category).sort()).toEqual(['E05','E10','M10']);
+    expect(model.entities.map(e=>e.recognitionCode).sort()).toEqual(['E05','E10','M10']);
     const bySource=new Map(model.memberships.map(m=>[m.sourceId,m]));
     expect(bySource.get('actuator')).toMatchObject({ownerId:bySource.get('gis')!.ownerId,interpretation:{meaning:'part',basis:'equipment_actuator_composition',independent:false}});
     expect(bySource.get('attached')).toMatchObject({ownerId:bySource.get('capacitor')!.ownerId,interpretation:{meaning:'part',basis:'equipment_terminal_composition',independent:false}});
-    expect(model.entities.find(e=>e.category==='M10')!.sourceIds).toEqual(['standalone']);
-    expect(build([source('free','独立机构箱')]).entities[0].category).toBe('E17');
+    expect(model.entities.find(e=>e.recognitionCode==='M10')!.sourceIds).toEqual(['standalone']);
+    expect(build([source('free','独立机构箱')]).entities[0].recognitionCode).toBe('E17');
     // The host category must not decide the boundary. A real assembly edge makes
     // a terminal box a host component even when a source declares it independent.
     const gisBox=build([source('bay','组合电器GIS'),source('explicit','端子箱',{assemblyParentId:'bay',objectRoles:[value('independent')]})]);
@@ -141,12 +141,12 @@ describe('construction and operation engineering wholes', () => {
 
   it('keeps fire alarm buttons out of the component-button branch', () => {
     expect(interpretObject(source('x', '手动报警按钮'))).toMatchObject({ category: 'C-D2', independent: true, meaning: 'object' });
-    expect(build([source('button', '手动报警按钮')]).entities.map(entity => entity.category)).toEqual(['C-D2']);
+    expect(build([source('button', '手动报警按钮')]).entities.map(entity => entity.recognitionCode)).toEqual(['C-D2']);
   });
 
   it('creates distinct E16 wholes for terminal box, panel, control cabinet and battery set', () => {
     const model = build([source('term', '独立端子箱'), source('panel', '二次屏柜'), source('control', 'HGIS智能控制柜'), source('battery', '蓄电池组')]);
-    expect(model.entities.map(entity => entity.category).sort()).toEqual(['E16.battery_set', 'E16.control_cabinet', 'E16.panel_cabinet', 'M10']);
+    expect(model.entities.map(entity => entity.recognitionCode).sort()).toEqual(['E16.battery_set', 'E16.control_cabinet', 'E16.panel_cabinet', 'M10']);
   });
 
   it('uses M09 only for explicit or material-typed other materials', () => {
@@ -167,7 +167,7 @@ describe('construction and operation engineering wholes', () => {
 
   it('preserves unknown proxies and known equipment nested under them', () => {
     const model = build([source('parent', 'Shape'), source('breaker', '断路器', { assemblyParentId: 'parent' })]);
-    expect(model.entities.map(e => e.category).sort()).toEqual(['E06', 'U-OBJECT']);
+    expect(model.entities.map(e => e.recognitionCode).sort()).toEqual(['E06', 'U-OBJECT']);
   });
 
   it('keeps fasteners as source members or source-only without losing them', () => {

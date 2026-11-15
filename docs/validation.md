@@ -75,6 +75,32 @@
 
 远程 CI 仅运行不依赖工程样本的单元测试、静态检查和构建；真实与合成工程样本、九工程对照和性能矩阵均不纳入 CI。命令语法、环境和工作区约定见[开发指南](development.md)。
 
+### 测试组织
+
+测试跟随被测模块，按模块边界组织，不按某轮任务、缺陷编号或开发阶段散放。模块搬迁、拆分或公开契约变化时，测试、共享夹具、发现入口和当前文档引用在同一变更中更新。断言跟随明确的新契约调整，保留身份、归属、几何及跨模块交互的不变量。
+
+| 测试归属 | 位置与入口 |
+|---|---|
+| 桌面 TS 模块 | `desktop/src/<模块>/__tests__/*.test.ts`；子模块有自己的 `__tests__`，例如 `gim/engineering/`、`services/projections/`、`ui/shell/` |
+| 平台桥接 | `desktop/bridge/__tests__/`；SQLite 仍使用独立配置，不进入默认单测 |
+| 共享线路核心 | `packages/powerline-core/src/__tests__/`，由 desktop/app 的 Vitest 自动发现；不再放在 Android 应用的顶层测试目录 |
+| Android 自身模块 | `app/src/<模块>/__tests__/`；真实样本在 `app/tests/local/`，只由显式本地配置发现 |
+| Node 开发脚本 | 与脚本同目录的 `*.test.mjs`；Browser Worker 夹具仍在 `desktop/tests/<模块>/` |
+| 独立 Python 工具 | 各工具 `tests/unit/test_<模块>.py` 与 `tests/local/test_<模块>.py`；CI 自动发现整个 `unit/`，不靠固定文件名白名单 |
+| 工具契约与夹具 | `tools/gim_element/tests/contracts/` 保存共享来源 DTO；`tests/support.py` 保存测试支持，不让测试模块互相导入 |
+| 手动浏览器检查 | `tools/gim_device/tests/manual/`，显式启动 Playwright，不由 unittest 或 CI 自动发现 |
+| Rust | 模块内 `#[cfg(test)]` 和各 crate 的集成测试，保持原生模块归属 |
+
+跨模块测试归实际编排入口或适配模块；例如组成投影服务的集成测试留在 services，空间投影算法测试归 `services/projections/`。测试覆盖多个模块时，不复制测试到每个模块。
+
+只用于测试拼装来源与识别结果的组合器放模块 `__tests__/fixtures.ts`，调用实际的来源收集与归一化接口。产品代码分别编排这两个阶段，不为旧测试保留同步组合入口或重复解码实现。
+
+桌面和 Android 均提供 `npm run test:module -- <目录或源文件> [...]`。该入口使用当前应用的 Vitest 配置，递归收集所选模块的源码与自有测试，再由 Vitest 的依赖图选择关联测试，因此会同时运行其他模块中的消费者测试。它沿用现有发现/排除规则，不启动真实样本、SQLite 原生集成或性能矩阵。全量 `npm test` 和独立门禁仍保留。
+
+共享 JSON 契约夹具使用静态导入纳入依赖图；例如识别契约 JSON 改动可直接选择跨语言对照测试。动态文件读取和 Python 子进程内部依赖不属于 JS 导入图；独立算法修改仍同时执行工具 `unit/` 与对应 TS 模块门禁。
+
+例：在 desktop 下执行 `npm run test:module -- engineering gim/engineering`，可同时核对纯领域、来源适配及相关的 services/UI 消费者；只修改一个文件时也可传 `src/engineering/classify.ts`。共享核心可传 `../packages/powerline-core/src`。目录或标准名称可配置时，测试验证公开分类与投影契约，目录标签取当前输入数据，不把历史标签当作业务规则。
+
 | 门禁命令（`desktop/` 下） | 证明什么 |
 |---|---|
 | `npm test` | 快速单元测试；不启动 Cargo |
@@ -192,7 +218,7 @@
 ### 分类与清册
 
 - `npm run test:local`：对开发者登记的一变、一线、一设备运行原生打开与证据检查；缺样本不计通过。
-- `npm run check:engineering-catalog -- --python`：检查共享目录与参考工具标签一致，不能证明两者归并策略一致。
+- `npm run check:engineering-catalog`：检查生成目录、独立工具副本和工作簿来源；TypeScript/Python 行为一致性另由共享来源 DTO 对照测试验证，不能替代真实样本人工核对。
 - 模板测试：单独检查组成路径变化不影响清册/来源、清册使用自己的搜索索引、同名实例不合并。
 - 完整九工程人工实体边界真值仍未建立。
 
@@ -253,13 +279,15 @@ cargo test --manifest-path app/src-tauri/Cargo.toml six_native_imports -- --igno
 
 ### Python 纯逻辑测试
 
-`python -m unittest discover -s tools/<tool>/tests -p test_pure.py` 只检查普通值的矩阵、文本、编码等契约。文件位于：
+`python -m unittest discover -s tools/<tool>/tests/unit -p 'test_*.py'` 检查普通值的矩阵、文本、编码、文件名展示及纯 DTO 识别契约。测试按实际 Python 模块命名，例如：
 
-- `tools/gim_device/tests/test_pure.py`
-- `tools/gim_element/tests/test_pure.py`
-- `tools/gim_info/tests/test_pure.py`
+- `tools/gim_device/tests/unit/test_gim_core.py`
+- `tools/gim_element/tests/unit/test_standard_sources.py`
+- `tools/gim_element/tests/unit/test_standard_recognition.py`
+- `tools/gim_element/tests/unit/test_element_core.py`
+- `tools/gim_info/tests/unit/test_gimbrowse.py`
 
-CI 显式按文件名执行，不能改成不加过滤的 discover：原有 `test_core.py` 与指针/UI 测试含模型目录或归档构造，应由开发者在工作区本地运行。
+CI 自动发现整个 `unit/`，新增模块单元测试不再需要维护文件名白名单。归档、来源装配、指针目录与 GUI 测试放在同工具的 `tests/local/`，仅开发者本地执行；不能把 CI 的发现范围扩大到整个 `tests/`。
 
 其他静态检查（`npm run lint`、`npm run check:version`、`npm run check:engineering-boundaries`）的命令语法与用途见[开发指南](development.md)，本页不重复。
 

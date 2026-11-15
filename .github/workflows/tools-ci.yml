@@ -80,12 +80,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Tool dependency installation failed' }
       - name: Run pure Python contracts without model samples
         run: |
-          python -m unittest discover -s "tools/$env:TOOL/tests" -p test_pure.py -v
+          python -m unittest discover -s "tools/$env:TOOL/tests/unit" -p 'test_*.py' -v
           if ($LASTEXITCODE -ne 0) { throw 'Pure Python contracts failed' }
-          if ($env:TOOL -eq 'gim_element') {
-            python -m unittest discover -s tools/gim_element/tests -p test_standard.py -v
-            if ($LASTEXITCODE -ne 0) { throw 'Standard recognition contracts failed' }
-          }
       - name: Build and startup-check the actual folder EXE
         run: |
           & "./tools/$env:TOOL/build.ps1" -Python (Get-Command python).Source -NoVenv -Publish

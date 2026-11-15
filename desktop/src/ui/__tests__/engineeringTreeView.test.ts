@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppState } from '../../app/state.js';
 import { extractEngineeringSourceGraph } from '../../gim/engineering/sourceGraph.js';
-import { buildEngineeringSources } from '../../gim/engineering/buildSources.js';
+import {buildTestEngineeringSources} from '../../gim/engineering/__tests__/fixtures.js';
 import type { CbmNode } from '../../gim/types.js';
 import { projectEngineeringNavigation } from '../../gim/engineering/navigation.js';
+import { STANDARD_CATALOG } from '../../engineering/standardCatalog.js';
 
 async function fixture() {
   const files: Record<string, string> = {
@@ -14,13 +15,13 @@ async function fixture() {
   };
   const graph = await extractEngineeringSourceGraph({ paths: Object.keys(files), readText: async p => files[p] });
   const state = new AppState(); state.activateProject(1, 'package'); state.currentProjectType = 'substation';
-  const built = buildEngineeringSources('package', graph, [], []);
+  const built = buildTestEngineeringSources('package', graph, [], []);
   state.engineeringSources = built.sources; state.engineeringSnapshot = built.snapshot; state.engineeringStatus = 'ready';
   state.engineeringNavigation = projectEngineeringNavigation(built.sources, built.snapshot);
   state.projectName = '测试变电工程';
   const node = (path: string, children: CbmNode[] = []): CbmNode => ({ path, children, rawProperties: {}, name: path, entityName: 'F4System', famPath: '', devPath: '', ifcFile: '', ifcGuid: '', classifyName: '', transformMatrix: '', systemNames: [], devSymbolName: '', devType: '', devExpanded: false });
   state.currentCbmTree = node('project.cbm', [node('unit.cbm')]);
-  return { state, graph, main: built.snapshot.entities.find(e => e.category === 'E01')!, box: built.snapshot.entities.find(e => e.category === 'E16.control_cabinet')! };
+  return { state, graph, main: built.snapshot.entities.find(e => e.category === 'E01')!, box: built.snapshot.entities.find(e => e.category === 'E17')! };
 }
 beforeEach(() => {
   vi.resetModules(); HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -31,7 +32,7 @@ describe('engineering composition and provenance navigation', () => {
   it('shows four top-level groups and selects an unresolved neutral attachment without selecting a main body',async()=>{
     const raw:Record<string,string>={'project.cbm':'SUBSYSTEM0=body.cbm\nSUBSYSTEM1=neutral.cbm','body.cbm':'OBJECTMODELPOINTER=body.dev','body.dev':'SYMBOLNAME=主变压器',
       'neutral.cbm':'OBJECTMODELPOINTER=neutral.dev','neutral.dev':'TYPE=OpenGroundingEquipment/NeutralPointEquipment\nSYMBOLNAME=220kV中性点成套装置'};
-    const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async p=>raw[p]}),built=buildEngineeringSources('p',graph,[],[]);
+    const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async p=>raw[p]}),built=buildTestEngineeringSources('p',graph,[],[]);
     const state=new AppState();state.activateProject(1,'p');state.currentProjectType='substation';state.engineeringSources=built.sources;state.engineeringSnapshot=built.snapshot;
     state.engineeringNavigation=projectEngineeringNavigation(built.sources,built.snapshot);state.engineeringNavMode='inventory';
     const inventory=state.engineeringNavigation.inventory!;
@@ -54,7 +55,10 @@ describe('engineering composition and provenance navigation', () => {
     const template=inventory.nodes.get(inventory.nodes.get(key)!.parent!)!;
     const group=inventory.nodes.get(template.parent!)!;
     expect(template.kind).toBe('template');expect(template.title).toBe('主变测控柜');
-    expect(group.title).toBe('二次屏柜');expect(view.inventorySearch!.find(r=>r.key===f.box.id)?.subtitle).toBe('设备材料清册 / 设备 / 二次屏柜 / 主变测控柜');
+    const modelLabel=STANDARD_CATALOG.find(item=>item.id==='equipment:secondarycabinet')!.label;
+    expect(group.title).toBe(modelLabel);
+    const modelPath=modelLabel==='二次屏柜'?['二次屏柜']:['二次屏柜',modelLabel];
+    expect(view.inventorySearch!.find(r=>r.key===f.box.id)?.subtitle).toBe(['设备材料清册','设备',...modelPath,'主变测控柜'].join(' / '));
     const item=[...document.querySelectorAll<HTMLElement>('.tree-row')].find(r=>r.dataset.nodePath===template.key)!;
     item.click();await vi.dynamicImportSettled();
     await vi.waitFor(()=>expect(f.state.engineeringSelection?.ownerIds).toEqual(new Set([f.box.id])));
@@ -87,7 +91,7 @@ describe('engineering composition and provenance navigation', () => {
       '24.cbm': 'SYSTEMNAME2=10kV系统\nSYSTEMNAME3=24S\nOBJECTMODELPOINTER=cabinet.dev',
       'cabinet.dev': 'TYPE=SwitchCabinet\nSYMBOLNAME=出线柜\nSUBDEVICE0=button.dev', 'button.dev': 'TYPE=Button\nSYMBOLNAME=按钮' };
     const graph = await extractEngineeringSourceGraph({ paths: Object.keys(raw), readText: async path => raw[path] });
-    const built = buildEngineeringSources('package', graph, [], []), state = new AppState(); state.activateProject(1, 'package'); state.currentProjectType = 'substation';
+    const built = buildTestEngineeringSources('package', graph, [], []), state = new AppState(); state.activateProject(1, 'package'); state.currentProjectType = 'substation';
     state.engineeringSources = built.sources; state.engineeringSnapshot = built.snapshot; state.engineeringNavigation = projectEngineeringNavigation(built.sources, built.snapshot);
     state.engineeringNavMode = 'composition';
     const { renderEngineeringTree } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../engineeringTreeView.js'); }); renderEngineeringTree(state); search('按钮');
@@ -102,7 +106,7 @@ describe('engineering composition and provenance navigation', () => {
   });
   it('shows an unassigned declared building and opens its original statement without inventing a geometry range', async () => {
     const raw: Record<string,string> = { 'project.cbm': 'SUBSYSTEM0=building.cbm', 'building.cbm': 'SYSTEMNAME1=建筑物系统\nSYSTEMNAME2=生产建筑物\nSYSTEMNAME3=主控通信楼01' };
-    const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async path=>raw[path]}), built=buildEngineeringSources('package',graph,[],[]);
+    const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async path=>raw[path]}), built=buildTestEngineeringSources('package',graph,[],[]);
     const state=new AppState();state.activateProject(1,'package');state.currentProjectType='substation';
     state.engineeringSources=built.sources;state.engineeringSnapshot=built.snapshot;state.engineeringNavigation=projectEngineeringNavigation(built.sources,built.snapshot);state.engineeringStatus='ready';
     state.engineeringNavMode='composition';
@@ -130,7 +134,7 @@ describe('engineering composition and provenance navigation', () => {
   it('reveals the last of 600 whole candidates through a bounded window and keeps keyboard focus on status-only updates', async () => {
     const raw: Record<string, string> = { 'project.cbm': Array.from({ length: 600 }, (_, i) => `SUBSYSTEM${i}=item${i}.cbm`).join('\n') };
     for (let i = 0; i < 600; i++) { raw[`item${i}.cbm`] = `OBJECTMODELPOINTER=item${i}.dev`; raw[`item${i}.dev`] = `SYMBOLNAME=钢梁${i}`; }
-    const graph = await extractEngineeringSourceGraph({ paths: Object.keys(raw), readText: async path => raw[path] }), built = buildEngineeringSources('package', graph, [], []);
+    const graph = await extractEngineeringSourceGraph({ paths: Object.keys(raw), readText: async path => raw[path] }), built = buildTestEngineeringSources('package', graph, [], []);
     const state = new AppState(); state.currentProjectType = 'substation'; state.engineeringSnapshot = built.snapshot; state.engineeringSources = built.sources; state.engineeringNavigation = projectEngineeringNavigation(built.sources, built.snapshot);
     state.engineeringNavMode = 'composition';
     const { renderEngineeringTree } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../engineeringTreeView.js'); }); renderEngineeringTree(state);
@@ -207,7 +211,7 @@ describe('engineering composition and provenance navigation', () => {
       "#1=IFCBUILDING('b',$,'主控楼',$,$,$,$,$,.ELEMENT.,$,$,$);", "#2=IFCWALL('w',$,'主控楼墙',$,$,$,$,$);", "#3=IFCRELCONTAINEDINSPATIALSTRUCTURE('r',$,$,$,(#2),#1);",
     ].join('\n') }], null);
     f.graph.ifcPaths.push('delivery.ifc');
-    const built = buildEngineeringSources('package', f.graph, spatial.objects, spatial.models, spatial.nodes);
+    const built = buildTestEngineeringSources('package', f.graph, spatial.objects, spatial.models, spatial.nodes);
     f.state.engineeringSources = built.sources; f.state.engineeringSnapshot = built.snapshot; f.state.engineeringNavigation = projectEngineeringNavigation(built.sources, built.snapshot);
     const count = built.snapshot.entities.length, { renderEngineeringTree } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../engineeringTreeView.js'); });
     f.state.engineeringNavMode = 'source'; renderEngineeringTree(f.state); search('主控楼');
@@ -222,7 +226,7 @@ describe('engineering composition and provenance navigation', () => {
   it('loads detailed IFC source properties explicitly and refuses a late reply after another whole is selected', async () => {
     const f = await fixture(), { buildSubstationSpatialIndexFromTexts } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/ifcSpatialParser.js'); });
     const spatial = buildSubstationSpatialIndexFromTexts([{ entry: { modelId: 'm', path: 'delivery.ifc', name: 'delivery' }, text: "#2=IFCWALL('w',$,'墙',$,$,$,$,$);" }], null);
-    f.graph.ifcPaths.push('delivery.ifc'); const built = buildEngineeringSources('package', f.graph, spatial.objects, spatial.models, spatial.nodes);
+    f.graph.ifcPaths.push('delivery.ifc'); const built = buildTestEngineeringSources('package', f.graph, spatial.objects, spatial.models, spatial.nodes);
     f.state.engineeringSources = built.sources; f.state.engineeringSnapshot = built.snapshot; f.state.engineeringNavigation = projectEngineeringNavigation(built.sources, built.snapshot);
     let resolve!: (value: unknown) => void;
     const properties = vi.fn(() => new Promise<any>(done => { resolve = done; }));

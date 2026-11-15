@@ -2,11 +2,11 @@
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import type {EngineeringSnapshot} from '../types.js';
-import {readFileSync} from 'node:fs';
+import recognitionCases from '../../../../tools/gim_element/tests/contracts/recognition_cases.json';
 import {it,expect} from 'vitest';
 import {toObjectEvidence,type SourceRecord} from '../../gim/engineering/sourceEvidence.js';
 import {normalizeEngineeringModel} from '../normalize.js';
-const cases=JSON.parse(readFileSync(new URL('../../../../tools/gim_element/tests/recognition_cases.json',import.meta.url),'utf8')) as Array<{name:string;records:Array<{id:string;type:string;name?:string;parent?:string;props?:Record<string,string>;attributeOnly?:boolean;relations?:SourceRecord['relations']}>;groups:string[][];pending:number;expectedMember?:Record<string,unknown>}>;
+const cases=recognitionCases as Array<{name:string;records:Array<{id:string;type:string;name?:string;parent?:string;props?:Record<string,string>;attributeOnly?:boolean;relations?:SourceRecord['relations']}>;groups:string[][];pending:number;expectedMember?:Record<string,unknown>}>;
 it.each(cases)('agrees with the independently implemented tool on $name',fixture=>{
   const rows=fixture.records.map(r=>({attributeOnly:r.attributeOnly,relations:r.relations,id:r.id,name:r.name??r.id,source_type:r.type,parent:r.parent??'',source:r.id+'.dev',track:'dev',sources:[r.id+'.dev'],context:[],guid:'',properties:Object.entries(r.props??{}).map(([key,value],i)=>({keys:[key],value,path:'attributes.fam',line:i+1}))}) as SourceRecord);
   const model=normalizeEngineeringModel('scope',rows.map(toObjectEvidence));

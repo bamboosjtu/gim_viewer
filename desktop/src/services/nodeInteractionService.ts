@@ -112,24 +112,6 @@ export async function syncSelectionNavigation(state: AppState, request: Selectio
   } finally { end(); }
 }
 
-/** Spatial navigation already opens the inspector; it has no implicit 3D fit. */
-export async function handleSpatialSelection(
-  state: AppState,
-  object: import('../gim/ifcSpatialParser.js').IfcSpatialObject | import('../gim/ifcSpatialParser.js').IfcSpatialNode,
-  index: import('../gim/ifcSpatialParser.js').SubstationSpatialIndex,
-  request: SelectionRequest,
-): Promise<void> {
-  if (!state.isCurrentSelection(request)) return;
-  const {showSpatialNodePropertiesBasic,showIfcSpatialObjectPropertiesBasic,openPropsDrawerUI}=await loadPresentation('propsDrawer');
-  if (!state.isCurrentSelection(request)) return;
-  openPropsDrawerUI();
-  await Promise.all([
-    request.target?.kind==='spatial-node' ? showSpatialNodePropertiesBasic(state,object as import('../gim/ifcSpatialParser.js').IfcSpatialNode,index,request)
-      : showIfcSpatialObjectPropertiesBasic(state,object as import('../gim/ifcSpatialParser.js').IfcSpatialObject,index,request),
-    clearSelectionHighlight(state,request,() => {}),syncSelectionNavigation(state,request),
-  ]);
-}
-
 export async function handleNodeClick(
   state: AppState, node: CbmNode, showMessage: (text: string) => void,
   request: SelectionRequest = state.beginSelection({kind:'cbm',key:node.path}),

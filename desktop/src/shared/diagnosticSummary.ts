@@ -78,9 +78,9 @@ export function summarizeDiagnostic(payload: unknown): string {
   lines.push(`缓存状态：valid=${valid}`);
   lines.push(`parser_version：${storedVersion} / ${currentVersion}${versionMatch ? '' : '（不匹配）'}`);
   if (diag.project_type === 'transmission_line') {
-    lines.push(`线路缓存版本：${diag.stored_line_parser_version ?? '(兼容旧字段)'} / ${diag.current_line_parser_version ?? '(未知)'}${diag.line_parser_version_match === false ? '（不匹配）' : ''}`);
+    lines.push(`线路缓存版本：${diag.stored_line_parser_version ?? '(未提供)'} / ${diag.current_line_parser_version ?? '(未知)'}${diag.line_parser_version_match === false ? '（不匹配）' : ''}`);
   } else if (diag.project_type === 'substation' || diag.project_type === 'hybrid') {
-    lines.push(`变电缓存版本：${diag.stored_substation_parser_version ?? '(兼容旧字段)'} / ${diag.current_substation_parser_version ?? '(未知)'}${diag.substation_parser_version_match === false ? '（不匹配）' : ''}`);
+    lines.push(`变电缓存版本：${diag.stored_substation_parser_version ?? '(未提供)'} / ${diag.current_substation_parser_version ?? '(未知)'}${diag.substation_parser_version_match === false ? '（不匹配）' : ''}`);
   }
   if (diag.cache_miss_reason) lines.push(`缓存失效原因：${diag.cache_miss_reason}`);
   if (diag.project_type === 'transmission_line') {

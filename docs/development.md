@@ -41,7 +41,7 @@ npm run tauri:dev     # Tauri 开发窗口
 | `npm run check:version` | npm/Cargo 版本一致性；构建前自动执行 |
 | `npm run check:types` | TypeScript 检查（含测试替身的接口完整性） |
 | `npm run check:engineering-boundaries` | 纯领域、来源与 Viewer 边界检查 |
-| `npm run check:engineering-catalog` | 共享目录与生成索引一致；加 `--python` 同时核对参考工具 |
+| `npm run check:engineering-catalog` | 生成目录、工作簿指纹、独立工具数据副本及目录文档一致性 |
 
 应用版本以 `desktop/package.json` 为准；Tauri 配置引用该文件。portable 组包还会读取 EXE 的 ProductVersion，拒绝把旧程序标成新版本。发布与资产细节见[平台、安全与发布](architecture/platform.md)。
 
@@ -50,6 +50,7 @@ npm run tauri:dev     # Tauri 开发窗口
 | 命令（在 `desktop/` 下） | 范围 |
 |---|---|
 | `npm test` | 快速单元测试（不启动 Cargo、不读工程样本） |
+| `npm run test:module -- engineering gim/engineering` | 按模块及源码依赖运行相关测试，包含其他模块中的消费者；也可传具体源文件或 `../packages/powerline-core/src` |
 | `npm run test:sqlite` | 真实 SQLite 往返（构建一次 Rust harness） |
 | `npm run test:engineering:worker` | 真实 Worker/Blob/缓存/取消（headless Edge，`desktop/tests/engineering/worker-check.html`，无样本） |
 | `npm run local-tests:check` | 检查跟踪的 `local-tests/mini-samples.example.json` |
@@ -62,6 +63,8 @@ npm run tauri:dev     # Tauri 开发窗口
 | `npm run test:local-contract` | 本地注册表协议 |
 
 Windows CI 保持一个串行任务：版本、测量协议、验收工具、本地注册表、分层、类型和 lint 检查在 Rust 编译及覆盖率之前执行；随后运行 Rust 单元测试、前端覆盖率、SQLite 集成、前端构建和 Rust 编译边界。`workflow_dispatch` 才构建、校验和上传便携 Benchmark 发布包。以上步骤均不执行工程性能样本；性能优化须取得可测的明显提升，功能和正确性修正应避免过大回退；实测收益、具体成本与未决项分别报告，没有统一时间、内存或增长比例验收线，是否接受及复核范围由开发者决定。
+
+单元测试随模块放入 `__tests__/`，共享包持有自己的测试，跨模块编排测试归编排模块；组织规则见[测试组织](validation.md#测试组织)。`test:module` 在 desktop 和 app 下均可使用，会加载各自的 Vitest 配置及排除规则；它不替代独立的原生/样本门禁。
 
 完整命令清单与逐项门禁条件见[验证](validation.md)。远程 CI 只运行无工程样本的单元测试、静态检查和构建；真实与合成工程样本、性能矩阵只在开发者本地运行。
 
@@ -88,6 +91,8 @@ npm test
 ```
 
 Python 工具位于 `tools/`，各自维护 `.venv` 与打包配置；构建、参数和排查见 [tools/README.md](../tools/README.md)。工具的目录归属见[项目目录](architecture.md#项目目录与模块归属)。
+
+独立漫游转换工具见 [gim_blender](../tools/gim_blender/README.md)：`tools/gim_blender/build.ps1` 生成目录包，可用 `-BlenderDirectory <便携目录> -Publish` 包含 Blender 并生成 ZIP；导入数据固定在 exe 旁 `data/`。它自带解析和几何实现副本，构建与运行不读取主程序资源。
 
 ## 工作区与临时目录
 
@@ -129,6 +134,6 @@ Markdown 文档不作为 CI 测试输入；事实正确性仍需对照源码和�
 - [性能测试指南](performance-guide.md)：单机验收的 测量口径与步骤。
 - [文档首页](README.md)：文档地图、写作约定与单一权威表。
 
-维护实体目录时只编辑 `research/实体识别/变电三维设计建模规范_索引表类.xlsx`；新增/修改名称的单元格标黄，再在 desktop/ 运行 `npm run generate:engineering-catalog`。该命令从工作簿生成主程序和独立工具的数据及目录文档，不读取 PDF、不启动工程样本或性能矩阵。
+维护实体目录名称、别名和部件宿主关系时，编辑 `docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx` 并标黄修改单元格；内部角色默认值由 `recognitionPolicy.json` 维护。随后在 desktop/ 运行 `npm run generate:engineering-catalog`，同步主程序、独立工具的数据副本和目录索引；生成的 JSON 不作为下一次导入的输入。该命令不读取 PDF、不启动工程样本或性能矩阵。
 
 仅核对来源按需输入的真实 Worker 协议时，可在 desktop/ 执行 `node scripts/with-workspace-temp.mjs scripts/engineering/check-worker-browser.mjs "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" 14358 source-input`。使用自有无头浏览器及内存 DTO，检查批量输入、物理/语义复用及测量控制消息，不读取工程样本或执行性能验收；结果在 output/log/source-input-browser.json。

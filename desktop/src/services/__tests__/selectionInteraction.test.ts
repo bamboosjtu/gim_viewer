@@ -41,11 +41,11 @@ beforeEach(() => {
 
 async function engineeringFixture(state: AppState, index: Awaited<ReturnType<typeof spatialFixture>>) {
   const { extractEngineeringSourceGraph } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/engineering/sourceGraph.js'); });
-  const { buildEngineeringSources } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/engineering/buildSources.js'); });
+  const { buildTestEngineeringSources } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/engineering/__tests__/fixtures.js'); });
   const { projectEngineeringNavigation } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/engineering/navigation.js'); });
   const raw: Record<string,string> = { 'project.cbm':'OBJECTMODELPOINTER=B.dev', 'B.dev':'SYMBOLNAME=B', 'CBM/model.ifc':'' };
   const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async path=>raw[path]});
-  const built=buildEngineeringSources('package',graph,index.objects,index.models,index.nodes);
+  const built=buildTestEngineeringSources('package',graph,index.objects,index.models,index.nodes);
   state.engineeringSources=built.sources;state.engineeringSnapshot=built.snapshot;state.engineeringNavigation=projectEngineeringNavigation(built.sources,built.snapshot);
   return {ifc:built.snapshot.memberships.find(member=>member.sourceId===built.sources.ifcRecords[0].id)!.ownerId!,device:built.snapshot.entities.find(entity=>entity.name==='B')!.id};
 }
@@ -316,10 +316,10 @@ it('a source IFC selection keeps its row and inspector after an earlier FAM requ
   state.currentFiles!.set('CBM/slow.fam',{text:() => {started.resolve();return fam.promise;}} as File);
   const index=await spatialFixture(state),object=index.objects[0];
   const { extractEngineeringSourceGraph } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/engineering/sourceGraph.js'); });
-  const { buildEngineeringSources } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/engineering/buildSources.js'); });
+  const { buildTestEngineeringSources } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/engineering/__tests__/fixtures.js'); });
   const raw: Record<string,string> = { 'project.cbm':'SUBSYSTEM0=unit.cbm', 'unit.cbm':'OBJECTMODELPOINTER=A.dev', 'A.dev':'SYMBOLNAME=设备 A', 'CBM/model.ifc':'' };
   const graph = await extractEngineeringSourceGraph({ paths:Object.keys(raw), readText:async path=>raw[path] });
-  const built = buildEngineeringSources('package',graph,index.objects,index.models,index.nodes); state.engineeringSources=built.sources;state.engineeringSnapshot=built.snapshot;
+  const built = buildTestEngineeringSources('package',graph,index.objects,index.models,index.nodes); state.engineeringSources=built.sources;state.engineeringSnapshot=built.snapshot;
   const {projectEngineeringNavigation}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/engineering/navigation.js'); });state.engineeringNavigation=projectEngineeringNavigation(built.sources,built.snapshot);
   const sourceId=built.sources.ifcRecords.find(r=>r.guid===object.globalId)!.id;
   const {showNodePropertiesBasic}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../ui/propsDrawer.js'); });const pending=showNodePropertiesBasic(state,a);await started.promise;
@@ -337,18 +337,6 @@ it('a source IFC selection keeps its row and inspector after an earlier FAM requ
   expect(state.highlightedModState).toBeNull();expect(document.querySelector('.props-header')!.textContent).toBe('IFC B');
   const id=state.selectionRequest!.id;buildAndRenderCbmTree(state,()=>{});
   expect(state.selectionRequest!.id).toBe(id);expect(document.querySelector('.tree-row.selected')?.getAttribute('data-node-path')).toBe(rowKey);
-});
-
-it.each([false,true])('a spatial IFC second render loses ownership to B; project replacement = %s', async (replaceProject) => {
-  const {state,b}=fixture(),data=deferred<any[]>(),started=deferred<void>();
-  const index=await spatialFixture(state),object=index.objects[0];
-  runtime.ctx.fragments.list.set('model',{getLocalIdsByGuids:async () => [10],getItemsData:() => {started.resolve();return data.promise;}});
-  const drawer=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../ui/propsDrawer.js'); });drawer.setupPropsDrawer(runtime.ctx);
-  const {handleSpatialSelection,handleNodeClick}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../nodeInteractionService.js'); });
-  const pending=handleSpatialSelection(state,object,index,state.beginSelection({kind:'ifc-object',key:object.key}));
-  await started.promise;if (replaceProject) state.activateProject(2,'next');b.devPath='';
-  await handleNodeClick(state,b,() => {});data.resolve([{Name:{value:'Old IFC'}}]);await pending;
-  expect(document.querySelector('.props-header')!.textContent).toBe('B');expect(document.body.textContent).not.toContain('Old IFC');
 });
 
 it('search selection wins before lazy imports and a slow 3D raycast cannot steal it', async () => {

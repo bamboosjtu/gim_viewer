@@ -1,4 +1,5 @@
 import {categoryFromName,isNumberedDesignation,mainNumber} from './classify.js';
+import {componentAcceptsHost} from './catalogLabels.js';
 import type {ObjectEvidence,ObjectInterpretation,EngineeringEntity,EngineeringSnapshot} from './types.js';
 
 /** Recover engineering composition from object-owned declarations. This never
@@ -43,6 +44,7 @@ export function recoverComponentMembership(rows:readonly ObjectEvidence[],meanin
     const constraints=[...direct.map(p=>{const owner=owners.get(p.value),host=owner?entities.get(owner):undefined;return host&&(host.category.startsWith('E')||host.category.startsWith('M'))?new Set([host.id]):new Set<string>();}),...(row.hostCodes??[]).map(p=>codes.get(key(p.value))??new Set<string>()),...designations.map(p=>names.get(key(p.value))??new Set<string>())];
     if(!constraints.length)continue;
     let candidates=new Set(constraints[0]);for(const values of constraints.slice(1))candidates=new Set([...candidates].filter(id=>values.has(id)));
+    candidates=new Set([...candidates].filter(id=>componentAcceptsHost(m,entities.get(id)!)));
     if(!explicit.length&&m.meaning==='object'&&candidates.size===1&&candidates.has(owners.get(row.sourceId)??''))continue;
     const proof=[...direct,...(row.hostCodes??[]),...designations].map(p=>p.evidenceId);
     if(candidates.size===1){attach(row,[...candidates][0],proof,declared?'confirmed':'candidate');continue;}

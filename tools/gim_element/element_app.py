@@ -22,7 +22,8 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QFileDialog, QMessageB
                                QWidget, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar,
                                QSplitter, QTreeWidget, QTreeWidgetItem, QTableWidget,
                                QTableWidgetItem, QTextBrowser, QLineEdit, QHeaderView,
-                               QAbstractItemView, QStyle)
+                               QAbstractItemView, QStyle, QDialog, QPlainTextEdit,
+                               QDialogButtonBox, QPushButton)
 
 import element_core as E
 
@@ -122,6 +123,8 @@ class MainWindow(QMainWindow):
             self.tree.header().setSectionResizeMode(c, QHeaderView.ResizeToContents)
         self.tree.setAlternatingRowColors(True)
         self.tree.itemSelectionChanged.connect(self._on_tree_sel)
+        self.tree.setExpandsOnDoubleClick(False)
+        self.tree.itemDoubleClicked.connect(self._on_tree_double_clicked)
         vs.addWidget(self.tree)
 
         self.table = QTableWidget(0, 3)
@@ -136,6 +139,7 @@ class MainWindow(QMainWindow):
         self.table.setWordWrap(False)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.itemSelectionChanged.connect(self._on_sample_sel)
+        self.table.cellDoubleClicked.connect(self._on_entity_double_clicked)
         vs.addWidget(self.table)
         vs.setSizes([560, 240])
 
@@ -356,7 +360,7 @@ class MainWindow(QMainWindow):
                 cit = QTreeWidgetItem([label,fmt(cd+ci)])
                 cit.setToolTip(0, '目录口径：%s' % cat)
                 root.addChild(cit)
-                # 子类 → 模板（设备侧用标准细分：E16 的 terminal_box / panel_cabinet…）
+                # 工作簿模型名称 → 名称模板 → 实体
                 subs = {}
                 for r in crows:
                     key = (r.get('std_sub') or r['sub']) if g == E.G_DEV else r['sub']
@@ -384,7 +388,7 @@ class MainWindow(QMainWindow):
         return (srows[0].get('modelOrder',999),sub)
 
     def _add_templates(self, parent_item, rows, flt):
-        rows = sorted(rows, key=lambda r: -r['total'])
+        rows = sorted(rows, key=lambda r: (r.get('modelOrder',999),r['template']))
         for r in rows:
             if flt and flt not in r['template'].lower():
                 continue
@@ -399,7 +403,7 @@ class MainWindow(QMainWindow):
                 if not entity:continue
                 sample=next((s for s in r['samples'] if len(s)>5 and s[5]==entity_id),None)
                 instance=QTreeWidgetItem([entity['name'],'' if entity['pending'] else '1'])
-                instance.setData(0,Qt.UserRole,{**r,'samples':[sample] if sample else [],'entityId':entity_id,'total':int(not entity['pending']),'dev':int(bool(sample) and sample[0]=='dev' and not entity['pending']),'ifc':int(bool(sample) and sample[0]=='ifc' and not entity['pending'])});it.addChild(instance)
+                instance.setData(0,Qt.UserRole,{**r,'samples':[sample] if sample else [],'entityId':entity_id,'nodeKind':'entity','total':int(not entity['pending']),'dev':int(bool(sample) and sample[0]=='dev' and not entity['pending']),'ifc':int(bool(sample) and sample[0]=='ifc' and not entity['pending'])});it.addChild(instance)
                 groups={}
                 for part in sorted(entity['parts'],key=lambda p:(p.get('componentOrder',999),p['componentLabel'],p['sourceId'])):
                     meaning=part['interpretation']
@@ -410,7 +414,7 @@ class MainWindow(QMainWindow):
                     child.setToolTip(0,part['componentLabel'])
                     if sample:
                         part_sample=list(sample);part_sample[1]=part['name'];part_sample[2]=part['source'];part_sample[3]=part['type']
-                        child.setData(0,Qt.UserRole,{**r,'cat':label,'sub':'','samples':[part_sample],'selectedSourceId':part['sourceId'],'total':0})
+                        child.setData(0,Qt.UserRole,{**r,'cat':label,'sub':'','samples':[part_sample],'selectedSourceId':part['sourceId'],'nodeKind':'source','total':0})
                     group.addChild(child)
 
     def _fill_group_summary(self):
@@ -459,7 +463,7 @@ class MainWindow(QMainWindow):
         self._table_pairs = pairs
         self.table.setRowCount(len(pairs))
         for i, (s, _r) in enumerate(pairs):
-            track, name, src = s[0], s[1], s[2]
+            name = s[1]
             stt = s[4] if len(s) > 4 else ''
             self.table.setItem(i, 0, QTableWidgetItem(name))
             it = QTableWidgetItem({'已确认':'已识别','候选':'待确认','未确认':'未识别'}.get(stt,stt))
@@ -470,7 +474,10 @@ class MainWindow(QMainWindow):
             elif stt == E.S.ST_UNC:
                 it.setForeground(QColor('#9aa3ad'))
             self.table.setItem(i, 1, it)
-            self.table.setItem(i, 2, QTableWidgetItem(src))
+            paths=self._source_files(s,_r)
+            source_item=QTableWidgetItem(f'{len(paths)} 个文件')
+            source_item.setToolTip('双击实体查看来源文件')
+            self.table.setItem(i, 2, source_item)
         if pairs:
             self.table.selectRow(0)
             # Replacing row 0 can retain the previous selection without a Qt
@@ -495,7 +502,7 @@ class MainWindow(QMainWindow):
 
     # ---------- 左侧属性面板 ----------
     def _prop_placeholder(self):
-        return '<div style="padding:12px 14px;color:#5b6472">选择一个对象，查看名称、分类、来源文件和设备部件。</div>'
+        return '<div style="padding:12px 14px;color:#5b6472">选择对象查看名称、分类和设备部件；双击实体查看来源文件。</div>'
 
     def _prop_block(self, title, rows):
         h = ['<div style="margin:0 0 10px 0">'
@@ -512,7 +519,7 @@ class MainWindow(QMainWindow):
         return ''.join(h)
 
     def _prop_html(self,s,r):
-        name,source=s[1],s[2];entity=self._entities_by_id.get(s[5]) if len(s)>5 else None
+        name=s[1];entity=self._entities_by_id.get(s[5]) if len(s)>5 else None
         selected=next((p for p in entity['parts'] if p['sourceId']==r.get('selectedSourceId')),None) if entity else None
         h=['<div style="padding:10px 12px;font-size:12px"><b>对象属性</b>']
         rows=[('名称',escape(name or '未命名'))]
@@ -522,7 +529,6 @@ class MainWindow(QMainWindow):
             rows.append(('分类',escape(' / '.join(dict.fromkeys(v for v in [r.get('group'),r.get('cat'),r.get('sub')] if v)))))
         status=s[4] if len(s)>4 else ''
         if status and status!='已确认':rows.append(('状态','待确认'))
-        if source:rows.append(('来源文件',escape(source)))
         h.append(self._prop_block('基本信息',rows))
         if entity and not selected:
             names=list(dict.fromkeys(p['componentLabel'] if p['componentLabel']!='未识别部件' else p['name'] or '未命名部件'
@@ -530,6 +536,36 @@ class MainWindow(QMainWindow):
             h.append('<div style="color:#7b8899;margin-top:12px">部件</div>')
             h.append('<ul>'+''.join('<li>'+escape(n)+'</li>' for n in names)+'</ul>' if names else '<p>未提供部件信息</p>')
         h.append('</div>');return ''.join(h)
+
+    def _source_files(self,s,r):
+        entity=self._entities_by_id.get(s[5]) if len(s)>5 else None
+        if not entity:return E.source_file_paths(s[2].split('; '))
+        selected=r.get('selectedSourceId')
+        return E.source_file_paths(p['source'] for p in entity['parts'] if not selected or p['sourceId']==selected)
+
+    def _show_source_files(self,s,r):
+        paths=self._source_files(s,r)
+        dialog=QDialog(self);dialog.setWindowTitle('来源文件 · '+(s[1] or '未命名'))
+        dialog.resize(900,480)
+        layout=QVBoxLayout(dialog)
+        title=QLabel(s[1] or '未命名');title.setTextFormat(Qt.PlainText);layout.addWidget(title)
+        content=QPlainTextEdit();content.setReadOnly(True);content.setLineWrapMode(QPlainTextEdit.NoWrap)
+        content.setPlainText('\n'.join(paths));layout.addWidget(content)
+        buttons=QDialogButtonBox(QDialogButtonBox.Close)
+        buttons.button(QDialogButtonBox.Close).setText('关闭')
+        copy=QPushButton('复制全部');buttons.addButton(copy,QDialogButtonBox.ActionRole)
+        copy.clicked.connect(lambda:QApplication.clipboard().setText(content.toPlainText()))
+        buttons.rejected.connect(dialog.reject);layout.addWidget(buttons)
+        dialog.exec()
+
+    def _on_entity_double_clicked(self,row,_column):
+        sample,record=self._table_pairs[row];self._show_source_files(sample,record)
+
+    def _on_tree_double_clicked(self,item,_column):
+        record=item.data(0,Qt.UserRole)
+        if record and record.get('nodeKind') in ('entity','source') and record['samples']:
+            self._show_source_files(record['samples'][0],record)
+        else:item.setExpanded(not item.isExpanded())
 
     def _on_sample_sel(self):
         rows = self.table.selectionModel().selectedRows()
@@ -611,7 +647,7 @@ class MainWindow(QMainWindow):
 
     # ---------- 对话框 ----------
     def about(self):
-        QMessageBox.about(self,'关于',f'<h3>{APP_NAME}</h3><p>版本 {APP_VER}</p><p>按维护的 xlsx 索引组织设备、材料、构件及实际部件。内部识别码不作为清册目录。独立运行，不依赖 GIM Viewer。</p>')
+        QMessageBox.about(self,'关于',f'<h3>{APP_NAME}</h3><p>版本 {APP_VER}</p><p>按实体目录组织设备、材料、构件及实际部件。</p>')
 
     def help_dialog(self):
         QMessageBox.information(self,'使用说明',"""
@@ -619,8 +655,9 @@ Ctrl+O 打开 .gim 或解包目录，也可拖入窗口。
 目录：设备/材料/构件 → 索引类别 → 索引名称 → 名称模板/实例 → 部件 → 来源。
 名称相同的目录/模板层会合并。选择设备或分类时不把部件重复计为设备台数。
 部件按设备模型部件名称对照表归组，未知或歧义归属继续保留。
+双击实体或部件查看来源文件，每行一个文件，可选择或复制全部。
 来源层级与工程身份、用途及目录投影分别表达；不因目录改变几何。
-目录维护源：变电三维设计建模规范_索引表类.xlsx。新增名称在工作簿标黄。
+目录使用随工具附带的分类数据，导出的清册包含目录编号。
 Ctrl+E 导出 HTML，另支持 CSV / JSON。工具运行和打包只使用自身数据。
 """)
 

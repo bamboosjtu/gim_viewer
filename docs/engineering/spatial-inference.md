@@ -106,7 +106,7 @@ IFC 的 web-ifc/RegionalIndex 范围是绝对 Y-up 米制；进入投影前统�
 
 ## 验证
 
-- `desktop/src/services/__tests__/compositionSpatial.test.ts`：Y-up→Z-up 转换、建筑轮廓、主变室外区域、房间/区域、防火墙、未分类保持、快照不变；
+- `desktop/src/services/projections/__tests__/compositionSpatial.test.ts`：Y-up→Z-up 转换、建筑轮廓、主变室外区域、房间/区域、防火墙、未分类保持、快照不变；
 - `compositionProjection.test.ts`：静态/运行时投影一致性；
 - `engineeringService.test.ts`：投影插件接入工程组成；
 - 本地工程回归入口：`npm run test:local -- --build <原生构建清单>`，样本由开发者在私有注册表中登记。

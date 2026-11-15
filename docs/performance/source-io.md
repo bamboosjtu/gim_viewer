@@ -16,6 +16,7 @@
 
 - 查询、重复模板或 occurrence 数增加时，全包枚举次数不得随之增长；同时监测 keys/entries/values/forEach/迭代器，不能换写法绕过计数。
 - 同修订的同文档只读/解析一次；共享依赖并发请求合并。慢根被挂起时，已满足依赖的根仍可完成。
+- 工程 Worker 的物理与语义遍历均按真实 CBM/DEV 边滚动预读；接到一批 CBM 后共享解析结果并合批准备其 DEV 指针。不能让每个 CBM 的 DEV 指针各自再跨一次宿主消息往返。先唤醒当前输入消费者，再等待其文档解析 Promise，避免自等待。
 - 来源预读被压力暂停或 Worker 回收重建后，实际请求仍复用有界共享读取；不能用重复 IPC 替代已暂停的预读。根准入窗口不等于 I/O 并发数，扩大窗口须保持原生批数、字节和过期结果保护。
 - 来源 Worker 请求输入时，回复不得排到等待它的任务后面；输入控制消息不能另建计算任务或充当终态结果。
 - 未引用的解码错误不能污染整批有效来源；未知/多候选保持原文和诊断，不选第一个路径冒充唯一。
@@ -26,5 +27,7 @@
 历史回退既有逐节点重建全包索引，也有撤掉批读后恢复大量 Worker→UI→原生 RPC，以及把所有缺失根串到一个 Promise 尾链。全包预取与逐文件惰性读都不能不看实际请求就当作通用最优解。
 
 用枚举数、native batch/RPC 数、重复读取/解析数及实际字节验证结构；本地再看 `engineering.physical-index`、`engineering.source-request`、来源准备 queueWaitMs/prepareMs 和批读 readMs。并发累计值不等于墙钟耗时。
+
+独立实体盘点工具只消费语义来源，容器路径在内存中接收所需文件，避免全量几何解包和语义小文件落盘后重开。不得为了共享实现而导入 Viewer；两种独立算法通过相同来源 DTO 对照。解析数量、文件打开次数与真实处理耗时分别报告。
 
 代码：[共享索引](../../desktop/src/gim/entryResolver.ts)、[按需输入](../../desktop/src/services/engineeringSourceInput.ts)、[来源供给](../../desktop/src/services/devLodSourceWorkset.ts)。检查：[索引](../../desktop/src/gim/__tests__/entryResolver.test.ts)、[递归读取](../../desktop/src/gim/__tests__/cbmParser.test.ts)、[根并发/共享依赖](../../desktop/src/services/__tests__/devSourcePipeline.test.ts)、[独立来源构建](../../desktop/src/services/__tests__/engineeringService.test.ts)。

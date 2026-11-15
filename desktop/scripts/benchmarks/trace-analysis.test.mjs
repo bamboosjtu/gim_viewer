@@ -12,8 +12,10 @@ import {JSDOM} from 'jsdom';
 import {cpuHotspots} from './profile-summary.mjs';
 import {MEASUREMENT_VERSION} from '../../../packages/measurement-core/src/version.mjs';
 import {writeArtifactInventory} from './artifacts.mjs';
+import {fileURLToPath} from 'node:url';
+const workspace=fileURLToPath(new URL('../../../',import.meta.url));
 test('private artifact inventory distinguishes existing events, missing captures and GPU support',()=>{
-  const parent=resolve('..','tmp','artifact-inventory-contract');mkdirSync(parent,{recursive:true});const out=mkdtempSync(join(parent,'run-'));
+  const parent=resolve(workspace,'tmp','artifact-inventory-contract');mkdirSync(parent,{recursive:true});const out=mkdtempSync(join(parent,'run-'));
   writeFileSync(join(out,'events.jsonl'),'{}\n');
   let inventory=writeArtifactInventory(out,{runId:'r',conditions:{mode:'benchmark'}});
   assert.equal(inventory.events.status,'available');assert.equal(inventory.analysis.status,'not-requested');
@@ -231,8 +233,22 @@ test('scope inheritance preserves explicit off and detects expansion instead of 
   assert.deepEqual(resolveScopes(scopes).requests.find(s=>s.scopeId==='B').capabilities,[]);
   assert.ok(resolveScopes(scopes).issues.includes('effective-capability-expansion'));
 });
+test('aggregate-only reports retain measured phases without fabricating task timelines',async()=>{
+  const root=resolve(workspace),parent=join(root,'tmp','aggregate-report-contract');mkdirSync(parent,{recursive:true});
+  const folder=mkdtempSync(join(parent,'run-')),input=join(folder,'report.json'),out=join(folder,'view');
+  writeFileSync(input,JSON.stringify({outcome:'PASS',measurement:{phases:{'parse <source>':{count:3,totalMs:12,maxMs:5}}}}));
+  await renderReport(input,out,{root});
+  const html=readFileSync(join(out,'report.html'),'utf8'),dom=new JSDOM(html);
+  assert.ok(dom.window.document.body.textContent.includes('parse <source>'));
+  assert.ok(dom.window.document.body.textContent.includes('12.00'));
+  assert.equal(dom.window.document.querySelector('tbody tr td:nth-child(2)').textContent,'3');
+  assert.ok(!dom.window.document.querySelector('#timeline'));
+  assert.ok(!dom.window.document.querySelector('#slow'));
+  assert.ok(readFileSync(join(out,'report.md'),'utf8').includes('未记录详细事件'));
+  dom.window.close();
+});
 test('private run -> analysis -> Perfetto -> executable public report preserves evidence isolation',async()=>{
-  const root=resolve('..'),parent=join(root,'tmp','observability-contract');mkdirSync(parent,{recursive:true});
+  const root=resolve(workspace),parent=join(root,'tmp','observability-contract');mkdirSync(parent,{recursive:true});
   const fixtureRoot=mkdtempSync(join(parent,'run-')),folder=join(fixtureRoot,'tmp','run'),input=join(folder,'report.json');
   mkdirSync(folder,{recursive:true});
   writeFileSync(input,JSON.stringify({conditions:{measurementVersion:MEASUREMENT_VERSION},
@@ -257,7 +273,7 @@ test('private run -> analysis -> Perfetto -> executable public report preserves 
   assert.equal(overview.trace,undefined);assert.match(internalHtml,/trace\.private\.json/);internalDom.window.close();
 });
 test('large traces cap task-path queries and persist summary evidence instead of raw events',async()=>{
-  const parent=resolve('..','tmp','trace-summary-contract');mkdirSync(parent,{recursive:true});
+  const parent=resolve(workspace,'tmp','trace-summary-contract');mkdirSync(parent,{recursive:true});
   const folder=mkdtempSync(join(parent,'run-')),input=join(folder,'report.json'),{events,emit}=fixture();
   for(let i=0;i<200;i++){
     const id='task-'+i,start=emit(100,{type:'span',action:'started',id,name:'geometry.compile'});
@@ -266,7 +282,7 @@ test('large traces cap task-path queries and persist summary evidence instead of
   }
   writeFileSync(input,JSON.stringify({conditions:{measurementVersion:MEASUREMENT_VERSION}}));
   writeFileSync(join(folder,'events.jsonl'),events.map(e=>JSON.stringify(e)).join('\n'));
-  const analysis=await analyzeRun(resolve('..'),input);
+  const analysis=await analyzeRun(resolve(workspace),input);
   assert.equal(analysis.taskPaths.length,16);assert.equal(analysis.taskPathSelection.eligible,201);
   assert.equal(analysis.taskPathSelection.omitted,185);assert.equal(analysis.trace.events,undefined);
   assert.ok(analysis.trace.spans.every(span=>Array.isArray(span.eventRefs)));
@@ -275,7 +291,7 @@ test('large traces cap task-path queries and persist summary evidence instead of
   assert.ok(geometry.totalMs>600);
 });
 test('preset CPU capture acknowledges start before releasing the operation barrier',async()=>{
-  const root=resolve('..'),parent=join(root,'tmp','capture-arm-contract');mkdirSync(parent,{recursive:true});
+  const root=resolve(workspace),parent=join(root,'tmp','capture-arm-contract');mkdirSync(parent,{recursive:true});
   const folder=mkdtempSync(join(parent,'run-'));let releaseStart,armed=false;
   const cdp={onEvent(){return ()=>{};},async send(method){
     if(method==='Profiler.start')await new Promise(resolve=>{releaseStart=resolve;});
@@ -290,7 +306,7 @@ test('preset CPU capture acknowledges start before releasing the operation barri
 });
 
 test('CPU profile brackets retain a candidate while an unverified clock domain stays unavailable',async()=>{
-  const parent=resolve('..','tmp','profile-clock-contract');mkdirSync(parent,{recursive:true});
+  const parent=resolve(workspace,'tmp','profile-clock-contract');mkdirSync(parent,{recursive:true});
   const out=mkdtempSync(join(parent,'capture-')),offset=1000000;let start,end;
   const cdp={onEvent(){return()=>{};},async send(method){
     if(method==='Profiler.start')start=(performance.now()+offset)*1000;
@@ -315,7 +331,7 @@ test('system capture rejects the unauthenticated plan launcher without creating 
 });
 
 test('slow span trigger sees new activity after the context history exceeds 32k events',async()=>{
-  const parent=resolve('..','tmp','slow-span-index-contract');mkdirSync(parent,{recursive:true});const out=mkdtempSync(join(parent,'run-'));
+  const parent=resolve(workspace,'tmp','slow-span-index-contract');mkdirSync(parent,{recursive:true});const out=mkdtempSync(join(parent,'run-'));
   const cdp={onEvent:()=>()=>{},send:async method=>method==='Profiler.stop'?{profile:{startTime:0,endTime:1000,nodes:[],samples:[],timeDeltas:[]}}:{}};
   const controller=new CaptureController(cdp,out,diagnosticPlan({captures:[{kind:'cpu',target:'main',trigger:'slow-span',stage:'late',thresholdMs:1,durationMs:1}]}));
   const context={runId:'r',executorId:'host',workerId:'host'};

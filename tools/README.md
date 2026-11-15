@@ -1,14 +1,17 @@
 # GIM 辅助工具
 
-三个独立的 Windows 桌面小工具，用于快速查看设备、识别工程实体和浏览 GIM 文件信息。它们使用 Python + PySide6，分别维护自己的运行环境和打包配置。
+四个独立的 Windows 桌面小工具，用于查看设备、识别工程实体、浏览 GIM 文件信息，以及生成变电站漫游。它们分别维护自己的运行环境和打包配置；前三个使用 Python + PySide6，`gim_blender` 使用 Python + Tkinter。
 
 | 工具 | 定位 | 输入 | 主要能力 | 目录包产物 |
 |---|---|---|---|---|
 | [gim_device](gim_device/README.md) | 设备 GIM 简易查看器 | 设备 `.gim` 包 | 递归装配、MOD/STL 三维预览、属性、视图截图 | `gim_device/dist/GIM设备查看器/GIM设备查看器.exe` |
 | [gim_element](gim_element/README.md) | 简易实体识别工具 | 变电 `.gim` 包或解包目录 | 识别设备、装置性材料、构件；未归类对象单列“其他”；导出 HTML / CSV / JSON | `gim_element/dist/GIM实体盘点器/GIM实体盘点器.exe` |
 | [gim_info](gim_info/README.md) | 简易 GIM 文件信息浏览器 | 已解包的 GIM 目录 | 浏览键值、XML、文本及二进制预览；指针跳转、反向引用、搜索和链清单导出 | `gim_info/dist/GIM信息阅读器/GIM信息阅读器.exe` |
+| [gim_blender](gim_blender/README.md) | 变电站漫游转换工具 | 变电站 `.gim` | 导入缓存并自动生成 Blender/HTML、删除缓存、启动本地浏览器漫游 | `gim_blender/dist/gim_blender/gim_blender.exe` |
 
 所有工具都持有自己的实现与资源，运行和打包不导入、不调用、不读取 GIM Viewer 主程序。`gim_element` 自带标准索引、分类词典和 Python 识别算法，通过数据版本、共同的纯数据用例及开发者本地结果对照验证一致性。它的输出可辅助审查主程序，不能替代工程实例的人工真值。`gim_info` 默认浏览文件与指针，不建立三维模型。
+
+`gim_blender` 的窗口仅有“导入 GIM、删除所选、启动 HTML Demo”。数据与日志位于 exe 旁 `data/`，独立 Node/IFC/网页资源随包分发；可额外打包 Blender 便携运行时。其构建与本地验证入口见 [工具说明](gim_blender/README.md)，不适用下面三个 Qt 工具的 smoke 参数。
 
 ## 运行与构建
 
@@ -59,9 +62,11 @@
 
 三个工具独立交付，保留各自的 Python 实现。它们的分类和解析结果限于各自规则，不作为 Viewer、未来 SDK 或 Validator 的权威真值；跨实现一致性仍需开发者本地真实来源复核。工具不依赖主程序或未来的 SDK 抽取，Benchmark 继续由独立的测量契约执行。
 
-CI 运行 `test_pure.py`，实体工具增加 `test_standard.py` 的纯 DTO 标准识别契约，以及构建路径安全、目录包构建和启动检查。纯函数检查不构造 GIM 包、不生成工程目录、不读取真实或合成工程样本。矩阵、IFC 文本和编码等普通值测试使用工作区临时目录作为所有子进程 TEMP/TMP/TMPDIR；错误退出即失败。
+测试按工具及被测模块组织：`tests/unit/test_<模块>.py` 保存普通值/纯 DTO 契约，`tests/local/test_<模块>.py` 保存来源目录、归档与 GUI 检查。CI 自动发现整个 `unit/`，同时执行构建路径安全、目录包构建和启动检查，不依赖固定测试文件名。纯函数检查不构造 GIM 包、不生成工程目录、不读取真实或合成工程样本。矩阵、IFC 文本和编码等普通值测试使用工作区临时目录作为所有子进程 TEMP/TMP/TMPDIR；错误退出即失败。
 
-现有 `test_core.py`、指针目录测试及冻结版工程 smoke 属于开发者本地任务，不加入远程 CI。它们仍可用下面命令显式运行。构建成功的完整目录 ZIP 上传；CI 不声称工程正确性或性能验收通过。
+`tests/local/` 和冻结版工程 smoke 属于开发者本地任务，不加入远程 CI。它们可用下面命令显式运行。构建成功的完整目录 ZIP 上传；CI 不声称工程正确性或性能验收通过。
+
+设备工具的浏览器截图与 HTML 检查放在 `tests/manual/`，需要开发者显式传入参数和启动 Playwright，不混入 unittest 自动发现。
 
 ## 验证
 
@@ -69,10 +74,15 @@ CI 运行 `test_pure.py`，实体工具增加 `test_standard.py` 的纯 DTO 标�
 # 构建路径越界、目录联接及失败时保留旧产物的回归
 powershell.exe -NoProfile -File .\tools\tests\build-safety.ps1
 
-# 每个工具的合成输入测试（分别运行，避免同名 gim_core 模块互相覆盖）
-.\tools\gim_device\.venv\Scripts\python.exe -m unittest discover -s tools/gim_device/tests -v
-.\tools\gim_element\.venv\Scripts\python.exe -m unittest discover -s tools/gim_element/tests -v
-.\tools\gim_info\.venv\Scripts\python.exe -m unittest discover -s tools/gim_info/tests -v
+# CI 同口径的模块单元测试；各工具分别启动 Python，避免同名模块互相覆盖
+python -m unittest discover -s tools/gim_device/tests/unit -p 'test_*.py' -v
+python -m unittest discover -s tools/gim_element/tests/unit -p 'test_*.py' -v
+python -m unittest discover -s tools/gim_info/tests/unit -p 'test_*.py' -v
+
+# 开发者本地目录/归档/GUI 检查
+.\tools\gim_device\.venv\Scripts\python.exe -m unittest discover -s tools/gim_device/tests/local -v
+.\tools\gim_element\.venv\Scripts\python.exe -m unittest discover -s tools/gim_element/tests/local -v
+.\tools\gim_info\.venv\Scripts\python.exe -m unittest discover -s tools/gim_info/tests/local -v
 
 # 先用 -Publish 构建；以下命令核对 ZIP 并运行真正的冻结 EXE
 .\tools\gim_device\.venv\Scripts\python.exe tools/tests/smoke_tool.py --tool gim_device --out output/tools-ci/gim_device
@@ -89,7 +99,7 @@ powershell.exe -NoProfile -File .\tools\tests\build-safety.ps1
 
 设备查看器提供 `viewer_app.py --smoke <设备.gim> <输出.png>`，实体工具提供 `element_app.py --smoke <gim或目录> <输出.png>`；对应 EXE 接受相同参数。文件浏览器的 `--guitest <目录>` 会自检跳转、返回、索引和内容视图，并在当前目录生成截图。
 
-设备查看器的 `tools/test_html_safety.py` 使用 Playwright + Edge 检查模型文本不能注入 HTML；`tools/test_render.py` 用于浏览器渲染回归。它们是开发辅助脚本，需要额外安装 Playwright。
+设备查看器的 `tests/manual/html_safety.py` 使用 Playwright + Edge 检查模型文本不能注入 HTML；`tests/manual/render.py` 用于浏览器渲染回归。它们是开发辅助脚本，需要额外安装 Playwright。
 
 ## Windows 启动排查
 

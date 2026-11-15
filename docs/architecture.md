@@ -23,6 +23,8 @@
 
 新增 SDK 前先遵循现有包边界；需要跨端复用时再迁入 `packages/`，不为减少目录数量合并运行面。测量产出的 HTML 属于 `output/` 或 `tmp/`，不是应用入口。
 
+单元测试随源码模块放在 `__tests__/`，共享线路核心的测试属于 `packages/powerline-core/src/__tests__/`；独立工具按 `tests/unit/` 与 `tests/local/` 区分自动契约和本地检查。模块重构时的归属及关联执行规则见[测试组织](validation.md#测试组织)。
+
 ## 运行时主干
 
 ```text

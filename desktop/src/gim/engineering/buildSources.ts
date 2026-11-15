@@ -45,11 +45,6 @@ export function collectEngineeringSources(graph: EngineeringSourceGraph, objects
   };
 }
 
-export function buildEngineeringSources(scope:string,graph:EngineeringSourceGraph,objects:readonly IfcSpatialObject[],models:readonly SpatialModelSummary[],nodes:readonly IfcSpatialNode[]=[]):{sources:EngineeringSources;snapshot:EngineeringSnapshot}{
-  const sources=collectEngineeringSources(graph,objects,models,nodes);
-  return {sources,snapshot:normalizeEngineeringSources(scope,sources)};
-}
-
 /** Rules can change without reparsing source formats or touching geometry. */
 export function normalizeEngineeringSources(scope: string, sources: EngineeringSources): EngineeringSnapshot {
   return {...normalizeEngineeringModel(scope, engineeringObjectEvidence(sources.graph,engineeringSourceRecords(sources.graph,sources.ifcRecords)), sources.graph.aliases),rulesVersion:ENGINEERING_RECOGNITION_VERSION,evidenceBinding:{scope,sourceRevision:sources.graph.revision??0}};

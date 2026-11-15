@@ -429,7 +429,7 @@ npm run bench -- report --input ../tmp/gim-bench/runs/<本轮runId>/report.json
 
 `analyze` 将摘要写入输入报告同目录的 `analysis.private.json`，原始事件留在 `events.jsonl`，终端只打印覆盖摘要；逐任务阻塞链只分析 duration 最大的前 16 个依赖终点，省略数量见 `taskPathSelection`。Pipeline 是可重叠 span duration 之和，不等于墙钟。内部 HTML 只内嵌有界概览；`export-trace` 写入同目录的 `trace.private.json`（Chrome Trace Event JSON，Perfetto 可读）。生命周期归并、冲突、阻塞链和未归因区间的判定见[测量架构](architecture/measurement.md#operation-trace-与定点诊断)。
 
-system 配置仍校验 durationMs 与 bufferMiB，但当前录制入口关闭，返回 `authenticated-system-helper-required`，不启动提权或 WPR；WPR/PMC 待受保护认证 helper 接入后恢复。已有 ETL 可由本地受控脚本调用 `system-diagnostics.mjs` 的 `exportSystemTables` 做离线 WPA 摘要，原生 `run` 不自动导出：需 exporter（可省略并从 PATH 查找）、wpaProfile、profileSha256 以及 tables 列/单位契约。表契约 columns 指定 pid/created/start/end/value，可选 tid，并单独指定时间列的 timeUnit（ns/us/ms/s）和数值列的 unit；创建时间必须与独立采样器的 windows-filetime-100ns 身份一致，没有匹配的 owned process 实例时返回 `owned-process-instance-not-matched` 并标 unavailable，不能用进程名称或 PID 猜配。缺少 WPA Profile 时保留原始 ETL，摘要标 unavailable。
+system 配置仍校验 durationMs 与 bufferMiB，但当前录制入口关闭，返回 `authenticated-system-helper-required`，不启动提权或 WPR。Benchmark 构建不附带不可执行的采集脚本；独立原生内存采样器仍随构建提供。已有 ETL 可由本地受控脚本调用 `system-diagnostics.mjs` 的 `exportSystemTables` 做离线 WPA 摘要，原生 `run` 不自动导出：需 exporter（可省略并从 PATH 查找）、wpaProfile、profileSha256 以及 tables 列/单位契约。表契约 columns 指定 pid/created/start/end/value，可选 tid，并单独指定时间列的 timeUnit（ns/us/ms/s）和数值列的 unit；创建时间必须与独立采样器的 windows-filetime-100ns 身份一致，没有匹配的 owned process 实例时返回 `owned-process-instance-not-matched` 并标 unavailable，不能用进程名称或 PID 猜配。缺少 WPA Profile 时保留原始 ETL，摘要标 unavailable。
 
 诊断运行不能参与普通性能基线。原始 .cpuprofile、.heapprofile、.heapsnapshot、.etl、analysis.private.json 和 trace.private.json 留 tmp；可分享报告由白名单生成，缺口不补零。P95 是给定重复轮次的经验最近秩，结合 Count/Missing 和覆盖状态判读，不宣称少量重复证明尾部性能。
 

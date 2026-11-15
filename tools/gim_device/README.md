@@ -18,11 +18,11 @@ gim_device/
 ├── OrbitControls.js        相机控制（本地副本）
 ├── dist/
 │   └── GIM设备查看器.exe    打包产物（约 190 MB，可单独拷走）
-├── tools/
-│   └── test_render.py      无头浏览器回归测试（不开 GUI 快速验证任意 gim）
+├── tests/manual/
+│   └── render.py      无头浏览器回归测试（不开 GUI 快速验证任意 gim）
 ```
 
-`tools/test_render.py` 的截图写入工作区 `output/gim-device/`，临时页面写入 `tmp/gim-device/`。
+`tests/manual/render.py` 的截图写入工作区 `output/gim-device/`，临时页面写入 `tmp/gim-device/`。
 
 ---
 
@@ -118,7 +118,7 @@ CBM.TRANSFORMMATRIX × DEV.SUBDEVICEn 矩阵 × DEV.SOLIDMODELn 矩阵 × PHM.TR
 ## 六、回归测试
 
 ```bash
-python tools/test_render.py some.gim --out tag --views iso,front
+python tests/manual/render.py some.gim --out tag --views iso,front
 # 截图落在工作区 output/gim-device/_r_<tag>_<view>.png
 ```
 

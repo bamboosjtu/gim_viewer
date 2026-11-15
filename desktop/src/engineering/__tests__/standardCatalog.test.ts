@@ -20,11 +20,12 @@ it('covers every verified index row, using the maintained workbook hierarchy and
 });
 it.each(STANDARD_CATALOG.flatMap(item=>[item.term,item.label].map(name=>({item,name}))))('recognizes $name from structured source declarations',({item,name})=>{
   const result=interpretObject(toObjectEvidence(source('x',name)));
-  expect(result.category.startsWith(item.kind==='equipment'?'E':item.kind==='material'?'M':'C')).toBe(true);
+  if(standardTerms(name).length===1)expect(result.category).toBe(item.category);
+  else expect(result.category).toBe('U-OBJECT');
   if(standardTerms(name).length===1)expect(result.standardClass).toMatchObject({id:item.id,kind:item.kind,status:'confirmed'});
   expect(result.classificationEvidence?.length||result.standardClass?.evidence.length).toBeGreaterThan(0);
 });
-it.each([['IFCCABLESEGMENT','M05'],['IFCLIGHTFIXTURE','M11'],['IFCOUTLET','M13'],['IFCTRANSFORMER','E-T'],['IFCRAMPFLIGHT','C-A9'],['IFCREINFORCINGBAR','C-B5'],['IFCCHILLER','E19']])('maps common outward IFC type %s', (type,category)=>{
+it.each([['IFCCABLESEGMENT','M07'],['IFCLIGHTFIXTURE','M05'],['IFCOUTLET','M05'],['IFCTRANSFORMER','E01'],['IFCRAMPFLIGHT','C02'],['IFCREINFORCINGBAR','C02'],['IFCCHILLER','C02']])('maps common outward IFC type %s', (type,category)=>{
   expect(interpretObject(toObjectEvidence(source('x',type,{track:'ifc'}))).category).toBe(category);
 });
 it('uses IFC predefined type without guessing porcelain, AC/DC or an internal IFC resource',()=>{

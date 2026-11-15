@@ -1,6 +1,6 @@
 # 实体目录
 
-本目录唯一维护源为 [变电三维设计建模规范_索引表类.xlsx](../../../research/实体识别/变电三维设计建模规范_索引表类.xlsx)。运行时目录、分类词汇、清册分组与 gim_element 使用从同一工作簿生成的数据，不再使用旧的“设备 E01–E19 / 材料九大类 / 构件四大类”作为展示目录。
+目录名称、层级、别名和部件宿主关系的维护源为 [变电三维设计建模规范_实体索引表.xlsx](变电三维设计建模规范_实体索引表.xlsx)。运行时目录、分类词汇、清册分组与 gim_element 使用从同一工作簿生成的 JSON 数据，具体条目与来源位置见[机器目录索引](catalog-index.md)。
 
 | 根分组 | 工作表 | 层级 |
 |---|---|---|
@@ -20,3 +20,7 @@
 - [材料](materials.md)
 - [构件](components.md)
 - [身份、归属与来源证据](../entities.md)
+
+运行时的 `category` 只使用工作簿目录编号：设备 E01–E22、材料 M01–M10、构件 C01–C06；编号按各表 A 列类别首次出现顺序生成。变压器 E01、电抗器 E02、电流互感器 E03、电压互感器 E04，二次屏柜 E17，灯具为材料 M05「照明及动力」。`standardClass.id` 标识具体模型条目，`purpose` 标识主变/站用等用途，`recognitionCode` 是身份和归属算法的内部角色，不能用于目录标签或排序。
+
+目录是数据配置：`catalog.json` 持有目录/部件及宿主约束，`standardCatalog.json` 持有模型条目/别名/原文位置，`sourceVocabulary.json` 持有适配词汇。维护导入器支持 `python desktop/scripts/generate-engineering-catalog.py --workbook <路径>`；算法和清册不直接引用 XLSX。内部默认角色由 `desktop/src/engineering/recognitionPolicy.json` 明确维护；生成器不读取旧生成结果，不用隐藏的代码表覆盖策略配置。工作簿 D 列为补充别名，部件表 C 列为别名、D 列为适用宿主类别；空宿主约束表示通用部件。工具持有生成数据的独立副本，运行及打包均不读取主程序。

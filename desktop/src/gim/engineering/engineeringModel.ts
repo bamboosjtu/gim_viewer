@@ -1,8 +1,5 @@
-import { normalizeEngineeringModel } from '../../engineering/normalize.js';
-import type { EngineeringSnapshot } from '../../engineering/types.js';
 import type { IfcSpatialObject } from '../ifcSpatialParser.js';
 import { ifcSourceRecords } from './ifcSourceRecords.js';
-import { engineeringObjectEvidence } from './objectEvidence.js';
 import type { SourceRecord } from './sourceEvidence.js';
 import {engineeringSourceRecords,type EngineeringSourceGraph} from './sourceGraph.js';
 
@@ -18,7 +15,6 @@ export interface IfcSourceMatch {
 
 export interface EngineeringSourceModel {
   sources: SourceRecord[];
-  snapshot: EngineeringSnapshot;
   ifcMatches: IfcSourceMatch[];
 }
 
@@ -27,7 +23,7 @@ const canonical = (value: string) => value.replace(/\\/g, '/').toLowerCase();
 /** Joins delivered sources, independent of scene loading and either navigation
  * tree. A declared file+GUID link does not prove DEV/IFC physical equivalence.
  */
-export function collectEngineeringSourceModel(graph: EngineeringSourceGraph, objects: readonly IfcSpatialObject[]): Omit<EngineeringSourceModel,'snapshot'> {
+export function collectEngineeringSourceModel(graph: EngineeringSourceGraph, objects: readonly IfcSpatialObject[]): EngineeringSourceModel {
   const ifc = ifcSourceRecords(objects);
   const sources = engineeringSourceRecords(graph,ifc);
   const byModelGuid = new Map<string, string[]>();
@@ -63,9 +59,4 @@ export function collectEngineeringSourceModel(graph: EngineeringSourceGraph, obj
       ifcSourceIds: [...hits], devSourceIds: [...aliases.get(cbm.id) ?? devByCbm.get(cbm.id) ?? []] });
   }
   return { sources, ifcMatches };
-}
-
-export function buildEngineeringSourceModel(scope:string,graph:EngineeringSourceGraph,objects:readonly IfcSpatialObject[]):EngineeringSourceModel {
-  const model=collectEngineeringSourceModel(graph,objects);
-  return {...model,snapshot:normalizeEngineeringModel(scope,engineeringObjectEvidence(graph,model.sources),graph.aliases)};
 }

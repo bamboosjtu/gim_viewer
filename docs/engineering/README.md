@@ -12,7 +12,7 @@
 | [空间推断](spatial-inference.md) | 建筑轮廓、命名投票、房间/区域归属、防火墙墙片与阈值 |
 | [清册模型树模板](inventory-template.md) | 独立分类/子类投影、计数、搜索与选择 |
 | [目录总则](catalogs/README.md) | 分类优先级、目录版本、未知/冲突处理 |
-| [设备目录](catalogs/equipment.md) | E01–E19、E-T、二次设备子类与成套边界 |
+| [设备目录](catalogs/equipment.md) | 工作簿 E01–E22、设备部件与成套边界 |
 | [装置性材料目录](catalogs/materials.md) | M01–M09 的目标粒度与边界 |
 | [构件清单](catalogs/components.md) | C-A1–C-D6 全部构件子类 |
 

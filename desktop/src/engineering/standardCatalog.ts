@@ -9,9 +9,9 @@ for(const item of STANDARD_CATALOG)for(const name of [item.label,item.term,...it
 }
 /** Exact aliases can be ambiguous (e.g. two distinct shielding devices). */
 export function standardTerms(value:string):readonly Item[]{return terms.get(normalize(value))??[];}
-const chinese=STANDARD_CATALOG.filter(row=>/[\u3400-\u9fff]/.test(row.label)&&row.label.length>=2);
-const byLength=[...chinese].sort((a,b)=>b.label.length-a.label.length||a.id.localeCompare(b.id));
-const expression=new RegExp(byLength.map(row=>row.label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|'),'g');
+const chinese=[...new Set(STANDARD_CATALOG.flatMap(row=>[row.label,...row.aliases]).filter(label=>/[\u3400-\u9fff]/.test(label)&&label.length>=2))];
+const byLength=chinese.sort((a,b)=>b.length-a.length||a.localeCompare(b));
+const expression=new RegExp(byLength.map(label=>label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|'),'g');
 /** Names provide candidates only. Structured source declarations stay authoritative. */
 export function standardTermsFromName(name:string):readonly Item[]{
   const exact=standardTerms(name);if(exact.length)return exact;

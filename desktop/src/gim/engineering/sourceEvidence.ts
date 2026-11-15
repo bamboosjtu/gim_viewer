@@ -2,12 +2,14 @@ import recognitionFields from './recognitionFields.json';
 import aliases from './sourceTypeAliases.json';
 import type { EvidenceValue, ObjectEvidence, ObjectNameEvidence } from '../../engineering/types.js';
 import { categoryFromName, ENGINEERING_RULES_VERSION } from '../../engineering/classify.js';
-import { ENGINEERING_CATEGORY_LABELS } from '../../engineering/catalogLabels.js';
+import { RECOGNITION_LABELS as ENGINEERING_CATEGORY_LABELS,directoryRecognitionCode,directoryDefinition } from '../../engineering/catalogLabels.js';
 import proxyCategories from './proxyCategories.json';
 import sourceVocabulary from './sourceVocabulary.json';
 import {standardTerms,standardEquipmentId,STANDARD_CATALOG_VERSION} from '../../engineering/standardCatalog.js';
 const vocabulary:Record<string,string>={...sourceVocabulary.equipment,...sourceVocabulary.equipmentAliases};
 const components:Record<string,string>=sourceVocabulary.components;
+const componentWords=Object.entries(sourceVocabulary.keywordDictionary.entries).filter(([word,entry])=>'componentType' in entry&&/[\u3400-\u9fff]/.test(word)&&word.length>=3).map(([word])=>word).sort((a,b)=>b.length-a.length);
+const componentNameExpression=new RegExp(componentWords.map(word=>word.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|'));
 // Data content invalidates semantic caches even while development contracts stay v1.
 const vocabularyContent=(()=>{const text=JSON.stringify([sourceVocabulary,aliases,proxyCategories]);let a=2166136261,b=2246822519;
   for(let i=0;i<text.length;i++){a=Math.imul(a^text.charCodeAt(i),16777619);b=Math.imul(b^text.charCodeAt(i),3266489917);}
@@ -94,14 +96,14 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
   const devTypes: Readonly<Record<string, string>> = aliases.dev;
   const ifcTypes: Readonly<Record<string, string>> = aliases.ifc;
   const standardTypes=standardTerms(type);
-  const standardCategories=[...new Set(standardTypes.map(item=>item.category))];
-  const devCategory = ENGINEERING_CATEGORY_LABELS[type]?type:standardCategories.length===1?standardCategories[0]:devTypes[type.toLowerCase()];
+  const standardCategories=[...new Set(standardTypes.map(item=>item.recognitionCode))];
+  const devCategory = standardCategories.length===1?standardCategories[0]:directoryRecognitionCode(type)??devTypes[type.toLowerCase()];
   const subtypeTypes:Record<string,string>={postinsulator:'支柱绝缘子',acpillarinsulator:'支柱绝缘子',chaininsulation:'绝缘子串',insulatorssring:'绝缘子串',walltubeinsulator:'穿墙套管',acwallbushing:'穿墙套管',cabletray:'电缆桥架'};
   const categoryValue=(value:string,allowName:boolean):string=>{
-    const direct=ENGINEERING_CATEGORY_LABELS[value]?value:undefined;
+    const direct=directoryRecognitionCode(value);
     const alias=devTypes[value.toLowerCase()]??ifcTypes[value.toUpperCase()];
     if(direct)return direct;
-    const standard=standardTerms(value);if(standard.length===1)return standard[0].category;
+    const standard=standardTerms(value);if(standard.length===1)return standard[0].recognitionCode;
     if(alias)return alias==='E01'?'E-T':alias;
     // Model/spec strings are free text ("220kV变压器模型04_散热器"), not a
     // category fact. Only explicit category/type fields may fall back to a name.
@@ -115,10 +117,13 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
   const keywordEntries=dictionary.entries as Record<string,{equipmentType?:string;componentType?:string;evidence:KeywordSourceEvidence}>;
   const confidence=(entry:typeof keywordEntries[string])=>entry.evidence.verification==='verified'&&entry.evidence.sourceKind==='workbook'&&entry.evidence.sourceLocation?'confirmed' as const:'candidate' as const;
   const standardDeclarations=[{value:type,evidenceId:`${record.id}:source_type:${type}`},...typeProperties,...values(['SYSCLASSIFYNAME','PARTNAME']).map(p=>({...p,confidence:keywordEntries[p.value.trim().toLowerCase()]?confidence(keywordEntries[p.value.trim().toLowerCase()]):'candidate' as const}))];
-  const standardClasses=standardDeclarations.flatMap(p=>standardTerms(p.value).map(item=>({...p,id:item.id,kind:item.kind as 'equipment'|'material'|'construction',label:item.label,term:item.term,category:item.category,catalogCategory:item.catalogCategory,catalogGroup:item.catalogGroup})));
+  const standardClasses=standardDeclarations.flatMap(p=>{
+    const items=standardTerms(p.value),family=!items.length?directoryDefinition(p.value):undefined;
+    const matches=items.length?items:family?[{id:'category:'+family.code,kind:family.kind,label:family.label,term:family.code,category:family.code,recognitionCode:directoryRecognitionCode(family.code)!,catalogCategory:family.label,catalogGroup:family.groupLabel}]:[];
+    return matches.map(item=>({...p,id:item.id,kind:item.kind as 'equipment'|'material'|'construction',label:item.label,term:item.term,category:item.category,recognitionCode:item.recognitionCode,catalogCategory:item.catalogCategory,catalogGroup:item.catalogGroup}));
+  });
   const keywords=dictionary.fields.flatMap(field=>values([field]).map(p=>({field,property:p,entry:keywordEntries[p.value.trim().toLowerCase()]})));
-  const keywordCategory:Record<string,string>={oil_immersed_transformer:'E-T',gis:'E05',hgis:'E05',ac_porcelain_circuit_breaker:'E06'};
-  const keywordTypes=keywords.flatMap(({property,entry})=>entry?.equipmentType&&keywordCategory[entry.equipmentType]?[{...property,value:keywordCategory[entry.equipmentType],confidence:confidence(entry)}]:[]);
+  const keywordTypes=keywords.flatMap(({property,entry})=>entry?standardTerms(property.value).map(item=>({...property,value:item.recognitionCode,confidence:confidence(entry)})):[]);
   const vocabularyObservations=keywords.map(({field,property,entry})=>{
     const terms=standardTerms(property.value),item=terms.length===1?terms[0]:undefined;
     return {field,rawValue:property.value,status:entry||item?'mapped' as const:'unresolved' as const,evidenceId:property.evidenceId,dictionaryVersion:entry?dictionary.version:STANDARD_CATALOG_VERSION,
@@ -126,11 +131,12 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
   });
   const modelProperties=values(['型号','MODEL','MODELSPEC']);
   const nameTerm=keywordEntries[record.name.trim().toLowerCase()]??keywordEntries[(record.name.split(/[_－:：]/).pop()??'').trim().toLowerCase()];
-  const componentNameCandidate=!components[type.toLowerCase()]&&!standardTypes.length&&!standardTerms(record.name).length&&(!devCategory||devCategory==='part')&&nameTerm?.componentType?
-    [{value:nameTerm.componentType,evidenceId:record.nameEvidence?.find(n=>n.value===record.name)?.evidenceId??`name:${record.id}`,confidence:'candidate' as const}]:[];
+  const namedComponent=nameTerm??keywordEntries[componentNameExpression.exec(record.name)?.[0]??''];
+  const componentNameCandidate=!components[type.toLowerCase()]&&!standardTypes.length&&!standardTerms(record.name).length&&(!devCategory||devCategory==='part')&&namedComponent?.componentType?
+    [{value:namedComponent.componentType,evidenceId:record.nameEvidence?.find(n=>n.value===record.name)?.evidenceId??`name:${record.id}`,confidence:'candidate' as const}]:[];
   const propertyCategories=[
     ...predefinedCategories,
-    ...keywordTypes.flatMap(p=>{const category=categoryValue(p.value,false);return category!=='U-OBJECT'&&category!=='part'?[{...p,value:category}]:[];}),
+    ...keywordTypes.filter(p=>p.value!=='U-OBJECT'&&p.value!=='part'),
     ...typeProperties.flatMap(p=>{const category=categoryValue(p.value,true);return category!=='U-OBJECT'&&category!=='part'?[{...p,value:category}]:[];}),
     ...modelProperties.flatMap(p=>{const category=categoryValue(p.value,false);return category!=='U-OBJECT'&&category!=='part'?[{...p,value:category}]:[];}),
   ];
@@ -168,7 +174,7 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
     names: record.nameEvidence,
     typeCategory: /neutralpointequipment/i.test(type) ? 'neutral_set' : predefinedCategories.length===1?predefinedCategories[0].value:devCategory==='E01'&&type!=='E01'?'E-T':devCategory ?? ifcTypes[type.toUpperCase()],
     typeEvidenceId: predefinedCategories.length===1?predefinedCategories[0].evidenceId:`${record.id}:source_type:${type}`,
-    propertyCategories:[...propertyCategories,...standardClasses.filter(p=>p.evidenceId!==`${record.id}:source_type:${type}`).map(p=>({...p,value:p.category}))],
+    propertyCategories:[...propertyCategories,...standardClasses.filter(p=>p.evidenceId!==`${record.id}:source_type:${type}`).map(p=>({...p,value:p.recognitionCode!}))],
     typeRefinements:['IFCPUMP','IFCVALVE'].includes(type)?['C-D5']:['IFCBEAM','IFCBEAMSTANDARDCASE'].includes(type)?['C-A4.steel']:['IFCCOLUMN','IFCCOLUMNSTANDARDCASE'].includes(type)?['C-A3.steel']:type==='IFCMEMBER'?['C-A14','C-A3','C-A4','C-B5','C-B7']:[],
     subtypeNames:[...values(['材料子类','设备子类','MATERIALSUBTYPE','EQUIPMENTSUBTYPE']),...(subtypeTypes[type.toLowerCase()]?[{value:subtypeTypes[type.toLowerCase()],evidenceId:`${record.id}:source_type:${type}`}]:[])],
     objectRoles:[...values(['对象角色','组件角色','OBJECTROLE','COMPONENTROLE']).flatMap(p=>/内部|组成|部件|component|part/i.test(p.value)?[{...p,value:'part'}]:/独立|independent/i.test(p.value)?[{...p,value:'independent'}]:[]),

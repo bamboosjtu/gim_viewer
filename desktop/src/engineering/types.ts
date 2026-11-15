@@ -30,7 +30,7 @@ export interface ObjectEvidence {
   assemblyParentId?: string;
   typeCategory?: string;
   typeEvidenceId?: string;
-  /** Category/role facts interpreted from current-object structured fields. */
+  /** Private category/role hints interpreted from current-object structured fields. */
   propertyCategories?: readonly EvidenceValue[];
   objectRoles?: readonly EvidenceValue[];
   phaseLabels?: readonly EvidenceValue[];
@@ -54,6 +54,8 @@ export interface ObjectEvidence {
 export type SourceMeaning = 'object' | 'part' | 'fragment' | 'neutral_set' | 'container' | 'detail' | 'source_only';
 export type SourceComponentRole = 'cover' | 'sidewall' | 'base';
 export interface ObjectInterpretation {
+  /** Private identity/assembly role, independent from the workbook directory. */
+  recognitionCode?:string;
   sourceName?:string;
   standardClass?:StandardClassEvidence & {status:'confirmed'|'candidate'|'unresolved';evidence:readonly string[]};
   membershipEvidence?:readonly string[];
@@ -64,6 +66,7 @@ export interface ObjectInterpretation {
   componentType?: TermInterpretation;
   purpose?: TermInterpretation;
   objectRole?: TermInterpretation;
+  /** Public workbook family code. Independent from purpose and assembly role. */
   category: string;
   meaning: SourceMeaning;
   basis: string;
@@ -87,6 +90,8 @@ export interface VocabularyObservation {
 }
 
 export interface EngineeringEntity {
+  /** Identity/assembly role; category is exclusively the workbook directory code. */
+  recognitionCode?:string;
   standardClass?:ObjectInterpretation['standardClass'];
   id: string;
   category: string;
@@ -97,6 +102,7 @@ export interface EngineeringEntity {
   sourceIds: string[];
   classificationConflicts: number;
   classificationStatus?: 'confirmed' | 'candidate' | 'unresolved';
+  categoryStatus?: 'confirmed' | 'candidate' | 'unresolved';
   boundaryStatus?: 'confirmed' | 'candidate' | 'unresolved';
   subtype?: string;
   subtypeLabel?: string;
@@ -107,6 +113,7 @@ export interface EngineeringEntity {
 }
 
 export interface StandardClassEvidence extends EvidenceValue {
+  recognitionCode?:string;
   id:string;kind:'equipment'|'material'|'construction';label:string;term:string;category:string;catalogCategory?:string;catalogGroup?:string;
 }
 

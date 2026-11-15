@@ -35,7 +35,7 @@ export default defineConfig({
     poolOptions: {
       forks: { minForks: 1, maxForks: 2 },
     },
-    include: ['src/**/__tests__/**/*.test.ts', 'bridge/__tests__/**/*.test.ts'],
+    include: ['src/**/__tests__/**/*.test.ts', 'bridge/__tests__/**/*.test.ts', '../packages/powerline-core/src/**/__tests__/**/*.test.ts'],
     // Native and private-sample suites use explicit local entry points.
     exclude: ['src/services/__tests__/substationSqlite.integration.test.ts'],
     setupFiles: ['./vitest.setup.ts'],

@@ -1,5 +1,5 @@
 import { expect,it } from 'vitest';
-import { categoryFromName, interpretObject } from '../classify.js';
+import { categoryFromName, interpretRecognitionObject as interpretObject } from '../classify.js';
 import { normalizeEngineeringModel } from '../normalize.js';
 import { ENGINEERING_CATEGORIES, ENGINEERING_CATEGORY_LABELS } from '../catalogLabels.js';
 import type { ObjectEvidence } from '../types.js';
@@ -12,7 +12,7 @@ it.each([
  ['CircuitBreaker','隔离开关','E06'],['SecondaryCabinet','主变压器测控柜','E16.control_cabinet'],
  ['OilFilledTransformer','站用变压器','E03'],['OilFilledTransformer','变压器','E-T'],
  ['CircuitBreaker','柜体','E06'],['PostInsulator','主变压器','E20'],
- ['E17','端子箱','E17'],['E01','站用变压器','E01'],
+ ['E17','端子箱','E16'],['E01','站用变压器','E03'],
 ])('uses object type %s before conflicting name %s', (source_type,name,category)=>{
  const object=toObjectEvidence({id:'x',track:'dev',source:'x.dev',name,source_type,parent:'',properties:[],sources:['x.dev'],context:[],guid:''});
  expect(interpretObject(object).category).toBe(category);
@@ -66,13 +66,13 @@ it('retains readable material details, grain, unknown reasons and stable indepen
  const source=toObjectEvidence({id:'a',track:'dev',source:'a.dev',name:'未知',source_type:'PostInsulator',parent:'',properties:[],sources:['a.dev'],context:[],guid:''});
  expect(interpretObject(source)).toMatchObject({category:'E20'});
  const model=normalizeEngineeringModel('p',[row('电缆桥架',{sourceId:'tray'}),row('未知物料',{sourceId:'unknown',traits:{materialType:true}})]);
- expect(model.entities.find(e=>e.category==='M08')).toMatchObject({grain:'segment',subtypeLabel:'电缆桥架'});
- expect(model.entities.find(e=>e.category==='M09')).toMatchObject({subtypeLabel:'未细分材料',unknownReason:'material_subtype_evidence_insufficient'});
+ expect(model.entities.find(e=>e.recognitionCode==='M08')).toMatchObject({grain:'segment',subtypeLabel:'电缆桥架'});
+ expect(model.entities.find(e=>e.recognitionCode==='M09')).toMatchObject({subtypeLabel:'未细分材料',unknownReason:'material_subtype_evidence_insufficient'});
  expect(interpretObject(row('主变引线套管'))).toMatchObject({category:'M07',unknownReason:'equipment_bushing_host_unresolved'});
- expect(ENGINEERING_CATEGORIES.filter(c=>/^M\d+$/.test(c.code))).toHaveLength(15);
- expect(ENGINEERING_CATEGORIES.filter(c=>/^C-/.test(c.code))).toHaveLength(43);
+ expect(ENGINEERING_CATEGORIES.filter(c=>/^M\d+$/.test(c.code))).toHaveLength(10);
+ expect(ENGINEERING_CATEGORIES.filter(c=>/^C\d+$/.test(c.code))).toHaveLength(6);
  expect(new Set(ENGINEERING_CATEGORIES.map(c=>c.code)).size).toBe(ENGINEERING_CATEGORIES.length);
- expect(ENGINEERING_CATEGORY_LABELS['C-B3']).toBe('建筑物基础');
+ expect(ENGINEERING_CATEGORY_LABELS['C02']).toBe('建筑物');
 });
 
 it('uses real same-type assembly to keep lamp terminal boards and cabinet bodies internal',()=>{
@@ -88,7 +88,7 @@ it('does not merge four single-phase bodies or repeated phase labels, and retain
  expect(model.entities).toHaveLength(0);expect(model.pending).toHaveLength(4);expect(model.diagnostics[0].kind).toBe('whole_identity_conflict');
  expect(normalizeEngineeringModel('p',bodies.slice(0,2).map(b=>({...b,phaseLabels:[value('A')]}))).pending).toHaveLength(2);
  const terminal=normalizeEngineeringModel('p',[row('主变端子箱',{sourceId:'box'})]);
- expect(terminal.entities[0].category).toBe('M10');
+ expect(terminal.entities[0].category).toBe('M04');
 });
 
 it('keeps free-text model strings out of category evidence',()=>{

@@ -1,0 +1,552 @@
+[
+  {
+    "name": "declared_host_overrides_wrong_source_parent",
+    "records": [
+      {
+        "id": "host",
+        "type": "OilImmersedTransformer",
+        "name": "1号主变",
+        "props": {
+          "PROJECTNAME": "1号主变",
+          "GRIDIDENTIFICATIONSYSTEMCODE": "unit-1"
+        }
+      },
+      {
+        "id": "wrong",
+        "type": "GIS",
+        "name": "2号组合电器",
+        "props": {
+          "PROJECTNAME": "2号组合电器",
+          "GRIDIDENTIFICATIONSYSTEMCODE": "unit-2"
+        }
+      },
+      {
+        "id": "part",
+        "type": "Radiator",
+        "name": "散热器",
+        "parent": "wrong",
+        "props": {
+          "HOSTEQUIPMENTCODE": "unit-1"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "host",
+        "part"
+      ],
+      [
+        "wrong"
+      ]
+    ],
+    "pending": 0
+  },
+  {
+    "name": "numbered_name_and_component_type",
+    "records": [
+      {
+        "id": "host",
+        "type": "OilImmersedTransformer",
+        "name": "1号主变",
+        "props": {
+          "PROJECTNAME": "1号主变"
+        }
+      },
+      {
+        "id": "part",
+        "type": "Body",
+        "name": "1号主变_本体"
+      }
+    ],
+    "groups": [
+      [
+        "host",
+        "part"
+      ]
+    ],
+    "pending": 0
+  },
+  {
+    "name": "duplicate_hosts_stay_ambiguous",
+    "records": [
+      {
+        "id": "host1",
+        "type": "OilImmersedTransformer",
+        "name": "1号主变",
+        "props": {
+          "PROJECTNAME": "1号主变"
+        }
+      },
+      {
+        "id": "host2",
+        "type": "OilImmersedTransformer",
+        "name": "1号主变",
+        "props": {
+          "PROJECTNAME": "1号主变"
+        }
+      },
+      {
+        "id": "part",
+        "type": "Body",
+        "name": "1号主变_本体"
+      }
+    ],
+    "groups": [
+      [
+        "host1"
+      ],
+      [
+        "host2"
+      ]
+    ],
+    "pending": 1
+  },
+  {
+    "name": "declared_host_from_components",
+    "records": [
+      {
+        "id": "body",
+        "type": "Body",
+        "name": "本体",
+        "props": {
+          "HOSTEQUIPMENTNAME": "3号主变"
+        }
+      },
+      {
+        "id": "radiator",
+        "type": "Radiator",
+        "name": "散热器",
+        "props": {
+          "HOSTEQUIPMENTNAME": "3号主变"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "body",
+        "radiator"
+      ]
+    ],
+    "pending": 0
+  },
+  {
+    "name": "unlabelled_component_not_assigned_by_proximity_or_name",
+    "records": [
+      {
+        "id": "host",
+        "type": "GIS",
+        "name": "组合电器"
+      },
+      {
+        "id": "part",
+        "type": "Body",
+        "name": "本体"
+      }
+    ],
+    "groups": [
+      [
+        "host"
+      ]
+    ],
+    "pending": 1
+  },
+  {
+    "name": "independent_controller_preserved",
+    "records": [
+      {
+        "id": "host",
+        "type": "OilImmersedTransformer",
+        "name": "1号主变",
+        "props": {
+          "PROJECTNAME": "1号主变"
+        }
+      },
+      {
+        "id": "control",
+        "type": "ControlCabinet",
+        "name": "控制柜",
+        "parent": "host",
+        "props": {
+          "OBJECTROLE": "independent",
+          "HOSTEQUIPMENTNAME": "1号主变"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "control"
+      ],
+      [
+        "host"
+      ]
+    ],
+    "pending": 0
+  },
+  {
+    "name": "source_host_conflicts_with_attribute_host",
+    "records": [
+      {
+        "id": "a",
+        "type": "GIS",
+        "props": {
+          "GRIDIDENTIFICATIONSYSTEMCODE": "A"
+        }
+      },
+      {
+        "id": "b",
+        "type": "GIS",
+        "props": {
+          "GRIDIDENTIFICATIONSYSTEMCODE": "B"
+        }
+      },
+      {
+        "id": "p",
+        "type": "Radiator",
+        "attributeOnly": true,
+        "relations": [
+          {
+            "kind": "host",
+            "targetSourceId": "a",
+            "evidence": "partindex:a"
+          }
+        ],
+        "props": {
+          "HOSTEQUIPMENTCODE": "B"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "a"
+      ],
+      [
+        "b"
+      ]
+    ],
+    "pending": 1,
+    "expectedMember": {
+      "sourceId": "p",
+      "membershipStatus": "unresolved",
+      "pendingReason": "component_host_conflict"
+    }
+  },
+  {
+    "name": "own_projectname_is_candidate_membership",
+    "records": [
+      {
+        "id": "a",
+        "type": "OilImmersedTransformer",
+        "props": {
+          "PROJECTNAME": "1号主变"
+        }
+      },
+      {
+        "id": "p",
+        "type": "Radiator",
+        "props": {
+          "PROJECTNAME": "1号主变"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "a",
+        "p"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "p",
+      "membershipStatus": "candidate",
+      "pendingReason": null
+    }
+  },
+  {
+    "name": "verified_keyword_is_confirmed",
+    "records": [
+      {
+        "id": "a",
+        "type": "Unknown",
+        "props": {
+          "SYSCLASSIFYNAME": "GIS"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "a"
+      ]
+    ],
+    "pending": 0
+  },
+  {
+    "name": "specific_cable_tray_name_is_not_replaced_by_cable_substring",
+    "records": [
+      {
+        "id": "tray",
+        "type": "Unknown",
+        "name": "220kV电缆桥架"
+      },
+      {
+        "id": "cable",
+        "type": "Unknown",
+        "name": "电缆"
+      }
+    ],
+    "groups": [
+      [
+        "tray"
+      ],
+      [
+        "cable"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "tray",
+      "category": "M07",
+      "categoryStatus": "candidate"
+    }
+  },
+  {
+    "name": "directory_OilImmersedTransformer",
+    "records": [
+      {
+        "id": "x",
+        "type": "OilImmersedTransformer"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "x",
+      "category": "E01",
+      "categoryStatus": "confirmed"
+    }
+  },
+  {
+    "name": "directory_OilImmersedReactor",
+    "records": [
+      {
+        "id": "x",
+        "type": "OilImmersedReactor"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "x",
+      "category": "E02",
+      "categoryStatus": "confirmed"
+    }
+  },
+  {
+    "name": "directory_ElectromagneticTa",
+    "records": [
+      {
+        "id": "x",
+        "type": "ElectromagneticTa"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "x",
+      "category": "E03",
+      "categoryStatus": "confirmed"
+    }
+  },
+  {
+    "name": "directory_ElectromagneticTv",
+    "records": [
+      {
+        "id": "x",
+        "type": "ElectromagneticTv"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "x",
+      "category": "E04",
+      "categoryStatus": "confirmed"
+    }
+  },
+  {
+    "name": "directory_控制柜",
+    "records": [
+      {
+        "id": "x",
+        "type": "控制柜"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "x",
+      "category": "E17",
+      "categoryStatus": "confirmed"
+    }
+  },
+  {
+    "name": "directory_ACPillarInsulator",
+    "records": [
+      {
+        "id": "x",
+        "type": "ACPillarInsulator"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "x",
+      "category": "E15",
+      "categoryStatus": "confirmed"
+    }
+  },
+  {
+    "name": "directory_DCWallBushing",
+    "records": [
+      {
+        "id": "x",
+        "type": "DCWallBushing"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "x",
+      "category": "E16",
+      "categoryStatus": "confirmed"
+    }
+  },
+  {
+    "name": "directory_Lamps",
+    "records": [
+      {
+        "id": "x",
+        "type": "Lamps"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "x",
+      "category": "M05",
+      "categoryStatus": "confirmed"
+    }
+  },
+  {
+    "name": "protective_device_recovered_to_secondary_cabinet",
+    "records": [
+      {
+        "id": "cab",
+        "type": "SecondaryCabinet",
+        "props": {
+          "GRIDIDENTIFICATIONSYSTEMCODE": "C-1"
+        }
+      },
+      {
+        "id": "gis",
+        "type": "GIS"
+      },
+      {
+        "id": "part",
+        "type": "ProtectionDevice",
+        "parent": "gis",
+        "props": {
+          "HOSTEQUIPMENTCODE": "C-1"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "cab",
+        "part"
+      ],
+      [
+        "gis"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "part",
+      "membershipStatus": "confirmed"
+    }
+  },
+  {
+    "name": "ambiguous_shielding",
+    "records": [
+      {
+        "id": "x",
+        "type": "均压屏蔽装置"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "x",
+      "category": "U-OBJECT",
+      "categoryStatus": "unresolved"
+    }
+  },
+  {
+    "name": "directory_family_declaration",
+    "records": [
+      {
+        "id": "x",
+        "type": "OTHERS",
+        "props": {
+          "SYSCLASSIFYNAME": "隔离开关"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "x",
+      "category": "E07",
+      "categoryStatus": "confirmed"
+    }
+  }
+]
