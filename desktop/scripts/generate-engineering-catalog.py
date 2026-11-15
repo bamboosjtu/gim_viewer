@@ -42,8 +42,8 @@ def main():
  source={'kind':'workbook','path':'research/实体识别/'+BOOK.name,'sha256':digest}
  old=load(ROOT/'desktop/src/engineering/standardCatalog.json')
  mapping={i['term'].lower():i['category'] for i in old['items']}
- mapping.update({'beam':'C-A4','column':'C-A3','steelbeam':'C-A4.steel','steelcolumn':'C-A3.steel','steelstructure':'C-A14','structuralmember':'C-A15','door':'C-A7','window':'C-A8','roof':'C-A6','railing':'C-A9.railing','protectiondevice':'E16.protection'})
- previous=load(ROOT/'desktop/src/engineering/catalog.json');semantic=previous.get('semanticCodes',previous.get('categories'))
+ mapping.update({'beam':'C-A4','column':'C-A3','steelbeam':'C-A4.steel','steelcolumn':'C-A3.steel','steelstructure':'C-A14','structuralmember':'C-A15','door':'C-A7','window':'C-A8','roof':'C-A6','railing':'C-A9.railing'})
+ previous=load(ROOT/'desktop/src/engineering/catalog.json');semantic=previous['semanticCodes']
  bycode={c['code']:c for c in semantic};items=[];categories=[]
  groups=[('equipment','设备','电气设备模型索引表','equipment'),('material','材料','材料模型索引表','materials'),('construction','构件','构件模型索引表','components')]
  for kind,label,sheet,semantic_group in groups:
@@ -69,7 +69,8 @@ def main():
  parts=[];old_vocab=load(ROOT/'desktop/src/gim/engineering/sourceVocabulary.json');component_ids=old_vocab['components']
  for row,cells in book['设备模型部件名称对照表']:
   if row==1 or not cells.get('A'):continue
-  term=cells['B'];parts.append({'id':component_ids.get(term.lower(),snake(term)),'label':cells['A'],'term':term,'order':len(parts),'evidence':{'sourceKind':'workbook','workbook':source['path'],'workbookSha256':digest,'sheet':'设备模型部件名称对照表','cell':f'B{row}','cellRange':f'A{row}:B{row}','verification':'verified','sourceLocation':f'设备模型部件名称对照表!A{row}:B{row}'}})
+  term=cells['B'];aliases=[name.strip() for name in cells.get('C','').split('/') if name.strip()]
+  parts.append({'id':component_ids.get(term.lower(),snake(term)),'label':cells['A'],'term':term,'aliases':aliases,'order':len(parts),'evidence':{'sourceKind':'workbook','workbook':source['path'],'workbookSha256':digest,'sheet':'设备模型部件名称对照表','cell':f'B{row}','cellRange':f'A{row}:'+('C' if aliases else 'B')+str(row),'verification':'verified','sourceLocation':f'设备模型部件名称对照表!A{row}:'+('C' if aliases else 'B')+str(row)}})
  # Internal identity/purpose codes are not the user-facing catalog hierarchy.
  preferred={'E16':'equipment:secondarycabinet','E16.panel_cabinet':'equipment:secondarycabinet','E16.control_cabinet':'equipment:secondarycabinet','E16.terminal_box':'material:terminalbox','E16.battery_set':'equipment:groupbattery',
   'C-A1':'construction:wall','C-A2':'construction:flooring','C-A10':'construction:supplementarycomponents','C-C1':'construction:trench','C-C2':'construction:trench','C-C4':'construction:fences','C-B4':'construction:foundation','C-B5':'construction:structuralmember','C-B6':'construction:structuralmember','M07':'material:cableauxiliaryfacilities','M08':'material:cableauxiliaryfacilities'}
@@ -99,10 +100,10 @@ def main():
   if eq:
    for term in [item['term'],*item['term'].split('/')]:vocab['equipment'][term.lower()]=eq
  for part in parts:
-  for word in [part['label'],part['term']]:
-   evidence={**part['evidence'],'cell':part['evidence']['cell'] if word==part['term'] else part['evidence']['cell'].replace('B','A')}
+  for word in [part['label'],part['term'],*part['aliases']]:
+   evidence={**part['evidence'],'cell':part['evidence']['cell'].replace('B','C' if word in part['aliases'] else 'B' if word==part['term'] else 'A')}
    entry=entries.setdefault(word.lower(),{'catalogIds':[],'evidence':evidence});entry['componentType']=part['id']
-  vocab['components'][part['term'].lower()]=part['id']
+   if word==part['term'] or word in part['aliases']:vocab['components'][word.lower()]=part['id']
  for path in [ROOT/'desktop/src/engineering/catalog.json',ROOT/'tools/gim_element/catalog.json']:write(path,catalog)
  for path in [ROOT/'desktop/src/engineering/standardCatalog.json',ROOT/'tools/gim_element/standardCatalog.json']:write(path,standard)
  for path in [ROOT/'desktop/src/gim/engineering/sourceVocabulary.json',ROOT/'tools/gim_element/sourceVocabulary.json']:write(path,vocab)

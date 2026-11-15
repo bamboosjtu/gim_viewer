@@ -24,11 +24,13 @@ export function benchmarkProgress(state:AppState){
   const baseSettled=dev?dev.baseRepresentationsSettled===true:!state.ifcBackgroundPending&&state.loadedModels.size===state.currentIfcEntries.length;
   const engineeringBuildPending=state.currentProjectType==='substation'&&state.engineeringBuildPending;
   return {semantic,semanticFailure,semanticStatus:state.engineeringStatus,engineeringBuildPending,
+    automaticTimingPolicy:'semantic-base-without-cache-v1',
+    geometryTimingPolicy:'in-viewport-model-draw-submitted-v1',
     engineeringTreeSettled,
     engineeringProgress:state.engineeringProgress?{...state.engineeringProgress}:null,engineeringFailureCode:state.engineeringFailureCode,
     automaticSettled:semantic&&!engineeringBuildPending&&!state.ifcBackgroundPending&&(line||baseSettled)&&n(dev?.pending)===0&&n(dev?.viewPendingOccurrences)===0,
     backgroundSettled:backgroundSettled&&!engineeringBuildPending&&engineeringTreeSettled,backgroundStatus,cachePersistenceStatus,
-    cacheSettled:(state.currentProjectType!=='substation'||semantic)&&!engineeringBuildPending&&(!dev||dev.cacheWritesSettled===true)&&!['loading','saving'].includes(state.engineeringCacheStatus)&&ifcPublication.settled>=state.currentIfcEntries.length
+    cacheSettled:(state.currentProjectType!=='substation'||semantic)&&!engineeringBuildPending&&!state.sourceGeometryCachePending&&(!dev||dev.cacheWritesSettled===true)&&!['loading','saving'].includes(state.engineeringCacheStatus)&&ifcPublication.settled>=state.currentIfcEntries.length
       &&(!line||linePersistence==='saved'||linePersistence==='failed'||linePersistence==='not-applicable'),
     workload:{cbmNodes:state.cbmNodeIndex.size,lineNodes:state.currentGimGraph?.nodesByPath.size??0,
       sources:state.engineeringSnapshot?.memberships.length??0,entities:state.engineeringSnapshot?.entities.length??0,
@@ -37,7 +39,7 @@ export function benchmarkProgress(state:AppState){
       occurrences:n(dev?.occurrences),devSources:n(dev?.uniqueDevSources),shown:n(dev?.shown),failed:n(dev?.failedOccurrences),empty:n(dev?.emptyOccurrences),partial:n(dev?.partialOccurrences),unsupported:n(dev?.unsupportedOccurrences),
       pending:n(dev?.pending),sourcePlacementWarnings:n(dev?.sourcePlacementWarnings)},
     cache:{engineering:state.engineeringCacheStatus,linePersistence,devCatalogHits:n(dev?.catalogHits),devLodHits:Array.isArray(dev?.lodHits)?[...dev.lodHits]:[],devLodMisses:Array.isArray(dev?.lodMisses)?[...dev.lodMisses]:[],
-      writePending:n(dev?.cacheWritePendingCount),writeFailures:n(dev?.artifactWriteFailures)+n(dev?.catalogWriteFailures)+ifcPublication.failed+(linePersistence==='failed'?1:0),readFailures:n(dev?.cacheReadErrorCount)},
+      writePending:n(dev?.cacheWritePendingCount)+(state.sourceGeometryCachePending?1:0),writeFailures:n(dev?.artifactWriteFailures)+n(dev?.catalogWriteFailures)+ifcPublication.failed+(linePersistence==='failed'?1:0)+(state.sourceGeometryCacheError?1:0),readFailures:n(dev?.cacheReadErrorCount)},
   };
 }
 async function hash(value:unknown){const bytes=new TextEncoder().encode(JSON.stringify(value));return [...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(v=>v.toString(16).padStart(2,'0')).join('');}

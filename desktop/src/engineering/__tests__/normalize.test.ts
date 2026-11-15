@@ -135,7 +135,7 @@ describe('construction and operation engineering wholes', () => {
     expect(interpretObject(source('x', '二次屏柜')).category).toBe('E16.panel_cabinet');
     expect(interpretObject(source('x', '通信柜')).category).toBe('E16.panel_cabinet');
     expect(interpretObject(source('x', '蓄电池组')).category).toBe('E16.battery_set');
-    expect(interpretObject(source('x', '变压器保护装置')).category).toBe('E16.protection');
+    expect(interpretObject(source('x', '变压器保护装置')).meaning).toBe('part');
     expect(interpretObject(source('x', '二次屏柜模型02_柜体'))).toMatchObject({ meaning: 'fragment', independent: false });
   });
 

@@ -4,6 +4,16 @@ import {performanceMeasurements,performanceComparison,lifecycleRetention,PERFORM
 import {benchmarkRun} from './test-fixtures.mjs';
 const runs=(metrics={})=>[0,1,2].map(i=>benchmarkRun('r-'+i,{metrics:{firstResponseMs:9000,settledMs:29000,processPrivatePeakBytes:6e9,...metrics}}));
 
+test('automatic load excludes persistence only under the same observed timing policy',()=>{
+  const current=runs({automaticLoadMs:2000});
+  const old=runs({automaticLoadMs:9000}).map(run=>({...run,conditions:{...run.conditions,automaticTimingPolicy:undefined}}));
+  const result=performanceComparison(old,current),metric=result.metrics.find(m=>m.name==='automaticLoadMs');
+  assert.equal(result.automaticComparable,false);assert.equal(metric.delta,null);assert.equal(metric.savedMs,null);
+  assert.match(metric.comparisonIssue,/automatic-timing-policy-changed/);
+  assert.equal(result.metrics.find(m=>m.name==='settledMs').comparable,true);
+  assert.equal(performanceComparison(current,runs({automaticLoadMs:1500})).metrics.find(m=>m.name==='automaticLoadMs').savedMs,500);
+});
+
 test('reports measurements without time, memory or growth acceptance targets',()=>{
   const result=performanceMeasurements(runs({firstResponseMs:120000,settledMs:600000,processPrivatePeakBytes:32e9}));
   assert.equal(result.evidenceComplete,true);assert.equal(result.maximumMemoryBytes,32e9);assert.equal(result.maximumSettledMs,600000);assert.equal(result.fullyMet,undefined);

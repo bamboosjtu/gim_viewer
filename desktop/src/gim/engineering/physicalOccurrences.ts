@@ -4,15 +4,21 @@ import type {SourceGeometryOccurrenceCatalog} from './geometryOccurrences.js';
 import {isUsableAffineMatrix} from '../geometry/affineMatrix.js';
 
 const identity=()=>[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1];
-const scalar=(doc:SourceDocument,key:string)=>doc.fields.find(p=>p.keys[0].toUpperCase()===key)?.value??'';
+const scalarKeys=new Set(['TRANSFORMMATRIX','OBJECTMODELPOINTER','ENTITYNAME','SYMBOLNAME','NAME']);
 interface DevTree {path:string;children:DevTree[]}
-interface Scope {roots:DevTree[];matches:Map<string,DevTree[]>}
+interface Scope {roots:DevTree[];matches:Map<string,DevTree[]>;indexed?:boolean}
 /** Physical references only. Does not create SourceRecords, aliases, attributes,
  * identities or tree projections. Parsed documents/index are shared with the
  * later semantic consumer, so a second pass does not read/parse them again. */
 export async function extractPhysicalOccurrences(input:{entryIndex:EntryIndex;readDocument(path:string):Promise<SourceDocument>},
   options:{signal?:AbortSignal;onProgress?:(count:number)=>void;maxOccurrences?:number;maxDepth?:number}={}):Promise<SourceGeometryOccurrenceCatalog>{
   const catalog:SourceGeometryOccurrenceCatalog={occurrences:[],diagnostics:[]};
+  const scalarFields=new WeakMap<SourceDocument,Map<string,string>>();
+  const scalar=(doc:SourceDocument,key:string)=>{
+    let fields=scalarFields.get(doc);
+    if(!fields){fields=new Map();for(const field of doc.fields){const key=field.keys[0].toUpperCase();if(scalarKeys.has(key)&&!fields.has(key))fields.set(key,field.value);}scalarFields.set(doc,fields);}
+    return fields.get(key)??'';
+  };
   let count=0,lastYield=performance.now();
   const max=options.maxOccurrences??500_000,maxDepth=options.maxDepth??128;
   const check=(depth:number)=>{
@@ -47,10 +53,16 @@ export async function extractPhysicalOccurrences(input:{entryIndex:EntryIndex;re
   };
   const roots=new Map<string,Promise<DevTree|null>>();
   const matches=(scope:Scope,path:string)=>{
-    let rows=scope.matches.get(path);if(rows)return rows;
-    rows=[];
-    const visit=(node:DevTree)=>{for(const child of node.children){if(child.path===path)rows!.push(child);visit(child);}};
-    scope.roots.forEach(visit);scope.matches.set(path,rows);return rows;
+    // PARTINDEX requests many different paths in one assembly. Build the
+    // descendant index once instead of rescanning that assembly per target.
+    if(!scope.indexed){
+      const index=(node:DevTree)=>{for(const child of node.children){
+        const rows=scope.matches.get(child.path)??[];rows.push(child);scope.matches.set(child.path,rows);index(child);
+      }};
+      scope.roots.forEach(index);
+      scope.indexed=true;
+    }
+    return scope.matches.get(path)??[];
   };
   const placement=(doc:SourceDocument,parent:number[],context:string)=>{
     const raw=scalar(doc,'TRANSFORMMATRIX');let local=identity();

@@ -49,7 +49,8 @@ export type EngineeringWorkerCommand =
   | { type: 'init'; scope: string; paths: string[];graphReferences?:boolean }
   | { type: 'files'; files: Array<{ path: string; blob?: Blob; bytes?: Uint8Array }> }
   | { type: 'packed-files'; batch: EngineeringSourceBatch }
-  | { type: 'extract-geometry' }
+  | { type: 'extract-geometry'; retainForCache?:boolean }
+  | { type: 'encode-geometry-cache' }
   | { type: 'extract' }
   | { type:'evidence-snapshot';entryIds?:readonly string[] }
   | { type:'evidence-query';query:EvidenceQuery }
@@ -69,6 +70,7 @@ export type EngineeringWorkerReply =
   | { type: 'ready' }
   | { type: 'progress'; stage: 'source-index'|'source-traverse'|'source-sort'; completed: number }
   | { type:'geometry';catalog:SourceGeometryOccurrenceCatalog }
+  | { type:'geometry-cache';bytes?:Uint8Array }
   | { type: 'graph'; summary: EngineeringExtractSummary }
   | { type: 'model'; result: EngineeringWorkerPayload }
   | { type: 'cache'; result: EngineeringCacheResult }

@@ -28,11 +28,13 @@ export function lifecycleRetention(growth){
 export function performanceComparison(baseline,candidate,{comparable=true,comparisonIssues=[],measurementRuns=candidate,correctnessChanges=[]}={}){
   const geometryPolicy=run=>run.conditions?.geometryTimingPolicy;
   const geometryComparable=[...baseline,...candidate].every(run=>!!geometryPolicy(run))&&new Set([...baseline,...candidate].map(geometryPolicy)).size===1;
+  const automaticPolicy=run=>run.conditions?.automaticTimingPolicy;
+  const automaticComparable=[...baseline,...candidate].every(run=>!!automaticPolicy(run))&&new Set([...baseline,...candidate].map(automaticPolicy)).size===1;
   const names=new Set(['firstResponseMs','firstGeometryMs','geometryCommitMs','settledMs','automaticLoadMs','processPrivatePeakBytes',
     ...(baseline[0]?.requiredMetrics??[]),...(candidate[0]?.requiredMetrics??[])]);
   const metrics=[...names].map(name=>{
     const b=values(baseline,name),c=values(candidate,name),before=b.length===baseline.length?median(b):null,after=c.length===candidate.length?median(c):null;
-    const time=name.endsWith('Ms'),compatible=name!=='firstGeometryMs'||geometryComparable;
+    const time=name.endsWith('Ms'),compatible=name==='firstGeometryMs'?geometryComparable:name==='automaticLoadMs'?automaticComparable:true;
     return {name,baseline:before,candidate:after,comparable:compatible,delta:compatible&&before!==null&&after!==null?after-before:null,
       regression:compatible&&before>0&&after!==null?after/before-1:compatible&&before===0&&after===0?0:null,
       ...(time?{savedMs:compatible&&before!==null&&after!==null?before-after:null,
@@ -52,13 +54,16 @@ export function performanceComparison(baseline,candidate,{comparable=true,compar
   const keyTimes=metrics.filter(m=>['firstResponseMs','settledMs'].includes(m.name));
   const matchingSpeedEvidence=keyTimes.every(m=>m.baseline!==null&&m.candidate!==null);
   const firstGeometry=metrics.find(m=>m.name==='firstGeometryMs');if(firstGeometry&&!geometryComparable)Object.assign(firstGeometry,{comparable:false,comparisonIssue:'geometry-timing-policy-changed; compare geometryCommitMs separately'});
+  const automatic=metrics.find(m=>m.name==='automaticLoadMs');
+  const automaticPolicyChanged=!!automatic&&!automaticComparable&&(automatic.baseline!==null||automatic.candidate!==null);
+  if(automaticPolicyChanged)automatic.comparisonIssue='automatic-timing-policy-changed; cache persistence is measured separately';
   const observedImprovementMetrics=changed.filter(m=>m.comparable&&m.delta<0).map(m=>m.name);
-  const hasTradeoff=memoryIncreased||timeRegressed||!geometryComparable;
+  const hasTradeoff=memoryIncreased||timeRegressed||!geometryComparable||automaticPolicyChanged;
   const recommendation=!comparable?'EVIDENCE_INCOMPLETE':hasTradeoff?'REGRESSION_REQUIRES_HUMAN_REVIEW':
     observedImprovementMetrics.length?'IMPROVEMENT_REQUIRES_HUMAN_REVIEW':'NO_IMPROVEMENT_OBSERVED';
   return {policy:PERFORMANCE_POLICY,approval:'PENDING',comparable,comparisonIssues,measurements,metrics,
     memoryGrowthFraction:memory?.regression??null,maximumMemoryGrowthFraction,matchingSpeedEvidence,
-    correctnessChanges,geometryComparable,
+    correctnessChanges,geometryComparable,automaticComparable,
     sameLevelBenefit:'human-assessment-required; no weighted score',requiresHumanReview:true,hasTradeoff,recommendation,
     observedImprovementMetrics,meaningfulImprovement:'developer-assessment-required',optimizationAccepted:false,
     interpretation:'performance work requires a meaningful measurable benefit; feature/correctness costs and regressions remain visible; acceptance and any further retest scope belong to the developer'};

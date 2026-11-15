@@ -2,7 +2,7 @@
 import {MEASUREMENT_VERSION} from '../../../packages/measurement-core/src/version.mjs';
 export function benchmarkRun(id,overrides={}){
   const conditions={machineId:'test-machine',runtimeSha256:'1'.repeat(64),buildMode:'release',
-    measurementVersion:MEASUREMENT_VERSION,geometryTimingPolicy:'in-viewport-model-draw-submitted-v1',detailPolicy:'task-phase-timeline-v1',lifecyclePolicy:'worker-terminal-v1',
+    measurementVersion:MEASUREMENT_VERSION,geometryTimingPolicy:'in-viewport-model-draw-submitted-v1',automaticTimingPolicy:'semantic-base-without-cache-v1',detailPolicy:'task-phase-timeline-v1',lifecyclePolicy:'worker-terminal-v1',
     contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',
     mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:'2'.repeat(64),sampleId:'test-sample',
     profileDigest:'3'.repeat(64),workloadDigest:'4'.repeat(64),routeDigest:'5'.repeat(64),viewportDigest:'6'.repeat(64),

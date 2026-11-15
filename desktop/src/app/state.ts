@@ -156,6 +156,8 @@ export class AppState {
   sourceGeometryReady: Promise<import('../gim/engineering/geometryOccurrences.js').SourceGeometryOccurrenceCatalog | null> | null = null;
   engineeringStatus: 'none' | 'loading' | 'partial' | 'ready' | 'error' = 'none';
   engineeringBuildPending = false;
+  sourceGeometryCachePending = false;
+  sourceGeometryCacheError = '';
   engineeringProgress: {stage:string;completed:number}|null = null;
   engineeringFailureCode: string|null = null;
   engineeringError = '';
@@ -451,6 +453,8 @@ export class AppState {
     this.engineeringTreeStatus = 'none'; this.engineeringIfcGeometryFinished = false;
     this.engineeringStatus = 'none'; this.engineeringError = '';
     this.engineeringBuildPending = false;
+    this.sourceGeometryCachePending = false;
+    this.sourceGeometryCacheError = '';
     this.engineeringProgress = null;
     this.engineeringFailureCode = null;
     this.engineeringCacheStatus = 'none'; this.engineeringCacheError = '';

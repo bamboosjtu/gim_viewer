@@ -18,10 +18,10 @@ const publicKeys=new Set(['exportId','status','outcome','correctness','cacheStat
   'firstResponseMs','firstGeometryMs','allGeometryReadyMs','settledMs','automaticLoadMs','modelTreeReadyMs','cachePublishMs','writeDrainMs','processPrivatePeakBytes',
   'measurementComplete','memoryEvidenceComplete','measurementDetailDropped','measurementDetailStatus','measurementLifecycleComplete','traceComplete','cacheVerified','baselineEligible',
   'wallClockMs','requested','available','unavailable','unsupported','method','unit','startMs','endMs','durationMs','estimatedMs','value','samples','maxSampleGapMs','maxSampleDelayMs','observedPeakBytes','observedHeapPeakBytes','attempts','updatedAt','atMs','bytes','sampleDelayMs']);
-for(const key of ['workerHeapPolicy','geometryTimingPolicy','failedGeometryReasons','coverageIncompleteReasons'])publicKeys.add(key);
+for(const key of ['workerHeapPolicy','geometryTimingPolicy','automaticTimingPolicy','failedGeometryReasons','coverageIncompleteReasons'])publicKeys.add(key);
 for(const key of ['gpuTimingStatus','gpuTimingSamples','gpuMemoryStatus','gpuMemoryBytes','gpuMemoryScope'])publicKeys.add(key);
 enums.add('DEV-representations-only');
-for(const value of ['aggregate-only','incomplete','in-viewport-model-draw-submitted-v1'])enums.add(value);
+for(const value of ['aggregate-only','incomplete','in-viewport-model-draw-submitted-v1','semantic-base-without-cache-v1'])enums.add(value);
 for(const key of ['stage','heapAvailability','heapReason','heapSamples','failedHeapSamples','sampleLabel','sampleTier','group','error','reason','reasonCode','preset','version',
   'workloadBytes','msPerMiB','p50LowerMs','p50UpperMs','p95LowerMs','p95UpperMs','p99LowerMs','p99UpperMs','lod','priority','admittedPriority','slotCapacityAtEnqueue','slotCapacity','slotsBusyAtEnqueue','queueDepthAtEnqueue','slotsBusyAtAdmit','queueWaitMs','slotOccupancyMs','cacheReadMs','workerAwaitMs','workerQueueWaitTotalMs','workerDispatches','inputBudgetWaitMs','outputBytes','cacheStatus','memoryPressure','selector','anonymize'])publicKeys.add(key);
 for(const value of ['not-applicable','short-lived','idle','ready','miss','hit','high','critical','normal','completed','failed','cancelled','queue','placement','survey','baseline','L0','L1','L2','gim-batch-profile-v1','gim-batch-results-v1','dev-fine','ifc-near','ifc-fine','canonical-first-base-v1','canonical-first-boolean-base-v1','smallest-source-canonical-small-object-v1'])enums.add(value);

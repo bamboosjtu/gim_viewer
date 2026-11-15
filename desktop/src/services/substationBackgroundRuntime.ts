@@ -315,7 +315,7 @@ export class SubstationBackgroundCoordinator {
 
   private gateReady(gate:SubstationBackgroundGate):boolean {
     if(gate==='interactive')return this.interactive;
-    if(gate==='coordinateAnchorReady')return this.interactive&&this.coordinateAnchorReady;
+    if(gate==='coordinateAnchorReady')return (this.interactive||this.allIfcReady)&&this.coordinateAnchorReady;
     if(gate==='allIfcPreviewsReady')return this.allIfcPreviewsReady||this.allIfcReady;
     return this.allIfcReady;
   }

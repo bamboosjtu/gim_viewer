@@ -54,6 +54,7 @@ interface ViewEvaluation {
 
 /** Session owner for catalog, templates and camera-driven occurrence representations. */
 export class DevLodRuntime {
+  private catalogLookupReady=false;
   private firstModelPresented=false;
   private readonly onModelPresented=()=>{
     if(!this.current()||this.firstModelPresented)return;
@@ -327,7 +328,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
     }
     this.diagnostics.occurrences = seeds.length;
     this.diagnostics.uniqueDevSources = byDev.size;
-    this.notifyCoordinateAnchor(); this.update(); // Compilation can begin before any IFC is ready.
+    this.notifyCoordinateAnchor();
     const catalogEntries = [...byDev];
     // Main transformers / GIS / arresters are the visual anchors of a station;
     // their catalog bounds must not be left behind hundreds of small rows.
@@ -358,7 +359,13 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
           this.diagnostics.errors.push(`目录缓存读取失败 ${dev}: ${catalogRead.error ?? ''}`);
         }
         if (this.diagnostics.errors.length > 32) this.diagnostics.errors.shift();
-        try { bounds = await this.worker.bounds(dev); }
+        try {
+          // Bounds traverse the same DEV/PHM/MOD sources as compilation.
+          // Feed both consumers one batched reachable workset on real misses.
+          await this.prepareMissingTemplateSources(dev);
+          if (!this.current()) throw new DOMException('DEV directory left the current view', 'AbortError');
+          bounds = await this.worker.bounds(dev);
+        }
         catch (error) {
           if (!this.current()) throw new DOMException('DEV directory left the current view', 'AbortError');
           bounds = { devPath: dev, sourceBounds: null, boundsQuality: 'unknown', primitiveCounts: {}, unsupportedTypes: [], diagnostic: String(error) };
@@ -417,6 +424,11 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
           // handling without issuing a second read for every confirmed miss.
           if (read && read.status !== 'deferred') this.catalogHints.set(dev, Promise.resolve(read));
         });
+        if(start===0&&devs.every(dev=>reads.get(this.catalogKey(dev))?.status==='miss')){
+          // Cold geometry can start immediately. Warm hits first establish
+          // their cached bounds, avoiding an all-visible speculative queue.
+          this.catalogLookupReady=true;this.update();
+        }
       }
     } catch (error) {
       // A failed prefetch falls back to per-DEV reads in resolveCatalog.
@@ -425,6 +437,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
     // Stream catalog bounds: a single slow DEV must not block the next batch.
     // This was the substation02 1395/3326 stall: Promise.all(batch of 8) waited
     // for one pathological bounds task while the other workers had no new rows.
+    this.catalogLookupReady=true;
     let nextCatalog = 0;
     const consumeCatalog = async (): Promise<void> => {
       while (this.current()) {
@@ -500,6 +513,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
   };
   private update(): void {
     if (!this.current()) { this.release(); return; }
+    if(!this.catalogLookupReady)return;
     // A renderer may be torn down before an already queued camera callback.
     // No view computation is meaningful until a live camera exists.
     const camera = this.ctx.world?.camera?.three as THREE.Camera | undefined;

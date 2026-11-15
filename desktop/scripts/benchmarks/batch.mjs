@@ -6,7 +6,6 @@ import {basename,dirname,join,relative,resolve} from 'node:path';
 import {digest,runReadiness,compareRuns,partialSignature} from './compare.mjs';
 import {coldWarmEquivalent} from './profiles.mjs';
 import {runNative} from './native-run.mjs';
-import {sourceFingerprint} from './acceptance-build.mjs';
 import {artifactDirectory,loadBatchInputs,isPublicArtifact} from './batch-input.mjs';
 import {writeBatchReports,writeBatchCheckpoint,writeBatchProgress} from './batch-report.mjs';
 import {workspacePath} from './samples.mjs';
@@ -28,6 +27,7 @@ function recordReport(row,report,state){
     gpuMemoryBytes:report.evidence?.geometry?.gpuBytes??null,
     gpuMemoryScope:report.evidence?.geometry?.scope??null,
     geometryTimingPolicy:report.conditions?.geometryTimingPolicy,
+    automaticTimingPolicy:report.conditions?.automaticTimingPolicy,
     workerHeapPolicy:report.conditions?.workerHeapPolicy??'shared-cdp-heap-v1',
     pendingCount:report.pendingCount??null,pendingSourceCount:report.pendingSourceCount??null,
     pendingDigest:report.pendingDigest??null,semanticDigestScope:report.semanticDigestScope??null,
@@ -243,7 +243,8 @@ export async function runBatch(options){
   if(inputs.samples.length&&!options.execute){
     const build=JSON.parse(readFileSync(workspacePath(root,options.buildManifest),'utf8'));
     if(build.frontendProbeVerified!==true)throw Error('benchmark-build-probe-unverified: run bench build before batch');
-    if(build.sourceFingerprint!==sourceFingerprint(root))throw Error('benchmark-source-changed: rebuild before batch');
+    // --build selects an immutable executable, not the current working tree.
+    // runNative verifies its executable/runtime/sampler hashes before launch.
   }
   writeFileSync(join(privateOut,'inputs.private.json'),JSON.stringify(inputs,null,2));
   writeFileSync(join(privateOut,'output.private.json'),JSON.stringify({out}));

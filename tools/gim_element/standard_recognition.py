@@ -18,7 +18,7 @@ for item in STANDARD['items']:
         key=norm(name)
         if item not in TERMS[key]:TERMS[key].append(item)
 NAME_RULES=[(cat,re.compile(pattern,re.I)) for cat,pattern in RULES['nameRules']]
-REFINEMENTS={'E-T':['E01','E03'],'E-R':['E02','E11'],'E16':['E16.terminal_box','E16.panel_cabinet','E16.control_cabinet','E16.battery_set','E16.protection'],'C-B4':['C-B2','C-B3','C-B9'],'C-B5':['C-B6','C-B7'],'C-A1':['C-C1','C-C4'],'C-A2':['C-C1','C-C5','C-B3'],'C-A5':['C-C1','M08'],'C-A4':['C-A4.steel'],'C-A3':['C-A3.steel']}
+REFINEMENTS={'E-T':['E01','E03'],'E-R':['E02','E11'],'E16':['E16.terminal_box','E16.panel_cabinet','E16.control_cabinet','E16.battery_set'],'C-B4':['C-B2','C-B3','C-B9'],'C-B5':['C-B6','C-B7'],'C-A1':['C-C1','C-C4'],'C-A2':['C-C1','C-C5','C-B3'],'C-A5':['C-C1','M08'],'C-A4':['C-A4.steel'],'C-A3':['C-A3.steel']}
 def compatible(coarse,fine):return coarse==fine or fine in REFINEMENTS.get(coarse,[])
 COMPONENTS={**VOCAB['components'],**{k:v['componentType'] for k,v in VOCAB['keywordDictionary']['entries'].items() if 'componentType' in v}}
 def values(row,*keys):
@@ -79,7 +79,8 @@ def interpret(row,has_children=False):
     if typed=='E01' and type!='E01':typed='E-T'
     for p in values(row,'IFC.PredefinedType'):
         enum=ALIASES.get('ifcPredefined',{}).get(type+'.'+p['value'].upper())
-        if enum:typed=enum;structured.append((enum,p))
+        if enum:
+            typed=enum;structured.append((enum,p));component=[(c,proof) for c,proof in component if proof['keys']!=['source_type']]
     role_values=values(row,'OBJECTROLE','COMPONENTROLE','对象角色','组件角色');roles=set()
     for p in role_values:
         if re.search(r'内部|组成|部件|component|part',p['value'],re.I):roles.add('part')

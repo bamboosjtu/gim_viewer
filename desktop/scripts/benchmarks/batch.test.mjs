@@ -439,15 +439,16 @@ test('live HTML uses export aliases or explicit sample labels without traversing
     const project=createPublicProjector({anonymize});
     const row={inputId:'private-input',sampleId:'private-sample',sourceSha256:'private-sha',sourcePath:'C:/private',
       sampleLabel:'standard-A1.gim',repetition:1,cacheState:'cold',status:'PARTIAL',error:'source-reference-unresolved;private-reason',
-      firstResponseMs:1234,firstGeometryMs:2345,allGeometryReadyMs:3456,settledMs:4567};
+      firstResponseMs:1234,firstGeometryMs:2345,automaticLoadMs:3456,settledMs:4567};
     const profile=project({cases:[row]}),state={version:'gim-batch-results-v1',anonymize,status:'RUNNING',outcome:'INCONCLUSIVE',updatedAt:'2026-11-12T01:00:00.000Z',rows:[row]};
     for(const key of ['stages','workers','slowTasks','slowPhases','templateDiagnostics','runs'])
       Object.defineProperty(state,key,{enumerable:true,get(){throw Error('diagnostic table visited: '+key);}});
     writeBatchProgress(out,state,{root:fixtureRoot,project});
     const html=readFileSync(join(out,'report.html'),'utf8');
-    assert.ok(html.includes(`<td>${profile.cases[0].inputId}</td>`));
-    if(anonymize)assert.ok(html.includes(`<td>${profile.cases[0].sampleId}</td>`));
-    for(const value of ['1.234','2.345','3.456','4.567'])assert.ok(html.includes(`<td>${value}</td>`));
+    const label=profile.cases[0].sampleLabel??profile.cases[0].sampleId??profile.cases[0].inputId;
+    assert.ok(html.includes(`<td class="">${label}</td>`));
+    assert.doesNotMatch(html,/<th[^>]*>输入(?: ID)?<\/th>/);
+    for(const value of ['1.234','2.345','3.456','4.567'])assert.ok(html.includes(`<td class="number">${value}</td>`));
     assert.match(html,/来源引用未解析/);assert.match(html,/其他未验证文本已隐藏/);
     assert.doesNotMatch(html,/private-input|private-sample|private-sha|C:\/private|private-reason/);
     assert.equal(html.includes('standard-A1.gim'),!anonymize);

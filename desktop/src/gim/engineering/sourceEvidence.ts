@@ -145,7 +145,8 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
     && proxyCategory.size === 1 && !['E19','C-D6'].includes([...proxyCategory][0])
     ? ENGINEERING_CATEGORY_LABELS[[...proxyCategory][0]] : undefined;
   const observedCategories=[...new Set(propertyCategories.map(p=>p.value))];
-  const typed=devCategory??ifcTypes[type]??(observedCategories.length===1?observedCategories[0]:undefined);
+  const typed=predefinedCategories.length===1?predefinedCategories[0].value:devCategory??ifcTypes[type]??(observedCategories.length===1?observedCategories[0]:undefined);
+  const sourceComponent=predefinedCategories.length?undefined:components[type.toLowerCase()];
   for(const p of values(['用途','设备用途','PURPOSE'])){
     const category=/^(?:站用|station_service_transformer)$/i.test(p.value.trim())?'E03':/^(?:主变|main_transformer)$/i.test(p.value.trim())?'E01':categoryValue(p.value,true);
     // A service target such as “主变控制” is not this cabinet's identity.
@@ -159,9 +160,9 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
     hostDesignations:values(['所属设备名称','所属设备工程中名称','宿主设备名称','HOSTEQUIPMENTNAME','PARENTEQUIPMENTNAME']),
     vocabularyObservations,
     equipmentTypeCandidates:[...standardDeclarations.flatMap(p=>standardTerms(p.value).filter(item=>item.kind==='equipment').map(item=>({...p,value:standardEquipmentId(item)}))),...(vocabulary[type.toLowerCase()]?[{value:vocabulary[type.toLowerCase()],evidenceId:`${record.id}:source_type:${type}`}]:[]),...typeProperties.flatMap(p=>vocabulary[p.value.trim().toLowerCase()]?[{...p,value:vocabulary[p.value.trim().toLowerCase()]}]:[]),...keywords.flatMap(({property:p,entry})=>entry?.equipmentType?[{...p,value:entry.equipmentType,confidence:confidence(entry)}]:[])],
-    componentTypeCandidates:[...componentNameCandidate,...(components[type.toLowerCase()]?[{value:components[type.toLowerCase()],evidenceId:`${record.id}:source_type:${type}`}]:[]),...typeProperties.flatMap(p=>components[p.value.trim().toLowerCase()]?[{...p,value:components[p.value.trim().toLowerCase()]}]:[]),...keywords.flatMap(({property:p,entry})=>entry?.componentType?[{...p,value:entry.componentType,confidence:confidence(entry)}]:[])],
+    componentTypeCandidates:[...componentNameCandidate,...(sourceComponent?[{value:sourceComponent,evidenceId:`${record.id}:source_type:${type}`}]:[]),...typeProperties.flatMap(p=>components[p.value.trim().toLowerCase()]?[{...p,value:components[p.value.trim().toLowerCase()]}]:[]),...keywords.flatMap(({property:p,entry})=>entry?.componentType?[{...p,value:entry.componentType,confidence:confidence(entry)}]:[])],
     ...(vocabulary[type.toLowerCase()]?{equipmentType:{value:vocabulary[type.toLowerCase()],evidenceId:`${record.id}:source_type:${type}`}}:{}),
-    ...(components[type.toLowerCase()]?{componentType:{value:components[type.toLowerCase()],evidenceId:`${record.id}:source_type:${type}`}}:{}),
+    ...(sourceComponent?{componentType:{value:sourceComponent,evidenceId:`${record.id}:source_type:${type}`}}:{}),
     purposes:/^stationtransformer$/i.test(type)?[{value:'station_service_transformer',evidenceId:`${record.id}:source_type:${type}`}]:['E01','E-T','E03'].includes(typed)?values(['用途','设备用途','PURPOSE']).flatMap(p=>/^(?:主变|主变压器|main_transformer)$/i.test(p.value.trim())?[{...p,value:'main_transformer'}]:/^(?:站用|站用变压器|station_service_transformer)$/i.test(p.value.trim())?[{...p,value:'station_service_transformer'}]:[]):[],
     sourceId: record.id, name: proxyName || record.name, assemblyParentId: record.parent || undefined,
     names: record.nameEvidence,

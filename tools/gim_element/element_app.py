@@ -455,7 +455,7 @@ class MainWindow(QMainWindow):
         for i in range(it.childCount()):self._collect_templates(it.child(i),out)
 
     def _fill_table(self, pairs):
-        """pairs = [(sample, row), …]；row 供属性面板显示所属模板与统计。"""
+        """pairs = [(sample, row), …]；切换分组后同步显示当前对象属性。"""
         self._table_pairs = pairs
         self.table.setRowCount(len(pairs))
         for i, (s, _r) in enumerate(pairs):
@@ -473,6 +473,9 @@ class MainWindow(QMainWindow):
             self.table.setItem(i, 2, QTableWidgetItem(src))
         if pairs:
             self.table.selectRow(0)
+            # Replacing row 0 can retain the previous selection without a Qt
+            # selection signal. Refresh the panel with the new row's data.
+            self._on_sample_sel()
         else:
             self.prop.setHtml(self._prop_placeholder())
 

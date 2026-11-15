@@ -59,7 +59,7 @@ export function isNumberedDesignation(value:string):boolean {
   return /#\s*\d+|\d+\s*(?:号|#)|(?:主变|组合电器|避雷器|互感器|电抗器组|电容器组|开关柜|屏柜|设备|装置|支架|基础)\s*\d+(?![\p{L}\p{N}_])|[ⅠⅡⅢⅣⅤ]/u.test(text);
 }
 const refinements:Record<string,string[]>={
-  'E-T':['E01','E03'],'E-R':['E02','E11'],E16:['E16.terminal_box','E16.panel_cabinet','E16.control_cabinet','E16.battery_set','E16.protection'],
+  'E-T':['E01','E03'],'E-R':['E02','E11'],E16:['E16.terminal_box','E16.panel_cabinet','E16.control_cabinet','E16.battery_set'],
   'C-B4':['C-B2','C-B3','C-B9'],'C-B5':['C-B6','C-B7'],
   'C-A1':['C-C1','C-C4'],'C-A2':['C-C1','C-C5','C-B3'],'C-A5':['C-C1','M08'],'C-A4':['C-A4.steel'],'C-A3':['C-A3.steel'],
 };

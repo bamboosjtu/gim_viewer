@@ -28,7 +28,7 @@ class StandardTests(unittest.TestCase):
                 with self.subTest(name=name):
                     result=R.interpret(record({'id':'x','type':name}))
                     self.assertTrue(result['category'].startswith({'equipment':'E','material':'M','construction':'C'}[item['kind']]))
-        self.assertEqual(len(R.STANDARD['items']),132)
+        self.assertEqual(len(R.STANDARD['items']),131)
     def test_shared_behavior_cases(self):
         for case in json.loads((TOOL/'tests/recognition_cases.json').read_text(encoding='utf-8')):
             with self.subTest(case=case['name']):
@@ -41,7 +41,7 @@ class StandardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder)
             for name in ['standard_recognition.py','standard_sources.py','catalog.json','standardCatalog.json','sourceVocabulary.json','sourceTypeAliases.json','catalogRules.json','proxyCategories.json']:shutil.copyfile(TOOL/name,root/name)
-            code='import sys;sys.path.insert(0,sys.argv[1]);import standard_recognition as r;assert len(r.STANDARD["items"])==132;assert r.category_value("TerminalBox")=="M10"'
+            code='import sys;sys.path.insert(0,sys.argv[1]);import standard_recognition as r;assert len(r.STANDARD["items"])==131;assert r.category_value("TerminalBox")=="M10"'
             subprocess.run([sys.executable,'-I','-c',code,str(root)],cwd=root,check=True,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
 
 if __name__=='__main__':unittest.main()

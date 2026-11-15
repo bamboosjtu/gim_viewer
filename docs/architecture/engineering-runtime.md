@@ -163,3 +163,11 @@ Worker 运行时解码只对带明确 projectionErrors 的失败投影允许覆�
 - [缓存域](caches.md)
 - [DEV 几何运行时](dev-geometry.md)
 - [验证](../validation.md)
+
+## 物理目录与持久化的完成边界
+
+物理目录先发布供几何使用；需要缓存时，由同一来源 Worker 保留一次目录，在独立请求中执行编码并转移字节。主线程不对整个目录执行 JSON 序列化，也不将目录再克隆回 Worker。编码阶段为 `engineering.physical-cache-encode`。
+
+实体构建完成后 `engineeringBuildPending` 立即结束。工程缓存的 saving 状态和物理目录的 `sourceGeometryCachePending` 单独跟踪；自动表示加载及来源/模型树完成不等待派生缓存写入。缓存结算与完全结算仍等待真实持久化结束，物理目录写入失败计入缓存写入失败，不删除已发布实体或几何。
+
+PARTINDEX 物理归属查询按装配作用域建立一次后代路径索引，保留重复 occurrence 和歧义；每个新目标路径不再重新扫描整棵装配树。文档标量仅索引物理目录使用的五个字段，原始字段与顺序继续由来源文档保留。

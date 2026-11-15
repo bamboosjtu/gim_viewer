@@ -18,13 +18,14 @@ export function observeModelPresentation(ctx:ViewerContext,isCurrent:()=>boolean
     const position=geometry.getAttribute('position'),count=geometry.index?.count??position?.count??0;
     if(count>0&&geometry.drawRange.count>0&&(!(this as THREE.InstancedMesh).isInstancedMesh||(this as THREE.InstancedMesh).count>0))drawn=true;
   };
-  function watch(root:THREE.Object3D){root.traverse(object=>{
+  function watch(root:THREE.Object3D){let registered=0;root.traverse(object=>{
     if(hooks.has(object))return;
+    registered++;
     const before=object.onAfterRender;
     const wrapped:THREE.Object3D['onAfterRender']=function(this:THREE.Object3D,...args){before.apply(this,args);drawnModel.apply(this,args);};
     hooks.set(object,{before,wrapped});object.onAfterRender=wrapped;
     object.addEventListener('childadded',added);object.addEventListener('childremoved',removed);
-  });}
+  });return registered;}
   function detach(object:THREE.Object3D){const hook=hooks.get(object);if(!hook)return;
     if(object.onAfterRender===hook.wrapped)object.onAfterRender=hook.before;
     object.removeEventListener('childadded',added);object.removeEventListener('childremoved',removed);hooks.delete(object);
@@ -34,5 +35,5 @@ export function observeModelPresentation(ctx:ViewerContext,isCurrent:()=>boolean
   const dispose=()=>{if(disposed)return;disposed=true;for(const object of hooks.keys())detach(object);roots.clear();renderer?.onBeforeUpdate.remove(before);renderer?.onAfterUpdate.remove(after);renderer?.onDisposed.remove(dispose);};
   const after=()=>{if(!isCurrent()){dispose();return;}if(drawn){dispose();onPresented();}};
   renderer?.onBeforeUpdate.add(before);renderer?.onAfterUpdate.add(after);renderer?.onDisposed.add(dispose);
-  return {watch(root:THREE.Object3D){if(disposed||roots.has(root))return;roots.add(root);watch(root);requestViewerRender(ctx);},dispose};
+  return {watch(root:THREE.Object3D){if(disposed||roots.has(root))return 0;roots.add(root);const registered=watch(root);requestViewerRender(ctx);return registered;},dispose};
 }

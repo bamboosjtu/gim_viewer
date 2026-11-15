@@ -151,9 +151,13 @@ export class EngineeringWorkerClient {
     await this.request({ type: 'files', files }, [...new Set(files.flatMap(f => f.bytes ? [f.bytes.buffer as ArrayBuffer] : []))]);
   }
   async addPackedFiles(batch:EngineeringSourceBatch):Promise<void> {await this.request({type:'packed-files',batch});}
-  async extractGeometry():Promise<SourceGeometryOccurrenceCatalog>{
-    const response=await this.request({type:'extract-geometry'});
+  async extractGeometry(retainForCache=false):Promise<SourceGeometryOccurrenceCatalog>{
+    const response=await this.request({type:'extract-geometry',retainForCache});
     if(response.type!=='geometry')throw Error('Physical geometry catalog expected');return response.catalog;
+  }
+  async encodeGeometryCache():Promise<Uint8Array|undefined>{
+    const response=await this.request({type:'encode-geometry-cache'});
+    if(response.type!=='geometry-cache')throw Error('Physical geometry cache expected');return response.bytes;
   }
   async extract(): Promise<EngineeringExtractSummary> {
     const response = await this.request({ type: 'extract' });

@@ -1,7 +1,7 @@
 import type * as THREE from 'three';
 import type {AppState,ProjectLoadSession} from '../app/state.js';
 import type {ViewerContext} from '../viewer/viewerEngine.js';
-import {perfCurrentSession,perfMarkProductMoment,type PerfSession} from '../utils/perfTimings.js';
+import {perfCurrentSession,perfMark,perfMarkProductMoment,type PerfSession} from '../utils/perfTimings.js';
 type Observation=ReturnType<typeof import('../viewer/modelPresentation.js')['observeModelPresentation']>;
 const jobs=new WeakMap<AppState,{session:ProjectLoadSession;promise:Promise<Observation>;callbacks:Set<()=>void>;presented:boolean}>();
 /** Source/semantic readiness remains independent from a submitted model frame. */
@@ -22,5 +22,9 @@ export async function observeFirstGeometry(state:AppState,ctx:ViewerContext,root
   }
   if(job.presented){onPresented?.();return;}
   if(onPresented)job.callbacks.add(onPresented);
-  const observer=await job.promise;if(current())observer.watch(root);else observer.dispose();
+  const observer=await job.promise;
+  if(current()){
+    const started=performance.now(),objects=observer.watch(root);
+    if(objects)perfMark('首次绘制观察注册',{objects,registrationMs:performance.now()-started},perf);
+  }else observer.dispose();
 }

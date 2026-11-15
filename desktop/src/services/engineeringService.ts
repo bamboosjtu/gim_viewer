@@ -1,4 +1,4 @@
-import {sourceGeometryCacheEntry,encodeSourceGeometryCache,decodeSourceGeometryCache} from './sourceGeometryCache.js';
+import {sourceGeometryCacheEntry,decodeSourceGeometryCache} from './sourceGeometryCache.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import {isByteFile,copyByteFileBytes} from '@desktop/byteFile.js';
 import {ENGINEERING_SOURCE_BATCH_BYTES,ENGINEERING_SOURCE_BATCH_FILES} from './engineeringWorkerProtocol.js';
@@ -29,7 +29,6 @@ interface EngineeringJob {
   identity?: EngineeringCacheIdentity;
   update: () => void;
   beforeCacheWrite?: Promise<unknown>;
-  physicalCacheWrite?:Promise<void>;
   resolveGeometry(catalog: SourceGeometryOccurrenceCatalog | null): void;
   projectionReady: Promise<boolean>;
   resolveProjection(complete: boolean): void;
@@ -122,12 +121,16 @@ async function saveResult(state: AppState, job: EngineeringJob, result: Engineer
 async function finishBuild(state:AppState,job:EngineeringJob,result:EngineeringBuildResult):Promise<void>{
   if(!currentBuild(state,job,result))return;
   job.finished=true;
-  try{await saveResult(state,job,result);await job.physicalCacheWrite;}finally{
+  // Domain work is complete. Persistence has its own cache-settled state;
+  // optional cache I/O must not extend the automatic geometry load metric.
+  const saving=saveResult(state,job,result);
+  state.engineeringBuildPending=false;job.update();
+  if(!state.engineeringSources?.models.length&&state.engineeringTreeStatus==='loading')
+    state.engineeringGeometryEvidenceChanged?.();
+  try{await saving;}finally{
     // Retain metadata/checkpoint; an idle reconstructible Worker can terminate.
     await job.client.releaseModel?.(result.buildId);
-    if(currentBuild(state,job,result)){state.engineeringBuildPending=false;job.update();
-      if(!state.engineeringSources?.models.length&&state.engineeringTreeStatus==='loading')
-        state.engineeringGeometryEvidenceChanged?.();}
+    if(currentBuild(state,job,result))job.update();
   }
 }
 
@@ -226,6 +229,8 @@ function fail(state: AppState, job: EngineeringJob, error: unknown): void {
 export function beginEngineeringBuild(state: AppState, files: Map<string, File>, options: EngineeringBuildOptions = {}): Promise<void> {
   state.engineeringCleanup?.();
   state.engineeringBuildPending=true;
+  state.sourceGeometryCachePending=false;
+  state.sourceGeometryCacheError='';
   state.engineeringProgress=null;
   state.engineeringFailureCode=null;
   let resolveGeometry!: EngineeringJob['resolveGeometry'];
@@ -314,7 +319,7 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
       await initialized;
       await prepareEntries([...files].filter(([path])=>/\.(?:cbm|dev)$/i.test(path)));prepared=true;
       if(!current(state,job))return;
-      try{physical=await client.extractGeometry();}catch(error){
+      try{physical=await client.extractGeometry(!!job.identity);}catch(error){
         if(!current(state,job))return;
         resolveGeometry(null);perfMark('来源物理目录失败',{reason:String(error)});
       }
@@ -325,14 +330,19 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
       perfMark('来源物理目录就绪',{occurrences:physical.occurrences.length,diagnostics:physical.diagnostics.length});
       if(job.identity&&prepared&&!physical.diagnostics.some(d=>d.reason==='source-read-failed')){
         // Cache persistence is a background publication, never a render prerequisite.
-        const catalog=physical;
-        job.physicalCacheWrite=Promise.resolve(job.beforeCacheWrite).then(async()=>{
+        state.sourceGeometryCachePending=true;
+        void (async()=>{
           await new Promise<void>(resolve=>setTimeout(resolve,0));
           if(!current(state,job))return;
-          const bytes=await encodeSourceGeometryCache(job.identity!.sourceSha256,catalog);if(!bytes)return;
+          // Encode the Worker's retained catalog; no clone back to the Worker
+          // and no model-sized stringify on the rendering thread.
+          const bytes=await client.encodeGeometryCache();if(!bytes)return;
+          await job.beforeCacheWrite;
+          if(!current(state,job))return;
           const {writeCacheFile}=await import('@desktop/database.js');
           if(current(state,job))await writeCacheFile(session.projectId!,sourceGeometryCacheEntry(job.identity!.sourceSha256),bytes,job.identity!.sourceSha256);
-        }).catch(error=>{if(current(state,job))perfMark('来源物理目录缓存未写入',{reason:String(error)});});
+        })().catch(error=>{if(current(state,job)){state.sourceGeometryCacheError=String(error);perfMark('来源物理目录缓存未写入',{reason:String(error)});}})
+          .finally(()=>{if(current(state,job)){state.sourceGeometryCachePending=false;update();}});
       }
     }
     // Allow the independently resolved geometry consumer to dispatch work first.

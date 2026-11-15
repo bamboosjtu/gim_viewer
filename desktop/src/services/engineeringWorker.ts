@@ -15,6 +15,8 @@ import {SourceDocuments} from '../gim/engineering/sourceDocuments.js';
 import {createEntryIndex,type EntryIndex} from '../gim/entryResolver.js';
 import { encodeEngineeringWorkerResultAsync, engineeringWorkerResultTransfers,type TransportGraphCache } from './engineeringWorkerTransport.js';
 import type {EvidenceStatus,EvidenceInventory} from '../engineering/evidence.js';
+import type {SourceGeometryOccurrenceCatalog} from '../gim/engineering/geometryOccurrences.js';
+import {encodeSourceGeometryCache} from './sourceGeometryCache.js';
 
 export function markCacheFailure(result:Pick<EngineeringBuildResult,'cacheError'|'cacheDisabled'>,error:unknown):void{
   result.cacheError=String(error);
@@ -25,6 +27,7 @@ export function markCacheFailure(result:Pick<EngineeringBuildResult,'cacheError'
  * build is retained; one cache buffer is encoded and transferred at a time. */
 export function createEngineeringWorkerHandler(){
   let scope='',paths:string[]=[],graph:EngineeringSourceGraph|null=null,sequence=0;
+  let physicalCache:SourceGeometryOccurrenceCatalog|undefined;
   let latest:{result:EngineeringBuildResult;identity?:EngineeringCacheIdentity;digest?:string;plan:EngineeringCacheDomain[]}|undefined;
   const files=new Map<string,Blob|Uint8Array>();
   const batches=new EngineeringSourceBatches();
@@ -112,7 +115,7 @@ export function createEngineeringWorkerHandler(){
       provider().restoreMetadata(checkpoint.snapshot);return {type:'ready'};
     }
     if(request.type==='release-model'){if(request.buildId===undefined||latest?.result.buildId===request.buildId){latest=undefined;compact();}return {type:'ready'};}
-    if(request.type==='init'){scope=request.scope;paths=request.paths;entryIndex=undefined;documents.clear();files.clear();batches.clear();graph=null;latest=undefined;lastSources=undefined;
+    if(request.type==='init'){scope=request.scope;paths=request.paths;physicalCache=undefined;entryIndex=undefined;documents.clear();files.clear();batches.clear();graph=null;latest=undefined;lastSources=undefined;
       graphReferences=request.graphReferences===true;wireGraph={};
       if(parkTimer)clearTimeout(parkTimer);parked=undefined;parkedCoverage=[];parkedEntries.clear();evidence=undefined;indexedGraph=undefined;indexedRevision=-1;
       return {type:'ready'};}
@@ -142,7 +145,12 @@ export function createEngineeringWorkerHandler(){
         return extractPhysicalOccurrences({entryIndex,readDocument:path=>documents.read(path)},
           {onProgress:count=>reportProgress('source-traverse',count)});
       });
+      physicalCache=request.retainForCache&&!catalog.diagnostics.some(d=>d.reason==='source-read-failed')?catalog:undefined;
       return {type:'geometry',catalog};
+    }
+    if(request.type==='encode-geometry-cache'){
+      const catalog=physicalCache;physicalCache=undefined;
+      return {type:'geometry-cache',bytes:catalog?await trace.measure('engineering.physical-cache-encode',()=>encodeSourceGeometryCache(scope,catalog)):undefined};
     }
     if(request.type==='extract'){
       graph=null;latest=undefined;lastSources=undefined;evidence?.resetObservations();wireGraph={};parked=undefined;parkedCoverage=[];parkedEntries.clear();indexedGraph=undefined;indexedRevision=-1;
@@ -221,7 +229,7 @@ if(typeof document==='undefined'&&typeof self!=='undefined'&&typeof self.postMes
     if(probe.control(event))return;
     chain=chain.then(async()=>{await probe.run(event, async trace=>{const request=event.data;try{
       const reply=await handle(request, trace,(stage,completed)=>send({type:'progress',stage,completed,requestId:request.requestId})),response={...reply,requestId:request.requestId} as EngineeringWorkerResponse;
-      const transfers=response.type==='model'?engineeringWorkerResultTransfers(response.result):response.type==='evidence-checkpoint'&&response.checkpoint?[response.checkpoint.bytes.buffer as ArrayBuffer]:response.type==='cache'&&response.result.bytes?[response.result.bytes.buffer as ArrayBuffer]:[];
+      const transfers=response.type==='model'?engineeringWorkerResultTransfers(response.result):response.type==='evidence-checkpoint'&&response.checkpoint?[response.checkpoint.bytes.buffer as ArrayBuffer]:response.type==='geometry-cache'&&response.bytes?[response.bytes.buffer as ArrayBuffer]:response.type==='cache'&&response.result.bytes?[response.result.bytes.buffer as ArrayBuffer]:[];
       trace.produced({ transferBuffers: transfers.length });
       send(trace.result(response),transfers);trace.sentResult();
     }catch(error){trace.fail(error);send({type:'error',requestId:request.requestId,message:String(error)});}});});

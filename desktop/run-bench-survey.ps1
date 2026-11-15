@@ -1,6 +1,9 @@
 ﻿param(
     # Optional: override the current HEAD short hash, e.g. -Commit 104924c
-    [string]$Commit
+    [string]$Commit,
+    [string]$BuildManifest,
+    [ValidateSet('all', 'substation', 'line', 'l0')]
+    [string]$Batch = 'all'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,6 +45,10 @@ try {
         Write-Warning 'The working tree has uncommitted changes. The output folder uses the HEAD commit hash, which does not identify those changes.'
     }
 
+    if ($BuildManifest) {
+        $manifestPath = $BuildManifest
+    }
+    else {
     # Build once and capture the acceptance manifest path from the build output.
     Write-Host "`n>>> npm run bench -- build" -ForegroundColor Cyan
     # Windows PowerShell turns redirected native stderr into ErrorRecords.
@@ -79,6 +86,7 @@ try {
     }
 
     $manifestPath = $manifestMatch.Groups[1].Value.Trim().Trim('"')
+    }
     if (-not [System.IO.Path]::IsPathRooted($manifestPath)) {
         $manifestPath = Join-Path (Get-Location).Path $manifestPath
     }
@@ -154,40 +162,51 @@ try {
         Write-Host "Batch completed; recorded outcome: $($completion.outcome)" -ForegroundColor Cyan
     }
 
+    # Keep earlier reports when manually repeating a batch with the same commit.
+    $outputTag = $Commit
+    $requestedGroups = if ($Batch -eq 'all') { @('substation', 'line', 'l0') } else { @($Batch) }
+    if (@($requestedGroups | Where-Object { Test-Path -LiteralPath "../output/$_-survey-$outputTag" }).Count -gt 0) {
+        $outputTag = "$Commit-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+    }
+
     # L1: substation registry
+    if ($Batch -in @('all', 'substation')) {
     Invoke-BenchBatch -SummaryGroup '--substation' -BenchArgs @(
         'batch',
         '--build', $manifestPath,
         '--registry', '..\benchmarks\l1\substation01-04.json',
-        '--output', "../output/substation-survey-$Commit",
+        '--output', "../output/substation-survey-$outputTag",
         '--preset', 'baseline',
         '--anonymize', 'false'
     )
+    }
 
     # L1: line registry
+    if ($Batch -in @('all', 'line')) {
     Invoke-BenchBatch -SummaryGroup '--line' -BenchArgs @(
         'batch',
         '--build', $manifestPath,
         '--registry', '..\benchmarks\l1\line01-06.json',
-        '--output', "../output/line-survey-$Commit",
+        '--output', "../output/line-survey-$outputTag",
         '--preset', 'baseline',
         '--anonymize', 'false'
     )
+    }
 
     # L0: local substation demo directory
+    if ($Batch -in @('all', 'l0')) {
     Invoke-BenchBatch -SummaryGroup '--substation' -BenchArgs @(
         'batch',
         '--build', $manifestPath,
         '--directory', '..\demo\变电站通用设计模型\',
-        '--output', "../output/l0-survey-$Commit",
+        '--output', "../output/l0-survey-$outputTag",
         '--preset', 'baseline',
         '--anonymize', 'false'
     )
+    }
 
     Write-Host "`n=== Benchmark survey completed; summary follows ===" -ForegroundColor Cyan
-    Write-Host "L1 substation output: ../output/substation-survey-$Commit"
-    Write-Host "L1 line output: ../output/line-survey-$Commit"
-    Write-Host "L0 output: ../output/l0-survey-$Commit"
+    foreach ($group in $requestedGroups) { Write-Host "$group output: ../output/$group-survey-$outputTag" }
     & node (Join-Path $PSScriptRoot 'scripts/with-workspace-temp.mjs') (Join-Path $PSScriptRoot 'scripts/benchmarks/survey-summary.mjs') @summaryArgs
     if ($LASTEXITCODE -ne 0) { throw 'Unable to summarize the completed benchmark reports.' }
     exit 0

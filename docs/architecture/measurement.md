@@ -164,3 +164,5 @@ DEV 分部结果到 Merge 的前置引用由实际 child 任务完成及 Merge �
 - [性能测试指南](../performance-guide.md)：性能口径、冷暖步骤与手工验收路线。
 - [验证](../validation.md)：证据边界、门禁与本地性能复核规则。
 - [开发指南](../development.md)：构建、测试与工作区约定。
+
+自动表示加载与派生缓存持久化分开：前端进度提供 `automaticTimingPolicy=semantic-base-without-cache-v1`，自动加载等待来源/实体和基础表示，不等待派生缓存；`cacheSettled` 和 `settledMs` 继续包含实际缓存写入。CLI 从实际前端进度记录策略，缺失或不同策略的 `automaticLoadMs` 不计算节省或回退百分比，仍保留两侧绝对值。首次几何策略也取实际前端声明，不能由新 CLI 给历史二进制补写新口径。

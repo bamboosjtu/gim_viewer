@@ -22,6 +22,7 @@ function fixture() {
   const state = { isCurrentSession: () => true, loadedXmlModGroups: new Map(), geometryDiagnostics: new Map(), deviceUnknownBounds: new Set() } as any;
   const runtime = new DevLodRuntime(state, {} as any, { sourceSha256: 'sha', generation: 1 } as any, status);
   (runtime as any).firstModelPresented=true;
+  (runtime as any).catalogLookupReady=true;
   ownedRuntimes.add(runtime);
   Object.assign(runtime.diagnostics, { anchorReady: true, catalogReady: true,baseRepresentationsSettled:true });
   return { runtime, internal: runtime as any, status };

@@ -677,23 +677,23 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
       startSpatialSemantic,
     );
   };
-  const scheduleStdSld = (coordinator: SubstationBackgroundCoordinator): void => {
+  const scheduleStdSld = (coordinator: SubstationBackgroundCoordinator, gate:SubstationBackgroundGate='interactive'): void => {
     if (!startStdSld) return;
     const starter = startStdSld;
     coordinator.enqueue({
       task: 'stdSld',
       priority: 2,
       heavy: false,
-      startAfter: 'interactive',
+      startAfter: gate,
       run: async () => { await starter(); },
     });
   };
-  const scheduleCachePersistence = (coordinator: SubstationBackgroundCoordinator, _gate: SubstationBackgroundGate): void => {
+  const scheduleCachePersistence = (coordinator: SubstationBackgroundCoordinator, gate: SubstationBackgroundGate): void => {
     coordinator.enqueue({
       task: 'cachePersistence',
       priority: 10,
       heavy: !preExtracted?.cachePaths?.size,
-      startAfter: 'interactive',
+      startAfter: gate,
       run: async () => { await startCachePersistence(); },
     });
   };

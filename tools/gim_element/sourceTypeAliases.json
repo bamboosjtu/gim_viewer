@@ -80,7 +80,7 @@
     "steelcolumn": "C-A3.steel",
     "steelstructure": "C-A14",
     "structuralmember": "C-A15",
-    "protectiondevice": "E16.protection"
+    "protectiondevice": "part"
   },
   "ifcPredefined": {
     "IFCPROTECTIVEDEVICE.CIRCUITBREAKER": "E06",
@@ -153,6 +153,6 @@
     "IFCBEAMSTANDARDCASE": "C-A4",
     "IFCCOLUMNSTANDARDCASE": "C-A3",
     "IFCMEMBERSTANDARDCASE": "C-A15",
-    "IFCPROTECTIVEDEVICE": "E16.protection"
+    "IFCPROTECTIVEDEVICE": "part"
   }
 }

@@ -25,6 +25,8 @@ export class DevLodSourceWorkset {
   missedSourcePreparations = new Map<string, Promise<void>>();
 
   missedSourceTail = Promise.resolve();
+  private queued = new Map<string,{dev:string;resolve:()=>void}>();
+  private scheduled = false;
 
   missedSourceBytes = 0;
 
@@ -46,11 +48,30 @@ export class DevLodSourceWorkset {
     try { if (localStorage.getItem('gim-dev-preload') === '0') return Promise.resolve(); } catch { /* storage unavailable */ }
     const key = dev.toLowerCase(), old = this.missedSourcePreparations.get(key);
     if (old) return old;
-    const pressured = () => this.options.memoryPressure() === 'high' || this.options.memoryPressure() === 'critical';
-    const task = this.missedSourceTail.then(async () => {
+    const task = new Promise<void>(resolve=>this.queued.set(key,{dev,resolve}));
+    this.missedSourcePreparations.set(key,task);
+    if(!this.scheduled){
+      this.scheduled=true;
+      queueMicrotask(()=>{
+        this.scheduled=false;
+        const requests=[...this.queued.values()];this.queued.clear();
+        // Coalesce actual catalog/compile misses, not the package inventory.
+        // Small batches let the first visible roots proceed before later roots.
+        for(let start=0;start<requests.length;start+=16){
+          const batch=requests.slice(start,start+16);
+          this.missedSourceTail=this.missedSourceTail.then(()=>this.materialize(batch.map(row=>row.dev)))
+            .catch(error=>{perfMark('DEV missing-template source fallback',{dev:batch[0].dev,reason:String(error)},this.options.perf);})
+            .then(()=>{batch.forEach(row=>row.resolve());});
+        }
+      });
+    }
+    return task;
+  }
+  private async materialize(devs:string[]):Promise<void>{
+      const pressured = () => this.options.memoryPressure() === 'high' || this.options.memoryPressure() === 'critical';
       if (!this.options.current() || pressured()) return;
       const before = this.missedSourceBytes;
-      const prepared = await hydrateSubstationGeometryGraph([dev], async paths => {
+      const prepared = await hydrateSubstationGeometryGraph(devs, async paths => {
         const loaded = new Map<string, File>();
         let batch: string[] = [], bytes = 0;
         const flush = async () => {
@@ -80,7 +101,7 @@ export class DevLodSourceWorkset {
           const file = this.sourceFiles!.get(source.path)!;
           const size = file.size;
           if (file instanceof File) { loaded.set(source.path, file); continue; }
-          if (!Number.isSafeInteger(size) || size <= 0 || size > 8 * 1024 * 1024 || this.missedSourceBytes + size > 32 * 1024 * 1024) continue;
+          if (!Number.isSafeInteger(size) || size <= 0 || size > 8 * 1024 * 1024 || this.missedSourceBytes + size > 128 * 1024 * 1024) continue;
           if (batch.length && bytes + size > 4 * 1024 * 1024) await flush();
           if (!this.options.current() || pressured()) break;
           this.missedSourceBytes += size; bytes += size; batch.push(source.path);
@@ -91,15 +112,14 @@ export class DevLodSourceWorkset {
       if (!this.options.current() || pressured()) return;
       // Keep the immutable values for shared dependencies. The path set stays
       // unchanged, so later templates reuse the same package path index.
-      for (const [path, file] of prepared) this.sourceFiles!.set(path, file);
+      // installSources updates the shared Map AND notifies existing Workers.
+      // Mutating it first makes its identity filter discard every upgrade.
       this.worker.installSources(prepared);
+      for(const [path,file]of prepared)this.sourceFiles!.set(path,file);
       perfMark('DEV missing-template source workset', {
-dev, entries: prepared.size, admittedBytes: this.missedSourceBytes - before,
+dev:devs[0], devCount:devs.length, entries: prepared.size, admittedBytes: this.missedSourceBytes - before,
         sessionAdmittedBytes: this.missedSourceBytes
 }, this.options.perf);
-    }).catch(error => { perfMark('DEV missing-template source fallback', { dev, reason: String(error) }, this.options.perf); });
-    this.missedSourcePreparations.set(key, task); this.missedSourceTail = task;
-    return task;
   }
   close(): void { this.sourceFiles = undefined;  }
 }

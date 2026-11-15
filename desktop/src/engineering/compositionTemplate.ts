@@ -200,7 +200,7 @@ export function assignEngineeringComposition(snapshot: EngineeringSnapshot, evid
     const hostIds = [...new Set(input?.hostEntityIds ?? [])].filter(id => id !== entity.id && entities.has(id));
     const host = hostIds.length === 1 ? assign(entities.get(hostIds[0])!) : undefined;
     const hostPaths = host?.paths.filter(path => path[0]?.key === 'installation') ?? [];
-    const fixed: Partial<Record<string, Purpose>> = { E01: 'main', E02: 'reactive', E03: 'auxiliary', E10: 'reactive', E11: 'reactive', E12: 'reactive', 'E16.protection': 'secondary', M05: 'cables', M08:'cables', M06: 'ground', 'C-D1': 'lighting', 'C-D2': 'fire', 'C-D4':'hvac', 'C-D5':'water', 'C-C2': 'water' };
+    const fixed: Partial<Record<string, Purpose>> = { E01: 'main', E02: 'reactive', E03: 'auxiliary', E10: 'reactive', E11: 'reactive', E12: 'reactive', M05: 'cables', M08:'cables', M06: 'ground', 'C-D1': 'lighting', 'C-D2': 'fire', 'C-D4':'hvac', 'C-D5':'water', 'C-C2': 'water' };
     if (fixed[category]) chosen = { purpose: fixed[category]! };
     if (ownFacility && !fixed[category]) chosen = { purpose: ownFacility };
     const ownSecondary = ownPurpose === 'secondary' && category.startsWith('E16') && category !== 'E16.terminal_box';

@@ -12,6 +12,7 @@ import type { EngineeringWorkerRequest, EngineeringWorkerResponse } from '../eng
 import { readCachedEntry, writeCacheFile, batchReadCachedFiles } from '@desktop/database.js';
 import {createByteFile} from '@desktop/byteFile.js';
 import{createSpatialSemanticStarter}from'../spatialSemanticStarter.js';
+import {benchmarkProgress} from '../../measurement/modelEvidence.js';
 
 vi.mock('@desktop/runtime.js', () => ({ isTauri: () => true }));
 vi.mock('@desktop/database.js', () => ({ readCachedEntry: vi.fn(), writeCacheFile: vi.fn(), batchReadCachedFiles: vi.fn() }));
@@ -69,6 +70,24 @@ beforeEach(() => {
 });
 
 describe('session-owned production engineering build', () => {
+  it('keeps physical cache persistence outside automatic geometry settlement',async()=>{
+    const app=state(),port=new LoopbackPort();app.currentProjectType='substation';
+    app.deviceLodRuntime={diagnostics:{baseRepresentationsSettled:true,cacheWritesSettled:true,pending:0,viewPendingOccurrences:0}} as never;
+    let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});
+    const write=vi.mocked(writeCacheFile).getMockImplementation()!;
+    vi.mocked(writeCacheFile).mockImplementation(async(...args)=>{
+      if(args[1].includes('/source-geometry-v1/'))await held;
+      return write(...args);
+    });
+    try{
+      await beginEngineeringBuild(app,sourceFiles(),{createWorker:portFactory(port)});
+      expect(app.engineeringBuildPending).toBe(false);expect(app.sourceGeometryCachePending).toBe(true);
+      expect(benchmarkProgress(app)).toMatchObject({automaticSettled:true,cacheSettled:false});
+      expect(port.commands).toContain('encode-geometry-cache');
+    }finally{release();}
+    await expect.poll(()=>app.sourceGeometryCachePending).toBe(false);
+    expect(benchmarkProgress(app).cacheSettled).toBe(true);
+  });
   it('publishes physical geometry while cold semantic extraction is held',async()=>{
     const app=state(),port=new LoopbackPort();port.holdExtract=true;
     const build=beginEngineeringBuild(app,sourceFiles(),{createWorker:portFactory(port)});

@@ -143,7 +143,7 @@ export async function loadAllIfcFiles(
     /** Schedule optional spatial work through the substation coordinator. */
     scheduleSpatialSemantic?: (coordinator: SubstationBackgroundCoordinator, readinessGate: SubstationBackgroundGate) => void;
     /** Schedule STD/SLD through the substation coordinator. */
-    scheduleStdSld?: (coordinator: SubstationBackgroundCoordinator) => void;
+    scheduleStdSld?: (coordinator: SubstationBackgroundCoordinator, gate?:SubstationBackgroundGate) => void;
     /** Schedule cold persistence through the substation coordinator. */
     scheduleCachePersistence?: (coordinator: SubstationBackgroundCoordinator, readinessGate: SubstationBackgroundGate) => void;
   } = {},
@@ -257,6 +257,23 @@ export async function loadAllIfcFiles(
   showLoading('正在加载 IFC 模型...');
   const failed: Array<{ name: string; message: string }> = [];
   let interactiveInitialized = false;
+  let deferredStarted=false;
+  let onIfcPresented:(()=>void)|undefined;
+  const afterPaintOpportunity=(work:()=>void)=>{
+    if(document.visibilityState!=='hidden'&&typeof requestAnimationFrame==='function')requestAnimationFrame(()=>setTimeout(work,0));
+    else setTimeout(work,0);
+  };
+  const startDeferredTasks=(presentationGate:SubstationBackgroundGate='allIfcReady')=>{
+    if(deferredStarted||!isCurrent())return;
+    deferredStarted=true;
+    const start=(label:string,starter?:()=>void|Promise<unknown>,scheduler?:(coordinator:SubstationBackgroundCoordinator,gate:SubstationBackgroundGate)=>void,gate:SubstationBackgroundGate='allIfcReady')=>{
+      try{if(scheduler)scheduler(background,gate);else if(starter)void Promise.resolve(starter()).catch(reportBackgroundError);}
+      catch(error){console.warn(`[GIM] 启动${label}失败，继续 IFC 后台加载:`,error);}
+    };
+    start('IFC 空间语义',options.startSpatialSemantic,options.scheduleSpatialSemantic);
+    start('STD/SLD',options.startStdSld,options.scheduleStdSld,presentationGate);
+    start('缓存持久化',options.startCachePersistence,options.scheduleCachePersistence,presentationGate);
+  };
   setSubstationViewerInteractive(false);
   let interactiveSignaled = false;
   let resolveInteractive!: () => void;
@@ -359,44 +376,24 @@ export async function loadAllIfcFiles(
     perfMarkProductMoment('firstUsableGeometryReady', firstMeta, perfSession);
     const runtimeId=state.ifcRuntimeModelIds.get(entry.modelId)??entry.modelId;
     const object=ctx.fragments.list.get(runtimeId)?.object;
-    const startPostInteractiveTask = (
-      label: string,
-      starter?: () => void | Promise<unknown>,
-      scheduler?: (coordinator: SubstationBackgroundCoordinator, gate: SubstationBackgroundGate) => void,
-    ): void => {
-      if (!starter && !scheduler) return;
-      try {
-        // All three starters are deliberately invoked only after the
-        // interactive product moment.  They are independent background
-        // tasks; one synchronous registration failure must not suppress the
-        // other tasks or the sequential IFC tail.
-        if (scheduler) scheduler(background, 'allIfcReady');
-        else void Promise.resolve(starter?.()).catch(reportBackgroundError);
-      } catch (err) {
-        console.warn(`[GIM] 启动${label}失败，继续 IFC 后台加载:`, err);
-      }
-    };
-    if(object)void observeFirstGeometry(state,ctx,object,session,()=>{
-      if(!isCurrent())return;setSubstationViewerInteractive(true);hideLoading();
+    let frameHandled=false;
+    onIfcPresented=()=>{
+      if(frameHandled||!isCurrent())return;frameHandled=true;setSubstationViewerInteractive(true);hideLoading();
       perfMark('变电工程首次实体画面已提交',firstMeta,perfSession);
       void Promise.resolve(sampleSubstationMemory(state,'interactive',perfSession,firstMeta,ctx)).catch(reportBackgroundError);
       // Give the submitted model frame a paint opportunity before optional
       // synchronous work. No GPU completion fence or readback is used.
       const start=()=>{
         if(!isCurrent())return;background.markInteractive();
-        startPostInteractiveTask('IFC 空间语义',options.startSpatialSemantic,options.scheduleSpatialSemantic);
-        startPostInteractiveTask('STD/SLD',options.startStdSld,options.scheduleStdSld);
-        startPostInteractiveTask('缓存持久化',options.startCachePersistence,options.scheduleCachePersistence);
-        void import('../viewer/ifcNameIndex.js').then(async({buildIfcNameIndex})=>{
-          if(!isCurrent())return;await buildIfcNameIndex(ctx,state,{session});
-          if(isCurrent())await renderSubstationCoreUi(state,showMessage,session,perfSession,'变电 IFC 名称补全');
-        }).catch(reportBackgroundError);
+        startDeferredTasks('interactive');
       };
-      if(typeof requestAnimationFrame==='function')requestAnimationFrame(()=>setTimeout(start,0));else setTimeout(start,0);
-    },perfSession).catch(reportBackgroundError);
+      afterPaintOpportunity(start);
+    };
+    if(object)void observeFirstGeometry(state,ctx,object,session,onIfcPresented,perfSession).catch(reportBackgroundError);
     signalInteractive();
     // Keep the IFC tail and DEV anchor live even if the first IFC is empty.
-    // Optional CPU/serialization work starts only after a model draw.
+    // Optional work starts after a model draw, or after the full IFC tail if
+    // every representation is empty/hidden; it never certifies a fake frame.
     background.startRemainingIfc();
     if (state.projectSourceToViewerMatrix) {
       background.markCoordinateAnchorReady();
@@ -650,6 +647,11 @@ session, perfSessionId: perfSession.id, onLoadSource: (source) => { if(!isCurren
           if (usable && !interactiveInitialized) {
             await initializeInteractiveAfterFirstIfc(entry, loadSource.value);
             if (!isCurrent()) return;
+          } else if(usable){
+            // An empty/offscreen first IFC cannot certify a visible frame.
+            // Observe later models too, with one shared presentation callback.
+            const object=ctx.fragments.list.get(runtimeModelId)?.object;
+            if(object)void observeFirstGeometry(state,ctx,object,session,onIfcPresented,perfSession).catch(reportBackgroundError);
           }
         } catch (err) {
           if (!readEnded) {
@@ -708,6 +710,9 @@ session, perfSessionId: perfSession.id, onLoadSource: (source) => { if(!isCurren
       state.endIfcBackgroundLoading();
       enqueueDevGeometry();
       background.markAllIfcReady();
+      // All IFCs may be empty/hidden. Complete source work independently of
+      // presentation; this does not emit an interactive/visible-frame moment.
+      afterPaintOpportunity(()=>startDeferredTasks());
       perfMarkProductMoment('allIfcReady', {
 total: entries.length, loaded: state.loadedModels.size,
         failed: failed.length, firstInteractive: interactiveInitialized
