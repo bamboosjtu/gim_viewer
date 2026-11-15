@@ -6,6 +6,8 @@
 
 三条路线的分工见下节；测量协议、采集面和完整性口径见[测量与本地 Benchmark](architecture/measurement.md)。
 
+本页定义怎么测；开发中需要保留的优化及防回退约束见[性能门禁](performance/gates.md)和[方向索引](performance/README.md)。
+
 ## 目录
 
 - [分工与路线](#分工与路线)
@@ -56,7 +58,7 @@
 
 | 名称 | 判定 |
 |---|---|
-| **First usable** | 工程已打开，主界面可交互，项目名称/状态栏已出现；不要求全部几何完成。 |
+| **首次实体可见** | 当前有效视口中的非空模型已进入实际绘制提交流程；不等 GPU 完成，也不要求全部几何完成。导航 DOM 就绪另计，不能仅凭名称/状态栏出现认定已有可浏览实体。 |
 | **Current view** | 当前相机范围内需要的 DEV 基础表示完成；以状态栏“当前视图已完成”或 `deviceLod.currentViewSettled === true` 为准。`currentViewReady === true` 只表示视觉上已显示，catalog 可能仍未 settled，不能替代 Current view 测量里程碑。 |
 | **基础表示完成（旧表列名 Full fidelity）** | `deviceLod.baseRepresentationsSettled === true`；全站 L0 基础任务及目录已结束。分别报告显示、合法空源、不支持、部分和失败数。用户主动 L2、IFC 与连接线分别计量。 |
 
@@ -64,7 +66,7 @@
 
 - `productMoments.navigationUiReady` 单独记录变电树、搜索和文件设备面板完成 DOM 提交的首次时刻，冷解析和暖恢复使用相同入口。它不等待首个 IFC，也不因后续名称或空间语义补全而改写。
 - 该字段的 `scope: navigation-dom`、`inputLatencyVerified: false` 明确表示尚未证明绘制或输入响应；工程可操作仍须在原生窗口实际展开、搜索及查看基本信息确认。
-- 兼容字段 `interactive` 继续表示首个 IFC 可浏览的旧时刻，`firstUsableGeometryReady` 单独说明首个有效三维画面。
+- `firstUsableGeometryReady` 表示已有可用几何提交；`firstVisibleGeometryReady`、当前 `firstGeometryReady/interactive` 则在真实模型绘制提交后记录。旧版同名字段口径不同，不能混比或回填新口径。
 - 不得把新增 DOM 时间点直接当作性能提升，或重算旧记录的 First usable。
 
 基础表示口径：
@@ -81,7 +83,7 @@
 暖启动有效的硬条件：
 
 1. 上一轮冷启动确实达到基础表示 settled，并确认基础缓存写入完成；
-2. 使用的是同一个 exe、同一份源码、同一个工程文件；
+2. 使用同一个 EXE 及其冻结构建身份、同一个工程文件；当前工作区可以继续开发，不能把工作区指纹相等作为执行已选构建的前提；
 3. 只重启进程，没有重新解压、没有改缓存版本、没有改样本。
 
 缓存与 profile：
@@ -110,7 +112,7 @@
 - 是否接通电源、是否高性能电源计划；
 - 测试时是否关闭了其他构建、浏览器、杀毒扫描和大型应用。
 
-性能数字只在同一环境、同一构建、同一缓存状态下比较。不要把开发模式、旧 exe、不同 WebView2 运行时的结果混在一张表里。
+组内重复使用同一个冻结构建；跨版本比较分别记录基线与候选构建，固定其他可比条件。不要把开发模式、错误 EXE、不同 WebView2 运行时或不同缓存准备的数字混算。
 
 ### 构建 Release
 

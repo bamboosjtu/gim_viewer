@@ -68,7 +68,7 @@ jobs:
         run: npm run test:version
 
       # Cheap, sample-free contracts fail before native compilation and coverage.
-      # Real-sample validation and the 10% regression decision remain manual/local.
+      # docs/performance/gates.md: real-sample performance decisions remain manual/local.
       - name: Check measurement value and protocol contracts (no model samples)
         run: npm run test:measurement-tools
 

@@ -16,6 +16,7 @@
 | 改 IFC / Spatial | [IFC 运行时](architecture/ifc-runtime.md) | [语义模型](schema/semantic-model.md) → [缓存域](architecture/caches.md) |
 | 改线路地图或 Android 线路语义 | [线路与移动端](architecture/line-mobile.md) | [线路 MOD](schema/powerline-mod.md) → [移动端规格](mobile-spec.md) |
 | 改选择、高亮、属性面板 | [选择与交互](architecture/selection.md) | [表示与绑定](architecture/representations.md) |
+| 修改可能影响性能的路径 | [性能门禁](performance/gates.md) | [按方向整理的经验与反例](performance/README.md)；不替代开发者本地实测 |
 | 跑性能测试或本地 Benchmark | [性能测试指南](performance-guide.md) | [Benchmark CLI](benchmark.md)；权威结果在本地 `tmp/`，`output/` 为默认匿名派生视图（显式非匿名 survey 例外） |
 | 核对验证门禁与证据边界 | [验证](validation.md) | [开发指南](development.md) |
 | 复核 GIM 格式与样本 | [Schema](schema/README.md) | [样本台账](schema/sample-corpus.md) |
@@ -84,6 +85,7 @@
 | [开发指南](development.md) | 环境、命令、工作区与临时目录、运行时资产、文档维护 |
 | [验证](validation.md) | 证据分层、必须成立的不变量、自动门禁、真实复核与覆盖率 |
 | [性能测试指南](performance-guide.md) | 怎么测：测量定义、冷/暖步骤、手工与 CLI 路线 |
+| [性能经验与门禁](performance/README.md) | 每方向一页的保留做法、失败反例、结构/计数检查和本地验收边界 |
 | [Benchmark CLI](benchmark.md) | 批量 CLI、子命令、注册表、报告、Trace/Profile 与状态/退出码 |
 | [测量与 Benchmark](architecture/measurement.md) | 测量协议、采集面、Trace/Profile、完整性口径与权威产物 |
 
@@ -114,6 +116,7 @@
 | 各轮性能测量结果 | 开发者本地 `tmp/gim-bench/` 私有报告（权威）；`output/` 默认匿名派生（显式非匿名 survey 仅展示允许的样本文件名），均不随仓库分发 |
 | 命令与工作区约定 | [开发指南](development.md) |
 | 验证证据规则 | [验证](validation.md) |
+| 性能开发约束与按方向防回退 | [性能门禁](performance/gates.md)及方向文档；性能接受仍由开发者决定 |
 | 目录编码与生成表 | `desktop/src/engineering/catalog.json` 与[机器目录索引](engineering/catalogs/catalog-index.md) |
 | 术语定义 | [术语表](glossary.md) |
 

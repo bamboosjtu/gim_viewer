@@ -35,8 +35,8 @@ export interface RestDependencies {
 
 /**
  * 第一阶段只依赖内存中的树/关系/IFC 清单，不读取任何源文件字节。
- * 这样交互后 1–3 s 就能提交 entries + 树 + IFC + 关系 + receipt，
- * 让暖启动立即可用；FAM/DEV 属性与几何引用留给第二阶段。
+ * 先提交 entries + 树 + IFC + 关系 + receipt，
+ * FAM/DEV 属性留给第二阶段，几何继续独立读取实际来源引用。
  */
 export async function publishSubstationCore(
   input: SubstationPublicationInput,
@@ -93,7 +93,7 @@ export async function publishSubstationCore(
   return true;
 }
 
-/** 第二阶段：几何引用 + FAM/DEV 属性，由单独的原子事务补写并重算 receipt。 */
+/** 第二阶段：FAM/DEV 属性，由单独的原子事务补写并重算 receipt。 */
 export async function publishSubstationRest(
   input: SubstationPublicationInput,
   deps: RestDependencies,
@@ -164,12 +164,11 @@ function assertSemanticSourcesCached(
 }
 
 /**
- * 属性与几何引用解析需要小文本源。
+ * 属性补写需要 DEV/FAM 小文本源。
  *
- * 冷路径中 CBM/DEV/FAM 已在 hydration 时驻留内存；PHM 等仍是磁盘惰性
- * File，逐条 text() 会产生数千次主线程 IPC（实测单条 30–90 ms），所以
- * 惰性条目统一走批量读取再包装成内存 File。读取失败直接中止，防止不完整
- * 属性入库。
+ * 已驻留条目直接交给属性收集器读取一次，保留来源提供的只读 text()。
+ * 磁盘惰性条目统一批量读取，避免逐条 IPC；PHM 不参与属性补写。
+ * 读取失败直接中止，防止不完整属性入库。
  */
 async function prepareSourceTexts(
   input: SubstationPublicationInput,
@@ -180,26 +179,9 @@ async function prepareSourceTexts(
   const { isDiskBackedFile } = await import('@desktop/gimExtract.js');
   const { batchReadCachedFiles } = await import('@desktop/database.js');
   const prepared = new Map(input.files);
-  // 只预读 DEV/FAM/PHM：DEV 属性与几何引用各解析一次，FAM 只解析一次；
-  // CBM 已从树上 rawProperties 读取。FAM 若留到解析时再逐个 File.text()，
-  // 会与 DEV 编译争用主线程（单次读取可达数十毫秒），所以一并预取。
-  const candidates = [...input.files].filter(([path]) => /\.(dev|fam|phm)$/i.test(path));
-  const eager = candidates.filter(([, file]) => !isDiskBackedFile(file));
+  // CBM 复用树上的 rawProperties，DEV/FAM 的属性由收集器各解析一次。
+  const candidates = [...input.files].filter(([path]) => /\.(dev|fam)$/i.test(path));
   const lazyPaths = candidates.filter(([, file]) => isDiskBackedFile(file)).map(([path]) => path);
-
-  for (let offset = 0; offset < eager.length; offset += 32) {
-    if (!current()) return null;
-    const chunk = eager.slice(offset, offset + 32);
-    const texts = await Promise.all(chunk.map(([, file]) => file.text()));
-    if (!current()) return null;
-    chunk.forEach(([path, file], i) => prepared.set(path, new Proxy(file, {
-      get(target, key) {
-        if (key === 'text') return async () => texts[i];
-        const value = Reflect.get(target, key, target);
-        return typeof value === 'function' ? value.bind(target) : value;
-      },
-    })));
-  }
 
   const BATCH_FILES = 2048;
   for (let offset = 0; offset < lazyPaths.length; offset += BATCH_FILES) {

@@ -28,6 +28,26 @@ function fixture() {
   return { runtime, internal: runtime as any, status };
 }
 
+it('uses a valid warm template without rehashing bytes, reading sources or recompiling',async()=>{
+  const {webcrypto}=await import('node:crypto');vi.stubGlobal('crypto',webcrypto);
+  const glb=await import('../glbCacheService.js'),database=await import('@desktop/database.js');
+  const scene=new THREE.Group(),geometry=new THREE.BoxGeometry(1,1,1);geometry.computeBoundingBox();
+  scene.add(new THREE.Mesh(geometry,new THREE.MeshBasicMaterial()));
+  const parse=vi.spyOn(glb,'parseDevGlbAsset').mockResolvedValue({scene,animations:[]});
+  const digest=vi.spyOn(webcrypto.subtle,'digest').mockRejectedValue(Error('Unexpected warm cache hash'));
+  const raw=vi.spyOn(database,'batchReadCachedFiles').mockRejectedValue(Error('Unexpected warm source read'));
+  const single=vi.spyOn(database,'readCachedEntry').mockRejectedValue(Error('Unexpected warm source entry read'));
+  const {internal}=fixture();internal.worker=createDevWorkerMock();
+  const prepare=vi.spyOn(internal,'prepareMissingTemplateSources');
+  const sha='a'.repeat(64),diagnostics={status:'complete',discoveredModCount:1,discoveredStlCount:0,renderableModCount:1,renderableStlCount:0,emptySourceCount:0,unsupportedSourceCount:0,partialSourceCount:0,unsupportedPrimitiveTypeCounts:{}};
+  internal.templateStore.cacheReader.read=vi.fn(async()=>({status:'hit',value:{sha,result:{status:'complete',bytes:new Uint8Array([1,2,3,4]),diagnostics}},release:()=>{}}));
+  try{
+    const row=await internal.template('cached.dev',0,1);
+    expect(row?.sha).toBe(sha);expect(parse).toHaveBeenCalledOnce();expect(digest).not.toHaveBeenCalled();
+    expect(raw).not.toHaveBeenCalled();expect(single).not.toHaveBeenCalled();expect(prepare).not.toHaveBeenCalled();expect(internal.worker.compile).not.toHaveBeenCalled();
+  }finally{parse.mockRestore();digest.mockRestore();raw.mockRestore();single.mockRestore();prepare.mockRestore();vi.unstubAllGlobals();}
+});
+
 it('streams cached catalog rows before later prefetch batches complete',async()=>{
   const {internal,runtime}=fixture();
   const scene=new THREE.Scene(),entries=Array.from({length:130},(_,i)=>({id:'root-'+i,sourceId:'root-'+i,sourceContextId:'scope',devPath:`p${i}.dev`,name:'object',placementMatrix:new THREE.Matrix4().toArray()}));

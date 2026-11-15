@@ -38,6 +38,21 @@ function run(sample,profileDigest){return {out:'private-run',dataRoot:'private-c
     profileDigest,workloadDigest:'w',routeDigest:'r',viewportDigest:'v'},correctness:'passed',cacheVerified:true,cachePublished:true,measurementComplete:true,requiredMetrics:['firstResponseMs'],metrics:{firstResponseMs:12},
   evidence:{progress:{workload:{failed:0}}}})};}
 
+test('public report explains failed index publication and skipped warm preparation',()=>{
+  const options=setup();
+  const state=publicView({version:'gim-batch-results-v1',status:'COMPLETE',outcome:'FAIL',rows:[
+    {inputId:'s',sampleId:'s',cacheState:'cold',status:'FAIL',error:'cache-io-failed'},
+    {inputId:'s',sampleId:'s',cacheState:'warm',status:'SKIPPED',error:'warm-preparation-incomplete'},
+  ],stages:[],workers:[]});
+  assert.equal(state.rows[0].error,'cache-io-failed');
+  writeBatchReports(options.out,state,{root:options.root});
+  const html=readFileSync(join(options.out,'report.html'),'utf8');
+  assert.match(html,/缓存或索引发布失败/);
+  assert.match(html,/冷开缓存未完整发布，跳过暖开/);
+  assert.doesNotMatch(html,/unverified-reason-omitted/);
+  assert.deepEqual(state.rows.map(row=>row.status),['FAIL','SKIPPED']);
+});
+
 test('batch continues after execution exceptions and exports every result and failure',async()=>{
   const options=setup(),called=[];
   const result=await executeBatch({...options,inputs:inputs(),execute:async({sample,profileDigest})=>{

@@ -1,0 +1,26 @@
+# 绘制、拾取与交互
+
+本页约束主线程绘制、静态矩阵、拾取、选择和大树 DOM。用户行为见[选择与交互](../architecture/selection.md)，近景策略见 [IFC](ifc-and-spatial.md)。
+
+## 保留的做法
+
+静态场景按需绘制，连续加载合并刷新；相机、尺寸、选择、显隐、材质、实例矩阵与 Fragments 新块实际变化均能请求下一帧。无视觉变化的周期完成通知不能重绘全站。静态容器冻结自动矩阵更新，放置和挂接时显式更新，避免逐帧重复处理完整树。
+
+模板/材质/资源共享和可用的合批降低无效提交，是否启用实例化以当前配置为准，不把历史试验当默认功能。视域评估对相机、bounds、档位和受影响对象增量处理，不能每个目录/模板返回都全站扫描和重排。
+
+普通选择先定位/高亮现有表示，不等 L2 CSG。利用实际可见性和已有 bounds 缩小拾取候选，避免每次构造全部 Mesh 数组；模型树虚拟化、按需展开和预建搜索索引，避免选择时再归一化整包。
+
+## 门禁
+
+- 静止后停止重复 render；真实变化能唤醒，不能“省帧”后一直白屏或丢更新。
+- 冻结仅用于不可变对象；动态门、实例矩阵、位置变化与场景迁移正确更新。局部矩阵 CPU 变快不证明整帧 p95 或整站加载变快。
+- L0 提交不无限等相机静止；精化延后有界。相机持续运动不能让基础几何永久排队。
+- 拾取必须遵守最终可见性掩码，包括 L1 替换；不能为少一次 RPC 选到隐藏对象。未经证明的首命中距离下界不能用来提前结束射线查询。
+- 高亮/隔离/恢复与 LOD 替换按来源地址和请求代次绑定，过期操作不回写；不靠同名或最近距离补配。
+- 树展开/搜索/选中/属性页不触发完整几何重编译或全 FAM 解析。显示“待确认/未加载”不能删掉对象来降低 DOM/渲染量。
+
+## 本地复核
+
+分别看主线程采样、Draw Calls、三角数、无变化帧数、矩阵更新、提交队列、输入到高亮下一帧，以及材质/纹理释放。Profile 栈采样权重不是墙钟或精确 CPU 秒数。按需绘制的加载收益不能掩盖峰值内存增加或冷场景可见性变化。
+
+代码：[按需绘制](../../desktop/src/viewer/demandRendering.ts)、[DEV 视域](../../desktop/src/services/devLodRuntime.ts)、[可见拾取](../../desktop/src/viewer/ifcVisibleRaycast.ts)、[树](../../desktop/src/ui/engineeringTreeView.ts)。检查：[绘制](../../desktop/src/viewer/__tests__/demandRendering.test.ts)、[静态矩阵](../../desktop/src/viewer/__tests__/staticContainer.test.ts)、[拾取](../../desktop/src/viewer/__tests__/ifcVisibleRaycast.test.ts)、[相机/提交](../../desktop/src/services/__tests__/devLodRuntime.test.ts)。

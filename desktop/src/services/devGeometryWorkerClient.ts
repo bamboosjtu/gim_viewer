@@ -86,7 +86,8 @@ export class DevGeometryPreprocessor {
     if (this.active.size || this.slots.size || this.exported.size) this.idleSince = null;
     else this.idleSince ??= now;
   }
-  constructor(_paths: string[], private files: Map<string, File>, private current: () => boolean) {
+  constructor(_paths: string[], private files: Map<string, File>, private current: () => boolean,
+    private sourceReader?: (path:string)=>Promise<File|undefined>) {
     const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
     const cores = navigator.hardwareConcurrency || 4;
     // DEV 编译是 CPU 密集任务：按逻辑核数的 60% 给 Worker（最多 8 个），
@@ -609,12 +610,17 @@ export class DevGeometryPreprocessor {
     if (data.kind === 'read') {
       try {
         const file = this.files.get(data.path); if (!file) throw new Error(`DEV source missing: ${data.path}`);
+        const read=async()=>{
+          const source=this.sourceReader&&!(file instanceof File)?await this.sourceReader(data.path)??file:file;
+          if(!this.current()||this.stopped)throw new DOMException('DEV source request expired','AbortError');
+          return source.arrayBuffer();
+        };
         const owner = this.active.get(worker);
         const bytes = owner ? await perfMeasureTaskPhase({...this.taskIdentity(owner.task), sourcePath: data.path},
-          'sourceRpc', () => file.arrayBuffer(), this.perf) : await file.arrayBuffer();
+          'sourceRpc', read, this.perf) : await read();
         if (!this.current() || this.stopped || !this.workers.includes(worker)) return;
         worker.postMessage({ kind: 'read-result', id: data.id, bytes }, [bytes]);
-      } catch (error) { if (!this.stopped&&this.workers.includes(worker)) worker.postMessage({ kind: 'read-result', id: data.id, error: String(error) }); }
+      } catch (error) { if (this.current()&&!this.stopped&&this.workers.includes(worker)) worker.postMessage({ kind: 'read-result', id: data.id, error: String(error) }); }
       return;
     }
     const owner = this.active.get(worker), task = owner?.task;
@@ -754,7 +760,7 @@ export class DevGeometryPreprocessor {
       perfRecordTaskPhase(this.taskIdentity(task), 'requestWall', performance.now() - task.queuedAt, this.perf, 'cancelled');
       task.settled = true; task.reject(error); task.mergeParts = undefined;
       if (task.split) { this.releaseSplitBuffers(task.split); task.split.reservation = 0; }
-    } this.slots.clear(); this.files = new Map();
+    } this.slots.clear(); this.files = new Map();this.sourceReader=undefined;
     this.exported.clear(); this.exportedBytes = 0; this.splitHeldBytes=0;this.mergeReservedBytes=0;this.sourceAffinity.clear();
     this.outputResources.clear();
     this.queueByTemplate.clear();
@@ -763,9 +769,10 @@ export class DevGeometryPreprocessor {
     this.idleSince = null;
   }
 }
-export function createDevGeometryPreprocessor(state: AppState, session: ProjectLoadSession, files: Map<string, File>): DevGeometryPreprocessor {
+export function createDevGeometryPreprocessor(state: AppState, session: ProjectLoadSession, files: Map<string, File>,
+  sourceReader?: (path:string)=>Promise<File|undefined>): DevGeometryPreprocessor {
   clients.get(state)?.cancel();
-  const client = new DevGeometryPreprocessor([], files, () => state.isCurrentSession(session)); clients.set(state, client); return client;
+  const client = new DevGeometryPreprocessor([], files, () => state.isCurrentSession(session),sourceReader); clients.set(state, client); return client;
 }
 export function getDevGeometryPreprocessor(state: AppState) { return clients.get(state); }
 export function cancelDevGeometryPreprocessing(state: AppState): void { clients.get(state)?.cancel(); clients.delete(state); }

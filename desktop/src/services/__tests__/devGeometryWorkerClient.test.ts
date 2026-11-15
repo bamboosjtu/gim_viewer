@@ -277,6 +277,42 @@ it('upgrades immutable sources in active workers and replacement initialization 
     expect(first.sent).toHaveLength(calls);
   } finally {client.cancel();}
 });
+it('uses the shared source reader for lazy Worker requests and publishes the resident file to peer workers',async()=>{
+  vi.stubGlobal('Worker',ControlledWorker);vi.stubGlobal('navigator',{hardwareConcurrency:4,deviceMemory:8});
+  const lazyRead=vi.fn(async()=>{throw Error('Unexpected single-entry IPC');});
+  const files=new Map([['MOD/a.mod',{size:3,arrayBuffer:lazyRead} as unknown as File]]);
+  const source=new File(['abc'],'a.mod');
+  const read=vi.fn(async(path:string)=>{client.installSources(new Map([[path,source]]));return source;});
+  const client=new DevGeometryPreprocessor([],files,()=>true,read);
+  try{
+    const [first,second]=ControlledWorker.instances;
+    first.onmessage!({data:{kind:'read',id:100,path:'MOD/a.mod'}});
+    await expect.poll(()=>first.sent.some(row=>row.kind==='read-result')).toBe(true);
+    expect(read).toHaveBeenCalledWith('MOD/a.mod');expect(lazyRead).not.toHaveBeenCalled();
+    expect(second.sent[second.sent.length-1]).toMatchObject({kind:'sources',files:[['MOD/a.mod',3,source]]});
+    const result=first.sent.find(row=>row.kind==='read-result');
+    expect(new TextDecoder().decode(result.bytes)).toBe('abc');
+    expect(files.get('MOD/a.mod')).toBe(source);
+    second.onmessage!({data:{kind:'read',id:101,path:'MOD/a.mod'}});
+    await expect.poll(()=>second.sent.some(row=>row.kind==='read-result')).toBe(true);
+    expect(read).toHaveBeenCalledOnce();expect(lazyRead).not.toHaveBeenCalled();
+  }finally{client.cancel();}
+});
+it('does not fall back to stale native reads when cancelled during shared source preparation',async()=>{
+  vi.stubGlobal('Worker',ControlledWorker);vi.stubGlobal('navigator',{hardwareConcurrency:4,deviceMemory:8});
+  let release!:(file:File|undefined)=>void;
+  const lazyRead=vi.fn(async()=>new ArrayBuffer(3));
+  const read=vi.fn(()=>new Promise<File|undefined>(resolve=>{release=resolve;}));
+  const client=new DevGeometryPreprocessor([],new Map([['MOD/a.mod',{size:3,arrayBuffer:lazyRead} as unknown as File]]),()=>true,read);
+  const first=ControlledWorker.instances[0];
+  try{
+    first.onmessage!({data:{kind:'read',id:100,path:'MOD/a.mod'}});
+    expect(read).toHaveBeenCalledOnce();client.cancel();release(undefined);
+    await Promise.resolve();await Promise.resolve();
+    expect(lazyRead).not.toHaveBeenCalled();
+    expect(first.sent.some(row=>row.kind==='read-result')).toBe(false);
+  }finally{client.cancel();}
+});
 it('a crash plus a full shared gate drains queued work without retrying the failed source', async () => {
   vi.stubGlobal('Worker', ControlledWorker);
   vi.stubGlobal('navigator', {hardwareConcurrency: 4, deviceMemory: 8});

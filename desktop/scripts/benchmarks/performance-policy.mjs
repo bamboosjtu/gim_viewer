@@ -4,6 +4,8 @@ export const PERFORMANCE_POLICY=Object.freeze({version:'gim-performance-policy-v
   performanceWork:'at least one meaningful improvement is required; no observed improvement is not an optimization success',
   featureAndCorrectnessWork:'avoid excessive regressions; report concrete rationale and costs',
   acceptance:'developer decides; no fixed time, memory or growth acceptance thresholds',memoryUnit:'decimal-GB',approval:'human-only',
+  developmentGates:'docs/performance/gates.md',
+  runtimeValidation:'browser; full-data validation needs a concrete failure rationale, bounded frequency, reuse analysis and cost evidence; no default redundant hashing',
   interactiveMetric:'firstResponseMs navigation-ready proxy; excludes executable launch; input latency not proven'});
 const values=(runs,key)=>runs.map(r=>r.metrics?.[key]).filter(v=>Number.isFinite(v)&&v>=0);
 export function performanceMeasurements(runs){

@@ -8,6 +8,7 @@ const messages={
   'worker-identity-unavailable':'Worker 身份未能关联','isolate-identity-unavailable':'JS isolate 身份不可用','missing':'缺少堆样本',
   'worker-target-not-observed':'未观测到 Worker 调试目标','input-corrupt':'归档输入损坏','INPUT_CORRUPT':'归档输入损坏',
   'measurement-incomplete':'测量证据不完整','measurement-lifecycle-incomplete':'任务生命周期证据不完整',
+  'cache-io-failed':'缓存或索引发布失败','warm-preparation-incomplete':'冷开缓存未完整发布，跳过暖开',
   'product-geometry-failed':'产品几何失败','source-reference-unresolved':'来源引用未解析','ifc-manifest-incomplete':'IFC 来源覆盖不完整',
   'missing-dependency':'缺少来源依赖','source-invalid':'来源几何无效','capacity-exceeded':'表示容量超限','parse-failed':'解析/编译失败',
   'unverified-reason-omitted':'其他未验证文本已隐藏；请对照私有报告','unavailable':'采样不可用'};

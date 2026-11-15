@@ -308,6 +308,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
       this.state,
       this.session,
       files,
+      path=>this.sources.readForWorker(path),
     );
     this.worker.setMemoryPressure?.(this.memoryPressure);
     this.diagnostics.workerCount = this.worker.workerCount;

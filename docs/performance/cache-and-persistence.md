@@ -1,0 +1,29 @@
+# 缓存与持久化
+
+本页约束暖恢复成本、失效范围和发布顺序。域版本和二进制格式的唯一权威是[缓存域](../architecture/caches.md)，不在本页维护第二份版本表。
+
+## 保留的做法
+
+来源、实体、导航、Spatial、DEV catalog/模板、IFC 远景/近景/属性分别拥有身份和失效范围。分类或投影改动不使有效几何失效；某个缓存坏只重建相应域/条目。项目自有开发契约保持 v1，旧开发格式失效重建，不维护迁移分支；源事实不能被缓存覆盖。
+
+模板按键合并请求和复用实例。L0 持久化基础表示，L1 选择性保存热点，L2 依明确需求保持会话内状态；确切策略以当前代码为准。重复 L1 请求的热度从已有计数恢复，不能每次从零开始。
+
+缓存结果明确区分 hit、miss、read-error、invalid、deferred。批次中一个坏/超限条目不使其余命中消失；正常延后不伪装损坏。写入返回值、原子替换、完整范围和完成凭据决定是否持久化成功，不由“已有几何”推定。
+
+内存结果先发布，后续编码/写入独立后压。物理目录先供几何使用；语义/投影和缓存终态分开。最终结算仍包含承诺的真实写入，不删除等待来包装提速。
+
+## 门禁
+
+- 合法完整暖命中不读/解析/编译对应原始来源；部分缓存缺失只补对应范围。不能全包预取以掩盖命中路径问题。
+- 普通 GLB 命中不重算整份内容 hash，不回读 STL 逐三角比对。复用已有产物身份，结构解码和便宜边界按需保留。
+- 最终 GLB 独占缓冲，输入批次预算在所有消费者释放后归还；不能只增加读取槽位而无结果后压。
+- 来源/实体有效而导航投影失败时保留已发布结果与已保存域；不持久化未完成树冒充全命中。
+- 写盘错误、容量禁用、部分发布和真正完整命中可区分；跨会话、跨修订结果不得覆盖新缓存。
+- 属性补写直接复用驻留源文件的读取接口，不用 Proxy 改写只读方法；DEV/FAM 各读一次，不预读补写不消费的 PHM。几何已显示不能掩盖属性补写失败，报告保留索引发布失败及暖开跳过原因。
+- 失效键变化不能靠复用旧不等价产物“提速”。各版本须各自正确建冷暖缓存；持续暖开慢不能一概归因版本失效。
+
+## 本地复核
+
+同时记录 catalog 与每级模板的 hit/miss/invalid/deferred、冷编译、写入失败、写入字节/队列/排水。核对同一 EXE/运行时、源 SHA、WebView profile 与原生数据根。冷发布不完整后的重开是部分恢复，不是完整暖开。
+
+代码：[模板缓存](../../desktop/bridge/devLodCache.ts)、[批读租约](../../desktop/src/services/devTemplateCacheReader.ts)、[持久化拥有者](../../desktop/src/services/devLodArtifactWriter.ts)、[工程缓存](../../desktop/src/services/engineeringCacheCodec.ts)。检查：[缓存状态](../../desktop/bridge/__tests__/devLodCache.test.ts)、[输入预算](../../desktop/src/services/__tests__/devTemplateCacheReader.test.ts)、[暖路径零额外校验/写入](../../desktop/src/services/__tests__/devLodRuntime.test.ts)、[延后编码](../../desktop/src/services/__tests__/engineeringDeferredCache.test.ts)。

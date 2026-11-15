@@ -1,5 +1,7 @@
 # 开发指南
 
+修改性能相关路径前先读[性能门禁](performance/gates.md)及[对应方向](performance/README.md)。现有 CI 负责结构、协议与计数；开发者选择本地性能复核范围。没有明确失效依据和成本说明，不新增高成本浏览器运行时校验。
+
 本页是开发环境、命令、工作区约定和文档维护的唯一入口。运行时结构与模块边界见[系统架构](architecture.md)及[分层与依赖](architecture/layers.md)；门禁语义与证据规则见[验证](validation.md)；Benchmark 参数见 [Benchmark CLI](benchmark.md)。
 
 ## 目录

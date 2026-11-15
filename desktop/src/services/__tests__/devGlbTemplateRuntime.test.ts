@@ -49,6 +49,24 @@ function makeNestedTemplate(): THREE.Group {
   return root;
 }
 
+it('reuses supplied bounds without auditing vertex values or repeating template traversal',()=>{
+  const array=new Proxy(new Float32Array([0,0,0,1,0,0,0,1,0]),{get(target,key){
+    if(typeof key==='string'&&/^\d+$/.test(key))throw Error('Unexpected cached vertex audit');
+    const value=Reflect.get(target,key,target);
+    if(typeof value==='function')return ()=>{throw Error('Unexpected cached vertex scan');};
+    return value;
+  }});
+  const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.BufferAttribute(array,3));
+  geometry.boundingBox=new THREE.Box3(new THREE.Vector3(0,0,0),new THREE.Vector3(1,1,0));
+  const scene=new THREE.Group();scene.add(new THREE.Mesh(geometry,new THREE.MeshBasicMaterial()));
+  const traverse=vi.spyOn(scene,'traverse');
+  expect(validateDevGlbTemplate({scene,animations:[]})).toEqual({shareable:true});
+  const template=new DevGlbTemplate('cached.dev',scene);
+  expect(template.bounds.equals(geometry.boundingBox)).toBe(true);expect(template.geometryRefs.has(geometry)).toBe(true);
+  expect(traverse.mock.calls.length).toBeLessThanOrEqual(1);
+  template.dispose();
+});
+
 it('rejects a template if its session expires during parsing',async()=>{
   let current=true;const scene=makeNestedTemplate();
   const pool=new DevGlbTemplatePool({parse:async()=>{await Promise.resolve();current=false;return{scene,animations:[]};},isCurrent:()=>current});

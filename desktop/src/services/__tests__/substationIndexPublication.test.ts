@@ -125,6 +125,33 @@ describe('two-phase semantic publication', () => {
       .toEqual(['sourceTextStart', 'sourceTextReady', 'saveRestStart', 'saveRestReady']);
   });
 
+  it('rest consumes read-only cached text once without wrapping or modifying source files', async () => {
+    const input = await fixture();
+    const deps = restDeps();
+    const reads = new Map<string, ReturnType<typeof vi.fn>>();
+    for (const path of ['DEV/root.dev', 'CBM/props.fam', 'DEV/empty.fam']) {
+      const file = input.files.get(path)!;
+      const text = await file.text();
+      const read = vi.fn(async () => text);
+      // Same descriptor used by DevLodSourceWorkset for resident DEV/PHM text.
+      Object.defineProperty(file, 'text', { value: read });
+      reads.set(path, read);
+    }
+    const unused = vi.spyOn(input.files.get('PHM/root.phm')!, 'text');
+
+    expect(await publishSubstationRest(input, deps)).toBe(true);
+    const payload = deps.saveRest.mock.calls[0][0] as {
+      fam_properties: unknown[]; dev_properties: unknown[];
+    };
+    expect(payload.fam_properties).toHaveLength(3);
+    expect(payload.dev_properties.length).toBeGreaterThan(0);
+    for (const [path, read] of reads) {
+      expect(input.files.get(path)!.text).toBe(read);
+      expect(read).toHaveBeenCalledOnce();
+    }
+    expect(unused).not.toHaveBeenCalled();
+  });
+
   it('rest aborts before saving when the session changes during text reads', async () => {
     const input = await fixture();
     const deps = restDeps();
