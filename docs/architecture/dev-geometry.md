@@ -159,7 +159,7 @@ DEV 模板是共享资产，不是工程实体资产：很小的 DEV 由同一 W
 
 常见原因码：`empty-device-xml`、`assembly-node-without-own-geometry`、`dev-no-solidmodel`、`phm-no-solidmodel`、`parser-unsupported`、`missing-dependency`、`source-invalid`、`capacity-exceeded`、`parse-failed`。缺引用携带原始引用证据；容量/预算与未分类解析失败不冒充源损坏。失败原因与 `failedVisibleRoots` 一并上报，不把 unsupported 并入 empty。
 
-500 m 模板范围守卫未获单 STL 源范围证据豁免、且缺少独立源损坏证据时属于 `capacity-exceeded`，不作为解析失败或源损坏证明。DEV 编译从依赖加载开始跟踪已创建的来源 Group，后续读取、放置、范围校验或导出失败均释放本次拥有的网格和材质；STL 共享资源按唯一对象释放，共享 MOD 缓存仍由其所有者管理。单 DEV 128 MiB、拆分输入 64 MiB 和原生单条缓存 128 MiB 上限不变。
+模板不设 500 m 绝对尺寸上限；空/非有限范围或超出范围时 Float32 坐标间距不足 1 mm 才拒绝。拒绝属于 `capacity-exceeded`/数值精度问题，不作为解析失败或源损坏证明；不再要求单 STL 源范围、源 SHA 或逐三角形证明。DEV 编译从依赖加载开始跟踪已创建的来源 Group，后续读取、放置、范围校验或导出失败均释放本次拥有的网格和材质；STL 共享资源按唯一对象释放，共享 MOD 缓存仍由其所有者管理。单 DEV 128 MiB、拆分输入 64 MiB 和原生单条缓存 128 MiB 上限不变。
 
 产品时刻与统计：
 

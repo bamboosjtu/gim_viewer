@@ -289,12 +289,19 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
       const {ensureEngineeringEvidence,queryEngineeringEvidence}=await import('./engineeringService.js');
       if(!guard.isCurrent())throw new DOMException('选择已变化','AbortError');
       const entryIds=[...new Set(single.properties.map(p=>p.path).filter((p):p is string=>!!p&&/\.fam$/i.test(p)))];
-      const range={entryIds,kinds:['attributes'] as const};
+      const range={entryIds,kinds:['attributes','assignments'] as const};
       const revision=cursor?.revision??(await ensureEngineeringEvidence(state,range)).revision;
       if(!guard.isCurrent())throw new DOMException('选择已变化','AbortError');
       const page=await queryEngineeringEvidence(state,{range,revision,offset:cursor?.offset,limit:200});
       if(!guard.isCurrent())throw new DOMException('选择已变化','AbortError');
-      return {incomplete:page.coverage.some(row=>row.materialization!=='materialized'||row.status!=='complete'),next:page.nextOffset===undefined?undefined:{revision:page.revision,offset:page.nextOffset},sections:[{title:'详细属性',rows:page.attributes.map(attribute=>[attribute.rawKey,attribute.rawValue] as [string,string])}]};
+      const labels=new Map(page.attributes.map(attribute=>[attribute.id,attribute.rawKey]));
+      const sourceName=(id:string)=>engineeringSourceRecord(state,id)?.name||'未命名对象';
+      const assignments=page.assignments.map(assignment=>[
+        labels.get(assignment.attributeId)??'来源属性',
+        assignment.status==='confirmed'?`已关联：${assignment.sourceId?sourceName(assignment.sourceId):'来源实例'}`
+          :assignment.status==='ambiguous'?`适用对象待确认：${assignment.candidateSourceIds.map(sourceName).join('、')}`:'尚未确定适用对象',
+      ] as [string,string]);
+      return {incomplete:page.coverage.some(row=>row.materialization!=='materialized'||row.status!=='complete'),next:page.nextOffset===undefined?undefined:{revision:page.revision,offset:page.nextOffset},sections:[{title:'详细属性',rows:page.attributes.map(attribute=>[attribute.rawKey,attribute.rawValue] as [string,string])},{title:'属性适用对象',rows:assignments}]};
     } : undefined,
   });
   if (!state.initialized) return true;

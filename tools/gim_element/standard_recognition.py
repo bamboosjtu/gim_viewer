@@ -49,7 +49,7 @@ def name_category(name,standard_fallback=True):
         matches=[item for item in STANDARD['items'] if len(item['label'])>=2 and item['label'] in text]
         if matches:
             longest=max(len(i['label']) for i in matches);matches=[i for i in matches if len(i['label'])==longest]
-    if standard_fallback and len({i['id'] for i in matches})==1:
+    if standard_fallback and len({i['id'] for i in matches})==1 and (category=='U-OBJECT' or category==name_category(matches[0]['label'],False)):
         coarse=matches[0]['category']
         if not category.startswith(coarse+'.'):return coarse
     if category!='U-OBJECT':return category

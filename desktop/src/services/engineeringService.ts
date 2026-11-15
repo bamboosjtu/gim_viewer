@@ -8,6 +8,7 @@ import type { EngineeringBuildResult } from './engineeringWorkerProtocol.js';
 import { EngineeringWorkerClient } from './engineeringWorkerClient.js';
 import { SUBSTATION_PARSER_DOMAIN_VERSION, SUBSTATION_SPATIAL_SEMANTIC_VERSION } from './substationSpatialCodec.js';
 import { isTauri } from '@desktop/runtime.js';
+import {readCachedEntry,writeCacheFile} from '@desktop/database.js';
 import { perfMark,perfMarkProductMoment } from '../utils/perfTimings.js';
 import type { SourceGeometryOccurrenceCatalog } from '../gim/engineering/geometryOccurrences.js';
 import { installCompositionProjection } from './compositionProjectionService.js';
@@ -45,7 +46,7 @@ async function prepareEvidenceEntry(state:AppState,job:EngineeringJob,path:strin
   const file=state.currentFiles?.get(path);
   let bytes:Uint8Array;
   if(file){if(file.size>16*1024*1024)throw Error('来源文件超过 16 MiB 整文件读取上限；当前尚未提供分块读取接口');bytes=new Uint8Array(await file.arrayBuffer());}
-  else{if(state.currentProjectId==null)throw Error('Evidence entry unavailable');const {readCachedEntry}=await import('@desktop/database.js');bytes=await readCachedEntry(state.currentProjectId,path);}
+  else{if(state.currentProjectId==null)throw Error('Evidence entry unavailable');bytes=await readCachedEntry(state.currentProjectId,path);}
   if(bytes.byteLength>16*1024*1024)throw Error('来源文件超过 16 MiB 整文件读取上限；当前尚未提供分块读取接口');
   if(!current(state,job))throw Error('Stale evidence session');await job.client.addFiles([{path,bytes}]);
 }
@@ -80,8 +81,6 @@ async function saveResult(state: AppState, job: EngineeringJob, result: Engineer
   state.engineeringCacheStatus = 'saving'; job.update();
   try {
     await job.beforeCacheWrite;
-    if (!currentBuild(state, job,result)) return;
-    const { writeCacheFile } = await import('@desktop/database.js');
     if (!currentBuild(state, job,result)) return;
     // Request only after publication and the source commit barrier. Persist and
     // release each buffer before asking the Worker to encode the next domain.
@@ -287,7 +286,7 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
     };
     let physical:SourceGeometryOccurrenceCatalog|undefined;
     if(job.identity){
-      try{const {readCachedEntry}=await import('@desktop/database.js');
+      try{
         physical=await decodeSourceGeometryCache(await readCachedEntry(session.projectId!,sourceGeometryCacheEntry(job.identity.sourceSha256)),job.identity.sourceSha256,files);
       }catch{/* Rebuild only the small physical directory; semantic caches are independent. */}
     }
@@ -317,7 +316,6 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
           const bytes=await client.encodeGeometryCache();if(!bytes)return;
           await job.beforeCacheWrite;
           if(!current(state,job))return;
-          const {writeCacheFile}=await import('@desktop/database.js');
           if(current(state,job))await writeCacheFile(session.projectId!,sourceGeometryCacheEntry(job.identity!.sourceSha256),bytes,job.identity!.sourceSha256);
         })().catch(error=>{if(current(state,job)){state.sourceGeometryCacheError=String(error);perfMark('来源物理目录缓存未写入',{reason:String(error)});}})
           .finally(()=>{if(current(state,job)){state.sourceGeometryCachePending=false;update();}});
@@ -327,7 +325,6 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
     await new Promise<void>(resolve=>setTimeout(resolve,0));
     await initialized;
     if (job.identity) {
-      const { readCachedEntry } = await import('@desktop/database.js');
       const reads = await Promise.allSettled([
         readCachedEntry(session.projectId!, engineeringCacheEntry(job.identity, 'sources')),
         readCachedEntry(session.projectId!, engineeringCacheEntry(job.identity, 'entities')),

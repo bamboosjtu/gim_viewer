@@ -15,7 +15,7 @@ vi.mock('../sourceGeometryService.js',()=>({getSourceGeometryOccurrences:async()
   id:`root/${name}`,sourceId:`root/${name}`,sourceContextId:`root/${name}`,devPath:'DEV/shared.dev',name,placementMatrix:new THREE.Matrix4().toArray()}))}));
 
 afterEach(()=>{vi.clearAllTimers();vi.useRealTimers();vi.unstubAllGlobals();vi.resetAllMocks();});
-it('initializes workers and base rows before optional warm preparation settles, and discards a reply after release',async()=>{
+it('initializes workers and base rows while a catalog read waits, and discards a reply after release',async()=>{
   let finish!:(value:any)=>void;
   mock.read.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
   const state=new AppState(),session=state.activateProject(1,'sha');state.substationEntryPaths=['DEV/shared.dev'];

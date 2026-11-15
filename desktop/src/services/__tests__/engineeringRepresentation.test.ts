@@ -103,7 +103,7 @@ describe('source-to-physical representation adapter and filters', () => {
     expect(f.state.engineeringSelection?.ownerIds).toEqual(new Set([f.main.id, f.terminal.id]));
     expect([f.body.visible, f.box.visible, f.radiator.visible]).toEqual([true, true, true]);
     expect(f.state.engineeringSnapshot!.entities).toHaveLength(count);
-    expect(document.body.textContent).toContain('工程分组范围');
+    expect(document.body.textContent).toContain('对象数量2');
   });
   it('restores the view when inspecting an unassigned declaration after isolation and preserves pre-existing hidden members', async () => {
     const f = await fixture(false, true); f.radiator.visible = false;

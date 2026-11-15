@@ -278,5 +278,15 @@
       ]
     ],
     "pending": 0
+  },
+  {
+    "name": "specific_cable_tray_name_is_not_replaced_by_cable_substring",
+    "records": [
+      {"id": "tray", "type": "Unknown", "name": "220kV电缆桥架"},
+      {"id": "cable", "type": "Unknown", "name": "电缆"}
+    ],
+    "groups": [["tray"], ["cable"]],
+    "pending": 0,
+    "expectedMember": {"sourceId": "tray", "category": "M08", "categoryStatus": "candidate"}
   }
 ]

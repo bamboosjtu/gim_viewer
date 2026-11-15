@@ -306,7 +306,8 @@ describe('session-owned production engineering build', () => {
     vi.mocked(batchReadCachedFiles).mockImplementation(async (_project, paths) => new Map(await Promise.all(paths.map(async path => [path, new Uint8Array(await originals.get(path)!.arrayBuffer())] as const))));
     await beginEngineeringBuild(app, lazy, { createWorker: portFactory(new LoopbackPort()) });
     expect(app.engineeringStatus).toBe('ready');
-    expect(batchReadCachedFiles).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(batchReadCachedFiles).mock.calls.flatMap(([,paths])=>paths).sort()).toEqual([...originals.keys()].sort());
+    for(const file of lazy.values())expect(file.arrayBuffer).not.toHaveBeenCalled();
     expect(app.engineeringSnapshot?.entities).toHaveLength(2);
   });
 

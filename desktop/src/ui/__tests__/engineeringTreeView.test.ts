@@ -37,11 +37,11 @@ describe('engineering composition and provenance navigation', () => {
     const inventory=state.engineeringNavigation.inventory!;
     for(const node of inventory.nodes.values())if(node.kind==='group'||node.kind==='project')state.engineeringExpandedRows.inventory.add(node.key);
     const {renderEngineeringTree}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../engineeringTreeView.js'); });renderEngineeringTree(state);
-    expect(inventory.nodes.get(inventory.rootKey)!.children.map(key=>inventory.nodes.get(key)!.title)).toEqual(['设备','装置性材料','构件','其他']);
-    const group=[...inventory.nodes.values()].find(n=>n.title==='附件（并入本体）')!;
+    expect(inventory.nodes.get(inventory.rootKey)!.children.map(key=>inventory.nodes.get(key)!.title)).toEqual(['设备','材料','构件','其他']);
+    const group=[...inventory.nodes.values()].find(n=>n.title==='宿主/边界待确认')!;
     [...document.querySelectorAll<HTMLElement>('.tree-row')].find(r=>r.dataset.nodePath===group.key)!.click();
     await vi.dynamicImportSettled();await vi.waitFor(()=>expect(state.engineeringSelection?.ownerIds).toEqual(new Set([built.snapshot.pending[0].id])));
-    expect(document.getElementById('props-drawer-body')?.textContent).toContain('中性点成套附件');
+    expect(document.querySelector('.props-header')?.textContent).toBe('宿主/边界待确认');
     expect(state.engineeringSelection!.ownerIds.has(built.snapshot.entities[0].id)).toBe(false);
   });
   it('renders inventory subtype groups with its own catalog search and selectable whole range',async()=>{
@@ -54,7 +54,7 @@ describe('engineering composition and provenance navigation', () => {
     const template=inventory.nodes.get(inventory.nodes.get(key)!.parent!)!;
     const group=inventory.nodes.get(template.parent!)!;
     expect(template.kind).toBe('template');expect(template.title).toBe('主变测控柜');
-    expect(group.title).toBe('控制柜');expect(view.inventorySearch!.find(r=>r.key===f.box.id)?.subtitle).toBe('设备材料清册 / 设备 / 二次设备 / 控制柜 / 主变测控柜');
+    expect(group.title).toBe('二次屏柜');expect(view.inventorySearch!.find(r=>r.key===f.box.id)?.subtitle).toBe('设备材料清册 / 设备 / 二次屏柜 / 主变测控柜');
     const item=[...document.querySelectorAll<HTMLElement>('.tree-row')].find(r=>r.dataset.nodePath===template.key)!;
     item.click();await vi.dynamicImportSettled();
     await vi.waitFor(()=>expect(f.state.engineeringSelection?.ownerIds).toEqual(new Set([f.box.id])));
@@ -71,7 +71,7 @@ describe('engineering composition and provenance navigation', () => {
     expect(row.textContent).toContain('空间推断');row.click();
     await vi.dynamicImportSettled();
     await vi.waitFor(()=>expect(document.querySelector('.props-header')?.textContent).toBe(f.main.name));
-    expect(document.getElementById('props-drawer-body')?.textContent).toContain('空间推断，工程归属待确认');
+    expect(f.state.engineeringSelection?.ownerIds).toEqual(new Set([f.main.id]));
     expect(document.getElementById('props-drawer-body')?.textContent).not.toContain('投影依据');
   });
   it('keeps DEV F levels explicit and exposes the JSON export action', async () => {
@@ -113,7 +113,7 @@ describe('engineering composition and provenance navigation', () => {
     expect(row.textContent).toContain('归属待确认');row.click();
     await vi.dynamicImportSettled();
     await vi.waitFor(()=>expect(document.querySelector('.props-header')?.textContent, state.selectionMessage).toBe('主控通信楼01'));
-    expect(document.body.textContent).toContain('尚无可靠的整体归属');
+    expect(document.body.textContent).toContain('当前分组暂无可用对象');
     expect((document.getElementById('engineering-fit') as HTMLButtonElement).disabled).toBe(true);
     expect((document.getElementById('engineering-isolate') as HTMLButtonElement).disabled).toBe(true);
     document.querySelector<HTMLElement>(`[data-node-path="${building.parent}"]`)!.click();

@@ -447,7 +447,9 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
         const index = nextCatalog++;
         if (index >= catalogEntries.length) return;
         const [dev, instances] = catalogEntries[index];
-        const bounds = await resolveCatalog(dev);
+        let bounds:DevSourceBounds;
+        try{bounds=await resolveCatalog(dev);}
+        catch(error){if(!this.current()&&(error as Error)?.name==='AbortError')return;throw error;}
         if (!this.current()) return;
         applyCatalog(dev, instances, bounds);
         this.schedule();

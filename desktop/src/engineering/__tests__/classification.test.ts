@@ -58,6 +58,10 @@ it('keeps real walls and specific type evidence intact when removing form-factor
  expect(categoryFromName('喷淋头支架')).toBe('C-B1');
 });
 
+it.each([['电缆','M05'],['电缆桥架','M08'],['220kV电缆桥架','M08'],['电缆终端','M05']])('keeps specific name heads and exact catalog terms ahead of generic substrings: %s', (name,category)=>{
+ expect(interpretObject(row(name))).toMatchObject({category,classificationStatus:'candidate'});
+});
+
 it('retains readable material details, grain, unknown reasons and stable independent identities',()=>{
  const source=toObjectEvidence({id:'a',track:'dev',source:'a.dev',name:'未知',source_type:'PostInsulator',parent:'',properties:[],sources:['a.dev'],context:[],guid:''});
  expect(interpretObject(source)).toMatchObject({category:'E20'});
@@ -66,7 +70,7 @@ it('retains readable material details, grain, unknown reasons and stable indepen
  expect(model.entities.find(e=>e.category==='M09')).toMatchObject({subtypeLabel:'未细分材料',unknownReason:'material_subtype_evidence_insufficient'});
  expect(interpretObject(row('主变引线套管'))).toMatchObject({category:'M07',unknownReason:'equipment_bushing_host_unresolved'});
  expect(ENGINEERING_CATEGORIES.filter(c=>/^M\d+$/.test(c.code))).toHaveLength(15);
- expect(ENGINEERING_CATEGORIES.filter(c=>/^C-/.test(c.code))).toHaveLength(38);
+ expect(ENGINEERING_CATEGORIES.filter(c=>/^C-/.test(c.code))).toHaveLength(43);
  expect(new Set(ENGINEERING_CATEGORIES.map(c=>c.code)).size).toBe(ENGINEERING_CATEGORIES.length);
  expect(ENGINEERING_CATEGORY_LABELS['C-B3']).toBe('建筑物基础');
 });

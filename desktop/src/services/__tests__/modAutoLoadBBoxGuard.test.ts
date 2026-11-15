@@ -21,9 +21,9 @@ describe('diagnoseGroupBBox（DEV 粒度守卫）', () => {
     expect(diagnoseGroupBBox(group, 'MOD/far.mod')).toBe(true);
   });
 
-  it('单位错误（跨度 12km，mm/m 混淆）被拒', () => {
+  it('大尺度来源（跨度 12km）在可表示精度内允许浏览，不仅凭尺寸推断单位错误', () => {
     const group = makeBoxGroup(12000);
-    expect(diagnoseGroupBBox(group, 'MOD/unit-error.mod')).toBe(false);
+    expect(diagnoseGroupBBox(group, 'MOD/large-source.mod')).toBe(true);
   });
 
   it('平移失控（几何正常但中心在 100km 外）被拒', () => {

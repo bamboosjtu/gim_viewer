@@ -158,7 +158,10 @@ export function interpretObject(object:ObjectEvidence,hasChildren=false):ObjectI
     }
   }else if(!classes.length&&result.meaning==='object'&&result.basis!=='attribute_conflict'){
     const names=standardTermsFromName(object.name);
-    if(names.length===1){const item=names[0],evidenceId=object.names?.find(n=>n.value===object.name)?.evidenceId??`name:${object.sourceId}`;
+    const namedCategory=categoryFromName(object.name);
+    // A generic catalog substring (电缆) cannot replace a more specific head
+    // already recognized in the full name (电缆桥架).
+    if(names.length===1&&(namedCategory==='U-OBJECT'||namedCategory===categoryFromName(names[0].label))){const item=names[0],evidenceId=object.names?.find(n=>n.value===object.name)?.evidenceId??`name:${object.sourceId}`;
       result.standardClass={...item,kind:item.kind as 'equipment'|'material'|'construction',value:item.term,evidenceId,status:'candidate',evidence:[evidenceId]};
       if(!object.typeCategory&&!object.propertyCategories?.length){
         if(!result.category.startsWith(`${item.category}.`))result.category=item.category;
