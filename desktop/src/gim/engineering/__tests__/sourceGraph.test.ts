@@ -42,7 +42,7 @@ describe('independent engineering source graph', () => {
       'main.cbm': 'ENTITYNAME=F3System\nOBJECTMODELPOINTER=string.dev\nSUBSYSTEM0=part.cbm',
       'part.cbm': 'ENTITYNAME=F2System\nOBJECTMODELPOINTER=ball.dev',
       'string.dev': 'SYMBOLNAME=绝缘子串\nTYPE=ChainInsulation\nSUBDEVICES.NUM=2\nSUBDEVICE0=ball.dev\nSUBDEVICE1=ball.dev',
-      'ball.dev': 'SYMBOLNAME=金具球',
+      'ball.dev': 'OBJECTROLE=part\nSYMBOLNAME=金具球',
     }));
     expect(graph.records).toHaveLength(3);
     expect(graph.aliases[0]).toMatchObject({ status: 'ambiguous' });
@@ -80,7 +80,7 @@ describe('independent engineering source graph', () => {
 
   it('preserves family evidence without borrowing its name as the component name', async () => {
     const graph = await extractEngineeringSourceGraph(files({ 'project.cbm': 'OBJECTMODELPOINTER=unit.dev',
-      'unit.dev': 'SYMBOLNAME=在线监测仪\nBASEFAMILYPOINTER=family.fam',
+      'unit.dev': 'TYPE=OnlineMonitoring\nSYMBOLNAME=在线监测仪\nBASEFAMILYPOINTER=family.fam',
       'family.fam': '[设备]\n工程中名称=PROJECTNAME=110kV中性点装置\nmalformed-row' }));
     expect(graph.records[0].properties[0]).toMatchObject({ path: 'family.fam', line: 2, rawLine: '工程中名称=PROJECTNAME=110kV中性点装置' });
     expect(graph.documents.find(doc => doc.path === 'family.fam')?.rawLines[2]).toBe('malformed-row');

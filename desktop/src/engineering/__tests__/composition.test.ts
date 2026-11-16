@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { projectEngineeringComposition, finalizeEngineeringComposition } from '../composition.js';
 import { normalizeEngineeringModel } from '../normalize.js';
-import type { ObjectEvidence } from '../types.js';
-const evidence = (sourceId: string, name: string, assemblyParentId?: string): ObjectEvidence => ({ sourceId, name, assemblyParentId,
-  traits: {}, designations: [], identityCodes: [], identityNames: [], phases: [] });
+import {declaredObject} from './evidenceFixtures.js';
+const evidence=(sourceId:string,name:string,assemblyParentId?:string)=>declaredObject(sourceId,name,{assemblyParentId});
 describe('whole-only composition projection', () => {
   it('keeps an independently identified cabinet out of the main transformer while hiding its radiator design part', () => {
     const snapshot = normalizeEngineeringModel('package', [evidence('body', '主变压器'), evidence('radiator', '散热器', 'body'), evidence('box', '测控柜', 'body')], []);

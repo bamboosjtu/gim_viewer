@@ -6,7 +6,7 @@ function snapshot():EngineeringSnapshot{
   return {evidenceBinding:{scope:'scope',sourceRevision:0},scope:'scope',rulesVersion:'rules',entities:[],pending:[{id:'pending-1',reason:'owner-unknown',sourceIds:['source-1']}],
     memberships:[{sourceId:'source-1',ownerId:'pending-1',disposition:'pending_whole_member',
       interpretation:{category:'U-OBJECT',meaning:'neutral_set',basis:'source',conflict:'',independent:false,
-        assemblyCategory:'U-OBJECT',assemblySignature:''}}],
+        }}],
     relationships:[],aliases:[],diagnostics:[]};
 }
 it('includes pending identity, source, category, disposition and reason in semantic input',()=>{

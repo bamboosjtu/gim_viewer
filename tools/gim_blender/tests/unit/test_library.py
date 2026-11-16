@@ -60,6 +60,7 @@ class CacheTests(unittest.TestCase):
             self.assertIn('&lt;img', body)
             self.assertNotIn('<img src=x', body)
             self.assertEqual(urlopen(url+rec['id']+'/index.html').read(), b'test DTO')
+            self.assertIn(b'prepareStaticModel', urlopen(url+rec['id']+'/js/main.js').read(), 'cached projects use the installed runtime')
             for route in ['data/projects/', rec['id']+'/source.gim', rec['id']+'/%2e%2e/source.gim', rec['id']+'/%5c..%5csource.gim']:
                 with self.assertRaises(HTTPError) as error:
                     urlopen(url+route)

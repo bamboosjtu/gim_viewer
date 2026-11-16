@@ -1,6 +1,6 @@
 {
   "version": "recognition-policy-v1",
-  "description": "Private identity/purpose/assembly roles. These are not workbook directory codes. Directory codes are generated only from workbook family order.",
+  "description": "GIM Viewer internal identity, purpose and grain policy. JSON directory codes are maintained independently; the workbook is reference evidence only.",
   "recognitionCodes": [
     {
       "code": "E01",

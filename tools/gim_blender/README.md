@@ -6,7 +6,7 @@
 2. **删除所选**：删除该项目的缓存和转换结果，保留用户最初选择的外部原文件。
 3. **启动 HTML Demo**：启动仅监听 `127.0.0.1` 的本地服务并打开默认浏览器。在网页中选择工程即可开始第一人称漫游。关闭工具窗口会停止它自己的服务。
 
-浏览器在独立进程中启动，不阻塞工具窗口。Windows 下按系统 HTTP 默认浏览器关联启动，并隔离冻结程序的 DLL 搜索目录。Edge、Chrome 等 Chromium 浏览器使用 `data/browser/` 下的独立漫游会话，避免与已有浏览器实例的权限状态冲突。收到浏览器对首页的请求后才显示已打开；失败或超时会明确提示，服务地址仍可见并可点击重试。
+浏览器在独立进程中启动，不阻塞工具窗口。Windows 下按系统 HTTP 默认浏览器关联启动，并隔离冻结程序的 DLL 搜索目录。Edge、Chrome 等 Chromium 浏览器分别使用 `data/browser/msedge/`、`data/browser/chrome/` 等独立漫游会话，避免不同浏览器共享配置及已有实例的权限状态冲突。收到浏览器对首页的请求后才显示已打开；失败或超时会明确提示，服务地址仍可见并可点击重试。
 
 工具不提供单独的转换、导出或服务器配置按钮。导入期间可查看真实阶段进度，失败原因显示在窗口中；失败项目可重新导入或删除。关闭窗口中止转换后，再导入会重建未完成结果。
 
@@ -45,6 +45,12 @@ gim_blender/
 ```
 
 `result/web/index.html` 通过 HTTP 使用。工具的服务只暴露已完成项目的 `web/` 和选择页，不提供原 GIM、构建目录、目录列表或远程写入接口。服务器使用系统分配的空闲端口，不占用已有的 8765 / 8785 服务。
+
+工具服务从程序资源提供当前 JS/CSS/Three 运行时，从项目缓存提供模型和导航数据。因此控制与渲染更新无需重新转换旧项目；直接导出的独立 `result/web/` 副本则保留生成时的前端版本。
+
+漫游运行时缓存静态模型矩阵，仅同步明确可动的门；门的交互位置随动画更新。低渲染帧率时用最多 25 ms 的物理分步推进人物，单帧最多补偿 250 ms，保留每步的完整碰撞检测。模型数量、材质、阴影和渲染分辨率不通过本优化缩减。
+
+完整 GLB 解码结束后即终止 Draco 解码线程并释放其临时 WASM 资源；场景几何保留在渲染器中，不影响后续漫游。这是一次完整加载的场景，不在漫游阶段继续用该解码器流式加载几何。
 
 ## 独立实现和边界
 
@@ -85,6 +91,7 @@ $env:TMP = $env:TEMP; $env:TMPDIR = $env:TEMP
 $env:PYTHONDONTWRITEBYTECODE = '1'
 New-Item -ItemType Directory -Force $env:TEMP | Out-Null
 .\tools\gim_blender\.venv\Scripts\python.exe -m unittest discover -s tools/gim_blender/tests/unit -v
+node tools/gim_blender/tests/unit/test_runtime.cjs
 ```
 
 真实工程验证把完整目录包复制到 `tmp/` 后，使用冻结 EXE 导入、提供服务并用 `tests/local/browser.cjs <URL> <工作区输出目录>` 复核。该浏览器脚本针对本地 110-A2-1 的已知回归位置，不能当作任意工程的通过判据。
@@ -94,3 +101,5 @@ New-Item -ItemType Directory -Force $env:TEMP | Out-Null
 首次转换与默认浏览器启动的本地检查使用 `gim_blender.exe --flow-check <工作区GIM路径> --check-result <工作区JSON路径>`，要求 exe 旁项目库为空。它走实际文件选择、导入和启动按钮，并记录系统浏览器对本地首页的真实请求。`tests/local/substation02_flow.cjs <URL> <项目缓存目录> <工作区输出目录>` 校验实际 GLB 的来源覆盖及键鼠操作；浏览器校验结束后由调用方在检查 JSON 旁创建同名 `.done` 文件结束服务。该流程不能复用已有项目库。
 
 性能和跨工程可达性仍由开发者选择本地复核范围，工具不自动批准基线。
+
+性能调查入口为 `tests/local/performance.cjs <工作区暂存目录> <变体列表>`；测试仅消费暂存的真实网页产物，记录 GPU、模型计数、帧耗时、JS CPU、碰撞查询及堆驻留。`tests/local/slow_frames.cjs` 复核低渲染帧率下的实际移动和关门阻挡。它们是显式本地任务，不在远程 CI 中运行；比较须保持相同模型、视角、分辨率和计时条件。

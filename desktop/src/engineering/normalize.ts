@@ -1,6 +1,7 @@
-import { ENGINEERING_RULES_VERSION, explicitMain, interpretRecognitionObject as interpretObject, isNumberedDesignation, categoryFromName } from './classify.js';
+import {COMPOSITION_POLICY,componentHostCompatibility,separateInstallation} from './compositionPolicy.js';
+import { ENGINEERING_RULES_VERSION, explicitMain, interpretRecognitionObject as interpretObject, categoryFromName } from './classify.js';
 import { assertEngineeringPartition } from './validate.js';
-import { categoryDefinition,publishDirectoryClassification,componentAcceptsHost } from './catalogLabels.js';
+import { categoryDefinition,publishDirectoryClassification } from './catalogLabels.js';
 import { classificationDetails } from './classificationDetails.js';
 import {recoverComponentMembership} from './recoverMembership.js';
 import type { EngineeringEntity, EngineeringSnapshot, ObjectEvidence, PendingWhole, SourceAlias } from './types.js';
@@ -10,16 +11,7 @@ const identity = (scope: string, kind: string, seed: string) => `${kind}:${JSON.
 const compare = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
 const transformer = (category: string | undefined) => !!category && ['E01','E-T','E03'].includes(category);
 const reserve = (row: ObjectEvidence) => row.designations.some(p=>/备用|预留/.test(p.value));
-/** Names that describe a component of the host when a real DEV assembly edge
- * exists. A standalone source keeps its independent catalog role. */
-const embeddedAccessory = /端子箱|端子排|机构箱|操动机构|操作机构|电动机构|散热器|油枕|冷却器|风扇|分接开关|吸湿器|温控器|压力释放|柜体|门扇|门框|电缆终端|电源切换箱|动力箱|分支箱|灯具|指示灯|监控器|监控终端|监控模块/;
 const explicitIndependent = (row: ObjectEvidence) => row.objectRoles?.some(p=>p.value==='independent') ?? false;
-/** A real DEV assembly edge into an equipment host. Host category is not a
- * discriminator: transformers, GIS, capacitor banks and other equipment embed
- * their accessories the same way. A prefabricated cabin (E18) is a building
- * boundary, and unknown hosts cannot prove device composition. */
-const embeddedEquipmentHost = (category: string | undefined) =>
-  !!category && category.startsWith('E') && category !== 'E18';
 function wholeName(row:ObjectEvidence,category:string):string {
   const number=explicitMain(row);
   if(category==='E01'&&number)return `${number}号${reserve(row)?'备用':''}主变`;
@@ -59,9 +51,9 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
       classificationStatus:meaning.get(sourceIds.find(id=>meaning.get(id)?.category===category)??'')?.classificationStatus??(category==='U-OBJECT'?'unresolved':'confirmed'),
       boundaryStatus:proof==='outward_object_boundary_unconfirmed'||kind!=='whole'
         ||sourceIds.some(id=>meaning.get(id)?.equipmentType||meaning.get(id)?.componentType||meaning.get(id)?.classificationStatus!=='confirmed')&&!sourceIds.some(id=>raw.get(id)?.identityCodes.length||raw.get(id)?.designations.length||explicitIndependent(raw.get(id)!))
-        ||['E04','E10'].includes(category)&&!/(?:成套|装置|组)/.test(name)&&!sourceIds.some(id=>raw.get(id)?.identityCodes.length)?'candidate':'confirmed',
+        ||COMPOSITION_POLICY.boundaryRequiresIdentity.includes(category)&&!sourceIds.some(id=>raw.get(id)?.identityCodes.length)?'candidate':'confirmed',
       grain:categoryDefinition(category)?.grain as 'item'|'segment'|undefined,
-      ...classificationDetails(category,name),
+      ...classificationDetails(category),
     });
     const interpreted=sourceIds.map(id=>meaning.get(id)!).find(m=>m.category===category);
     if(interpreted)Object.assign(entities.get(id)!,{standardClass:interpreted.standardClass,subtype:interpreted.subtype,subtypeLabel:interpreted.subtypeLabel,unknownReason:interpreted.unknownReason});
@@ -76,53 +68,11 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
     return id;
   }
 
-  // Peer fragments require declared engineering identity and a compatible set
-  // signature. Common source parent, template, location and name alone do not merge.
-  interface PeerGroup { category: string; code: string; name: string; signature: string; members: ObjectEvidence[] }
-  const groups = new Map<string, PeerGroup>();
-  const signatures = new Map<string, Set<string>>();
-  const roots = new Map<string, ObjectEvidence[]>();
-  for (const row of ordered) {
-    const m = meaning.get(row.sourceId)!;
-    const code = row.identityCodes[0]?.value;
-    const name = row.designations[0]?.value;
-    if (!code || !name) continue;
-    const rootKey = JSON.stringify([code, name, row.name]);
-    const rootMembers = roots.get(rootKey) ?? [];
-    rootMembers.push(row); roots.set(rootKey, rootMembers);
-    if (m.meaning !== 'fragment' || m.independent) continue;
-    const base = JSON.stringify([m.assemblyCategory, code, name]);
-    const key = JSON.stringify([m.assemblyCategory, code, name, m.assemblySignature]);
-    const group = groups.get(key) ?? { category: m.assemblyCategory, code, name, signature: m.assemblySignature, members: [] };
-    group.members.push(row); groups.set(key, group);
-    const values = signatures.get(base) ?? new Set<string>();
-    values.add(m.assemblySignature); signatures.set(base, values);
-  }
-  for (const [, group] of [...groups].sort(([a], [b]) => compare(a, b))) {
-    const members = [...new Set([...group.members, ...roots.get(JSON.stringify([group.code, group.name, group.signature])) ?? []])];
-    if (members.length < 2) continue;
-    const parents=new Set(members.map(row=>row.assemblyParentId).filter(id=>id&&meaning.get(id)?.meaning!=='container'));
-    if (signatures.get(JSON.stringify([group.category, group.code, group.name]))!.size !== 1 || parents.size>1
-      ||new Set(members.map(row=>meaning.get(row.sourceId)?.equipmentType?.id).filter(Boolean)).size>1
-      || members.some(row=>new Set(row.identityCodes.map(p=>p.value)).size>1||new Set(row.designations.map(p=>p.value)).size>1)) {
-      diagnostics.push({ kind: 'whole_identity_conflict', identity: group.code, name: group.name });
-      for(const row of members)if(!owners.has(row.sourceId))bundle(`conflict:${row.sourceId}`,'assembly_identity_conflict',[row.sourceId]);
-      continue;
-    }
-    const seed = `set:${JSON.stringify([group.code, group.name])}`;
-    if (!isNumberedDesignation(group.name)) {
-      bundle(seed, 'unnumbered_set_identity_requires_confirmation', members.map(row => row.sourceId));
-      diagnostics.push({ kind: 'unnumbered_assembly_identity', identity: group.code, name: group.name }); continue;
-    }
-    const entity = addEntity(seed, group.category, group.name, 'engineering_code+designation+assembly_signature', members.map(row => row.sourceId), 'set');
-    entity.compositionState = 'declared_identity_physical_completeness_unverified';
-  }
-
   const banks = new Map<string, ObjectEvidence[]>();
   for (const row of ordered) {
     const m = meaning.get(row.sourceId)!;
     const number = explicitMain(row);
-    if (owners.has(row.sourceId) || m.meaning !== 'object' || m.category !== 'E01' || !number || !row.phases.some(p => p.value === '单相')) continue;
+    if (owners.has(row.sourceId) || explicitIndependent(row) || m.meaning !== 'object' || m.category !== 'E01' || !number || !row.phases.some(p => p.value === '单相')) continue;
     let parent=row.assemblyParentId,contained=false;
     while(parent&&raw.has(parent)){const ancestor=meaning.get(parent)!;if(ancestor.meaning==='object'&&transformer(ancestor.category)){contained=true;break;}parent=raw.get(parent)?.assemblyParentId;}
     if(contained)continue;
@@ -135,7 +85,7 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
     const codes=new Set(members.flatMap(row=>row.identityCodes.map(p=>p.value)));
     const phases=members.flatMap(row=>row.phaseLabels?.map(p=>p.value.trim().toUpperCase())??[]);
     const parents=new Set(members.map(row=>row.assemblyParentId).filter(id=>id&&meaning.get(id)?.meaning!=='container'));
-    if(members.length>3||codes.size>1||parents.size>1||new Set(phases).size!==phases.length){
+    if(members.length>COMPOSITION_POLICY.mainBank.maximumBodies||codes.size>1||parents.size>1||new Set(phases).size!==phases.length){
       diagnostics.push({kind:'whole_identity_conflict',identity:number,name:'主变成组证据冲突'});
       members.forEach(row=>bundle(`main-conflict:${row.sourceId}`,'transformer_bank_identity_conflict',[row.sourceId]));continue;
     }
@@ -159,58 +109,32 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
     };
     if (m.basis === 'attribute_conflict') {
       bundle(sourceId,'object_attributes_conflict',[sourceId]);
-    } else if(above&&entities.has(above)&&m.componentType&& !componentAcceptsHost(m,entities.get(above)!)){
-      bundle(sourceId,'component_host_incompatible',[sourceId]);
-      m.membershipStatus='unresolved';
-      diagnostics.push({kind:'component_host_incompatible',identity:sourceId,name:row.name});
     } else if (m.meaning === 'neutral_set') {
-      // Resolve external attachments after all bodies and their identities exist.
-      if (transformer(aboveCategory)) owners.set(sourceId, above);
+      if (transformer(aboveCategory)&&!explicitIndependent(row)) owners.set(sourceId, above);
       else bundle(sourceId, 'neutral_set_main_unresolved', [sourceId]);
-    } else if (['E16.terminal_box','M10'].includes(m.category) && above && (
-      transformer(aboveCategory)||pending.get(above)?.reason==='neutral_set_main_unresolved'
-      ||embeddedEquipmentHost(aboveCategory))) {
-      // A genuinely embedded terminal box is part of its host assembly. An
-      // explicit independent role does not detach it, and the host being a
-      // main transformer, GIS or capacitor bank does not change the boundary.
-      m.meaning='part';m.independent=false;m.basis=transformer(aboveCategory)||pending.get(above)?.reason==='neutral_set_main_unresolved'?'transformer_terminal_composition':'equipment_terminal_composition';
-      if(explicitIndependent(row)){m.conflict='assembly_role_conflict';m.classificationStatus='candidate';m.categoryStatus='candidate';if(m.objectRole)m.objectRole={...m.objectRole,status:'unresolved'};}
-      owners.set(sourceId,above);
-    } else if (m.category==='E17'&&m.subtype==='机构箱'&&above&&aboveCategory?.startsWith('E')&&aboveCategory!=='E18'
-      &&!row.objectRoles?.some(p=>p.value==='independent')) {
-      m.meaning='part';m.independent=false;m.basis='equipment_actuator_composition';
-      owners.set(sourceId,above);
-    } else if (above && embeddedEquipmentHost(aboveCategory)&&m.componentType?.status==='confirmed'&&!explicitIndependent(row)) {
-      m.meaning='part';m.independent=false;m.basis='standard_component_in_equipment_assembly';owners.set(sourceId,above);
-    } else if (above && aboveCategory?.startsWith('E') && aboveCategory!=='E18'
-      && !explicitIndependent(row) && embeddedAccessory.test(row.name)) {
-      // Terminal boxes, operating mechanisms, radiators and other assembled
-      // accessories are components of the host, never a second device whole.
-      m.meaning='part';m.independent=false;m.basis='equipment_accessory_composition';
-      owners.set(sourceId,above);
+    } else if (above && entities.has(above) && m.componentType?.status==='confirmed' && !explicitIndependent(row)) {
+      const compatibility=componentHostCompatibility(m,entities.get(above)!);
+      m.membershipEvidence=[...(m.componentType.evidence??[]),`assembly:${row.assemblyParentId}->${sourceId}`,`policy:${COMPOSITION_POLICY.version}:${m.componentType.id}`];
+      if(compatibility==='compatible'){
+        m.meaning='part';m.independent=false;m.basis='configured_component_assembly';m.membershipStatus='confirmed';owners.set(sourceId,above);
+      }else{
+        const reason=compatibility==='unconfigured'?'component_host_unconfigured':'component_host_incompatible';
+        bundle(sourceId,reason,[sourceId]);m.membershipStatus='unresolved';diagnostics.push({kind:reason,identity:sourceId,name:row.name});
+      }
     } else if (['source_only', 'container', 'detail'].includes(m.meaning)) {
       owners.set(sourceId, above);
     } else if (m.meaning === 'part') {
-      if (above) owners.set(sourceId, above);
+      if(m.componentType&&m.componentType.status!=='confirmed'&&!row.objectRoles?.some(p=>p.value==='part')){bundle(sourceId,'component_type_unresolved',[sourceId]);m.membershipStatus='unresolved';}
+      else if (above) {owners.set(sourceId, above);m.membershipStatus='confirmed';m.membershipEvidence=[...(row.objectRoles?.map(p=>p.evidenceId)??[]),`assembly:${row.assemblyParentId}->${sourceId}`];}
       else bundle(sourceId, 'component_whole_unresolved', [sourceId]);
-    } else if (m.meaning === 'fragment') {
-      if (above && (aboveCategory === m.assemblyCategory || pending.has(above))) owners.set(sourceId, above);
-      else bundle(sourceId, 'peer_fragment_engineering_identity_insufficient', [sourceId]);
-    } else if (aboveCategory && (aboveCategory===m.category||aboveCategory.startsWith('E16')&&m.category.startsWith('E16'))
-      && /端子板|端子排|柜体|门扇|门框/.test(row.name) && !row.objectRoles?.some(p=>p.value==='independent')) {
-      m.meaning='part';m.independent=false;m.basis='same_category_assembly_component';owners.set(sourceId,above);
     } else if (m.independent) {
       associate('independent_function_identity', 'source_assembly_only');
     } else if (aboveCategory === 'U-OBJECT' && m.category !== 'U-OBJECT') {
       associate('object_identity_parent_boundary_unknown', 'unknown_parent_does_not_define_whole_boundary');
     } else if (aboveCategory) {
-      const separateInstallation = ['C-B1','C-B2','C-B3','C-B4','C-B9'].includes(m.category) && aboveCategory.startsWith('E');
-      const cabinetInCabin = m.category === 'E09' && aboveCategory === 'E18';
-      const distinctCivil=aboveCategory.startsWith('C')&&(m.category.startsWith('C')&&m.category!==aboveCategory||m.category.startsWith('E'));
-      if (separateInstallation || cabinetInCabin || distinctCivil) associate('independent_installation_object', 'source_assembly_only');
-      else owners.set(sourceId, above);
+      associate(separateInstallation(m.category,aboveCategory)?'independent_installation_object':'object_identity_in_assembly', 'source_assembly_only');
     } else if (above && pending.has(above)) {
-      owners.set(sourceId, above);
+      addEntity(sourceId,m.category,wholeName(row,m.category),'object_identity',[sourceId]);
     } else {
       addEntity(sourceId, m.category, wholeName(row,m.category), m.category === 'U-OBJECT' ? 'outward_object_boundary_unconfirmed' : 'object_identity', [sourceId]);
     }

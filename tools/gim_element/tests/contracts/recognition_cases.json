@@ -60,11 +60,10 @@
     ],
     "groups": [
       [
-        "host",
-        "part"
+        "host"
       ]
     ],
-    "pending": 0
+    "pending": 1
   },
   {
     "name": "duplicate_hosts_stay_ambiguous",
@@ -250,15 +249,14 @@
     ],
     "groups": [
       [
-        "a",
-        "p"
+        "a"
       ]
     ],
-    "pending": 0,
+    "pending": 1,
     "expectedMember": {
       "sourceId": "p",
-      "membershipStatus": "candidate",
-      "pendingReason": null
+      "membershipStatus": null,
+      "pendingReason": "component_whole_unresolved"
     }
   },
   {

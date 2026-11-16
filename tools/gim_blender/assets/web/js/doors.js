@@ -1,4 +1,4 @@
-import { circleIntersectsRect } from './nav.js?v=20261115-composite-nav-v6';
+import { circleIntersectsRect } from './nav.js?v=20261116-runtime-perf-v1';
 
 // Door and gate interaction. All coordinates in this module are Blender plan metres.
 export class DoorManager {
@@ -42,7 +42,7 @@ export class DoorManager {
     }
     if (!leaves.length) return null;
     const b = d.bbox;
-    return {
+    const entry = {
       id: isGate ? 'GATE' : d.id,
       isGate,
       name: d.name,
@@ -58,6 +58,25 @@ export class DoorManager {
       t: 0,
       target: 0,
     };
+    this.refreshTargets(entry);
+    return entry;
+  }
+
+  refreshTargets(entry) {
+    entry.targets = [entry.center];
+    for (const leaf of entry.leaves) {
+      const geometry = leaf.obj.geometry;
+      if (!geometry) continue;
+      if (!geometry.boundingBox) geometry.computeBoundingBox();
+      leaf.obj.updateWorldMatrix(true, false);
+      const point = leaf.obj.position.clone();
+      geometry.boundingBox.getCenter(point).applyMatrix4(leaf.obj.matrixWorld);
+      entry.targets.push([point.x, -point.z, point.y]);
+    }
+  }
+
+  refreshAllTargets() {
+    for (const entry of this.entries) this.refreshTargets(entry);
   }
 
   nearest(px, py, feet, fx, fy, maxDist = 3.4) {
@@ -65,17 +84,9 @@ export class DoorManager {
     let bestScore = Infinity;
     for (const e of this.entries) {
       if (feet+1.7 < (e.bottom??0)-.1 || feet > (e.top??3)+.1) continue;
-      const targets = [e.center];
       // Once open, the panel no longer sits at its closed doorway centre.
       // Interact with its actual pose from either side, including at the hinge.
-      for (const leaf of e.leaves) {
-        const obj=leaf.obj,geometry=obj.geometry;
-        if(!geometry)continue;
-        if(!geometry.boundingBox)geometry.computeBoundingBox();
-        const p=obj.position.clone();geometry.boundingBox.getCenter(p);obj.localToWorld(p);
-        targets.push([p.x,-p.z,p.y]);
-      }
-      for (const point of targets) {
+      for (const point of e.targets) {
         const dx=point[0]-px,dy=point[1]-py,dist=Math.hypot(dx,dy);
         if(dist>maxDist)continue;
         const dot=dist<.05?1:(dx*fx+dy*fy)/dist;
@@ -121,6 +132,7 @@ export class DoorManager {
           l.obj.rotation.y = l.baseRotY + l.angle * t;
         }
       }
+      this.refreshTargets(e);
     }
   }
 

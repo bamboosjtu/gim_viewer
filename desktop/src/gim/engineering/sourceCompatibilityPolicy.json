@@ -1,5 +1,5 @@
 {
-  "version": "source-type-aliases-1",
+  "version": "source-compatibility-policy-v1",
   "dev": {
     "oilimmersedtransformer": "E01",
     "drytypetransformer": "E01",
@@ -156,5 +156,9 @@
     "IFCCOLUMNSTANDARDCASE": "C-A3",
     "IFCMEMBERSTANDARDCASE": "C-A15",
     "IFCPROTECTIVEDEVICE": "part"
+  },
+  "description": "Format-specific source enums. Exact model declarations take precedence; collisions are observable, not extra classifications.",
+  "structured": {
+    "道路": "C-C5"
   }
 }

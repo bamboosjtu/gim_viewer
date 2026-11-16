@@ -12,6 +12,21 @@ from browser_launcher import local_demo_url, command_for_url, split_windows_comm
 
 
 class BrowserTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform=='win32', 'Windows browser profile policy')
+    def test_browser_products_have_separate_profiles(self):
+        root_dir=REPO/'tmp/gim-blender-browser-unit';root_dir.mkdir(parents=True,exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=root_dir) as directory:
+            data=Path(directory)/'data';result=data/'tmp/browser.json';result.parent.mkdir(parents=True)
+            profiles=[]
+            for name in ['chrome.exe','msedge.exe']:
+                executable=Path(directory)/name;executable.write_bytes(b'ordinary executable-path DTO')
+                kernel=Mock();kernel.SetDllDirectoryW.return_value=1;process=Mock();process.wait.return_value=0;process.pid=123
+                with patch('browser_launcher.ctypes.WinDLL',return_value=kernel),patch('browser_launcher.default_browser_command',return_value=[str(executable),'--single-argument','http://127.0.0.1:1234/']),patch('browser_launcher.subprocess.Popen',return_value=process) as opened:
+                    self.assertEqual(open_demo('http://127.0.0.1:1234/',result),0)
+                    command=opened.call_args.args[0];profiles.append(next(x for x in command if x.startswith('--user-data-dir=')))
+                    self.assertNotIn('--single-argument',command)
+            self.assertNotEqual(profiles[0],profiles[1])
+
     def test_only_local_demo_url(self):
         self.assertEqual(local_demo_url('http://127.0.0.1:12345/'), 'http://127.0.0.1:12345/')
         for url in ['https://example.com/','file:///C:/file','http://127.0.0.1/','http://user:password@127.0.0.1:123/']:

@@ -16,7 +16,7 @@ def main(exe):
     assets=exe.parent/'_internal'
     if not (assets/'catalog.json').is_file():
         raise SystemExit('catalog.json missing from the package')
-    for name in ['standardCatalog.json', 'sourceVocabulary.json', 'sourceTypeAliases.json', 'catalogRules.json','proxyCategories.json']:
+    for name in ['standardCatalog.json', 'sourceVocabulary.json', 'sourceCompatibilityPolicy.json', 'compositionPolicy.json','recognitionPolicy.json','proxyCategories.json']:
         if not (assets/name).is_file():
             raise SystemExit(name + ' missing from the package')
     if any(name in toc for name in ['node.exe','recognition-engine.cjs']):

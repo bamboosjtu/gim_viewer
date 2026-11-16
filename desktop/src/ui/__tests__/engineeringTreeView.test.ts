@@ -11,7 +11,7 @@ async function fixture() {
     'project.cbm': 'SUBSYSTEM0=unit.cbm',
     'unit.cbm': 'ENTITYNAME=F2System\nOBJECTMODELPOINTER=body.dev\nNAME=主变系统',
     'body.dev': 'SYMBOLNAME=1号主变压器\nSUBDEVICE0=box.dev\nSUBDEVICE1=radiator.dev',
-    'box.dev': 'SYMBOLNAME=1号主变测控柜', 'radiator.dev': 'SYMBOLNAME=散热器',
+    'box.dev': 'SYMBOLNAME=1号主变测控柜', 'radiator.dev': 'TYPE=Radiator\nSYMBOLNAME=散热器',
   };
   const graph = await extractEngineeringSourceGraph({ paths: Object.keys(files), readText: async p => files[p] });
   const state = new AppState(); state.activateProject(1, 'package'); state.currentProjectType = 'substation';
@@ -30,7 +30,7 @@ beforeEach(() => {
 const search = (value: string) => { const input = document.querySelector<HTMLInputElement>('[role="combobox"]')!; input.value = value; input.dispatchEvent(new Event('input')); };
 describe('engineering composition and provenance navigation', () => {
   it('shows four top-level groups and selects an unresolved neutral attachment without selecting a main body',async()=>{
-    const raw:Record<string,string>={'project.cbm':'SUBSYSTEM0=body.cbm\nSUBSYSTEM1=neutral.cbm','body.cbm':'OBJECTMODELPOINTER=body.dev','body.dev':'SYMBOLNAME=主变压器',
+    const raw:Record<string,string>={'project.cbm':'SUBSYSTEM0=body.cbm\nSUBSYSTEM1=neutral.cbm','body.cbm':'OBJECTMODELPOINTER=body.dev','body.dev':'TYPE=OilImmersedTransformer\nPURPOSE=主变\nSYMBOLNAME=主变压器',
       'neutral.cbm':'OBJECTMODELPOINTER=neutral.dev','neutral.dev':'TYPE=OpenGroundingEquipment/NeutralPointEquipment\nSYMBOLNAME=220kV中性点成套装置'};
     const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async p=>raw[p]}),built=buildTestEngineeringSources('p',graph,[],[]);
     const state=new AppState();state.activateProject(1,'p');state.currentProjectType='substation';state.engineeringSources=built.sources;state.engineeringSnapshot=built.snapshot;

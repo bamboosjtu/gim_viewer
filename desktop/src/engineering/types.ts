@@ -12,13 +12,12 @@ export interface ObjectNameEvidence extends EvidenceValue {
 }
 
 export interface ObjectEvidence {
+  vocabularyAmbiguities?:readonly string[];
   standardClasses?:readonly StandardClassEvidence[];
   hostCodes?:readonly EvidenceValue[];
   hostDesignations?:readonly EvidenceValue[];
   declaredHostSourceIds?:readonly EvidenceValue[];
   vocabularyObservations?:readonly VocabularyObservation[];
-  equipmentType?: EvidenceValue;
-  componentType?: EvidenceValue;
   equipmentTypeCandidates?:readonly EvidenceValue[];
   componentTypeCandidates?:readonly EvidenceValue[];
   purposes?: readonly EvidenceValue[];
@@ -34,7 +33,6 @@ export interface ObjectEvidence {
   propertyCategories?: readonly EvidenceValue[];
   objectRoles?: readonly EvidenceValue[];
   phaseLabels?: readonly EvidenceValue[];
-  subtypeNames?: readonly EvidenceValue[];
   typeRefinements?: readonly string[];
   traits: {
     fastener?: boolean;
@@ -51,8 +49,7 @@ export interface ObjectEvidence {
   phases: readonly EvidenceValue[];
 }
 
-export type SourceMeaning = 'object' | 'part' | 'fragment' | 'neutral_set' | 'container' | 'detail' | 'source_only';
-export type SourceComponentRole = 'cover' | 'sidewall' | 'base';
+export type SourceMeaning = 'object' | 'part' | 'neutral_set' | 'container' | 'detail' | 'source_only';
 export interface ObjectInterpretation {
   /** Private identity/assembly role, independent from the workbook directory. */
   recognitionCode?:string;
@@ -77,16 +74,12 @@ export interface ObjectInterpretation {
   unknownReason?: string;
   subtype?: string;
   subtypeLabel?: string;
-  /** Optional role inside a composite source such as a cable trench. */
-  role?: SourceComponentRole;
-  assemblyCategory: string;
-  assemblySignature: string;
 }
 
 export interface TermInterpretation {id?:string;status:'confirmed'|'candidate'|'unresolved';evidence:readonly string[]}
 export interface VocabularyObservation {
   verification?:'verified'|'unverified'|'ambiguous';sourceLocation?:string;
-  field:string;rawValue:string;status:'mapped'|'unresolved';evidenceId:string;dictionaryVersion:string;dictionaryEvidence?:string;
+  field:string;rawValue:string;status:'mapped'|'unresolved'|'ambiguous';evidenceId:string;dictionaryVersion:string;dictionaryEvidence?:string;
 }
 
 export interface EngineeringEntity {

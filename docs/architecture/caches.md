@@ -33,7 +33,7 @@ SQLite 共享 `gim_project`；变电表使用 `substation_*`，线路表使用 `
 | IFC Spatial parser | `gim-substation-parser-v1` | [Spatial codec](../../desktop/src/services/substationSpatialCodec.ts) | 独立于变电语义域 |
 | 来源物理目录 | `source-geometry-v1` | [独立物理遍历](../../desktop/src/gim/engineering/physicalOccurrences.ts)、[物理目录缓存](../../desktop/src/services/sourceGeometryCache.ts) | 源 SHA、契约与载荷长度、实际 entry 路径及有效矩阵；字符串表复用身份/上下文/路径，按实际 UTF-8 字节判断 32 MiB 可选缓存上限；独立于分类/实体/导航，命中后不读完整语义图 |
 | 工程来源 | `engineering-source-v1` | [来源契约](../../desktop/src/gim/engineering/buildSources.ts)、[编码](../../desktop/src/services/engineeringCacheCodec.ts)、[来源表](../../desktop/src/services/engineeringSourceCodec.ts) | 源 SHA、条目清单、来源/IFC parser 契约、完整性；保留实际 FAM 归属、属性对象/Pset/实例类型范围；独立原子文件 |
-| 工程实体 | `engineering-entity-v1` + `engineering-wholes-1` + `substation-vocabulary-1` / `source-keywords-1` + substation-standard-index-1 / membership-recovery-1 / 来源类型与 Proxy 映射版本 + `engineering-catalog-v1` | [实体编码](../../desktop/src/services/engineeringCacheCodec.ts)、[识别版本](../../desktop/src/gim/engineering/sourceEvidence.ts)、[目录契约](../../desktop/src/engineering/catalog.json) | 绑定来源内容摘要、scope/sourceRevision、实体 schema、复合识别契约与词典内容指纹；单独修改识别词汇只重建实体、导航 |
+| 工程实体 | `engineering-entity-v1` + `recognition-evidence-policy-v1` + 内部策略内容指纹 + 模型/部件词汇与来源兼容映射内容指纹 + `engineering-catalog-v1` | [实体编码](../../desktop/src/services/engineeringCacheCodec.ts)、[识别版本](../../desktop/src/gim/engineering/sourceEvidence.ts)、[目录契约](../../desktop/src/engineering/catalog.json) | 绑定来源内容摘要、scope/sourceRevision、实体 schema、复合识别契约与词典内容指纹；单独修改识别词汇只重建实体、导航 |
 | 工程导航 | `engineering-navigation-v1` + `engineering-composition-v1` + `engineering-source-tree-v1` + `engineering-inventory-v1` + 目录版本 | [三视图投影](../../desktop/src/gim/engineering/navigation.ts)、[组成](../../desktop/src/engineering/composition.ts)、[来源树](../../desktop/src/gim/engineering/sourceProjection.ts)、[清册](../../desktop/src/engineering/inventoryTemplate.ts)、[导航缓存](../../desktop/src/services/engineeringNavigationCache.ts) | 绑定来源摘要、实体快照指纹和空间投影策略版本；校验节点可达性、完整投影标记与覆盖率；部分范围不写导航缓存 |
 | IFC 浏览 LOD | `bim-lod-v1` 组合 | [features](../../desktop/src/config/features.ts)、[LOD 缓存](../../desktop/bridge/ifcLodCache.ts) | 源 SHA、条目、LOD 策略、单次解析、依赖版本；分远景/近景/属性独立失效 |
 | IFC 区域模板 | `near-templates-v1`，附加于浏览 LOD 键 | [features](../../desktop/src/config/features.ts) | 模板几何与逐对象放置；不重建有效远景 |
@@ -101,6 +101,8 @@ Engineering 输入载体限制为每批 8 MiB / 256 文件，批次数不是会�
 | Spatial 解析/宿主规则变化 | Spatial 快照 | 变电语义、DEV 几何 |
 | IFC 浏览 LOD 策略变化 | 远景/近景/属性对应键 | DEV 几何、工程实体 |
 | UI 展示变化 | 视图状态或无需缓存 | 工程数据/几何 |
+
+识别字段投影清单的内容指纹纳入变电 Spatial parser 契约；新增字段不能复用缺少这些字段的来源/Spatial 缓存。分类、部件宿主和 grain 策略只影响实体/导航指纹，物理目录与几何模板独立。协议仍为 v1。
 
 旧格式直接失效重建，不提供迁移、旧快照读取或历史兼容分支。缓存损坏只删除受影响域；删除工程时再清理该工程全部缓存。
 

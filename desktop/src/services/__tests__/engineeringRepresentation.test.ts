@@ -21,8 +21,8 @@ async function fixture(shared = false, declaredBuilding = false) {
   const data: Record<string, string> = {
     'project.cbm': `SUBSYSTEM0=unit.cbm${shared ? '\nSUBSYSTEM1=unit.cbm' : ''}${declaredBuilding ? '\nSUBSYSTEM2=building.cbm' : ''}`,
     'unit.cbm': 'OBJECTMODELPOINTER=body.dev',
-    'body.dev': 'SYMBOLNAME=主变压器\nSUBDEVICE0=box.dev\nSUBDEVICE1=radiator.dev',
-    'box.dev': 'SYMBOLNAME=测控柜', 'radiator.dev': 'SYMBOLNAME=散热器',
+    'body.dev': 'TYPE=OilImmersedTransformer\nPURPOSE=主变\nSYMBOLNAME=主变压器\nSUBDEVICE0=box.dev\nSUBDEVICE1=radiator.dev',
+    'box.dev': 'TYPE=ControlCabinet\nOBJECTROLE=independent\nSYMBOLNAME=测控柜', 'radiator.dev': 'TYPE=Radiator\nSYMBOLNAME=散热器',
   };
   if (declaredBuilding) data['building.cbm'] = 'SYSTEMNAME1=建筑物系统\nSYSTEMNAME2=生产建筑物\nSYSTEMNAME3=主控通信楼01';
   const graph = await extractEngineeringSourceGraph({ paths: Object.keys(data), readText: async p => data[p] });
@@ -44,7 +44,7 @@ describe('source-to-physical representation adapter and filters', () => {
   it('selects integrated GIS boxes with the host while keeping a standalone terminal box outside its isolated range',async()=>{
     const raw:Record<string,string>={'project.cbm':'SUBSYSTEM0=gis.cbm\nSUBSYSTEM1=free.cbm','gis.cbm':'OBJECTMODELPOINTER=gis.dev',
       'gis.dev':'TYPE=GIS\nSYMBOLNAME=组合电器GIS\nSUBDEVICE0=actuator.dev\nSUBDEVICE1=terminal.dev',
-      'actuator.dev':'SYMBOLNAME=操动机构箱','terminal.dev':'SYMBOLNAME=端子箱','free.cbm':'OBJECTMODELPOINTER=free.dev','free.dev':'SYMBOLNAME=端子箱模型01:Null:2754317'};
+      'actuator.dev':'TYPE=OperatingMechanismBox\nSYMBOLNAME=操动机构箱','terminal.dev':'TYPE=TerminalBox\nOBJECTROLE=part\nSYMBOLNAME=端子箱','free.cbm':'OBJECTMODELPOINTER=free.dev','free.dev':'TYPE=TerminalBox\nOBJECTROLE=independent\nSYMBOLNAME=端子箱模型01:Null:2754317'};
     const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async p=>raw[p]}),built=buildTestEngineeringSources('p',graph,[],[]),state=new AppState();
     state.activateProject(1,'p');state.engineeringSources=built.sources;state.engineeringSnapshot=built.snapshot;state.engineeringNavigation=projectEngineeringNavigation(built.sources,built.snapshot);
     const gis=built.snapshot.entities.find(e=>e.category==='E05')!,free=built.snapshot.entities.find(e=>e.category==='M04')!;

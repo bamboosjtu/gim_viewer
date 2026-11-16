@@ -1,0 +1,189 @@
+{
+  "version": "composition-policy-v1",
+  "authority": "GIM Viewer engineering policy; not workbook facts. Unconfigured host constraints do not establish compatibility.",
+  "componentHosts": {
+    "body": [
+      "E01",
+      "E-T",
+      "E03",
+      "E02",
+      "E-R",
+      "E11",
+      "E04",
+      "E05",
+      "E06",
+      "E07",
+      "E08",
+      "E09",
+      "E10",
+      "E12",
+      "E13",
+      "E14",
+      "E15",
+      "E16",
+      "E16.panel_cabinet",
+      "E16.control_cabinet",
+      "E17"
+    ],
+    "expansion_tank": null,
+    "tap_changer": [
+      "E01",
+      "E-T",
+      "E03",
+      "E02",
+      "E-R",
+      "E11"
+    ],
+    "hv_bushing": [
+      "E01",
+      "E-T",
+      "E03",
+      "E02",
+      "E-R",
+      "E11"
+    ],
+    "mv_bushing": null,
+    "lv_bushing": [
+      "E01",
+      "E-T",
+      "E03",
+      "E02",
+      "E-R",
+      "E11"
+    ],
+    "neutral_bushing": [
+      "E04"
+    ],
+    "terminal_boards": null,
+    "radiator": [
+      "E01",
+      "E-T",
+      "E03",
+      "E02",
+      "E-R",
+      "E11"
+    ],
+    "grounding_terminal": null,
+    "terminal_box": [
+      "E01",
+      "E-T",
+      "E03",
+      "E02",
+      "E-R",
+      "E11",
+      "E04",
+      "E05",
+      "E06",
+      "E07",
+      "E08",
+      "E09",
+      "E10",
+      "E12",
+      "E13",
+      "E14",
+      "E15",
+      "E16",
+      "E16.panel_cabinet",
+      "E16.control_cabinet",
+      "E17"
+    ],
+    "ladder": null,
+    "respirator": null,
+    "meter": null,
+    "relay": null,
+    "online_monitoring": null,
+    "pressure_relief_device": null,
+    "oil_level_thermostat": null,
+    "moisture_absorber": null,
+    "civil_interface": null,
+    "junction_box": null,
+    "density_relay": null,
+    "oil_level_meter": null,
+    "operating_mechanism_box": [
+      "E05",
+      "E06",
+      "E07",
+      "E08",
+      "E09"
+    ],
+    "control_cabinet": [
+      "E01",
+      "E-T",
+      "E03",
+      "E02",
+      "E-R",
+      "E11",
+      "E04",
+      "E05",
+      "E06",
+      "E07",
+      "E08",
+      "E09",
+      "E10",
+      "E12",
+      "E13",
+      "E14",
+      "E15",
+      "E16",
+      "E16.panel_cabinet",
+      "E16.control_cabinet",
+      "E17"
+    ],
+    "central_control_box": null,
+    "on_off_indicator": null,
+    "parallel_resistance": null,
+    "cabinet": null,
+    "ground_resistance": [
+      "E04"
+    ],
+    "gridding": null,
+    "devices_in_cubicle": null,
+    "counter_online_monitor": null,
+    "capacitor_unit": null,
+    "damped_reactor": null,
+    "imbalance_dta": null,
+    "valve_group": null,
+    "grid_side_bushing": null,
+    "valve_side_bushing": null,
+    "spark_gap": null,
+    "tcrgd": null,
+    "devices": [
+      "E16",
+      "E16.panel_cabinet",
+      "E16.control_cabinet"
+    ],
+    "protective_device": null,
+    "protection_equipment": null
+  },
+  "independentRoles": [
+    "E16",
+    "E16.panel_cabinet",
+    "E16.control_cabinet",
+    "E16.terminal_box",
+    "E16.battery_set",
+    "E17"
+  ],
+  "separateInstallations": [
+    "C-B1",
+    "C-B2",
+    "C-B3",
+    "C-B4",
+    "C-B9"
+  ],
+  "transformerRoles": [
+    "E01",
+    "E-T",
+    "E03"
+  ],
+  "neutralAssemblyRoles": [
+    "E04"
+  ],
+  "mainBank": {
+    "maximumBodies": 3,
+    "requires": "own numbered designation + single phase + nonconflicting codes and phases"
+  },
+  "boundaryRequiresIdentity": [
+    "E04",
+    "E10"
+  ]
+}

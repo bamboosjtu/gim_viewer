@@ -178,7 +178,10 @@ class DemoServer:
                     project = library.project(pieces.pop(0))
                     try:
                         if library.ready(read_json(project / 'project.json')):
-                            folder = project / 'result/web'
+                            # Runtime belongs to the installed tool; geometry
+                            # belongs to the source-identified import. Updating
+                            # controls/rendering must not require reconversion.
+                            folder = resources()/'web' if pieces[0] in ('js','css','vendor') else project/'result/web'
                     except (OSError, ValueError):
                         pass
                 if folder is None or any(x in ('', '.', '..') or '\\' in x or ':' in x for x in pieces):

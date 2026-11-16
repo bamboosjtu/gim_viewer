@@ -1,16 +1,18 @@
 import catalog from './catalog.json';
-import index from './standardCatalog.json';
+import {STANDARD_CATALOG} from './standardCatalog.js';
+import policy from './recognitionPolicy.json';
 import type {EngineeringEntity} from './types.js';
+const index={items:STANDARD_CATALOG};
 
 /** Single catalog vocabulary shared by classification and independent projections. */
 export const ENGINEERING_CATALOG_VERSION = catalog.version;
 export const ENGINEERING_CATEGORIES = catalog.categories;
 export const ENGINEERING_CATEGORY_LABELS: Readonly<Record<string,string>> = Object.fromEntries(catalog.categories.map(c=>[c.code,c.label]));
 export const categoryLabel = (code:string) => ENGINEERING_CATEGORY_LABELS[code] ?? code;
-export const RECOGNITION_LABELS:Readonly<Record<string,string>>=Object.fromEntries(catalog.recognitionCodes.map(c=>[c.code,c.label]));
+export const RECOGNITION_LABELS:Readonly<Record<string,string>>=Object.fromEntries(policy.recognitionCodes.map(c=>[c.code,c.label]));
 export const recognitionLabel=(code:string)=>RECOGNITION_LABELS[code]??code;
 export const recognitionCategory=(entity:Pick<EngineeringEntity,'category'|'recognitionCode'>)=>entity.recognitionCode??entity.category;
-export const categoryDefinition = (code:string) => catalog.recognitionCodes.find(c=>c.code===code);
+export const categoryDefinition = (code:string) => codes.get(code);
 export const classificationReasonLabel=(reason:string)=>({
   material_subtype_evidence_insufficient:'材料具体形式尚无足够证据',equipment_subtype_evidence_insufficient:'设备具体类型尚待确认',
   foundation_purpose_unresolved:'尚不能确定属于设备基础还是建筑物基础',transformer_purpose_unresolved:'尚不能确定主变或站用用途',
@@ -19,19 +21,21 @@ export const classificationReasonLabel=(reason:string)=>({
 } as Record<string,string>)[reason]??'对象证据尚待核对';
 
 export const MODEL_CATALOG_CATEGORIES=catalog.categories;
-export const directoryDefinition=(code:string)=>catalog.categories.find(row=>row.code===code||row.label===code);
+const directoryByTerm=new Map(catalog.categories.flatMap(row=>[[row.code,row],[row.label,row]] as const));
+export const directoryDefinition=(code:string)=>directoryByTerm.get(code);
 export const COMPONENT_CATALOG=catalog.components;
 const indexed=new Map(index.items.map(item=>[item.id,item]));
-const codes=new Map(catalog.recognitionCodes.map(item=>[item.code,item]));
+const codes=new Map(policy.recognitionCodes.map(item=>[item.code,item]));
 const byCode=new Map<string,typeof index.items>();
 const byRecognition=new Map<string,typeof index.items>();
 for(const item of index.items){
   const list=byCode.get(item.category)??[];list.push(item);byCode.set(item.category,list);
   const roles=byRecognition.get(item.recognitionCode)??[];roles.push(item);byRecognition.set(item.recognitionCode,roles);
 }
-const componentNames=new Map(COMPONENT_CATALOG.map(item=>[item.id,item.label]));
+const directoryRoles=new Map([...byCode].map(([category,items])=>[category,[...new Set(items.map(item=>item.recognitionCode))]]));
+const componentNames=new Map<string,string>();
+for(const item of COMPONENT_CATALOG){const labels=componentNames.get(item.id)?.split(' / ')??[];if(!labels.includes(item.label))labels.push(item.label);componentNames.set(item.id,labels.join(' / '));}
 const componentById=new Map(COMPONENT_CATALOG.map(item=>[item.id,item]));
-const componentByTerm=new Map(COMPONENT_CATALOG.map(item=>[item.term.toLowerCase(),item]));
 export const componentLabel=(id:string)=>componentNames.get(id)??id;
 export function catalogLocation(entity:Pick<EngineeringEntity,'category'|'standardClass'>){
   const specific=entity.standardClass?.id?indexed.get(entity.standardClass.id):undefined;
@@ -63,14 +67,10 @@ export function publishDirectoryClassification<T extends {category:string;recogn
 }
 export function directoryRecognitionCode(code:string):string|undefined{
   code=directoryDefinition(code)?.code??code;
-  const matches=byCode.get(code)??[],roles=[...new Set(matches.map(item=>item.recognitionCode))];
+  const roles=directoryRoles.get(code)??[];
   if(code==='E01')return 'E-T';if(code==='E02')return 'E-R';
   return roles[0];
 }
 export const catalogPathLabel=(entity:Pick<EngineeringEntity,'category'|'standardClass'>)=>{const row=catalogLocation(entity);return `${row.category} / ${row.label}`;};
 
-export function componentDefinition(meaning:{componentType?:{id?:string};standardClass?:{term:string}}){return componentById.get(meaning.componentType?.id??'')??componentByTerm.get(meaning.standardClass?.term.toLowerCase()??'');}
-export function componentAcceptsHost(meaning:Parameters<typeof componentDefinition>[0],host:Pick<EngineeringEntity,'category'|'standardClass'>):boolean{
-  const required=componentDefinition(meaning)?.hostCategory;
-  return !required||categoryLabel(directoryClassification(host.category,host.standardClass).category)===required;
-}
+export function componentDefinition(meaning:{componentType?:{id?:string}}){return componentById.get(meaning.componentType?.id??'');}

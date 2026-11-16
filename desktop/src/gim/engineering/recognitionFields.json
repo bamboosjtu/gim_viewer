@@ -48,5 +48,8 @@
   "设备用途",
   "设备类别",
   "设备类型",
-  "设备编码"
+  "设备编码",
+  "COMPONENTTYPE",
+  "部件类型",
+  "CONSTRUCTIONTYPE"
 ]

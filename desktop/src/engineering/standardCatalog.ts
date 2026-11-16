@@ -1,6 +1,8 @@
 import catalog from './standardCatalog.json';
+import policy from './recognitionPolicy.json';
 export const STANDARD_CATALOG_VERSION=catalog.version;
-export const STANDARD_CATALOG=catalog.items;
+/** The catalog supplies facts; the product policy supplies private semantic roles. */
+export const STANDARD_CATALOG=catalog.items.map(item=>({...item,recognitionCode:(policy.terms as Record<string,string>)[item.term.toLowerCase()]}));
 const normalize=(value:string)=>value.normalize('NFKC').replace(/\s+/g,'').toLowerCase();
 type Item=typeof STANDARD_CATALOG[number];
 const terms=new Map<string,Item[]>();
@@ -8,7 +10,7 @@ for(const item of STANDARD_CATALOG)for(const name of [item.label,item.term,...it
   const key=normalize(name),rows=terms.get(key)??[];if(!rows.some(row=>row.id===item.id))rows.push(item);terms.set(key,rows);
 }
 /** Exact aliases can be ambiguous (e.g. two distinct shielding devices). */
-export function standardTerms(value:string):readonly Item[]{return terms.get(normalize(value))??[];}
+export function standardTerms(value:string):readonly Item[]{return terms.get(value.toLowerCase())??terms.get(normalize(value))??[];}
 const chinese=[...new Set(STANDARD_CATALOG.flatMap(row=>[row.label,...row.aliases]).filter(label=>/[\u3400-\u9fff]/.test(label)&&label.length>=2))];
 const byLength=chinese.sort((a,b)=>b.length-a.length||a.localeCompare(b));
 const expression=new RegExp(byLength.map(label=>label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|'),'g');

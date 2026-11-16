@@ -2,7 +2,7 @@ import {expect,it} from 'vitest';
 import {normalizeEngineeringModel} from '../../../engineering/normalize.js';
 import {type CompositionSpatialDiagnostics,fromIfcYUpBounds,projectSpatialComposition} from '../compositionSpatial.js';
 import type {CompositionAssignment} from '../../../engineering/composition.js';
-import type {ObjectEvidence} from '../../../engineering/types.js';
+import {declaredObject} from '../../../engineering/__tests__/evidenceFixtures.js';
 
 interface CompositionParityMismatch {entityId:string;sourceIds:string[];expectedPaths:string[];actualPaths:string[];}
 function compareCompositionAssignments(
@@ -24,7 +24,7 @@ function compareCompositionAssignments(
   for (const entityId of right.keys()) if (!left.has(entityId)) extra.push(entityId);
   return { missing, extra, mismatches };
 }
-const object=(sourceId:string,name:string):ObjectEvidence=>({sourceId,name,traits:{},designations:[],identityCodes:[],identityNames:[],phases:[]});
+const object=declaredObject;
 it('uses named storeys in a placeholder building and projects other architectural files into its footprint without merging wholes',()=>{
  const snapshot=normalizeEngineeringModel('p',[object('a','墙'),object('b','板'),object('c','柱'),object('d','梁')]),before=JSON.stringify(snapshot);
  const facts=snapshot.entities.map(e=>({entityId:e.id,hostEntityIds:[],declarations:[],sourceHints:['建筑.ifc'],spaces:[{building:{value:'IFCBUILDING #111',evidenceId:'b'},storeys:[{value:e.sourceIds[0]==='a'?'4.8m标高层（110配电楼）':'0m',evidenceId:'floor'}]}]}));

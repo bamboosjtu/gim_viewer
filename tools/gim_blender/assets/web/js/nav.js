@@ -1,6 +1,6 @@
 // Navigation grid decoded from the Blender/IFC build.
 // Coordinates are Blender plan metres: x east, y north, z up.
-import { TriangleCollision, EquipmentCollision } from './collision.js?v=20261115-composite-nav-v6';
+import { TriangleCollision, EquipmentCollision } from './collision.js?v=20261116-runtime-perf-v1';
 
 function base64ToBytes(b64) {
   const bin = atob(b64);

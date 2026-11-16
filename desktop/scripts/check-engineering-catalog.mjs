@@ -1,20 +1,26 @@
-import {readFileSync,writeFileSync,existsSync} from 'node:fs';
+import {readFileSync,writeFileSync} from 'node:fs';
 import {resolve,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createHash} from 'node:crypto';
 const repo=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
 const load=path=>JSON.parse(readFileSync(resolve(repo,path),'utf8'));
 const catalog=load('desktop/src/engineering/catalog.json'),standard=load('desktop/src/engineering/standardCatalog.json');
-const codes=new Set(catalog.categories.map(c=>c.code)),roles=new Set(catalog.recognitionCodes.map(c=>c.code));
-if(codes.size!==catalog.categories.length||new Set(standard.items.map(i=>i.id)).size!==standard.items.length||standard.items.some(i=>!codes.has(i.category)||!roles.has(i.recognitionCode)))throw Error('Catalog IDs / directory and recognition role mapping mismatch');
-for(const file of ['catalog.json','standardCatalog.json'])if(JSON.stringify(load('desktop/src/engineering/'+file))!==JSON.stringify(load('tools/gim_element/'+file)))throw Error('Standalone catalog copy differs: '+file);
+const policy=load('desktop/src/engineering/recognitionPolicy.json');
+const codes=new Set(catalog.categories.map(c=>c.code)),roles=new Set(policy.recognitionCodes.map(c=>c.code));
+if(codes.size!==catalog.categories.length||new Set(standard.items.map(i=>i.id)).size!==standard.items.length||standard.items.some(i=>!codes.has(i.category)||!roles.has(policy.terms[i.term.toLowerCase()])))throw Error('Catalog IDs / directory and recognition role mapping mismatch');
+for(const file of ['catalog.json','standardCatalog.json','recognitionPolicy.json','compositionPolicy.json'])if(JSON.stringify(load('desktop/src/engineering/'+file))!==JSON.stringify(load('tools/gim_element/'+file)))throw Error('Standalone catalog copy differs: '+file);
 if(JSON.stringify(load('desktop/src/gim/engineering/sourceVocabulary.json'))!==JSON.stringify(load('tools/gim_element/sourceVocabulary.json')))throw Error('Standalone vocabulary copy differs');
-const source=resolve(repo,catalog.source.path);
-if(existsSync(source)&&createHash('sha256').update(readFileSync(source)).digest('hex')!==catalog.source.sha256)throw Error('XLSX changed; run generate:engineering-catalog');
+if(JSON.stringify(load('desktop/src/gim/engineering/sourceCompatibilityPolicy.json'))!==JSON.stringify(load('tools/gim_element/sourceCompatibilityPolicy.json')))throw Error('Standalone compatibility policy differs');
+const vocabulary=load('desktop/src/gim/engineering/sourceVocabulary.json');
+for(const entry of Object.values(vocabulary.keywordDictionary.entries))if('componentType' in entry)throw Error('Component meaning leaked into model vocabulary');
+for(const item of standard.items)for(const word of [item.label,item.term,...item.term.split('/'),...item.aliases])if(!vocabulary.keywordDictionary.entries[word.trim().toLowerCase()]?.catalogIds.includes(item.id))throw Error('Model vocabulary missing '+item.id+' / '+word);
+for(const part of catalog.components)for(const word of [part.label,part.term,...part.aliases])if(!vocabulary.componentDictionary.entries[word.trim().toLowerCase()]?.componentIds.includes(part.id))throw Error('Component vocabulary missing '+part.term+' / '+word);
+const hosts=load('desktop/src/engineering/compositionPolicy.json').componentHosts;
+for(const part of catalog.components)if(!(part.id in hosts))throw Error('Explicit configured/unconfigured host policy required: '+part.id);
+for(const [id,allowed]of Object.entries(hosts))if(!catalog.components.some(part=>part.id===id)||allowed!==null&&(!Array.isArray(allowed)||!allowed.length||allowed.some(code=>!roles.has(code))))throw Error('Invalid component host policy: '+id);
 const path='docs/engineering/catalogs/catalog-index.md';
-const doc='# 工作簿目录索引\n\n唯一维护源：[`变电三维设计建模规范_实体索引表.xlsx`](变电三维设计建模规范_实体索引表.xlsx)。本文件和运行时数据由生成命令导出。运行和打包只消费 JSON 配置，不读取 XLSX。新增项在工作簿标黄。目录编号按各表类别首次出现顺序生成，内部用途/归属角色不参与目录排序。\n\n'+['equipment','material','construction'].map(kind=>{
+const doc='# 实体目录参考索引\n\n维护源为独立 JSON 目录配置；[`变电三维设计建模规范_实体索引表.xlsx`](变电三维设计建模规范_实体索引表.xlsx) 仅作参考。下列单元格与摘要保留所记录的参考版本的来源位置，不要求当前工作簿参与配置、构建或检查。目录代码稳定维护，内部用途/归属角色不参与目录排序。\n\n'+['equipment','material','construction'].map(kind=>{
  const title={equipment:'设备',material:'材料',construction:'构件'}[kind];
  return '## '+title+'\n\n| 编号 | 类别 | 名称 | 英文名称 | 单元格 | 补充项 |\n|---|---|---|---|---|---|\n'+standard.items.filter(i=>i.kind===kind).map(i=>`| ${i.category} | ${i.catalogCategory} | ${i.label} | ${i.term} | ${i.evidence.sheet}!${i.evidence.cellRange} | ${i.supplemental?'是':''} |`).join('\n');
 }).join('\n\n')+'\n\n## 设备部件\n\n| 名称 | 英文名称 | 单元格 |\n|---|---|---|\n'+catalog.components.map(i=>`| ${i.label} | ${i.term} | ${i.evidence.sheet}!${i.evidence.cellRange} |`).join('\n')+'\n';
 if(process.argv.includes('--write'))writeFileSync(resolve(repo,path),doc);else if(readFileSync(resolve(repo,path),'utf8').replace(/\r\n/g,'\n')!==doc)throw Error('Generated catalog documentation is stale');
-console.log('Generated catalogs, semantic mappings, standalone copies and documentation agree.'+(existsSync(source)?' Workbook SHA checked.':' Workbook absent: source freshness was not checked.'));
+console.log('JSON catalogs, namespace vocabularies, composition policies, standalone copies and documentation agree. No workbook dependency.');

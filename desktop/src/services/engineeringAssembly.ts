@@ -17,7 +17,7 @@ export function assembleStoredEngineeringView(scope:string,sources:EngineeringSo
     stageErrors.recognition=String(error);
     const ids=engineeringSourceRecords(graph,sources.ifcRecords).map(r=>r.id);
     snapshot={scope,rulesVersion:ENGINEERING_RULES_VERSION,entities:[],pending:[],relationships:[],aliases:[],
-      memberships:ids.map(sourceId=>({sourceId,ownerId:null,disposition:'source_only',interpretation:{category:'U-OBJECT',meaning:'source_only',basis:'recognition_unavailable',conflict:'',independent:false,classificationStatus:'unresolved',categoryStatus:'unresolved',assemblyCategory:'',assemblySignature:''}})),
+      memberships:ids.map(sourceId=>({sourceId,ownerId:null,disposition:'source_only',interpretation:{category:'U-OBJECT',meaning:'source_only',basis:'recognition_unavailable',conflict:'',independent:false,classificationStatus:'unresolved',categoryStatus:'unresolved'}})),
       evidenceBinding:{scope,sourceRevision:graph.revision??0},diagnostics:[{kind:'recognition-failed',identity:scope,name:String(error)}],recognitionCoverage:{inputSourceIds:ids,processed:0,confirmed:0,complete:false}};
   }
   const navigation=projectEngineeringNavigation(sources,snapshot);

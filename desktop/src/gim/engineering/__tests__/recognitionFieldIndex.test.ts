@@ -1,5 +1,5 @@
 import {it,expect} from 'vitest';
-import {toObjectEvidence,type SourceRecord} from '../../gim/engineering/sourceEvidence.js';
+import {toObjectEvidence,type SourceRecord} from '../sourceEvidence.js';
 it('scans unrelated raw attributes once and preserves object identity, phase, host and evidence addresses',()=>{
   let reads=0;
   const unrelated=Array.from({length:2000},(_,i)=>({get keys(){reads++;return [`UNRELATED_${i}`];},value:'raw'}));

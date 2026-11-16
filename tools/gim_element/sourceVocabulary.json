@@ -5,9 +5,6 @@
     "path": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
     "sha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6"
   },
-  "workbook": "变电三维设计建模规范_实体索引表.xlsx",
-  "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-  "recognitionPolicySha256": "11816232cabb293a2492b207ac05cfeaf6cc2681c2379b837659a5ce78d0b1a4",
   "equipment": {
     "oilimmersedtransformer": "oil_immersed_transformer",
     "drytypetransformer": "dry_type_transformer",
@@ -126,7 +123,7 @@
       "SYSCLASSIFYNAME",
       "PARTNAME"
     ],
-    "match": "exact-index-term-case-insensitive",
+    "namespace": "standard-model",
     "entries": {
       "油浸式变压器": {
         "catalogIds": [
@@ -966,8 +963,7 @@
           "sourceLocation": "电气设备模型索引表!A27:C27",
           "cell": "C27"
         },
-        "equipmentType": "ground_resistance",
-        "componentType": "ground_resistance"
+        "equipmentType": "ground_resistance"
       },
       "中性点成套设备": {
         "catalogIds": [
@@ -2079,10 +2075,30 @@
           "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
           "sheet": "材料模型索引表",
           "cellRange": "A7:C7",
-          "verification": "verified",
+          "verification": "ambiguous",
           "sourceLocation": "材料模型索引表!A7:C7",
           "cell": "B7"
-        }
+        },
+        "evidences": [
+          {
+            "sourceKind": "workbook",
+            "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+            "sheet": "材料模型索引表",
+            "cellRange": "A7:C7",
+            "verification": "verified",
+            "sourceLocation": "材料模型索引表!A7:C7",
+            "cell": "B7"
+          },
+          {
+            "sourceKind": "workbook",
+            "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+            "sheet": "材料模型索引表",
+            "cellRange": "A20:C20",
+            "verification": "verified",
+            "sourceLocation": "材料模型索引表!A20:C20",
+            "cell": "B20"
+          }
+        ]
       },
       "equilibriumloadsshieldingdevice": {
         "catalogIds": [
@@ -2530,8 +2546,7 @@
           "verification": "verified",
           "sourceLocation": "材料模型索引表!A23:C23",
           "cell": "C23"
-        },
-        "componentType": "terminal_box"
+        }
       },
       "灯具/照明灯/泛光灯/吊灯/投光灯/吸顶灯/格栅灯/路灯": {
         "catalogIds": [
@@ -4409,1252 +4424,6 @@
           "cell": "C41"
         }
       },
-      "本体": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A2",
-          "cellRange": "A2:B2",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A2:B2"
-        },
-        "componentType": "body"
-      },
-      "body": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B2",
-          "cellRange": "A2:B2",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A2:B2"
-        },
-        "componentType": "body"
-      },
-      "储油柜": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A3",
-          "cellRange": "A3:B3",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A3:B3"
-        },
-        "componentType": "expansion_tank"
-      },
-      "expansiontank": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B3",
-          "cellRange": "A3:B3",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A3:B3"
-        },
-        "componentType": "expansion_tank"
-      },
-      "分接开关": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A4",
-          "cellRange": "A4:B4",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A4:B4"
-        },
-        "componentType": "tap_changer"
-      },
-      "tapchanger": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B4",
-          "cellRange": "A4:B4",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A4:B4"
-        },
-        "componentType": "tap_changer"
-      },
-      "高压套管": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A5",
-          "cellRange": "A5:B5",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A5:B5"
-        },
-        "componentType": "hv_bushing"
-      },
-      "hvbushing": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B5",
-          "cellRange": "A5:B5",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A5:B5"
-        },
-        "componentType": "hv_bushing"
-      },
-      "中压套管": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A6",
-          "cellRange": "A6:B6",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A6:B6"
-        },
-        "componentType": "mv_bushing"
-      },
-      "mvbushing": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B6",
-          "cellRange": "A6:B6",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A6:B6"
-        },
-        "componentType": "mv_bushing"
-      },
-      "低压套管": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A7",
-          "cellRange": "A7:B7",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A7:B7"
-        },
-        "componentType": "lv_bushing"
-      },
-      "lvbushing": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B7",
-          "cellRange": "A7:B7",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A7:B7"
-        },
-        "componentType": "lv_bushing"
-      },
-      "中性点套管": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A8",
-          "cellRange": "A8:B8",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A8:B8"
-        },
-        "componentType": "neutral_bushing"
-      },
-      "neutralbushing": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B8",
-          "cellRange": "A8:B8",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A8:B8"
-        },
-        "componentType": "neutral_bushing"
-      },
-      "接线端子板": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A9",
-          "cellRange": "A9:B9",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A9:B9"
-        },
-        "componentType": "terminal_boards"
-      },
-      "terminalboards": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B9",
-          "cellRange": "A9:B9",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A9:B9"
-        },
-        "componentType": "terminal_boards"
-      },
-      "散热器": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A10",
-          "cellRange": "A10:B10",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A10:B10"
-        },
-        "componentType": "radiator"
-      },
-      "radiator": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B10",
-          "cellRange": "A10:B10",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A10:B10"
-        },
-        "componentType": "radiator"
-      },
-      "接地端子": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A11",
-          "cellRange": "A11:B11",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A11:B11"
-        },
-        "componentType": "grounding_terminal"
-      },
-      "groundingterminal": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B11",
-          "cellRange": "A11:B11",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A11:B11"
-        },
-        "componentType": "grounding_terminal"
-      },
-      "本体端子箱": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A12",
-          "cellRange": "A12:B12",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A12:B12"
-        },
-        "componentType": "terminal_box"
-      },
-      "爬梯": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A13",
-          "cellRange": "A13:B13",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A13:B13"
-        },
-        "componentType": "ladder"
-      },
-      "ladder": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B13",
-          "cellRange": "A13:B13",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A13:B13"
-        },
-        "componentType": "ladder"
-      },
-      "呼吸器": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A14",
-          "cellRange": "A14:B14",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A14:B14"
-        },
-        "componentType": "respirator"
-      },
-      "respirator": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B14",
-          "cellRange": "A14:B14",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A14:B14"
-        },
-        "componentType": "respirator"
-      },
-      "表计": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A15",
-          "cellRange": "A15:B15",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A15:B15"
-        },
-        "componentType": "meter"
-      },
-      "meter": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B15",
-          "cellRange": "A15:B15",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A15:B15"
-        },
-        "componentType": "meter"
-      },
-      "继电器": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A16",
-          "cellRange": "A16:B16",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A16:B16"
-        },
-        "componentType": "relay"
-      },
-      "relay": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B16",
-          "cellRange": "A16:B16",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A16:B16"
-        },
-        "componentType": "relay"
-      },
-      "在线监测": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A17",
-          "cellRange": "A17:B17",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A17:B17"
-        },
-        "componentType": "online_monitoring"
-      },
-      "onlinemonitoring": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B17",
-          "cellRange": "A17:B17",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A17:B17"
-        },
-        "componentType": "online_monitoring"
-      },
-      "压力释放装置": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A18",
-          "cellRange": "A18:B18",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A18:B18"
-        },
-        "componentType": "pressure_relief_device"
-      },
-      "pressurereliefdevice": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B18",
-          "cellRange": "A18:B18",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A18:B18"
-        },
-        "componentType": "pressure_relief_device"
-      },
-      "油面温控器": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A19",
-          "cellRange": "A19:B19",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A19:B19"
-        },
-        "componentType": "oil_level_thermostat"
-      },
-      "oillevelthermostat": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B19",
-          "cellRange": "A19:B19",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A19:B19"
-        },
-        "componentType": "oil_level_thermostat"
-      },
-      "吸湿器": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A20",
-          "cellRange": "A20:B20",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A20:B20"
-        },
-        "componentType": "moisture_absorber"
-      },
-      "moistureabsorber": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B20",
-          "cellRange": "A20:B20",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A20:B20"
-        },
-        "componentType": "moisture_absorber"
-      },
-      "土建接口": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A21",
-          "cellRange": "A21:B21",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A21:B21"
-        },
-        "componentType": "civil_interface"
-      },
-      "civilinterface": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B21",
-          "cellRange": "A21:B21",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A21:B21"
-        },
-        "componentType": "civil_interface"
-      },
-      "接线盒": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A22",
-          "cellRange": "A22:B22",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A22:B22"
-        },
-        "componentType": "junction_box"
-      },
-      "junctionbox": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B22",
-          "cellRange": "A22:B22",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A22:B22"
-        },
-        "componentType": "junction_box"
-      },
-      "密度继电器": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A23",
-          "cellRange": "A23:B23",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A23:B23"
-        },
-        "componentType": "density_relay"
-      },
-      "densityrelay": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B23",
-          "cellRange": "A23:B23",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A23:B23"
-        },
-        "componentType": "density_relay"
-      },
-      "油位计": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A24",
-          "cellRange": "A24:B24",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A24:B24"
-        },
-        "componentType": "oil_level_meter"
-      },
-      "oillevelmeter": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B24",
-          "cellRange": "A24:B24",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A24:B24"
-        },
-        "componentType": "oil_level_meter"
-      },
-      "操作机构箱": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A25",
-          "cellRange": "A25:B25",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A25:B25"
-        },
-        "componentType": "operating_mechanism_box"
-      },
-      "operatingmechanismbox": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B25",
-          "cellRange": "A25:B25",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A25:B25"
-        },
-        "componentType": "operating_mechanism_box"
-      },
-      "汇控柜": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A26",
-          "cellRange": "A26:B26",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A26:B26"
-        },
-        "componentType": "control_cabinet"
-      },
-      "controlcabinet": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B26",
-          "cellRange": "A26:B26",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A26:B26"
-        },
-        "componentType": "control_cabinet"
-      },
-      "中控箱": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A27",
-          "cellRange": "A27:B27",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A27:B27"
-        },
-        "componentType": "central_control_box"
-      },
-      "centralcontrolbox": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B27",
-          "cellRange": "A27:B27",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A27:B27"
-        },
-        "componentType": "central_control_box"
-      },
-      "示意分合指示器": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A28",
-          "cellRange": "A28:B28",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A28:B28"
-        },
-        "componentType": "on_off_indicator"
-      },
-      "onoffindicator": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B28",
-          "cellRange": "A28:B28",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A28:B28"
-        },
-        "componentType": "on_off_indicator"
-      },
-      "并联电阻": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A29",
-          "cellRange": "A29:B29",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A29:B29"
-        },
-        "componentType": "parallel_resistance"
-      },
-      "parallelresistance": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B29",
-          "cellRange": "A29:B29",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A29:B29"
-        },
-        "componentType": "parallel_resistance"
-      },
-      "箱体": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A30",
-          "cellRange": "A30:B30",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A30:B30"
-        },
-        "componentType": "cabinet"
-      },
-      "cabinet": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B30",
-          "cellRange": "A30:B30",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A30:B30"
-        },
-        "componentType": "cabinet"
-      },
-      "接地电阻": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A31",
-          "cellRange": "A31:B31",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A31:B31"
-        },
-        "componentType": "ground_resistance"
-      },
-      "网栏": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A32",
-          "cellRange": "A32:B32",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A32:B32"
-        },
-        "componentType": "gridding"
-      },
-      "gridding": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B32",
-          "cellRange": "A32:B32",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A32:B32"
-        },
-        "componentType": "gridding"
-      },
-      "装置": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A33",
-          "cellRange": "A33:B33",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A33:B33"
-        },
-        "componentType": "devices_in_cubicle"
-      },
-      "devicesincubicle": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B33",
-          "cellRange": "A33:B33",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A33:B33"
-        },
-        "componentType": "devices_in_cubicle"
-      },
-      "计数器/在线检测仪": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A34",
-          "cellRange": "A34:B34",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A34:B34"
-        },
-        "componentType": "counter_online_monitor"
-      },
-      "counter/onlinemonitor": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B34",
-          "cellRange": "A34:B34",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A34:B34"
-        },
-        "componentType": "counter_online_monitor"
-      },
-      "电容器单元": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A35",
-          "cellRange": "A35:B35",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A35:B35"
-        },
-        "componentType": "capacitor_unit"
-      },
-      "capacitorunit": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B35",
-          "cellRange": "A35:B35",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A35:B35"
-        },
-        "componentType": "capacitor_unit"
-      },
-      "阻尼电抗器": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A36",
-          "cellRange": "A36:B36",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A36:B36"
-        },
-        "componentType": "damped_reactor"
-      },
-      "dampedreactor": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B36",
-          "cellRange": "A36:B36",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A36:B36"
-        },
-        "componentType": "damped_reactor"
-      },
-      "不平衡电流互感器": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A37",
-          "cellRange": "A37:B37",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A37:B37"
-        },
-        "componentType": "imbalance_dta"
-      },
-      "imbalancedta": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B37",
-          "cellRange": "A37:B37",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A37:B37"
-        },
-        "componentType": "imbalance_dta"
-      },
-      "阀组": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A38",
-          "cellRange": "A38:B38",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A38:B38"
-        },
-        "componentType": "valve_group"
-      },
-      "valvegroup": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B38",
-          "cellRange": "A38:B38",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A38:B38"
-        },
-        "componentType": "valve_group"
-      },
-      "网侧套管": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A39",
-          "cellRange": "A39:B39",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A39:B39"
-        },
-        "componentType": "grid_side_bushing"
-      },
-      "gridsidebushing": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B39",
-          "cellRange": "A39:B39",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A39:B39"
-        },
-        "componentType": "grid_side_bushing"
-      },
-      "阀侧套管": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A40",
-          "cellRange": "A40:B40",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A40:B40"
-        },
-        "componentType": "valve_side_bushing"
-      },
-      "valvesidebushing": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B40",
-          "cellRange": "A40:B40",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A40:B40"
-        },
-        "componentType": "valve_side_bushing"
-      },
-      "放电间隙": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A41",
-          "cellRange": "A41:B41",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A41:B41"
-        },
-        "componentType": "spark_gap"
-      },
-      "sparkgap": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B41",
-          "cellRange": "A41:B41",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A41:B41"
-        },
-        "componentType": "spark_gap"
-      },
-      "相控电抗器": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A42",
-          "cellRange": "A42:B42",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A42:B42"
-        },
-        "componentType": "tcrgd"
-      },
-      "tcrgd": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B42",
-          "cellRange": "A42:B42",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A42:B42"
-        },
-        "componentType": "tcrgd"
-      },
-      "二次屏柜柜内装置": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A43",
-          "cellRange": "A43:B43",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A43:B43"
-        },
-        "componentType": "devices"
-      },
-      "devices": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B43",
-          "cellRange": "A43:B43",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A43:B43"
-        },
-        "componentType": "devices"
-      },
-      "保护装置": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A44",
-          "cellRange": "A44:B44",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A44:B44"
-        },
-        "componentType": "devices"
-      },
-      "protectiondevice": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B44",
-          "cellRange": "A44:B44",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A44:B44"
-        },
-        "componentType": "devices"
-      },
-      "保护设备": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A45",
-          "cellRange": "A45:B45",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A45:B45"
-        },
-        "componentType": "protective_device"
-      },
-      "protectivedevice": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B45",
-          "cellRange": "A45:B45",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A45:B45"
-        },
-        "componentType": "protective_device"
-      },
-      "线路保护装置": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A46",
-          "cellRange": "A46:B46",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A46:B46"
-        },
-        "componentType": "protection_equipment"
-      },
-      "protectionequipment": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B46",
-          "cellRange": "A46:B46",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A46:B46"
-        },
-        "componentType": "protection_equipment"
-      },
-      "变压器保护装置": {
-        "catalogIds": [],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "A47",
-          "cellRange": "A47:B47",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!A47:B47"
-        },
-        "componentType": "protection_equipment"
-      },
       "变压器": {
         "catalogIds": [
           "category:E01"
@@ -6522,6 +5291,1490 @@
           "verification": "verified",
           "sourceLocation": "构件模型索引表!A38"
         }
+      }
+    }
+  },
+  "componentDictionary": {
+    "version": "source-components-1",
+    "namespace": "standard-component",
+    "entries": {
+      "本体": {
+        "componentIds": [
+          "body"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A2",
+          "cellRange": "A2:B2",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A2:B2"
+        },
+        "componentType": "body"
+      },
+      "body": {
+        "componentIds": [
+          "body"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B2",
+          "cellRange": "A2:B2",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A2:B2"
+        },
+        "componentType": "body"
+      },
+      "储油柜": {
+        "componentIds": [
+          "expansion_tank"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A3",
+          "cellRange": "A3:B3",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A3:B3"
+        },
+        "componentType": "expansion_tank"
+      },
+      "expansiontank": {
+        "componentIds": [
+          "expansion_tank"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B3",
+          "cellRange": "A3:B3",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A3:B3"
+        },
+        "componentType": "expansion_tank"
+      },
+      "分接开关": {
+        "componentIds": [
+          "tap_changer"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A4",
+          "cellRange": "A4:B4",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A4:B4"
+        },
+        "componentType": "tap_changer"
+      },
+      "tapchanger": {
+        "componentIds": [
+          "tap_changer"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B4",
+          "cellRange": "A4:B4",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A4:B4"
+        },
+        "componentType": "tap_changer"
+      },
+      "高压套管": {
+        "componentIds": [
+          "hv_bushing"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A5",
+          "cellRange": "A5:B5",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A5:B5"
+        },
+        "componentType": "hv_bushing"
+      },
+      "hvbushing": {
+        "componentIds": [
+          "hv_bushing"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B5",
+          "cellRange": "A5:B5",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A5:B5"
+        },
+        "componentType": "hv_bushing"
+      },
+      "中压套管": {
+        "componentIds": [
+          "mv_bushing"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A6",
+          "cellRange": "A6:B6",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A6:B6"
+        },
+        "componentType": "mv_bushing"
+      },
+      "mvbushing": {
+        "componentIds": [
+          "mv_bushing"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B6",
+          "cellRange": "A6:B6",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A6:B6"
+        },
+        "componentType": "mv_bushing"
+      },
+      "低压套管": {
+        "componentIds": [
+          "lv_bushing"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A7",
+          "cellRange": "A7:B7",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A7:B7"
+        },
+        "componentType": "lv_bushing"
+      },
+      "lvbushing": {
+        "componentIds": [
+          "lv_bushing"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B7",
+          "cellRange": "A7:B7",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A7:B7"
+        },
+        "componentType": "lv_bushing"
+      },
+      "中性点套管": {
+        "componentIds": [
+          "neutral_bushing"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A8",
+          "cellRange": "A8:B8",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A8:B8"
+        },
+        "componentType": "neutral_bushing"
+      },
+      "neutralbushing": {
+        "componentIds": [
+          "neutral_bushing"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B8",
+          "cellRange": "A8:B8",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A8:B8"
+        },
+        "componentType": "neutral_bushing"
+      },
+      "接线端子板": {
+        "componentIds": [
+          "terminal_boards"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A9",
+          "cellRange": "A9:B9",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A9:B9"
+        },
+        "componentType": "terminal_boards"
+      },
+      "terminalboards": {
+        "componentIds": [
+          "terminal_boards"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B9",
+          "cellRange": "A9:B9",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A9:B9"
+        },
+        "componentType": "terminal_boards"
+      },
+      "散热器": {
+        "componentIds": [
+          "radiator"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A10",
+          "cellRange": "A10:B10",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A10:B10"
+        },
+        "componentType": "radiator"
+      },
+      "radiator": {
+        "componentIds": [
+          "radiator"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B10",
+          "cellRange": "A10:B10",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A10:B10"
+        },
+        "componentType": "radiator"
+      },
+      "接地端子": {
+        "componentIds": [
+          "grounding_terminal"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A11",
+          "cellRange": "A11:B11",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A11:B11"
+        },
+        "componentType": "grounding_terminal"
+      },
+      "groundingterminal": {
+        "componentIds": [
+          "grounding_terminal"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B11",
+          "cellRange": "A11:B11",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A11:B11"
+        },
+        "componentType": "grounding_terminal"
+      },
+      "本体端子箱": {
+        "componentIds": [
+          "terminal_box"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A12",
+          "cellRange": "A12:B12",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A12:B12"
+        },
+        "componentType": "terminal_box"
+      },
+      "terminalbox": {
+        "componentIds": [
+          "terminal_box"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B12",
+          "cellRange": "A12:B12",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A12:B12"
+        },
+        "componentType": "terminal_box"
+      },
+      "爬梯": {
+        "componentIds": [
+          "ladder"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A13",
+          "cellRange": "A13:B13",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A13:B13"
+        },
+        "componentType": "ladder"
+      },
+      "ladder": {
+        "componentIds": [
+          "ladder"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B13",
+          "cellRange": "A13:B13",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A13:B13"
+        },
+        "componentType": "ladder"
+      },
+      "呼吸器": {
+        "componentIds": [
+          "respirator"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A14",
+          "cellRange": "A14:B14",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A14:B14"
+        },
+        "componentType": "respirator"
+      },
+      "respirator": {
+        "componentIds": [
+          "respirator"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B14",
+          "cellRange": "A14:B14",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A14:B14"
+        },
+        "componentType": "respirator"
+      },
+      "表计": {
+        "componentIds": [
+          "meter"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A15",
+          "cellRange": "A15:B15",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A15:B15"
+        },
+        "componentType": "meter"
+      },
+      "meter": {
+        "componentIds": [
+          "meter"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B15",
+          "cellRange": "A15:B15",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A15:B15"
+        },
+        "componentType": "meter"
+      },
+      "继电器": {
+        "componentIds": [
+          "relay"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A16",
+          "cellRange": "A16:B16",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A16:B16"
+        },
+        "componentType": "relay"
+      },
+      "relay": {
+        "componentIds": [
+          "relay"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B16",
+          "cellRange": "A16:B16",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A16:B16"
+        },
+        "componentType": "relay"
+      },
+      "在线监测": {
+        "componentIds": [
+          "online_monitoring"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A17",
+          "cellRange": "A17:B17",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A17:B17"
+        },
+        "componentType": "online_monitoring"
+      },
+      "onlinemonitoring": {
+        "componentIds": [
+          "online_monitoring"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B17",
+          "cellRange": "A17:B17",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A17:B17"
+        },
+        "componentType": "online_monitoring"
+      },
+      "压力释放装置": {
+        "componentIds": [
+          "pressure_relief_device"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A18",
+          "cellRange": "A18:B18",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A18:B18"
+        },
+        "componentType": "pressure_relief_device"
+      },
+      "pressurereliefdevice": {
+        "componentIds": [
+          "pressure_relief_device"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B18",
+          "cellRange": "A18:B18",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A18:B18"
+        },
+        "componentType": "pressure_relief_device"
+      },
+      "油面温控器": {
+        "componentIds": [
+          "oil_level_thermostat"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A19",
+          "cellRange": "A19:B19",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A19:B19"
+        },
+        "componentType": "oil_level_thermostat"
+      },
+      "oillevelthermostat": {
+        "componentIds": [
+          "oil_level_thermostat"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B19",
+          "cellRange": "A19:B19",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A19:B19"
+        },
+        "componentType": "oil_level_thermostat"
+      },
+      "吸湿器": {
+        "componentIds": [
+          "moisture_absorber"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A20",
+          "cellRange": "A20:B20",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A20:B20"
+        },
+        "componentType": "moisture_absorber"
+      },
+      "moistureabsorber": {
+        "componentIds": [
+          "moisture_absorber"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B20",
+          "cellRange": "A20:B20",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A20:B20"
+        },
+        "componentType": "moisture_absorber"
+      },
+      "土建接口": {
+        "componentIds": [
+          "civil_interface"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A21",
+          "cellRange": "A21:B21",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A21:B21"
+        },
+        "componentType": "civil_interface"
+      },
+      "civilinterface": {
+        "componentIds": [
+          "civil_interface"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B21",
+          "cellRange": "A21:B21",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A21:B21"
+        },
+        "componentType": "civil_interface"
+      },
+      "接线盒": {
+        "componentIds": [
+          "junction_box"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A22",
+          "cellRange": "A22:B22",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A22:B22"
+        },
+        "componentType": "junction_box"
+      },
+      "junctionbox": {
+        "componentIds": [
+          "junction_box"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B22",
+          "cellRange": "A22:B22",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A22:B22"
+        },
+        "componentType": "junction_box"
+      },
+      "密度继电器": {
+        "componentIds": [
+          "density_relay"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A23",
+          "cellRange": "A23:B23",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A23:B23"
+        },
+        "componentType": "density_relay"
+      },
+      "densityrelay": {
+        "componentIds": [
+          "density_relay"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B23",
+          "cellRange": "A23:B23",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A23:B23"
+        },
+        "componentType": "density_relay"
+      },
+      "油位计": {
+        "componentIds": [
+          "oil_level_meter"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A24",
+          "cellRange": "A24:B24",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A24:B24"
+        },
+        "componentType": "oil_level_meter"
+      },
+      "oillevelmeter": {
+        "componentIds": [
+          "oil_level_meter"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B24",
+          "cellRange": "A24:B24",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A24:B24"
+        },
+        "componentType": "oil_level_meter"
+      },
+      "操作机构箱": {
+        "componentIds": [
+          "operating_mechanism_box"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A25",
+          "cellRange": "A25:B25",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A25:B25"
+        },
+        "componentType": "operating_mechanism_box"
+      },
+      "operatingmechanismbox": {
+        "componentIds": [
+          "operating_mechanism_box"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B25",
+          "cellRange": "A25:B25",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A25:B25"
+        },
+        "componentType": "operating_mechanism_box"
+      },
+      "汇控柜": {
+        "componentIds": [
+          "control_cabinet"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A26",
+          "cellRange": "A26:B26",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A26:B26"
+        },
+        "componentType": "control_cabinet"
+      },
+      "controlcabinet": {
+        "componentIds": [
+          "control_cabinet"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B26",
+          "cellRange": "A26:B26",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A26:B26"
+        },
+        "componentType": "control_cabinet"
+      },
+      "中控箱": {
+        "componentIds": [
+          "central_control_box"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A27",
+          "cellRange": "A27:B27",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A27:B27"
+        },
+        "componentType": "central_control_box"
+      },
+      "centralcontrolbox": {
+        "componentIds": [
+          "central_control_box"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B27",
+          "cellRange": "A27:B27",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A27:B27"
+        },
+        "componentType": "central_control_box"
+      },
+      "示意分合指示器": {
+        "componentIds": [
+          "on_off_indicator"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A28",
+          "cellRange": "A28:B28",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A28:B28"
+        },
+        "componentType": "on_off_indicator"
+      },
+      "onoffindicator": {
+        "componentIds": [
+          "on_off_indicator"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B28",
+          "cellRange": "A28:B28",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A28:B28"
+        },
+        "componentType": "on_off_indicator"
+      },
+      "并联电阻": {
+        "componentIds": [
+          "parallel_resistance"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A29",
+          "cellRange": "A29:B29",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A29:B29"
+        },
+        "componentType": "parallel_resistance"
+      },
+      "parallelresistance": {
+        "componentIds": [
+          "parallel_resistance"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B29",
+          "cellRange": "A29:B29",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A29:B29"
+        },
+        "componentType": "parallel_resistance"
+      },
+      "箱体": {
+        "componentIds": [
+          "cabinet"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A30",
+          "cellRange": "A30:B30",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A30:B30"
+        },
+        "componentType": "cabinet"
+      },
+      "cabinet": {
+        "componentIds": [
+          "cabinet"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B30",
+          "cellRange": "A30:B30",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A30:B30"
+        },
+        "componentType": "cabinet"
+      },
+      "接地电阻": {
+        "componentIds": [
+          "ground_resistance"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A31",
+          "cellRange": "A31:B31",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A31:B31"
+        },
+        "componentType": "ground_resistance"
+      },
+      "groundresistance": {
+        "componentIds": [
+          "ground_resistance"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B31",
+          "cellRange": "A31:B31",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A31:B31"
+        },
+        "componentType": "ground_resistance"
+      },
+      "网栏": {
+        "componentIds": [
+          "gridding"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A32",
+          "cellRange": "A32:B32",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A32:B32"
+        },
+        "componentType": "gridding"
+      },
+      "gridding": {
+        "componentIds": [
+          "gridding"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B32",
+          "cellRange": "A32:B32",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A32:B32"
+        },
+        "componentType": "gridding"
+      },
+      "装置": {
+        "componentIds": [
+          "devices_in_cubicle"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A33",
+          "cellRange": "A33:B33",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A33:B33"
+        },
+        "componentType": "devices_in_cubicle"
+      },
+      "devicesincubicle": {
+        "componentIds": [
+          "devices_in_cubicle"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B33",
+          "cellRange": "A33:B33",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A33:B33"
+        },
+        "componentType": "devices_in_cubicle"
+      },
+      "计数器/在线检测仪": {
+        "componentIds": [
+          "counter_online_monitor"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A34",
+          "cellRange": "A34:B34",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A34:B34"
+        },
+        "componentType": "counter_online_monitor"
+      },
+      "counter/onlinemonitor": {
+        "componentIds": [
+          "counter_online_monitor"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B34",
+          "cellRange": "A34:B34",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A34:B34"
+        },
+        "componentType": "counter_online_monitor"
+      },
+      "电容器单元": {
+        "componentIds": [
+          "capacitor_unit"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A35",
+          "cellRange": "A35:B35",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A35:B35"
+        },
+        "componentType": "capacitor_unit"
+      },
+      "capacitorunit": {
+        "componentIds": [
+          "capacitor_unit"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B35",
+          "cellRange": "A35:B35",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A35:B35"
+        },
+        "componentType": "capacitor_unit"
+      },
+      "阻尼电抗器": {
+        "componentIds": [
+          "damped_reactor"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A36",
+          "cellRange": "A36:B36",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A36:B36"
+        },
+        "componentType": "damped_reactor"
+      },
+      "dampedreactor": {
+        "componentIds": [
+          "damped_reactor"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B36",
+          "cellRange": "A36:B36",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A36:B36"
+        },
+        "componentType": "damped_reactor"
+      },
+      "不平衡电流互感器": {
+        "componentIds": [
+          "imbalance_dta"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A37",
+          "cellRange": "A37:B37",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A37:B37"
+        },
+        "componentType": "imbalance_dta"
+      },
+      "imbalancedta": {
+        "componentIds": [
+          "imbalance_dta"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B37",
+          "cellRange": "A37:B37",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A37:B37"
+        },
+        "componentType": "imbalance_dta"
+      },
+      "阀组": {
+        "componentIds": [
+          "valve_group"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A38",
+          "cellRange": "A38:B38",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A38:B38"
+        },
+        "componentType": "valve_group"
+      },
+      "valvegroup": {
+        "componentIds": [
+          "valve_group"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B38",
+          "cellRange": "A38:B38",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A38:B38"
+        },
+        "componentType": "valve_group"
+      },
+      "网侧套管": {
+        "componentIds": [
+          "grid_side_bushing"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A39",
+          "cellRange": "A39:B39",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A39:B39"
+        },
+        "componentType": "grid_side_bushing"
+      },
+      "gridsidebushing": {
+        "componentIds": [
+          "grid_side_bushing"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B39",
+          "cellRange": "A39:B39",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A39:B39"
+        },
+        "componentType": "grid_side_bushing"
+      },
+      "阀侧套管": {
+        "componentIds": [
+          "valve_side_bushing"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A40",
+          "cellRange": "A40:B40",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A40:B40"
+        },
+        "componentType": "valve_side_bushing"
+      },
+      "valvesidebushing": {
+        "componentIds": [
+          "valve_side_bushing"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B40",
+          "cellRange": "A40:B40",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A40:B40"
+        },
+        "componentType": "valve_side_bushing"
+      },
+      "放电间隙": {
+        "componentIds": [
+          "spark_gap"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A41",
+          "cellRange": "A41:B41",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A41:B41"
+        },
+        "componentType": "spark_gap"
+      },
+      "sparkgap": {
+        "componentIds": [
+          "spark_gap"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B41",
+          "cellRange": "A41:B41",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A41:B41"
+        },
+        "componentType": "spark_gap"
+      },
+      "相控电抗器": {
+        "componentIds": [
+          "tcrgd"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A42",
+          "cellRange": "A42:B42",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A42:B42"
+        },
+        "componentType": "tcrgd"
+      },
+      "tcrgd": {
+        "componentIds": [
+          "tcrgd"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B42",
+          "cellRange": "A42:B42",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A42:B42"
+        },
+        "componentType": "tcrgd"
+      },
+      "二次屏柜柜内装置": {
+        "componentIds": [
+          "devices"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A43",
+          "cellRange": "A43:B43",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A43:B43"
+        },
+        "componentType": "devices"
+      },
+      "devices": {
+        "componentIds": [
+          "devices"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B43",
+          "cellRange": "A43:B43",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A43:B43"
+        },
+        "componentType": "devices"
+      },
+      "保护装置": {
+        "componentIds": [
+          "devices"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A44",
+          "cellRange": "A44:B44",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A44:B44"
+        },
+        "componentType": "devices"
+      },
+      "protectiondevice": {
+        "componentIds": [
+          "devices"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B44",
+          "cellRange": "A44:B44",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A44:B44"
+        },
+        "componentType": "devices"
+      },
+      "保护设备": {
+        "componentIds": [
+          "protective_device"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A45",
+          "cellRange": "A45:B45",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A45:B45"
+        },
+        "componentType": "protective_device"
+      },
+      "protectivedevice": {
+        "componentIds": [
+          "protective_device"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B45",
+          "cellRange": "A45:B45",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A45:B45"
+        },
+        "componentType": "protective_device"
+      },
+      "线路保护装置": {
+        "componentIds": [
+          "protection_equipment"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A46",
+          "cellRange": "A46:B46",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A46:B46"
+        },
+        "componentType": "protection_equipment"
+      },
+      "protectionequipment": {
+        "componentIds": [
+          "protection_equipment"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B46",
+          "cellRange": "A46:B46",
+          "verification": "ambiguous",
+          "sourceLocation": "设备模型部件名称对照表!A46:B46"
+        },
+        "componentType": "protection_equipment",
+        "evidences": [
+          {
+            "sourceKind": "workbook",
+            "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+            "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+            "sheet": "设备模型部件名称对照表",
+            "cell": "B46",
+            "cellRange": "A46:B46",
+            "verification": "ambiguous",
+            "sourceLocation": "设备模型部件名称对照表!A46:B46"
+          },
+          {
+            "sourceKind": "workbook",
+            "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+            "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+            "sheet": "设备模型部件名称对照表",
+            "cell": "B47",
+            "cellRange": "A47:B47",
+            "verification": "verified",
+            "sourceLocation": "设备模型部件名称对照表!A47:B47"
+          }
+        ]
+      },
+      "变压器保护装置": {
+        "componentIds": [
+          "protection_equipment"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "beab33b14b589887eadbea85e734be4cb983df1a582505c7dbd0fbfbffb494c6",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "A47",
+          "cellRange": "A47:B47",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!A47:B47"
+        },
+        "componentType": "protection_equipment"
       }
     }
   }

@@ -11,8 +11,8 @@ it('groups catalog subtypes while preserving distinct instances, internal member
  expect(INVENTORY_TEMPLATE.levels).toEqual(['group','category','subtype','template','entity','source']);
  const raw:Record<string,string>={'project.cbm':'SUBSYSTEM0=box.cbm\nSUBSYSTEM1=box.cbm\nSUBSYSTEM2=text.cbm',
   'box.cbm':'SYSTEMNAME1=10kV系统\nSYSTEMNAME2=36S\nOBJECTMODELPOINTER=box.dev',
-  'box.dev':'TYPE=TerminalBox\nSYMBOLNAME=端子箱\nSUBDEVICE0=bolt.dev',
-  'bolt.dev':'SYMBOLNAME=螺栓','text.cbm':'OBJECTMODELPOINTER=text.dev','text.dev':'SYMBOLNAME=模型文字'};
+  'box.dev':'TYPE=TerminalBox\nOBJECTROLE=independent\nSYMBOLNAME=端子箱\nSUBDEVICE0=bolt.dev',
+  'bolt.dev':'OBJECTROLE=detail\nSYMBOLNAME=螺栓','text.cbm':'OBJECTMODELPOINTER=text.dev','text.dev':'OBJECTROLE=source_only\nSYMBOLNAME=模型文字'};
  const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async p=>raw[p]});
  const built=buildTestEngineeringSources('p',graph,[],[]),before=JSON.stringify(built.snapshot),view=projectEngineeringNavigation(built.sources,built.snapshot),inventory=view.inventory!;
  expect(built.snapshot.entities).toHaveLength(2);
@@ -35,9 +35,9 @@ it('groups catalog subtypes while preserving distinct instances, internal member
 
 it('shows known and host-unresolved neutral sets as transformer attachments without inventing device identities',async()=>{
  const raw:Record<string,string>={'project.cbm':'SUBSYSTEM0=body.cbm\nSUBSYSTEM1=neutral.cbm',
-  'body.cbm':'OBJECTMODELPOINTER=body.dev','body.dev':'TYPE=OilFilledTransformer\nSYMBOLNAME=主变压器',
+  'body.cbm':'OBJECTMODELPOINTER=body.dev','body.dev':'TYPE=OilFilledTransformer\nTYPE=OilImmersedTransformer\nPURPOSE=主变\nSYMBOLNAME=主变压器',
   'neutral.cbm':'OBJECTMODELPOINTER=neutral.dev','neutral.dev':'TYPE=OpenGroundingEquipment/NeutralPointEquipment\nSYMBOLNAME=220kV中性点成套装置\nSUBDEVICE0=box.dev',
-  'box.dev':'SYMBOLNAME=端子箱'};
+  'box.dev':'TYPE=TerminalBox\nOBJECTROLE=part\nSYMBOLNAME=端子箱'};
  const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async p=>raw[p]});
  const built=buildTestEngineeringSources('p',graph,[],[]),view=projectEngineeringNavigation(built.sources,built.snapshot),inventory=view.inventory!;
  const neutral=built.snapshot.memberships.find(m=>m.interpretation.meaning==='neutral_set')!;

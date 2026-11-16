@@ -24,8 +24,8 @@ function paths(f: Awaited<ReturnType<typeof fixture>>, name: string): string[][]
 it('projects a declared main unit without promoting the transformer purpose from organization labels', async () => {
   const f = await fixture({ 'project.cbm': 'SUBSYSTEM0=main.cbm\nSUBSYSTEM1=foundation.cbm',
     'main.cbm': 'ENTITYNAME=F3System\nSYSTEMNAME1=电气系统\nSYSTEMNAME2=主变系统01\nSYSTEMNAME3=主变01\nOBJECTMODELPOINTER=main.dev',
-    'main.dev': 'TYPE=OilFilledTransformer\nSYMBOLNAME=220kV变压器模型ZJ01_1\nSUBDEVICE0=box.dev', 'box.dev': 'SYMBOLNAME=独立端子箱',
-    'foundation.cbm': 'ENTITYNAME=F2System\nSYSTEMNAME2=主变系统01\nOBJECTMODELPOINTER=foundation.dev', 'foundation.dev': 'SYMBOLNAME=独立基础' });
+    'main.dev': 'TYPE=OilFilledTransformer\nSYMBOLNAME=220kV变压器模型ZJ01_1\nSUBDEVICE0=box.dev', 'box.dev': 'TYPE=TerminalBox\nOBJECTROLE=part\nSYMBOLNAME=本体端子箱',
+    'foundation.cbm': 'ENTITYNAME=F2System\nSYSTEMNAME2=主变系统01\nOBJECTMODELPOINTER=foundation.dev', 'foundation.dev': 'TYPE=EquipmentFoundation\nSYMBOLNAME=独立基础' });
   const main = f.snapshot.entities.find(entity => entity.category === 'E01')!;
   expect(main.name).toBe('220kV变压器模型ZJ01_1');
   expect(paths(f, main.name)[0]).toEqual(expect.arrayContaining(['安装工程', '主变压器系统', '1号主变']));
@@ -64,7 +64,7 @@ it('uses the declared unit 36S as a bay without requiring 间隔 or any fixed F/
 it('keeps a main-transformer incoming bay in its distribution installation and its support in civil works', async () => {
   const f = await fixture({ 'project.cbm': 'SUBSYSTEM0=bay.cbm',
     'bay.cbm': 'SYSTEMNAME1=电气系统\nSYSTEMNAME2=10kV系统\nSYSTEMNAME3=主变进线间隔01\nOBJECTMODELPOINTER=cabinet.dev\nSUBSYSTEM0=support.cbm',
-    'cabinet.dev': 'TYPE=SwitchCabinet\nSYMBOLNAME=10kV主变进线柜', 'support.cbm': 'OBJECTMODELPOINTER=support.dev', 'support.dev': 'SYMBOLNAME=设备支架' });
+    'cabinet.dev': 'TYPE=SwitchCabinet\nSYMBOLNAME=10kV主变进线柜', 'support.cbm': 'OBJECTMODELPOINTER=support.dev', 'support.dev': 'TYPE=TrussesComponents\nSYMBOLNAME=设备支架' });
   expect(paths(f, '10kV主变进线柜')[0]).toEqual(expect.arrayContaining(['安装工程', '10千伏配电装置', '主变进线间隔01']));
   expect(paths(f, '设备支架')[0]).toEqual(expect.arrayContaining(['建筑工程', '10千伏配电装置区域', '支架']));
   expect([...f.view.composition.nodes.values()].map(row => row.title)).not.toContain('主变压器系统');

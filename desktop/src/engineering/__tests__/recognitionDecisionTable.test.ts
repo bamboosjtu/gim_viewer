@@ -10,12 +10,12 @@ const decisions=[
   {rule:'R03',lines:'TYPE=GIS',category:'E05',status:'confirmed',equipment:'gis',component:undefined,purpose:undefined,part:false,independent:false},
   {rule:'R04',lines:'TYPE=ACPorcelainCircuitBreaker',category:'E06',status:'confirmed',equipment:'ac_porcelain_circuit_breaker',component:undefined,purpose:undefined,part:false,independent:false},
   {rule:'R05',lines:'TYPE=Body',category:'',status:'unresolved',equipment:undefined,component:'body',purpose:undefined,part:true,independent:false},
-  {rule:'R06',lines:'TYPE=ControlCabinet\nOBJECTROLE=内部部件',category:'E17',status:'confirmed',equipment:undefined,component:'control_cabinet',purpose:undefined,part:true,independent:false},
-  {rule:'R07',lines:'TYPE=ControlCabinet\nOBJECTROLE=独立',category:'E17',status:'confirmed',equipment:undefined,component:'control_cabinet',purpose:undefined,part:false,independent:true},
+  {rule:'R06',lines:'TYPE=ControlCabinet\nOBJECTROLE=内部部件',category:'',status:'unresolved',equipment:undefined,component:'control_cabinet',purpose:undefined,part:true,independent:false},
+  {rule:'R07',lines:'TYPE=ControlCabinet\nOBJECTROLE=独立',category:'E17',status:'confirmed',equipment:undefined,component:undefined,purpose:undefined,part:false,independent:true},
   {rule:'R08',lines:'TYPE=GIS\nEQUIPMENTTYPE=HGIS',category:'U-OBJECT',status:'unresolved',equipment:undefined,component:undefined,purpose:undefined,part:false,independent:false},
   {rule:'R09',lines:'SYSCLASSIFYNAME=GIS',category:'E05',status:'confirmed',equipment:'gis',component:undefined,purpose:undefined,part:false,independent:false},
   {rule:'R10',lines:'TYPE=Radiator',category:'',status:'unresolved',equipment:undefined,component:'radiator',purpose:undefined,part:true,independent:false},
-  {rule:'R11',lines:'TYPE=OTHERS\nSYMBOLNAME=断路器',category:'E06',status:'candidate',equipment:undefined,component:undefined,purpose:undefined,part:false,independent:false},
+  {rule:'R11',lines:'TYPE=OTHERS\nSYMBOLNAME=交流瓷柱式断路器',category:'E06',status:'candidate',equipment:'ac_porcelain_circuit_breaker',component:undefined,purpose:undefined,part:false,independent:false},
 ] as const;
 it.each(decisions)('$rule preserves independent classification, type, purpose, role and boundary across three source contexts',async decision=>{
   for(const context of ['root','assembly','attributes'] as const){
@@ -39,7 +39,7 @@ it.each(decisions)('$rule preserves independent classification, type, purpose, r
     if(decision.independent)expect(result.objectRole).toMatchObject({id:'object',status:'confirmed'});
     const owner=built.snapshot.entities.find(e=>e.id===member.ownerId);
     if(context==='root')expect(owner?.boundaryStatus??'unresolved').toBe(decision.independent?'confirmed':decision.part||decision.rule==='R08'?'unresolved':'candidate');
-    if(context==='assembly'&&decision.part)expect(member.ownerId).toBe(built.snapshot.memberships.find(m=>m.sourceId===graph.records[0].id)?.ownerId);
+    if(context==='assembly'&&decision.part&&decision.rule!=='R10')expect(member.ownerId).toBe(built.snapshot.memberships.find(m=>m.sourceId===graph.records[0].id)?.ownerId);
   }
 });
 

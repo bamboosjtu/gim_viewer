@@ -19,7 +19,7 @@ it('covers every verified index row, using the maintained workbook hierarchy and
   expect(standardTerms('均压屏蔽装置')).toHaveLength(2);
 });
 it.each(STANDARD_CATALOG.flatMap(item=>[item.term,item.label].map(name=>({item,name}))))('recognizes $name from structured source declarations',({item,name})=>{
-  const result=interpretObject(toObjectEvidence(source('x',name)));
+  const result=interpretObject(toObjectEvidence(source('x','OTHERS',{properties:[field(item.kind==='equipment'?'EQUIPMENTTYPE':item.kind==='material'?'MATERIALTYPE':'构件类型',name)]})));
   if(standardTerms(name).length===1)expect(result.category).toBe(item.category);
   else expect(result.category).toBe('U-OBJECT');
   if(standardTerms(name).length===1)expect(result.standardClass).toMatchObject({id:item.id,kind:item.kind,status:'confirmed'});
@@ -44,11 +44,9 @@ it('recovers a part under the declared equipment despite an incorrect source par
   const partGroup=inventory.nodes.get(inventory.nodes.get(inventory.rowsBySource.get('radiator')!)!.parent!);expect(partGroup?.title).toBe('散热器');expect(partGroup?.parent).toBe(inventory.rowsByEntity.get(owner.id)![0]);
   expect(build([...rows].reverse())).toEqual(result);
 });
-it('supports numbered name fallback with a confirmed component term, while retaining host ambiguity',()=>{
+it('does not use numbered names or own designations as host declarations',()=>{
   const part=source('body','Body',{name:'1号主变_本体'});
-  expect(build([host(),part]).entities[0].sourceIds).toEqual(['body','host']);
-  const ambiguous=build([host(),host('duplicate'),part]);
-  expect(ambiguous.entities).toHaveLength(2);expect(ambiguous.pending[0].reason).toBe('component_host_ambiguous');
+  const result=build([host(),part]);expect(result.entities[0].sourceIds).toEqual(['host']);expect(result.pending[0].sourceIds).toEqual(['body']);
 });
 it('keeps unlabelled components pending and creates only declared numbered candidate hosts',()=>{
   expect(build([source('x','Body',{name:'本体'})]).pending[0].reason).toBe('component_whole_unresolved');

@@ -10,7 +10,7 @@ except NameError:                       # noqa: F821
 CATALOG = TOOL_ROOT / 'catalog.json'
 if not CATALOG.is_file():
     raise SystemExit(f'Standalone engineering catalog missing: {CATALOG}')
-ASSETS = ['catalog.json','standardCatalog.json','sourceVocabulary.json','sourceTypeAliases.json','catalogRules.json','proxyCategories.json']
+ASSETS = ['catalog.json','standardCatalog.json','sourceVocabulary.json','sourceCompatibilityPolicy.json','compositionPolicy.json','recognitionPolicy.json','proxyCategories.json']
 if any(not (TOOL_ROOT / name).is_file() for name in ASSETS):
     raise SystemExit('Standalone recognition vocabulary is incomplete')
 

@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeEngineeringModel } from '../normalize.js';
 import { EngineeringRepresentationIndex } from '../representations.js';
-import type { ObjectEvidence } from '../types.js';
+import {declaredObject} from './evidenceFixtures.js';
 
-const source = (sourceId: string, name: string, assemblyParentId?: string): ObjectEvidence => ({ sourceId, name, assemblyParentId,
-  traits: {}, designations: [], identityCodes: [], identityNames: [], phases: [] });
+const source=(sourceId:string,name:string,assemblyParentId?:string)=>declaredObject(sourceId,name,{assemblyParentId});
 function fixture() {
   const snapshot = normalizeEngineeringModel('package', [source('body', '主变压器'), source('box', '测控柜', 'body'), source('radiator', '散热器', 'body')]);
   const index = new EngineeringRepresentationIndex(snapshot, [

@@ -79,7 +79,7 @@ def open_demo(url, result_path):
             system_directory = Path(os.environ['SystemRoot'])/'System32'
             report['workingDirectorySanitized'] = True
             command = default_browser_command(url)
-            profile = Path(result_path).parent.parent/'browser'
+            profile = Path(result_path).parent.parent/'browser'/Path(command[0]).stem.casefold()
             if Path(command[0]).name.casefold() in ('msedge.exe','chrome.exe','chromium.exe','brave.exe','vivaldi.exe'):
                 profile.mkdir(parents=True, exist_ok=True)
                 # Shell-only --single-argument mode bypasses Chromium's normal

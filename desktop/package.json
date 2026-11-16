@@ -11,7 +11,6 @@
     "check:version": "node scripts/check-desktop-version.mjs",
     "check:types": "node scripts/with-workspace-temp.mjs node_modules/typescript/bin/tsc",
     "check:engineering-boundaries": "node scripts/check-engineering-boundaries.mjs",
-    "generate:engineering-catalog": "python scripts/generate-engineering-catalog.py && node scripts/check-engineering-catalog.mjs --write",
     "check:engineering-catalog": "node scripts/check-engineering-catalog.mjs",
     "test:version": "node scripts/with-workspace-temp.mjs --test scripts/check-desktop-version.test.mjs",
     "prebuild": "node scripts/check-desktop-version.mjs && node scripts/copy-web-ifc-wasm.mjs",
@@ -38,7 +37,9 @@
     "test:acceptance-tools": "node scripts/with-workspace-temp.mjs --test scripts/benchmarks/acceptance-build.test.mjs scripts/benchmarks/acceptance-probe.test.mjs scripts/benchmarks/benchmark-build-attestation.test.mjs",
     "test:coverage": "node scripts/with-workspace-temp.mjs node_modules/vitest/vitest.mjs run --coverage",
     "test:ifc-critical": "node scripts/with-workspace-temp.mjs node_modules/vitest/vitest.mjs run src/viewer/__tests__/ifcConversion.test.ts src/viewer/__tests__/ifcSessionRace.test.ts src/viewer/__tests__/ifcFragmentsCache.test.ts src/viewer/__tests__/ifcNameIndex.test.ts src/viewer/__tests__/ifcOpeningPolicy.test.ts src/viewer/__tests__/ifcRegionalData.test.ts src/viewer/__tests__/ifcBimLoader.test.ts src/viewer/__tests__/webIfcCompatibility.test.ts src/ui/__tests__/ifcDetailModeControl.test.ts bridge/__tests__/gimExtract.test.ts src/viewer/__tests__/ifcSharedImport.test.ts src/viewer/__tests__/ifcRegionalInstances.test.ts src/viewer/__tests__/ifcConnectionBatches.test.ts src/viewer/__tests__/ifcConnectionEndpoints.test.ts src/viewer/__tests__/ifcConnectionPreviewRuntime.test.ts",
-    "lint": "eslint src bridge"
+    "lint": "eslint src bridge",
+    "sync:engineering-catalog": "python scripts/sync-engineering-catalog.py && node scripts/check-engineering-catalog.mjs --write",
+    "test:recognition": "node scripts/with-workspace-temp.mjs node_modules/vitest/vitest.mjs run --config vitest.recognition.config.ts"
   },
   "author": "bamboosjtu",
   "license": "MIT",

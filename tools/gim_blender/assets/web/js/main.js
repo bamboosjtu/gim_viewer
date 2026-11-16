@@ -3,9 +3,11 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { NavGrid } from './nav.js?v=20261115-composite-nav-v6';
-import { DoorManager } from './doors.js?v=20261115-composite-nav-v6';
-import { HUD } from './ui.js?v=20261115-composite-nav-v6';
+import { NavGrid } from './nav.js?v=20261116-runtime-perf-v1';
+import { DoorManager } from './doors.js?v=20261116-runtime-perf-v1';
+import { HUD } from './ui.js?v=20261116-runtime-perf-v1';
+import { prepareStaticModel } from './static_scene.js?v=20261116-runtime-perf-v1';
+import { advancePlayer } from './frame_time.js?v=20261116-runtime-perf-v1';
 
 const canvas = document.getElementById('scene');
 const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
@@ -26,7 +28,7 @@ function releasePointerLock(){
 function notifyHost(type,extra={}){if(hostBridge)parent.postMessage({type,session:hostSession,...extra},location.origin)}
 // Bump when scene.json or the GLB changes, so a normal reload cannot keep the
 // previous 20 MB asset from the browser cache.
-const ASSET_VERSION = '20261115-composite-nav-v6';
+const ASSET_VERSION = '20261116-runtime-perf-v1';
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(lite ? 1 : Math.min(window.devicePixelRatio || 1, 1.6));
@@ -494,20 +496,29 @@ async function load() {
   const draco = new DRACOLoader();
   draco.setDecoderPath('./vendor/jsm/libs/draco/');
   loader.setDRACOLoader(draco);
-  const gltf = await new Promise((resolve, reject) => {
-    loader.load(`./assets/world.glb?v=${ASSET_VERSION}`, resolve, (xhr) => {
-      if (xhr.total) {
-        const p = xhr.loaded / xhr.total;
-        setLoading(0.18 + p * 0.68, p < 0.85 ? '解压建筑与设备几何…' : '构建材质与光照…');
-      }
-    }, reject);
-  });
+  let gltf;
+  try {
+    gltf = await new Promise((resolve, reject) => {
+      loader.load(`./assets/world.glb?v=${ASSET_VERSION}`, resolve, (xhr) => {
+        if (xhr.total) {
+          const p = xhr.loaded / xhr.total;
+          setLoading(0.18 + p * 0.68, p < 0.85 ? '解压建筑与设备几何…' : '构建材质与光照…');
+        }
+      }, reject);
+    });
+  } finally {
+    // This walkthrough loads one complete GLB, with no later streaming decode.
+    // Release worker/WASM scratch heaps after their geometry is transferred.
+    draco.dispose();
+  }
 
   setLoading(0.9, '整理园区细节…');
   world = gltf.scene;
   scene.add(world);
   let meshCount = 0;
+  const modelNodes = [];
   world.traverse((o) => {
+    modelNodes.push(o);
     if (!o.isMesh) return;
     meshCount++;
     const name = o.name || '';
@@ -531,6 +542,9 @@ async function load() {
   setupFlashlight();
 
   doors = new DoorManager(world, sceneData);
+  prepareStaticModel(world, modelNodes,
+    doors.entries.flatMap(entry => entry.leaves.map(leaf => leaf.obj)),
+    () => doors.refreshAllTargets());
   doors.onToggle = (entry) => {
     audio?.creak(entry.open);
     const label = entry.isGate ? '大门' : entry.name || '门';
@@ -1138,12 +1152,12 @@ let dustTime = 0;
 function animate() {
   requestAnimationFrame(animate);
   const now = performance.now();
-  const dt = Math.min(0.05, (now - clock.last) / 1000);
+  const dt = Math.min(0.25, Math.max(0, (now - clock.last) / 1000));
   clock.last = now;
   if (renderPaused) return;
   try {
     if (started) {
-      if (controlsActive()) updatePlayer(dt);
+      if (controlsActive()) advancePlayer(dt, updatePlayer);
       else { player.moving = false; updateCamera(0); }
       doors.update(dt);
       const target = updateMission();

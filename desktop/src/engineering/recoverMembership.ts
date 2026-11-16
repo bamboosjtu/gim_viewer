@@ -1,5 +1,5 @@
 import {categoryFromName,isNumberedDesignation,mainNumber} from './classify.js';
-import {componentAcceptsHost} from './catalogLabels.js';
+import {componentHostCompatibility,COMPOSITION_POLICY} from './compositionPolicy.js';
 import type {ObjectEvidence,ObjectInterpretation,EngineeringEntity,EngineeringSnapshot} from './types.js';
 
 /** Recover engineering composition from object-owned declarations. This never
@@ -27,7 +27,7 @@ export function recoverComponentMembership(rows:readonly ObjectEvidence[],meanin
     const visited=new Set<string>();
     const visit=(id:string)=>{if(visited.has(id))return;visited.add(id);for(const child of children.get(id)??[]){
       const cm=meaning.get(child.sourceId)!;
-      if(owners.get(child.sourceId)!==previous||!['part','detail','container','source_only','fragment'].includes(cm.meaning))continue;
+      if(owners.get(child.sourceId)!==previous||!['part','detail','container','source_only'].includes(cm.meaning))continue;
       owners.set(child.sourceId,to);cm.membershipEvidence=proof;cm.membershipStatus=status;visit(child.sourceId);
     }};if(previous!==to)visit(row.sourceId);
   };
@@ -35,33 +35,32 @@ export function recoverComponentMembership(rows:readonly ObjectEvidence[],meanin
     const m=meaning.get(row.sourceId)!;
     if(m.basis==='attribute_conflict'||row.objectRoles?.some(p=>p.value==='independent')||!(m.meaning==='part'||m.componentType?.status==='confirmed'))continue;
     const direct=row.declaredHostSourceIds??[];
-    const declared=!!(row.hostCodes?.length||row.hostDesignations?.length);
+    const declared=!!(direct.length||row.hostCodes?.length||row.hostDesignations?.length);
     const explicit=[...direct,...(row.hostCodes??[]),...(row.hostDesignations??[])];
-    const own=row.designations.filter(p=>isNumberedDesignation(p.value));
-    const prefix=row.name.split(/[_－:：]/)[0];
-    const inferred=!explicit.length&&!own.length&&isNumberedDesignation(prefix)?[{value:prefix,evidenceId:row.names?.find(n=>n.value===row.name)?.evidenceId??`name:${row.sourceId}`}]:[];
-    const designations=explicit.length?row.hostDesignations??[]:own.length?own:inferred;
+    const designations=row.hostDesignations??[];
+    if(!explicit.length)continue;
     const constraints=[...direct.map(p=>{const owner=owners.get(p.value),host=owner?entities.get(owner):undefined;return host&&(host.category.startsWith('E')||host.category.startsWith('M'))?new Set([host.id]):new Set<string>();}),...(row.hostCodes??[]).map(p=>codes.get(key(p.value))??new Set<string>()),...designations.map(p=>names.get(key(p.value))??new Set<string>())];
     if(!constraints.length)continue;
     let candidates=new Set(constraints[0]);for(const values of constraints.slice(1))candidates=new Set([...candidates].filter(id=>values.has(id)));
-    candidates=new Set([...candidates].filter(id=>componentAcceptsHost(m,entities.get(id)!)));
+    const matched=[...candidates];
+    candidates=new Set(matched.filter(id=>componentHostCompatibility(m,entities.get(id)!)==='compatible'||!m.componentType&&row.objectRoles?.some(p=>p.value==='part')));
     if(!explicit.length&&m.meaning==='object'&&candidates.size===1&&candidates.has(owners.get(row.sourceId)??''))continue;
-    const proof=[...direct,...(row.hostCodes??[]),...designations].map(p=>p.evidenceId);
+    const proof=[...direct,...(row.hostCodes??[]),...designations].map(p=>p.evidenceId).concat(m.componentType?.evidence??[],`policy:${COMPOSITION_POLICY.version}:${m.componentType?.id??'declared-role'}`);
     if(candidates.size===1){attach(row,[...candidates][0],proof,declared?'confirmed':'candidate');continue;}
     const anyMatch=constraints.some(ids=>ids.size>0);
     const resolved=constraints.filter(ids=>ids.size>0);
     const conflicting=resolved.length>1&&resolved.reduce((common,ids)=>new Set([...common].filter(id=>ids.has(id))),new Set(resolved[0])).size===0;
-    const name=designations.length===1?designations[0].value:'',category=categoryFromName(name);
+    const name=designations.length===1?designations[0].value:'',category=mainNumber(name)?'E01':categoryFromName(name);
     // A declared numbered host can establish a candidate whole even when the
     // exporter delivered only its components. A catalog term alone cannot.
-    if(!direct.length&&!inferred.length&&!anyMatch&&name&&isNumberedDesignation(name)&&category.startsWith('E')&&category!=='E18'&&category!=='E19'&&m.meaning==='part'){
+    if(!direct.length&&!anyMatch&&name&&isNumberedDesignation(name)&&category.startsWith('E')&&category!=='E18'&&category!=='E19'&&m.meaning==='part'&&componentHostCompatibility(m,{category})==='compatible'){
       const code=row.hostCodes?.[0]?.value??'',seed=`declared-host:${JSON.stringify([code,key(name)])}`;
       const host=create(seed,category,name,row.sourceId);host.boundaryStatus='candidate';host.classificationStatus='candidate';
       index(names,name,host.id);if(code)index(codes,code,host.id);
       attach(row,host.id,proof,'candidate');continue;
     }
     if(explicit.length||anyMatch){
-      const reason=conflicting?'component_host_conflict':anyMatch?'component_host_ambiguous':'component_host_not_found';
+      const reason=conflicting?'component_host_conflict':matched.length&&!candidates.size?matched.some(id=>componentHostCompatibility(m,entities.get(id)!)==='unconfigured')?'component_host_unconfigured':'component_host_incompatible':anyMatch?'component_host_ambiguous':'component_host_not_found';
       unresolved(row.sourceId,reason);m.membershipEvidence=proof;m.membershipStatus='unresolved';m.conflict=conflicting?reason:m.conflict;
       diagnostics.push({kind:reason,identity:row.sourceId,name:row.name});
     }

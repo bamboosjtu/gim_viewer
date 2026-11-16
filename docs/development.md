@@ -41,11 +41,14 @@ npm run tauri:dev     # Tauri 开发窗口
 | `npm run check:version` | npm/Cargo 版本一致性；构建前自动执行 |
 | `npm run check:types` | TypeScript 检查（含测试替身的接口完整性） |
 | `npm run check:engineering-boundaries` | 纯领域、来源与 Viewer 边界检查 |
-| `npm run check:engineering-catalog` | 生成目录、工作簿指纹、独立工具数据副本及目录文档一致性 |
+| `npm run sync:engineering-catalog` | 同步独立 JSON 词汇、工具配置副本和目录文档，不读取 XLSX |
+| `npm run check:engineering-catalog` | JSON 目录、词汇命名空间、独立工具数据副本及目录文档一致性 |
 
 应用版本以 `desktop/package.json` 为准；Tauri 配置引用该文件。portable 组包还会读取 EXE 的 ProductVersion，拒绝把旧程序标成新版本。发布与资产细节见[平台、安全与发布](architecture/platform.md)。
 
 ## 测试与门禁命令
+
+`desktop/` 下的 `npm run test:recognition` 在独立 Node 环境运行实体识别与来源证据专项，不启动几何编译或渲染；对应 CI 为 Entity Recognition Contracts。
 
 | 命令（在 `desktop/` 下） | 范围 |
 |---|---|
@@ -134,6 +137,6 @@ Markdown 文档不作为 CI 测试输入；事实正确性仍需对照源码和�
 - [性能测试指南](performance-guide.md)：单机验收的 测量口径与步骤。
 - [文档首页](README.md)：文档地图、写作约定与单一权威表。
 
-维护实体目录名称、别名和部件宿主关系时，编辑 `docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx` 并标黄修改单元格；内部角色默认值由 `recognitionPolicy.json` 维护。随后在 desktop/ 运行 `npm run generate:engineering-catalog`，同步主程序、独立工具的数据副本和目录索引；生成的 JSON 不作为下一次导入的输入。该命令不读取 PDF、不启动工程样本或性能矩阵。
+维护实体目录名称、别名和部件宿主关系时，编辑 `docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx` 并标黄修改单元格；内部角色默认值由 `recognitionPolicy.json` 维护。随后在 desktop/ 运行 `npm run sync:engineering-catalog`，同步主程序、独立工具的数据副本和目录索引；生成的 JSON 不作为下一次导入的输入。该命令不读取 PDF、不启动工程样本或性能矩阵。
 
 仅核对来源按需输入的真实 Worker 协议时，可在 desktop/ 执行 `node scripts/with-workspace-temp.mjs scripts/engineering/check-worker-browser.mjs "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" 14358 source-input`。使用自有无头浏览器及内存 DTO，检查批量输入、物理/语义复用及测量控制消息，不读取工程样本或执行性能验收；结果在 output/log/source-input-browser.json。

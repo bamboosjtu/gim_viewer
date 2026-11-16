@@ -55,78 +55,27 @@
 
 ## 对象证据
 
-`standardCatalog.json` 从用户维护的 `docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx` 生成，设备、材料、构件及部件的当前范围见生成数据的 `coverage`，由 `npm run check:engineering-catalog` 核对工作簿与工具副本。分类目录和展开顺序直接取四张索引表，新增项在工作簿标黄。常用 IFC 梁、柱、门窗、屋面和杆件映射到建筑物相应条目，普通 IFC 梁柱不自动推断为钢。内部用途/边界码与目录类别、名称分开，不再用旧目录替代工作簿层级。
+[目录](catalogs/README.md)由独立 JSON 维护；工作簿只提供参考来源，不参与配置加载和构建。Standard Catalog 提供目录数据，Recognition Policy 定义私有用途/粒度，Source Compatibility Policy 解释格式枚举，Composition Policy 判断归属。内部角色不是标准目录编号或标准原文。
 
-0.2.3 将来源清单、已解析证据与工程快照分开。`ModelEvidenceProvider` 的元数据快照和有界详情查询不触发 IO；宿主通过显式物化请求取得 FAM 属性，识别只消费所需的已解析来源。物理目录在 FAM 物化和实体归一化之前可用。清单完整、属性解析完成和工程输入处理完成是不同范围，不用当前属性条数推断全包属性总数。
+`SourceRecord` 在 gim 适配为中立 `ObjectEvidence`。优先消费当前对象 FAM/IFC 类型和角色字段，按精确标准条目、格式适配枚举、名称候选的顺序解释。自由文本型号不参与模糊类别匹配。名称只提供候选类别和候选部件，不决定 independent、part、source_only 或整体宿主；不按“模型<n>_”前缀合并片段。
 
-`getSnapshot()` 不触发解析；指定范围的 `getSnapshot`、`ensureEvidence`、`queryEvidence` 最多 256 个 Entry、请求范围最多 64 KiB。详情页最多 1000 条、512 KiB（UTF-8，包含 coverage），Viewer 每页请求 200 条属性/赋值记录并提供继续加载。页游标绑定 Provider revision；修订过期重新读取，不能拼接不同修订。全包 Inventory 枚举不受详情范围上限影响。
+模型与部件使用独立词汇空间。TerminalBox、GroundResistance 没有字段或角色语境时保持未决；不能同时赋予模型和部件身份。MATERIALTYPE/EQUIPMENTTYPE/SYSCLASSIFYNAME 等模型字段或明确 independent 角色选择模型；明确部件字段、part 角色或宿主声明选择部件。模型多条目歧义保留全部来源，观察状态为 ambiguous。标准与格式别名同词冲突时精确标准词义优先，另存兼容冲突观察记录。
 
-`EngineeringSnapshot.evidenceBinding` 必须包含 scope 和 sourceRevision，与本轮识别消费的来源图修订一致；缓存和 Worker 接收均核对。它绑定来源事实修订，可与 `EvidenceInventory.sourceRevision` 对照；与 Provider 的解析/驻留状态页游标 revision 分开。
+`categoryStatus`、`equipmentType`、`componentType`、`purpose`、`objectRole` 独立保存状态与证据。确定油浸式变压器类型不等于确定主变/站用用途；分类确认也不自动确认整体边界。跨分段/Pset/实例与类型范围的候选保留上下文，当前对象明确属性相互矛盾时保留未决。
 
-属性记录由原始键值、分段/容器地址、Parsed Value 和可选 Semantic Value 组成；`sourceId`、`rawSection`、`containerId`、`rawContainerName` 和 `applicability` 保留对象、阶段、原始 Pset 名及实例/类型范围，未知范围显式为 unknown。冲突只比较同一对象、文档、规范属性、阶段、容器和适用范围。未知单位不推定，只有物理量和明确单位相容时才执行有版本的转换。重复原始行独立保留，共享 FAM 的记录与 occurrence 赋值分开。IFC 外露属性仍是部分投影。当前 `readEntry()` 是上限 16 MiB 的整条目读取，尚未提供大文件分块访问；超过上限的 IFC 不能通过此接口完整读取。未来 `readEntryRange()` 属于接口预留，不代表已实现 Validator 来源访问。
+识别只扫描一次原始属性列表，按 `recognitionFields.json` 建立字段到原始序号的临时索引。查询按字段合并并恢复来源顺序，保留原始文件/行/键，不复制其余属性。IFC 请求相同字段子集，其余详情继续 deferred/truncated；未读取字段不视为缺失。
 
-`categoryStatus` 表达工程目录类别状态，`equipmentType`、`componentType`、`purpose`、`objectRole` 各有独立状态和证据；既有 `meaning` 保留对象角色，既有 `role` 保留盖板/侧壁等组成子角色。油浸式 TYPE 可确认 `oil_immersed_transformer`，没有明确用途时目录类别为 E01/confirmed、purpose unresolved；E-T 仅作为内部用途待定角色；标准断路器 TYPE 支持 `ACPorcelainCircuitBreaker`。仅名称推断或名称细分保持候选。分类已确认不自动确认整体边界。
+真实装配边、部件类型、独立角色、显式宿主编码/名称分别保留证据。只有确认部件、真实装配边和已配置的兼容宿主共同支持时才能确认归属；明确 part 角色与实际装配也可证明组成。independent 角色保留独立整体，不能被装配边覆盖。宿主不兼容或尚未配置时部件进入待归集合，并记录原因及策略依据。构件安装和独立设备仍建整体并保存关联，不因为处于另一个设备的装配下就默认吞并。
 
-PARTINDEX 只赋予属性：在当前父装配子树内唯一匹配才赋值，多候选保留歧义，无匹配保留来源和未决别名，不回退创建物理根。证据查询分别返回 confirmed、带全部 candidateSourceIds 的 ambiguous 和空候选 unresolved；同一 FAM 的不同引用用途分开保留。确认的 FAM 绑定在实际赋值处记录，不能从包含祖先上下文的 sources 清单推导继承。同一 DEV 的其他真实物理引用正常保留；PARTINDEX 标记是引用用途事实，不是工程层级推断。
+宿主恢复使用当前对象明确宿主 ID、编码或名称，全部声明共同支持唯一宿主才确认；同名多候选、矛盾、无匹配分别诊断。对象自己的 PROJECTNAME、显示名称和名称前缀不作为宿主声明。仅有明确带编号宿主声明、兼容部件和内部策略时，可建立候选宿主。原始 parent、DEV occurrence 和物理表示地址始终保留。
 
-`standardClass` 保存设备/材料/构件标准目录身份，与工程用途目录和 `equipmentType` / `componentType` 分开。支柱绝缘子、穿墙套管归设备；独立端子箱、灯具、动力/照明/检修箱、安装钢材等按索引归材料。唯一 FAM 类型候选可以确认词义，不能自动确认用途、整体边界或物理表示。多个声明不相容时保留未决；跨分段/Pset/实例类型的候选保留上下文。
+PARTINDEX 的物理匹配、属性赋值和工程归属分开。无匹配的属性来源保存在 `attributeRecords`，没有 devOccurrence，不能创建几何根；其宿主关系仍是独立证据。CBM 组织上下文不向子对象提供主变编号、备用状态或宿主。
 
-识别适配只扫描一次原始属性列表，临时筛出 `recognitionFields.json` 指定的字段，保留原始序号、顺序及证据地址。IFC 宿主请求同一字段子集，覆盖对象及关联类型 Pset，并保留实例/类型范围；其余属性继续 deferred/truncated，不将未读取字段当作缺失。
+`ModelEvidenceProvider` 的元数据和有界 query 不触发 IO；显式 ensure 才物化来源。单次 Entry 范围最多 256 项、64 KiB，详情页最多 1,000 条/512 KiB；游标绑定 Provider revision。来源清单完整、属性解析完成、实体处理完成分别报告。原文读取上限 16 MiB，超限不宣称完整访问。
 
-原始层级不正确时，部件可由明确宿主编码/名称、对象自己的带编号工程名称及标准部件术语恢复到唯一宿主。原始 parent 和物理地址不变。名称兜底与来源 PARTINDEX 上下文归属保持候选；多候选、冲突和无证据继续待归。缺少整体来源时，仅明确宿主声明可以建立候选整体。工程树与清册按语义成员显示整体—部件，来源树仍保留原始组织。
+属性保留对象、文档、阶段、Pset、实例/类型适用范围和原始单位。冲突只在同一证据上下文比较；未知单位不猜测转换。`EngineeringSnapshot.evidenceBinding` 绑定实际消费的 scope/sourceRevision，独立于查询分页和驻留修订。
 
-未匹配 PARTINDEX 保存在 `graph.attributeRecords` 中，包含属性用途和原始引用，不能生成 `devOccurrence` 或物理根。它可以描述无几何的部件，也可以保留被错误放在该层级的独立对象；类型与边界由 Core 判断。语义属性赋值可确认，物理别名仍可 unresolved，表示绑定不靠同名补配。设备内的基础、独立控制柜等继续按独立安装规则处理。
-
-`standards/` 提供首批 B.1/B.27/B.31 的 63 项几何要求元数据和 B.2/B.28/B.32 中 21 项已选属性定义；每个字段有原文页码、摘要和复核状态。带脚注依赖的未放行字段继续未验证，已核对字段可单独查询；缺模型类型不默认通用/产品模型。requirementContext 是只读数据查询，不比较实际模型、不驱动实体身份或编译器，也不代表完整覆盖标准。
-
-适配层把 `SourceRecord` 转成 `ObjectEvidence`：
-
-| 字段 | 用途 |
-|---|---|
-| `sourceId` | 包内 occurrence 身份 |
-| `name` | 当前对象名称；前缀“主变模型1_”等作为组成片段处理 |
-| `assemblyParentId` | 真实装配父 |
-| `typeCategory` | 适配后的内部识别/归属角色；不等于公开的目录 category |
-| `propertyCategories` | 已解释为当前对象类别的有效属性，带证据地址；服务对象/用途上下文不无条件成为自身类别 |
-| `objectRoles` | 明确内部组成或独立角色属性；桩身等基础组件保留角色 |
-| `subtypeNames` / `phaseLabels` | 当前对象的子类声明/类型细类、相别，用于细分与成组冲突检查 |
-| `traits` | fastener / assemblyContainer / materialType / nonphysical |
-| `names` | 当前对象的名称通道及证据地址；原值与显示名称分别保留 |
-| `designations` | 当前对象自身的工程中名称、PROJECTNAME 等明确声明 |
-| `inheritedContextDesignations` | 组织上下文，仅供审计；不能确定主变编号、备用状态、成组或中性点宿主 |
-| `identityCodes` | 电网工程标识/设备编码 |
-| `identityNames` | 设备名称等别名 |
-| `phases` | 相数 |
-
-证据值都带 `evidenceId`（来源 ID + 文件/行/键），可追溯到原始字段。
-
-CBM 祖先或当前组织节点的 SYSTEMNAME/NAME/PARTNAME 保留为上下文，不因含“主变系统”而成为对象声明。主变编号与备用状态只使用对象自身声明；缺少明确宿主的中性点保留待归。组织改名不改变 occurrence ID 或实体成员；插入引用包装层会改变路径型 occurrence ID，验收按对应来源验证整体边界等价，不承诺引用路径改变后的 ID 原样不变。
-
-当前对象的类型、明确角色和有效类别属性优先；只有缺少这些证据时，才由部件/整体名称兜底。通用二次柜类型可相容细分，不能被“主变”服务前缀覆盖；具体开关柜类型也不被控制柜名称直接改判。有效属性互相矛盾时进入待归，名称冲突保留类型并记录候选状态：
-
-| 角色 | 判定要点 | 归属 |
-|---|---|---|
-| `source_only` | 非物理/接口/文字/接线点 | 归上级或仅来源 |
-| `container` | 明确的“组/模型组/Default”容器且有子对象 | 归上级容器 |
-| `detail` | 紧固件/内部设计件 | 归上级整体或来源 |
-| `part` | 按钮、柜体、端子排、机构、散热器等组件头 | 有宿主则归宿主，否则待归 |
-| `fragment` | 名称前缀“<装配类别>模型<n>_<自身名>”的分散片段 | 需要同类整体/成套签名；否则待归 |
-| `neutral_set` | 中性点成套装置 | 优先归对应主变整体；宿主不明则待归 |
-| `object` | 外露、可独立识别的对象 | 按目录类别建整体或归上级 |
-
-端子箱按真实 DEV 装配边决定边界：只要嵌在设备装配内，不论宿主是主变、GIS、电容器装置还是其他设备，都作为宿主组成来源；源上的 `independent` 角色不能把真实装配边改回独立整体。没有这类装配边的独立端子箱保留 E16.terminal_box，预制舱（E18）作为建筑边界不因舱内安装吞并独立柜/箱；宿主无法确定时进入待归集合。测控柜、控制柜、保护柜/屏、配电箱等按独立功能保留；SecondaryCabinet 不能因名称带“主变”变成本体。独立的 `C-B1/C-B2`（支架/基础）与设备整体是安装关联，不并成本体成员；`E09` 开关柜在 `E18` 预制舱内仍保留柜级整体。
-
-### 三种对象边界
-
-| 对象 | 建模方式 | 示例 |
-|---|---|---|
-| 工程整体 | 独立工程实体，有统一类别、身份和整体成员范围 | 一台/组主变、一套 GIS、一面柜、一套支架、一根梁、一串绝缘子 |
-| 整体的内部组成 | 有真实 DEV 装配边时作为来源/表示成员，默认不建独立实体 | 单相本体、散热器、柜体、端子排、螺栓、绝缘子串内金具球 |
-| 与整体关联的独立对象 | 没有真实装配边、独立安装时另建整体并保存关联 | 独立端子箱、设备基础、独立控制柜 |
-
-“整体”由对象性质决定，不等于整个系统或建筑；门、梁、盖板本身可以是构件整体。无法证明边界的内容进入待归整体集合或未知整体候选。设计拆件可跨平级 CBM 归入一个整体，但必须有共同工程标识、带编号的工程名称或兼容成套签名；共同目录、父节点、同名、同模板、同位置不能单独证明同一整体。
-
-IFC 只处理 GIM 交付的外露产品接口：Type、属性、材质、截面、几何表示、布尔体等内部定义不建立工程实体；洞口、端口、图示保留为特征证据。外露产品仍要做整体边界判断；未知 Proxy/Shape 保留未知整体候选，不因名称缺失丢弃，也不推断真实专业。
+`standards/` 是只读标准元数据查询，不执行模型校核、不驱动整体身份或几何编译，也不代表标准全文覆盖。
 
 ## 工程整体
 
@@ -141,11 +90,11 @@ EngineeringEntity {
 }
 ```
 
-- `boundaryEvidence` 记录整体边界依据（对象身份、独立功能、工程编码+名称+成套签名、主变编号+单相本体、上级边界未知等）。
+- `boundaryEvidence` 记录整体边界依据（对象身份、明确独立角色、主变编号+单相本体、上级边界未知等）。
 - `classificationState=unknown` 对应 `U-OBJECT`；不能把未知类别写成“其他设备”。
 - `compositionState` 只表示交付声明/相别完整性尚未核对，不是“物理组成已验证”。
 - `phaseBodyCount` 是单相本体数，不是主变台数。
-- `classificationConflicts` 统计名称/类型等冲突，不自动选择一方。
+- `classificationConflicts` 统计结构化类型/角色等冲突，不自动选择一方。
 
 独立关系：
 
@@ -163,8 +112,8 @@ EntityRelationship { from, to, kind: 'associated_with', evidence }
 |---|---|
 | `neutral_set_main_unresolved` | 中性点装置对应主变不明 |
 | `component_whole_unresolved` | 组件没有明确整体宿主 |
-| `unnumbered_set_identity_requires_confirmation` | 缺少明确编号，不能确认同一套 |
-| `peer_fragment_engineering_identity_insufficient` | 分散片段缺少整体身份/兼容签名 |
+| `component_host_incompatible` | 部件与已配置宿主范围不兼容 |
+| `component_host_unconfigured` | 尚无可用的部件宿主策略 |
 
 别名：
 
@@ -178,25 +127,17 @@ EntityRelationship { from, to, kind: 'associated_with', evidence }
 
 1. 按 sourceId 稳定排序，校验唯一、非空、装配环。
 2. 逐对象解释角色和类别。
-3. 处理平级分散片段：要求相同装配类别、工程编码/名称和成套签名；至少两份；无编号进入待归集合。
-4. 处理主变组：多个单相 `E01` 本体，且有唯一显式主变编号；建立 `transformer_bank`，记录本体数。
-5. 递归分配来源：
-   - 中性点先等待主变整体；
-   - source_only/container/detail/part 归宿主；
-   - fragment 仅在宿主类别匹配时归宿主；
-   - 独立对象建整体并关联宿主；
-   - 宿主未知或边界不明时建整体/待归；
-   - 支架/基础与设备、舱内柜与舱体按独立安装关系处理。
-6. 中性点重定向：显式主变编号只对应一个主变整体时，把待归集合归入该主变；否则保留待归。
-7. 生成成员、关系、别名和诊断。
-8. `assertEngineeringPartition` 校验：每份来源恰好一个主归属，成员/整体/待归一致，独立对象不丢失整体。
+3. 处理显式单相主变组：对象自身有一致的主变编号、单相属性，无设备编码或相别冲突，按 CompositionPolicy 成组并记录完整性未验证。
+4. 按实际装配递归分配来源，保留独立角色；组件归属需要角色/类型、关系和兼容性证据，未知保留待归。
+5. 恢复显式宿主关系，拒绝冲突、多候选和未知兼容性；不修改物理来源图。
+6. 发布成员、关系、别名和诊断，执行已有分区守恒检查。
 
 来源顺序、包装层和 F 层级变化不得改变工程结果；规则版本变化才改变结果。
 
 ## 质量与限制
 
 - “整体候选/待归集合”是候选统计，不是台套数；守恒不等于分类正确。
-- 名称、同模板、共同 F3、空间邻近不能单独证明同一整体；需要工程编号、名称和成套签名等共同证据。
+- 名称、同模板、共同 F3、空间邻近不能单独证明同一整体；需要明确组成关系或单相主变组策略所要求的证据。
 - 没有人工逐台套真值时，不宣称归属准确率；见[问题与限制](../open-issues.md) L-12。
 - 来源不完整时只发布部分快照，不写完整缓存；未知类别、待归集合和未解析引用保留。
 
@@ -208,8 +149,6 @@ EntityRelationship { from, to, kind: 'associated_with', evidence }
 - [表示与绑定](../architecture/representations.md)
 - [建筑推断](building-inference.md)
 
-宿主恢复同时保留原始来源宿主关系、明确宿主编码和明确宿主名称。全部声明须共同支持唯一宿主；指向不同宿主时记录 `component_host_conflict` 并进入待归；未解析的声明不能被另一条唯一匹配覆盖。唯一且无冲突的明确宿主字段可确认；原始关系兜底、对象自身 PROJECTNAME 和名称前缀匹配保持 candidate。此步骤不改物理父级和几何根。
+模型和部件词典来源记录参考版本的 SHA、工作表及单元格；这些是追溯证据，不是工作簿依赖。词典/策略内容指纹只重建实体和导航，不失效物理目录或几何模板。
 
-`sourceVocabulary.keywordDictionary` 的词条由同一工作簿的中文名称、英文名称和设备部件表生成；来源只记录工作簿 SHA、工作表及单元格，不需要 PDF 复核标记。词条 mapped/confirmed 表示索引类型已识别，不是模型交付校核通过。未识别、歧义、无明确宿主的对象仍保留候选或待归。中文 GIS/HGIS 与英文匹配统一大小写；词典内容指纹只重建实体/导航缓存，不失效物理目录或几何模板。
-
-TypeScript 的纯 DTO 一致性用例实际启动独立 Python runner，比较逐来源 ownerId、类别及状态、成员状态、待归原因和诊断；契约数据放在工具的 `tests/contracts/`，工具 CI 自动发现 `tests/unit/` 中的 `test_standard_recognition.py` 等模块单测。实际工程和合成来源文件装配检查位于 `tests/local/`，仍留在开发者本地，不作为远程工程验收。
+`npm run test:recognition` 独立运行分类、归一化、全量模型/部件、冲突词汇、来源上下文、字段计数与 Python DTO 一致性测试；CI 有独立识别任务，不启动几何编译或渲染，也不运行工程样本或性能矩阵。Parity 只证明实现一致，不能替代标准决策表和真实工程人工真值。逐对象人工验收仍由开发者选择变压器、GIS、断路器样本并审核。

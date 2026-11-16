@@ -217,8 +217,10 @@
 
 ### 分类与清册
 
+- `npm run test:recognition`：独立 Node 环境的实体识别专项；全量模型和部件、词汇冲突、显式宿主与独立边界，及 TS/Python 一致性。独立 CI 不启动几何编译和渲染。
+
 - `npm run test:local`：对开发者登记的一变、一线、一设备运行原生打开与证据检查；缺样本不计通过。
-- `npm run check:engineering-catalog`：检查生成目录、独立工具副本和工作簿来源；TypeScript/Python 行为一致性另由共享来源 DTO 对照测试验证，不能替代真实样本人工核对。
+- `npm run check:engineering-catalog`：检查 JSON 目录、模型/部件词汇命名空间、宿主策略和独立工具副本；TypeScript/Python 行为一致性另由共享来源 DTO 对照测试验证，不能替代真实样本人工核对。
 - 模板测试：单独检查组成路径变化不影响清册/来源、清册使用自己的搜索索引、同名实例不合并。
 - 完整九工程人工实体边界真值仍未建立。
 

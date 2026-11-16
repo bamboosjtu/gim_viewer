@@ -1,0 +1,41 @@
+name: Entity Recognition Contracts
+on:
+  push:
+    paths: ['desktop/src/engineering/**', 'desktop/src/gim/**', 'desktop/scripts/*engineering-catalog*', 'desktop/vitest.recognition.config.ts', 'desktop/package*.json', 'tools/gim_element/**', '.github/workflows/recognition-ci.yml']
+  pull_request:
+    paths: ['desktop/src/engineering/**', 'desktop/src/gim/**', 'desktop/scripts/*engineering-catalog*', 'desktop/vitest.recognition.config.ts', 'desktop/package*.json', 'tools/gim_element/**', '.github/workflows/recognition-ci.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  recognition:
+    name: Pure recognition and source evidence
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Prepare workspace temporary directory
+        run: |
+          New-Item -ItemType Directory -Path ../tmp/ci/recognition -Force | Out-Null
+          "TEMP=$((Resolve-Path ../tmp/ci/recognition).Path)" >> $env:GITHUB_ENV
+          "TMP=$((Resolve-Path ../tmp/ci/recognition).Path)" >> $env:GITHUB_ENV
+          "TMPDIR=$((Resolve-Path ../tmp/ci/recognition).Path)" >> $env:GITHUB_ENV
+          "PYTHONDONTWRITEBYTECODE=1" >> $env:GITHUB_ENV
+      - run: npm ci
+      - run: npm run check:engineering-catalog
+      - run: npm run check:engineering-boundaries
+      - name: Recognition DTOs and adapters without geometry or model samples
+        run: npm run test:recognition
+      - name: Independent Python recognition contracts
+        run: python -m unittest discover -s ../tools/gim_element/tests/unit -p test_standard_recognition.py -v
