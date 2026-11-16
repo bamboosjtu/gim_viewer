@@ -27,8 +27,8 @@ async function fixture(shared = false, declaredBuilding = false) {
   if (declaredBuilding) data['building.cbm'] = 'SYSTEMNAME1=建筑物系统\nSYSTEMNAME2=生产建筑物\nSYSTEMNAME3=主控通信楼01';
   const graph = await extractEngineeringSourceGraph({ paths: Object.keys(data), readText: async p => data[p] });
   const built = buildTestEngineeringSources('package', graph, [], []), state = new AppState();
-  state.activateProject(1, 'package'); state.engineeringSources = built.sources; state.engineeringSnapshot = built.snapshot;
-  state.engineeringNavigation = projectEngineeringNavigation(built.sources, built.snapshot);
+  state.activateProject(1, 'package'); state.engineering.sources = built.sources; state.engineering.snapshot = built.snapshot;
+  state.engineering.navigation = projectEngineeringNavigation(built.sources, built.snapshot);
   state.currentCbmTree = node('project.cbm', [node('unit.cbm')]);
   const rootId = graph.records.find(row => row.devOccurrence?.rootSourceId === row.id)!.id;
   const root = new THREE.Group(); root.userData.rootOccurrence = rootId;
@@ -46,7 +46,7 @@ describe('source-to-physical representation adapter and filters', () => {
       'gis.dev':'TYPE=GIS\nSYMBOLNAME=组合电器GIS\nSUBDEVICE0=actuator.dev\nSUBDEVICE1=terminal.dev',
       'actuator.dev':'TYPE=OperatingMechanismBox\nSYMBOLNAME=操动机构箱','terminal.dev':'TYPE=TerminalBox\nOBJECTROLE=part\nSYMBOLNAME=端子箱','free.cbm':'OBJECTMODELPOINTER=free.dev','free.dev':'TYPE=TerminalBox\nOBJECTROLE=independent\nSYMBOLNAME=端子箱模型01:Null:2754317'};
     const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async p=>raw[p]}),built=buildTestEngineeringSources('p',graph,[],[]),state=new AppState();
-    state.activateProject(1,'p');state.engineeringSources=built.sources;state.engineeringSnapshot=built.snapshot;state.engineeringNavigation=projectEngineeringNavigation(built.sources,built.snapshot);
+    state.activateProject(1,'p');state.engineering.sources=built.sources;state.engineering.snapshot=built.snapshot;state.engineering.navigation=projectEngineeringNavigation(built.sources,built.snapshot);
     const gis=built.snapshot.entities.find(e=>e.category==='E05')!,free=built.snapshot.entities.find(e=>e.category==='M04')!;
     const mesh=(root:THREE.Group,assemblyPath:string)=>{const wrapper=new THREE.Group();wrapper.userData.assemblyPath=assemblyPath;const value=new THREE.Mesh(new THREE.BoxGeometry(),new THREE.MeshBasicMaterial());wrapper.add(value);root.add(wrapper);return value;};
     const gisRoot=new THREE.Group();gisRoot.userData.rootOccurrence=graph.records.find(r=>r.source==='gis.dev')!.id;
@@ -97,19 +97,19 @@ describe('source-to-physical representation adapter and filters', () => {
     expect(f.state.selectionRequest?.target?.key).toBe(f.terminal.id);
   });
   it('selects a view group as a deduplicated whole collection without inventing another entity', async () => {
-    const f = await fixture(), count = f.state.engineeringSnapshot!.entities.length;
-    await selectEngineeringTarget(f.state, { kind: 'engineering-group', key: f.state.engineeringNavigation!.composition.rootKey });
+    const f = await fixture(), count = f.state.engineering.snapshot!.entities.length;
+    await selectEngineeringTarget(f.state, { kind: 'engineering-group', key: f.state.engineering.navigation!.composition.rootKey });
     f.state.setOnlySelected(true);
     expect(f.state.engineeringSelection?.ownerIds).toEqual(new Set([f.main.id, f.terminal.id]));
     expect([f.body.visible, f.box.visible, f.radiator.visible]).toEqual([true, true, true]);
-    expect(f.state.engineeringSnapshot!.entities).toHaveLength(count);
+    expect(f.state.engineering.snapshot!.entities).toHaveLength(count);
     expect(document.body.textContent).toContain('对象数量2');
   });
   it('restores the view when inspecting an unassigned declaration after isolation and preserves pre-existing hidden members', async () => {
     const f = await fixture(false, true); f.radiator.visible = false;
     await selectEngineeringTarget(f.state, { kind: 'engineering', key: f.main.id }); f.state.setOnlySelected(true);
     expect([f.body.visible, f.box.visible, f.radiator.visible]).toEqual([true, false, false]);
-    const building = [...f.state.engineeringNavigation!.composition.nodes.values()].find(node => node.title === '主控通信楼01')!;
+    const building = [...f.state.engineering.navigation!.composition.nodes.values()].find(node => node.title === '主控通信楼01')!;
     await selectEngineeringTarget(f.state, { kind: 'engineering-group', key: building.key });
     expect(f.state.onlySelected).toBe(false);
     expect([f.body.visible, f.box.visible, f.radiator.visible]).toEqual([true, true, false]);
@@ -132,12 +132,12 @@ describe('source-to-physical representation adapter and filters', () => {
   });
   it('rebinds a selected whole to updated membership while keeping the same logical request', async () => {
     const f = await fixture(); await selectEngineeringTarget(f.state, { kind: 'engineering', key: f.main.id }); f.state.setOnlySelected(true);
-    const request = f.state.selectionRequest!, next = structuredClone(f.state.engineeringSnapshot!);
+    const request = f.state.selectionRequest!, next = structuredClone(f.state.engineering.snapshot!);
     const source = f.graph.records.find(row => row.name === '散热器')!.id;
     next.memberships.find(member => member.sourceId === source)!.ownerId = f.terminal.id;
     next.entities.find(entity => entity.id === f.main.id)!.sourceIds = f.main.sourceIds.filter(id => id !== source);
     next.entities.find(entity => entity.id === f.terminal.id)!.sourceIds.push(source);
-    f.state.engineeringSnapshot = next; f.state.engineeringNavigation = projectEngineeringNavigation(f.state.engineeringSources!, next);
+    f.state.engineering.snapshot = next; f.state.engineering.navigation = projectEngineeringNavigation(f.state.engineering.sources!, next);
     expect(f.state.representationSelection?.isCurrent()).toBe(false);
     await reconcileEngineeringSelection(f.state, request);
     expect(f.state.selectionRequest?.id).toBe(request.id); expect(f.state.engineeringSelection?.snapshot).toBe(next);
@@ -146,12 +146,12 @@ describe('source-to-physical representation adapter and filters', () => {
   });
   it('clears an obsolete member range and offers candidates when a selected whole splits', async () => {
     const f = await fixture(); await selectEngineeringTarget(f.state, { kind: 'engineering', key: f.main.id }); f.state.setOnlySelected(true);
-    const next = structuredClone(f.state.engineeringSnapshot!), [body, radiator] = f.main.sourceIds;
+    const next = structuredClone(f.state.engineering.snapshot!), [body, radiator] = f.main.sourceIds;
     next.entities = next.entities.filter(entity => entity.id !== f.main.id);
     next.entities.push({ ...f.main, id: 'new:body', sourceIds: [body] }, { ...f.main, id: 'new:radiator', sourceIds: [radiator] });
     for (const member of next.memberships) if (member.ownerId === f.main.id) member.ownerId = member.sourceId === body ? 'new:body' : 'new:radiator';
     next.relationships = [];
-    f.state.engineeringSnapshot = next; f.state.engineeringNavigation = projectEngineeringNavigation(f.state.engineeringSources!, next);
+    f.state.engineering.snapshot = next; f.state.engineering.navigation = projectEngineeringNavigation(f.state.engineering.sources!, next);
     await reconcileEngineeringSelection(f.state, f.state.selectionRequest!);
     expect(f.state.engineeringSelection).toBeNull(); expect(document.querySelectorAll('[data-engineering-choice]')).toHaveLength(2);
     expect([f.body.visible, f.box.visible, f.radiator.visible]).toEqual([false, false, false]);

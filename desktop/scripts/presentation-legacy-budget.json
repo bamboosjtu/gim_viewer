@@ -1,0 +1,39 @@
+{
+  "services/compositionProjectionService.ts": {
+    "propsDrawer": 1
+  },
+  "services/devLodRuntime.ts": {
+    "deviceBoundsMarker": 1
+  },
+  "services/devViewportSelection.ts": {
+    "selectionSources": 1,
+    "propsDrawer": 1
+  },
+  "services/engineeringSelection.ts": {
+    "engineeringTreeView": 1,
+    "engineeringInspector": 1
+  },
+  "services/engineeringSourceInspector.ts": {
+    "engineeringTreeView": 2
+  },
+  "services/engineeringViewportSelection.ts": {
+    "selectionSources": 2
+  },
+  "services/nodeInteractionService.ts": {
+    "cbmTreeView": 2,
+    "sldView": 1,
+    "propsDrawer": 2,
+    "fileDevView": 1
+  },
+  "services/powerlineRuntime.ts": {
+    "lineProjectView": 2
+  },
+  "services/substationDocumentRuntime.ts": {
+    "sldView": 1
+  },
+  "services/substationPresentation.ts": {
+    "sldView": 1,
+    "propsDrawer": 1,
+    "selectionSources": 1
+  }
+}

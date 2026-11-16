@@ -410,6 +410,11 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
   }
 }
 
+const openRequests=new WeakMap<AppState,symbol>();
+function beginOpenRequest(state:AppState):()=>boolean {
+  const request=Symbol('open');openRequests.set(state,request);return ()=>openRequests.get(state)===request;
+}
+
 async function openTauriGim(
   state: AppState,
   showMessage: (text: string) => void,
@@ -421,6 +426,7 @@ async function openTauriGim(
 
   state.invalidatePendingLoads();
   const requestGeneration = state.projectGeneration;
+  const ownsRequest=beginOpenRequest(state);
   let openedSession:ProjectLoadSession|null=null;
   const ownsOpen=()=>openedSession ? state.isCurrentSession(openedSession) : state.projectGeneration===requestGeneration;
   perfReset({ generation: requestGeneration, projectId: null, sourceSha256: null });
@@ -498,7 +504,7 @@ async function openTauriGim(
     scheduleHideLoading(ownsOpen, 3000);
     if(options.rethrowError)throw error;
   } finally {
-    if(ownsOpen())btnLoadGim.disabled = false;
+    if(ownsRequest())btnLoadGim.disabled = false;
   }
 }
 
@@ -511,6 +517,7 @@ async function openBrowserGim(
   if (!file || state.projectGeneration !== chooserGeneration) return;
   state.invalidatePendingLoads();
   const requestGeneration = state.projectGeneration;
+  const ownsRequest=beginOpenRequest(state);
   let openedSession:ProjectLoadSession|null=null;
   const ownsOpen=()=>openedSession ? state.isCurrentSession(openedSession) : state.projectGeneration===requestGeneration;
   perfReset({ generation: requestGeneration, projectId: null, sourceSha256: null });
@@ -532,8 +539,8 @@ async function openBrowserGim(
     showLoading(`GIM 解析失败: ${error instanceof Error ? error.message : String(error)}`);
     scheduleHideLoading(ownsOpen, 3000);
   } finally {
-    gimFileInput.value = '';
-    if(ownsOpen())btnLoadGim.disabled = false;
+    if(ownsRequest())gimFileInput.value = '';
+    if(ownsRequest())btnLoadGim.disabled = false;
   }
 }
 

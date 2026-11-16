@@ -111,7 +111,7 @@
 |---|---|
 | 单文件缺失/读取失败 | 保留来源记录和原因；其他对象继续；不发布完整来源凭据 |
 | 单 DEV/IFC 表示失败 | 该 occurrence 进入 failed/unsupported/partial；不删除整体 |
-| 工程来源不完整 | `engineeringStatus=partial`，三视图可浏览部分结果；不写完整缓存 |
+| 工程来源不完整 | `engineering.status=partial`，三视图可浏览部分结果；不写完整缓存 |
 | Spatial 未就绪 | 来源/实体先发布；建筑楼层分组留待空间容器补充 |
 | 缓存损坏 | 只重建受影响域；旧格式直接失效，不迁移 |
 | 工程切换时旧任务完成 | 会话守卫拒绝提交，释放旧资源 |
@@ -122,7 +122,11 @@
 
 工程身份检查统一使用 `shared/projectSession.isCurrentProject`；携带完整批次身份的几何上下文使用 `isCurrentGeometry`，额外核对 token。几何换代不失效同工程的语义任务。
 
-独立设备打开是 `SessionScope` 的纵向试点：提取和解析在作用域外准备局部结果，`withSession` 只接受同步提交；作用域持有 AbortSignal 和幂等释放器，工程失效后先拒绝写入，再释放导航、搜索和监听。迟到的资源登记立即释放。`AppState.withSession` 与设备流程使用同一作用域守卫。DEV runtime 仍由既有 runtime slot 释放，不登记第二份所有权。其他打开入口暂保留显式提交前守卫，不将几何 token 混入所有语义守卫。
+独立设备及变电冷开/暖恢复使用 `SessionScope`：`read` 拒绝失效会话的异步准备结果，`withSession` 在同步提交时再次核对所有权，不能把 `read` 成功当作后续写入授权（两者之间可能运行其他微任务）。作用域持有 AbortSignal 和幂等释放器；工程失效先拒绝写入，再释放导航、搜索和监听，迟到登记立即释放。变电后台发布状态由作用域持有；DEV runtime 仍由既有 runtime slot 释放，不登记第二份所有权。几何 token 不混入语义守卫。
+
+`AppState.engineering` 持有工程来源、快照、导航、构建/缓存状态及 Worker 释放器；`viewState` 持有导航模式与展开集合，独立于工程事实。选择请求、相机和几何批次保留各自身份，不能用语义缓存命中恢复旧交互请求。打开按钮使用独立请求 token 完成 finally；清理递增工程代次不会让当前打开请求丢失按钮归属，旧请求也不能启用新请求的按钮。
+
+Viewer 与 UI 装配区分 idle/creating/ready/failed；并发调用共享一次创建，成功后复用，失败清空 Promise。引擎创建失败先完成局部 Components 释放再允许重试；UI 装配失败按逆序撤销属性上下文、选择监听、相机历史和可见性状态。选择绑定的 disposer 幂等取消监听、hover timer 和在途 pick；旧绑定不能清空新绑定的 hover 所有权。
 
 ## 相关文档
 

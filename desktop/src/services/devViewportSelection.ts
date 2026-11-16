@@ -10,7 +10,7 @@ export async function selectViewportDev(ctx: ViewerContext, state: AppState, roo
   const guard = state.selectionGuard(request);
   if (!guard.isCurrent()) return;
   request.origin = 'viewport';
-  if (state.currentProjectType === 'substation' || state.engineeringSnapshot) {
+  if (state.currentProjectType === 'substation' || state.engineering.snapshot) {
     const { selectEngineeringDevPick } = await import('./engineeringViewportSelection.js');
     if (!guard.isCurrent() || await selectEngineeringDevPick(state, rootOccurrence, hint, request)) return;
   }

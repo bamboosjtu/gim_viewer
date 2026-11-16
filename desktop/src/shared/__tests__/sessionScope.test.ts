@@ -1,6 +1,23 @@
 import {it,expect,vi} from 'vitest';
 import {AppState} from '../../app/state.js';
 
+it('rejects delayed reads after replacement without exposing the result to a commit',async()=>{
+  const state=new AppState(),scope=state.sessionScope(state.activateProject(1,'a')),commit=vi.fn();
+  let finish!:(value:string)=>void;
+  const pending=scope.read(()=>new Promise<string>(resolve=>{finish=resolve;})).then(commit);
+  state.activateProject(2,'b');finish('old');
+  await expect(pending).rejects.toThrow('no longer owns');expect(commit).not.toHaveBeenCalled();
+  const read=vi.fn(async()=>42);await expect(scope.read(read)).rejects.toThrow('no longer owns');expect(read).not.toHaveBeenCalled();
+});
+
+it('guards publication even when replacement runs between preparation and the caller resuming',async()=>{
+  const state=new AppState(),scope=state.sessionScope(state.activateProject(1,'a')),commit=vi.fn();
+  const ready=scope.read(async()=>42);
+  void ready.then(()=>state.activateProject(2,'b'));
+  expect(await ready).toBe(42);
+  expect(scope.withSession(()=>{commit();})).toBe(false);expect(commit).not.toHaveBeenCalled();
+});
+
 it('freezes tokens, keeps geometry replacement independent and refuses outgoing commits before disposal',()=>{
   const state=new AppState(),session=state.activateProject(1,'a'),scope=state.sessionScope(session),commit=vi.fn();
   expect(Object.isFrozen(session)).toBe(true);

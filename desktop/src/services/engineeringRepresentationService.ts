@@ -14,7 +14,7 @@ const cached = new WeakMap<AppState, { sources: unknown; snapshot: unknown; valu
 /** DEV roots use the same occurrence identity in source, renderer and binding.
  * Repeated references to a single CBM/template remain distinct placements. */
 export function getEngineeringRepresentations(state: AppState): EngineeringRepresentationState | null {
-  const sources = state.engineeringSources, snapshot = state.engineeringSnapshot;
+  const sources = state.engineering.sources, snapshot = state.engineering.snapshot;
   if (!sources || !snapshot) return null;
   const previous = cached.get(state);
   if (previous?.sources === sources && previous.snapshot === snapshot) return previous.value;

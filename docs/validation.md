@@ -276,12 +276,18 @@ cargo test --manifest-path app/src-tauri/Cargo.toml six_native_imports -- --igno
 
 远程 CI 的覆盖率只来自不依赖工程样本的单元测试。`desktop/` 下的 `npm run test:coverage` 执行以下下限：
 
-| 范围 | 行/语句/函数 | 分支 |
-|---|---|---|
-| `engineering/` | 95% | 90% |
-| `gim/` | 90% | 80% |
+| 范围 | 行/语句 | 函数 | 分支 |
+|---|---|---|---|
+| `engineering/` | 95% | 95% | 90% |
+| `gim/` | 90% | 90% | 80% |
+| `services/openGimService.ts` | 70% | 80% | 50% |
+| `services/substationRuntime.ts` | 70% | 45% | 70% |
+| `services/viewerUIBinding.ts` | 80% | 50% | 70% |
+| `viewer/viewerRuntime.ts` | 100% | 100% | 100% |
+| `ui/lineProjectView.ts` | 70% | 60% | 65% |
+| `ui/lineMapView.ts` | 65% | 65% | 60% |
 
-其余层报告覆盖率，不自动提高或更新阈值；该门禁不代表真实工程或原生性能通过。
+热点门禁覆盖打开/取消/失败、变电冷开与暖恢复、后台发布、Viewer 重试、线路导航/地图/检查器联动及资源释放。其余层只报告覆盖率，不自动调整阈值；这些无工程样本的单元证据不代表真实工程或原生性能通过。`npm run test:presentation-boundaries` 验证展示边界检查器，`check:engineering-boundaries` 在本地与 CI 检查实际源码。
 
 ### Python 纯逻辑测试
 

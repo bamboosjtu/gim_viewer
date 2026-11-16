@@ -175,14 +175,14 @@ export function handleSubstationPropertyReference(
   showMessage: (text: string) => void = () => undefined,
 ): boolean {
   if (state.currentProjectType !== 'substation' && state.currentProjectType !== 'equipment') return false;
-  if (state.currentProjectType === 'substation' && state.engineeringSources) {
+  if (state.currentProjectType === 'substation' && state.engineering.sources) {
     const normalize = (path: string) => path.replace(/\\/g, '/').toLowerCase();
     const wanted = normalize(detail.path), name = wanted.split('/').pop();
-    const inventory = [...new Set([...state.substationEntryPaths, ...state.engineeringSources.graph.documents.map(doc => doc.path), ...state.engineeringSources.graph.ifcPaths])];
+    const inventory = [...new Set([...state.substationEntryPaths, ...state.engineering.sources.graph.documents.map(doc => doc.path), ...state.engineering.sources.graph.ifcPaths])];
     const exact = inventory.filter(path => normalize(path) === wanted);
     const matches = exact.length ? exact : inventory.filter(path => normalize(path).split('/').pop() === name);
     if (matches.length !== 1) { showMessage(matches.length ? '来源文件有多个候选，请在来源视图核对' : '该来源文件当前不可用'); return true; }
-    state.engineeringNavMode = 'source'; renderEngineeringTree(state);
+    state.viewState.mode = 'source'; renderEngineeringTree(state);
     void import('../services/engineeringSourceInspector.js').then(({ inspectEngineeringDocument }) => inspectEngineeringDocument(state, matches[0]))
       .catch(error => showMessage(`来源未能打开：${String(error)}`));
     return true;
@@ -256,8 +256,9 @@ export function handleSubstationPropertyReference(
 }
 
 /** Expand every saved ancestor row; unrendered paths are skipped. */
-export async function expandTreeToPaths(paths: readonly string[]): Promise<void> {
+export async function expandTreeToPaths(paths: readonly string[], current:()=>boolean=()=>true): Promise<void> {
   for (const path of [...paths].sort((a, b) => a.split('/').length - b.split('/').length)) {
+    if(!current())return;
     const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(path) : path.replace(/"/g, '\\"');
     const row = document.querySelector<HTMLElement>(`#cbm-tree-panel .tree-row[data-node-path="${escaped}"]`);
     if (!row) continue;

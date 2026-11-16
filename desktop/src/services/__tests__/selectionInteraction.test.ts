@@ -46,7 +46,7 @@ async function engineeringFixture(state: AppState, index: Awaited<ReturnType<typ
   const raw: Record<string,string> = { 'project.cbm':'OBJECTMODELPOINTER=B.dev', 'B.dev':'SYMBOLNAME=B', 'CBM/model.ifc':'' };
   const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async path=>raw[path]});
   const built=buildTestEngineeringSources('package',graph,index.objects,index.models,index.nodes);
-  state.engineeringSources=built.sources;state.engineeringSnapshot=built.snapshot;state.engineeringNavigation=projectEngineeringNavigation(built.sources,built.snapshot);
+  state.engineering.sources=built.sources;state.engineering.snapshot=built.snapshot;state.engineering.navigation=projectEngineeringNavigation(built.sources,built.snapshot);
   return {ifc:built.snapshot.memberships.find(member=>member.sourceId===built.sources.ifcRecords[0].id)!.ownerId!,device:built.snapshot.entities.find(entity=>entity.name==='B')!.id};
 }
 
@@ -319,12 +319,12 @@ it('a source IFC selection keeps its row and inspector after an earlier FAM requ
   const { buildTestEngineeringSources } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/engineering/__tests__/fixtures.js'); });
   const raw: Record<string,string> = { 'project.cbm':'SUBSYSTEM0=unit.cbm', 'unit.cbm':'OBJECTMODELPOINTER=A.dev', 'A.dev':'SYMBOLNAME=设备 A', 'CBM/model.ifc':'' };
   const graph = await extractEngineeringSourceGraph({ paths:Object.keys(raw), readText:async path=>raw[path] });
-  const built = buildTestEngineeringSources('package',graph,index.objects,index.models,index.nodes); state.engineeringSources=built.sources;state.engineeringSnapshot=built.snapshot;
-  const {projectEngineeringNavigation}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/engineering/navigation.js'); });state.engineeringNavigation=projectEngineeringNavigation(built.sources,built.snapshot);
+  const built = buildTestEngineeringSources('package',graph,index.objects,index.models,index.nodes); state.engineering.sources=built.sources;state.engineering.snapshot=built.snapshot;
+  const {projectEngineeringNavigation}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/engineering/navigation.js'); });state.engineering.navigation=projectEngineeringNavigation(built.sources,built.snapshot);
   const sourceId=built.sources.ifcRecords.find(r=>r.guid===object.globalId)!.id;
   const {showNodePropertiesBasic}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../ui/propsDrawer.js'); });const pending=showNodePropertiesBasic(state,a);await started.promise;
   const {buildAndRenderCbmTree}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../ui/cbmTreeView.js'); });
-  state.engineeringNavMode='source';buildAndRenderCbmTree(state,()=>{});
+  state.viewState.mode='source';buildAndRenderCbmTree(state,()=>{});
   const input=document.querySelector<HTMLInputElement>('[role="combobox"]')!;input.value='IFC B';input.dispatchEvent(new Event('input'));
   document.querySelector<HTMLElement>('[role="option"]')!.click();
   expect(state.selectionRequest!.target).toEqual({kind:'engineering-source',key:sourceId});
@@ -454,7 +454,7 @@ it('marks a source-backed group range even when no individual far or near repres
  const box=new THREE.Box3(new THREE.Vector3(1,2,3),new THREE.Vector3(11,12,13));
  state.ifcRegionalRuntimes.set('model',{index:{objects:[{expressId:10}]},worldBounds:()=>box,highlightGroup:()=>null,clearHighlight:()=>{}} as any);
  const {selectEngineeringTarget}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../engineeringSelection.js'); });
- await selectEngineeringTarget(state,{kind:'engineering-group',key:state.engineeringNavigation!.composition.rootKey},undefined,{fit:false,load:false});
+ await selectEngineeringTarget(state,{kind:'engineering-group',key:state.engineering.navigation!.composition.rootKey},undefined,{fit:false,load:false});
  expect(runtime.ctx.world.scene.three.children.some((g:THREE.Group)=>g.children.some(c=>c.type==='Box3Helper'))).toBe(true);
  expect(state.selectionGeometry?.detail).toContain('空间范围');
 });

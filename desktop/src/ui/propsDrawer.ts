@@ -154,8 +154,9 @@ export function setupPropsDrawerInteractions(ctx?: ViewerContext): void {
 }
 
 /** 绑定属性面板按钮事件（Viewer 变电场景）。 */
-export function setupPropsDrawer(ctx: ViewerContext): void {
+export function setupPropsDrawer(ctx: ViewerContext): () => void {
   setupPropsDrawerInteractions(ctx);
+  return () => {if(propsDrawerViewerContext===ctx)propsDrawerViewerContext=null;};
 }
 
 /** 检查器四页签内容桶 */

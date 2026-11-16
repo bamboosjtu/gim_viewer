@@ -1,6 +1,7 @@
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import { ProjectPropertyCache } from '../services/projectPropertyCache.js';
 import { ProjectViewState } from '../shared/projectViewState.js';
+import {EngineeringSessionState} from './engineeringSessionState.js';
 import { RuntimeSlot } from '../shared/runtimeSlot.js';
 import type { DeviceRuntime } from '../shared/deviceRuntime.js';
 import type { IfcRegionalRuntime } from '../viewer/ifcRegionalRuntime.js';
@@ -131,7 +132,7 @@ export class AppState {
     if (!request?.target) return false;
     if (kind !== 'engineering' && kind !== 'engineering-source' && kind !== 'engineering-group') return true;
     const scope = this.engineeringSelection;
-    return !!scope && scope.requestId === request!.id && scope.snapshot === this.engineeringSnapshot && scope.sourceIds.size > 0;
+    return !!scope && scope.requestId === request!.id && scope.snapshot === this.engineering.snapshot && scope.sourceIds.size > 0;
   }
   setOnlySelected(only: boolean): void {
     if (only && !this.canIsolateSelection) return;
@@ -148,32 +149,13 @@ export class AppState {
   currentCbmTree: CbmNode | null = null;
   /** 变电 IFC 空间对象图；线路工程保持 null。 */
   substationSpatialIndex: SubstationSpatialIndex | null = null;
-  engineeringSources: import('../gim/engineering/buildSources.js').EngineeringSources | null = null;
-  engineeringSnapshot: import('../engineering/types.js').EngineeringSnapshot | null = null;
-  engineeringNavigation: import('../gim/engineering/navigation.js').EngineeringNavigationData | null = null;
-  engineeringNavigationCacheHit = false;
-  engineeringTreeStatus: 'none' | 'loading' | 'ready' | 'error' = 'none';
-  engineeringIfcGeometryFinished = false;
   sourceGeometryCatalog: import('../gim/engineering/geometryOccurrences.js').SourceGeometryOccurrenceCatalog | null = null;
   sourceGeometryReady: Promise<import('../gim/engineering/geometryOccurrences.js').SourceGeometryOccurrenceCatalog | null> | null = null;
-  engineeringStatus: 'none' | 'loading' | 'partial' | 'ready' | 'error' = 'none';
-  engineeringBuildPending = false;
   sourceGeometryCachePending = false;
   sourceGeometryCacheError = '';
-  engineeringProgress: {stage:string;completed:number}|null = null;
-  engineeringFailureCode: string|null = null;
-  engineeringError = '';
-  engineeringCacheStatus: 'none' | 'hit' | 'miss' | 'saving' | 'saved' | 'partial' | 'disabled' | 'error' = 'none';
-  engineeringPipelineMetrics: (NonNullable<import('../services/engineeringWorkerProtocol.js').EngineeringBuildResult['metrics']> & {caches:Array<{domain:string;encodeMs:number;plainBytes:number;encodedBytes:number}>}) | null = null;
-  engineeringCacheError = '';
-  engineeringCleanup: (() => void) | null = null;
-  engineeringListeners = new Set<() => void>();
+  readonly engineering = new EngineeringSessionState();
   readonly viewState = new ProjectViewState();
-  get engineeringNavMode() {return this.viewState.mode;}
-  set engineeringNavMode(mode:ProjectViewState['mode']) {this.viewState.mode=mode;}
-  get engineeringExpandedRows() {return this.viewState.expanded;}
-  set engineeringExpandedRows(rows:ProjectViewState['expanded']) {this.viewState.expanded=rows;}
-  notifyEngineeringChanged(): void { for (const listener of [...this.engineeringListeners]) listener(); }
+  notifyEngineeringChanged(): void { this.engineering.notify(); }
   /** GIM 头部提取的工程名称（如"XX变电站"），用于 F1System 根节点显示 */
   projectName: string = '';
 
@@ -339,11 +321,12 @@ export class AppState {
     if(scope)this.safelyRelease(()=>scope.dispose());
     const disposables = [...this.sessionDisposables]; this.sessionDisposables.clear();
     for (const dispose of disposables) this.safelyRelease(dispose);
-    for (const key of ['hoverCleanup', 'selectionDecorationCleanup', 'engineeringCleanup',
+    for (const key of ['hoverCleanup', 'selectionDecorationCleanup',
       'engineeringSelectionCleanup', 'engineeringNavigationCleanup'] as const) {
       const cleanup = this[key]; this[key] = null;
       if (cleanup) this.safelyRelease(cleanup);
     }
+    this.safelyRelease(()=>this.engineering.release());
     this.deviceLodRuntime = null;
     const monitor = this.substationResourceMonitor; this.substationResourceMonitor = null;
     if (monitor) this.safelyRelease(() => monitor.release());
@@ -457,26 +440,16 @@ export class AppState {
    */
   resetGimState(invalidate = true) {
     if (invalidate) this.invalidatePendingLoads(); else this.releaseSessionResources();
+    this.engineering.reset();
+    this.viewState.reset();
     this.deviceUnknownBounds.clear();
     this.currentFiles = null;
     this.currentIfcEntries = [];
     this.currentCbmTree = null;
     this.substationSpatialIndex = null;
-    this.engineeringSources = null; this.engineeringSnapshot = null;
-    this.engineeringNavigation = null; this.engineeringNavigationCacheHit = false;
     this.sourceGeometryCatalog = null; this.sourceGeometryReady = null;
-    this.engineeringTreeStatus = 'none'; this.engineeringIfcGeometryFinished = false;
-    this.engineeringStatus = 'none'; this.engineeringError = '';
-    this.engineeringBuildPending = false;
     this.sourceGeometryCachePending = false;
     this.sourceGeometryCacheError = '';
-    this.engineeringProgress = null;
-    this.engineeringFailureCode = null;
-    this.engineeringCacheStatus = 'none'; this.engineeringCacheError = '';
-    this.engineeringPipelineMetrics=null;
-    this.engineeringListeners.clear();
-    this.engineeringNavMode = 'inventory';
-    this.engineeringExpandedRows = { composition: new Set<string>(), source: new Set<string>(), inventory:new Set<string>() };
     this.engineeringGeometryFilter = null; this.engineeringRepresentationChanged = null;
     this.projectName = '';
     this.currentProjectType = null;

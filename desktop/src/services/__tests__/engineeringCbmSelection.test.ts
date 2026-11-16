@@ -14,7 +14,7 @@ async function fixture(shared = false) {
     'box.dev': 'SYMBOLNAME=测控柜', 'alias.cbm': 'ENTITYNAME=PARTINDEX\nOBJECTMODELPOINTER=box.dev' };
   const graph = await extractEngineeringSourceGraph({ paths: Object.keys(raw), readText: async path => raw[path] });
   const built = buildTestEngineeringSources('package', graph, [], []), state = new AppState(); state.activateProject(1, 'package'); state.currentProjectType = 'substation';
-  state.engineeringSources = built.sources; state.engineeringSnapshot = built.snapshot; state.engineeringNavigation = projectEngineeringNavigation(built.sources, built.snapshot);
+  state.engineering.sources = built.sources; state.engineering.snapshot = built.snapshot; state.engineering.navigation = projectEngineeringNavigation(built.sources, built.snapshot);
   return { state, ...built };
 }
 describe('source address links use the engineering identity chain', () => {

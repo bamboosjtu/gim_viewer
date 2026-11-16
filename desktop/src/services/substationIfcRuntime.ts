@@ -1,5 +1,7 @@
+import {projectPresentation} from './projectPresentationPort.js';
+import * as statusPresentation from './presentation/shell_statusBar.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
-import { loadPresentation } from './presentationPort.js';
+
 import { setSubstationViewerInteractive } from './substationLoadingState.js';
 /** Sequential IFC loading, early geometry, cache profiles and background gates. */
 import { setConnectionStatus, setIfcStatus as publishIfcStatus } from './presentation/shell_statusBar.js';
@@ -248,7 +250,7 @@ export async function loadAllIfcFiles(
     const { startDeviceLod } = await import('./devLodRuntime.js');
     if (!isCurrent()) return;
     void startDeviceLod(state, ctx, session, (text, detail) => {
-      if (isCurrent()) void Promise.resolve(loadPresentation('shell_statusBar').then(({ setDeviceStatus }) => {
+      if (isCurrent()) void Promise.resolve(Promise.resolve(statusPresentation).then(({ setDeviceStatus }) => {
         if (isCurrent()) setDeviceStatus(text, detail);
       })).catch(reportBackgroundError);
     }).catch(error => { if (isCurrent()) console.warn('[DEV startup]', error); });
@@ -684,9 +686,7 @@ session, perfSessionId: perfSession.id, onLoadSource: (source) => { if(!isCurren
               void Promise.resolve(ctx.fragments.core.disposeModel(runtimeModelId)).catch(reportBackgroundError);
             }
             state.loadedModels.delete(modelId);
-            const modelRow = document.getElementById(`model-${modelId}`)
-              ?? document.getElementById(`model-${runtimeModelId}`);
-            if (modelRow) modelRow.remove();
+            projectPresentation().removeModelRows([modelId,runtimeModelId]);
           } catch (cleanupErr) {
             console.warn('[GIM] cleanup failed model after load error', entry, cleanupErr);
           }
@@ -722,7 +722,7 @@ total: entries.length, loaded: state.loadedModels.size,
       // buildIfcNameIndex 失败不应阻断 UI 渲染
       const { buildIfcNameIndex } = await import('../viewer/ifcNameIndex.js');
       if (!isCurrent()) return;
-      state.engineeringIfcGeometryFinished = true;
+      state.engineering.ifcGeometryFinished = true;
       state.engineeringGeometryEvidenceChanged?.();
       const endNameIndex = perfBegin('变电 IFC name index', undefined, perfSession);
       await buildIfcNameIndex(ctx, state, { session }).catch((err) => {
@@ -748,7 +748,7 @@ total: entries.length, loaded: state.loadedModels.size,
 
     } catch (err) {
       if (!isCurrent()) return;
-      state.engineeringIfcGeometryFinished = true; state.engineeringGeometryEvidenceChanged?.();
+      state.engineering.ifcGeometryFinished = true; state.engineeringGeometryEvidenceChanged?.();
       console.error('[GIM] IFC 加载失败 (outer)', {
         error: err,
         message: err instanceof Error ? err.message : String(err),

@@ -57,7 +57,7 @@ export async function ensureEngineeringEvidence(state:AppState,range:EvidenceRan
   const inventory=await job.client.getEvidenceSnapshot(range.entryIds),entries=new Map(inventory.entries.map(e=>[e.id,e])),coverage=new Map(inventory.coverage.map(e=>[e.entryId,e]));
   for(const path of range.entryIds){const entry=entries.get(path);if(!entry)throw Error('Unknown evidence entry');if(!coverage.get(path)?.restorable&&(entry.status==='not_requested'||entry.status==='failed'||coverage.get(path)?.rawAvailable===false))await prepareEvidenceEntry(state,job,path);}
   const result=await job.client.ensureEvidence(range);if(!current(state,job))throw Error('Stale evidence session');
-  const requested=new Set(range.entryIds),affectsRecognition=state.engineeringSources?.graph.familyAssignments?.some(a=>requested.has(a.path));
+  const requested=new Set(range.entryIds),affectsRecognition=state.engineering.sources?.graph.familyAssignments?.some(a=>requested.has(a.path));
   if(affectsRecognition&&range.entryIds.some(id=>entries.get(id)?.status==='failed'||entries.get(id)?.status==='not_requested')&&result.revision!==inventory.revision){
     const rebuilt=await job.client.recognizeEvidence(job.identity);if(!current(state,job))throw Error('Stale evidence session');
     publish(state,job,rebuilt);await finishBuild(state,job,rebuilt);
@@ -79,7 +79,7 @@ export interface EngineeringBuildOptions {
 
 async function saveResult(state: AppState, job: EngineeringJob, result: EngineeringBuildResult): Promise<void> {
   if(!currentBuild(state,job,result)||!job.identity||job.session.projectId==null||!result.cachePlan?.length||!result.buildId)return;
-  state.engineeringCacheStatus = 'saving'; job.update();
+  state.engineering.cacheStatus = 'saving'; job.update();
   try {
     await job.beforeCacheWrite;
     if (!currentBuild(state, job,result)) return;
@@ -88,32 +88,32 @@ async function saveResult(state: AppState, job: EngineeringJob, result: Engineer
     for(const domain of result.cachePlan){
       if(!currentBuild(state,job,result))return;
       if(domain==='navigation' && !await job.projectionReady){
-        if(currentBuild(state,job,result)){state.engineeringCacheStatus='partial';job.update();}return;
+        if(currentBuild(state,job,result)){state.engineering.cacheStatus='partial';job.update();}return;
       }
       if(!currentBuild(state,job,result))return;
       let projection:ReturnType<typeof createNavigationCacheProjection>|undefined;
-      if(domain==='navigation'&&state.engineeringNavigation){
-        try{projection=createNavigationCacheProjection(result.navigation,state.engineeringNavigation);}
+      if(domain==='navigation'&&state.engineering.navigation){
+        try{projection=createNavigationCacheProjection(result.navigation,state.engineering.navigation);}
         catch{
           // The Worker base may not contain the final composition. Never fall
           // back to persisting it as a complete view, or invalidate domains
           // already saved because an optional projection cannot be constructed.
-          if(currentBuild(state,job,result)){state.engineeringCacheStatus='partial';
-            state.engineeringCacheError='navigation-projection-unavailable';job.update();}
+          if(currentBuild(state,job,result)){state.engineering.cacheStatus='partial';
+            state.engineering.cacheError='navigation-projection-unavailable';job.update();}
           return;
         }
       }
       const encoded=await job.client.encodeCache(result.buildId,domain,projection);
       if(!currentBuild(state,job,result))return;
       perfMark('工程缓存域编码',{domain,...encoded.metrics});
-      state.engineeringPipelineMetrics?.caches.push({domain,...encoded.metrics});
-      if(encoded.error||!encoded.bytes){state.engineeringCacheStatus=encoded.disabled?'disabled':'error';state.engineeringCacheError=encoded.disabled??encoded.error??'工程缓存编码未返回内容';job.update();return;}
+      state.engineering.pipelineMetrics?.caches.push({domain,...encoded.metrics});
+      if(encoded.error||!encoded.bytes){state.engineering.cacheStatus=encoded.disabled?'disabled':'error';state.engineering.cacheError=encoded.disabled??encoded.error??'工程缓存编码未返回内容';job.update();return;}
       await writeCacheFile(job.session.projectId,engineeringCacheEntry(job.identity,domain),encoded.bytes,job.identity.sourceSha256);
       encoded.bytes=undefined;
     }
-    if (currentBuild(state, job,result)) { state.engineeringCacheStatus = Object.keys(result.stageErrors??{}).length?'partial':'saved'; state.engineeringCacheError = ''; job.update(); }
+    if (currentBuild(state, job,result)) { state.engineering.cacheStatus = Object.keys(result.stageErrors??{}).length?'partial':'saved'; state.engineering.cacheError = ''; job.update(); }
   } catch (error) {
-    if (currentBuild(state, job,result)) { state.engineeringCacheStatus = 'error'; state.engineeringCacheError = String(error); job.update(); }
+    if (currentBuild(state, job,result)) { state.engineering.cacheStatus = 'error'; state.engineering.cacheError = String(error); job.update(); }
   }
 }
 
@@ -123,8 +123,8 @@ async function finishBuild(state:AppState,job:EngineeringJob,result:EngineeringB
   // Domain work is complete. Persistence has its own cache-settled state;
   // optional cache I/O must not extend the automatic geometry load metric.
   const saving=saveResult(state,job,result);
-  state.engineeringBuildPending=false;job.update();
-  if(!state.engineeringSources?.models.length&&state.engineeringTreeStatus==='loading')
+  state.engineering.buildPending=false;job.update();
+  if(!state.engineering.sources?.models.length&&state.engineering.treeStatus==='loading')
     state.engineeringGeometryEvidenceChanged?.();
   try{await saving;}finally{
     // Retain metadata/checkpoint; an idle reconstructible Worker can terminate.
@@ -137,24 +137,24 @@ function publish(state: AppState, job: EngineeringJob, result: EngineeringBuildR
   if (!current(state, job)) return;
   if(result.buildId&&result.buildId<=job.publishedBuildId)return;
   if(result.buildId)job.publishedBuildId=result.buildId;
-  state.engineeringSources = result.sources;
-  state.engineeringSnapshot = result.snapshot;
-  state.engineeringNavigation = result.navigation;
-  state.engineeringNavigationCacheHit = result.navigationCacheHit === true;
+  state.engineering.sources = result.sources;
+  state.engineering.snapshot = result.snapshot;
+  state.engineering.navigation = result.navigation;
+  state.engineering.navigationCacheHit = result.navigationCacheHit === true;
   const noIfc=result.sources.graph.ifcPaths.length===0;
   const finalNavigation=!result.navigation.projectionErrors&&(result.navigationCacheHit===true&&result.navigation.compositionComplete===true&&result.navigation.compositionCoverage==='full' || noIfc);
-  state.engineeringTreeStatus=finalNavigation||result.navigation.projectionErrors?'ready':'loading';
+  state.engineering.treeStatus=finalNavigation||result.navigation.projectionErrors?'ready':'loading';
   if(result.navigation.projectionErrors){result.navigation.compositionCoverage='partial';job.resolveProjection(false);}
   if(finalNavigation){result.navigation.compositionComplete=true;result.navigation.compositionCoverage='full';job.resolveProjection(true);
     perfMarkProductMoment('engineeringTreeReady',{available:true,source:'engineering-publish'});}
-  state.engineeringPipelineMetrics=result.metrics?{...result.metrics,caches:[]}:null;
+  state.engineering.pipelineMetrics=result.metrics?{...result.metrics,caches:[]}:null;
   state.engineeringRepresentationChanged?.();
-  state.engineeringStatus = result.sources.complete&&!Object.keys(result.stageErrors??{}).length ? 'ready' : 'partial';
-  state.engineeringError = Object.entries(result.stageErrors??{}).map(([stage,error])=>`${stage}: ${error}`).join('\n');
-  state.engineeringFailureCode=null;
-  if (!result.sources.complete) state.engineeringCacheStatus = 'partial';
-  if (result.cacheError) { state.engineeringCacheStatus = 'error'; state.engineeringCacheError = result.cacheError; }
-  if (result.cacheDisabled) { state.engineeringCacheStatus = 'disabled'; state.engineeringCacheError = result.cacheDisabled; }
+  state.engineering.status = result.sources.complete&&!Object.keys(result.stageErrors??{}).length ? 'ready' : 'partial';
+  state.engineering.error = Object.entries(result.stageErrors??{}).map(([stage,error])=>`${stage}: ${error}`).join('\n');
+  state.engineering.failureCode=null;
+  if (!result.sources.complete) state.engineering.cacheStatus = 'partial';
+  if (result.cacheError) { state.engineering.cacheStatus = 'error'; state.engineering.cacheError = result.cacheError; }
+  if (result.cacheDisabled) { state.engineering.cacheStatus = 'disabled'; state.engineering.cacheError = result.cacheDisabled; }
   perfMark('工程实体就绪', { complete: result.sources.complete, sources: result.snapshot.memberships.length,
     entities: result.snapshot.entities.length, pending: result.snapshot.pending.length, entityCacheHit: result.entityCacheHit === true, navigationCacheHit: result.navigationCacheHit === true });
   job.update();
@@ -194,14 +194,14 @@ export function notifyEngineeringIfcFailure(state: AppState, reason: string): vo
   job.ready.then(() => {
     if (!current(state, job) || job.finished) return;
     job.finished = true; job.client.close();
-    state.engineeringBuildPending=false;
+    state.engineering.buildPending=false;
     job.resolveProjection(false);
-    state.engineeringTreeStatus=state.engineeringNavigation?'ready':'error';
-    if(state.engineeringNavigation)state.engineeringNavigation={...state.engineeringNavigation,compositionCoverage:'partial'};
-    state.engineeringError = reason;
-    state.engineeringFailureCode='ifc-semantic-failed';
-    state.engineeringStatus = state.engineeringSnapshot ? 'partial' : 'error';
-    state.engineeringCacheStatus = 'partial'; job.update();
+    state.engineering.treeStatus=state.engineering.navigation?'ready':'error';
+    if(state.engineering.navigation)state.engineering.navigation={...state.engineering.navigation,compositionCoverage:'partial'};
+    state.engineering.error = reason;
+    state.engineering.failureCode='ifc-semantic-failed';
+    state.engineering.status = state.engineering.snapshot ? 'partial' : 'error';
+    state.engineering.cacheStatus = 'partial'; job.update();
   }).catch(error => fail(state, job, error));
 }
 
@@ -212,13 +212,13 @@ function fail(state: AppState, job: EngineeringJob, error: unknown): void {
   job.resolveGeometry(null);
   console.warn('[工程来源] 构建失败', error instanceof Error ? error.stack : String(error));
   job.finished = true;
-  state.engineeringBuildPending=false;
+  state.engineering.buildPending=false;
   job.resolveProjection(false);
-  state.engineeringTreeStatus=state.engineeringNavigation?'ready':'error';
-  if(state.engineeringNavigation)state.engineeringNavigation={...state.engineeringNavigation,compositionCoverage:'partial'};
-  state.engineeringError = String(error);
-  state.engineeringFailureCode=hasErrorCode(error,'WORKER_TIMEOUT')?'engineering-progress-stalled':'engineering-build-failed';
-  state.engineeringStatus = state.engineeringSnapshot ? 'partial' : 'error';
+  state.engineering.treeStatus=state.engineering.navigation?'ready':'error';
+  if(state.engineering.navigation)state.engineering.navigation={...state.engineering.navigation,compositionCoverage:'partial'};
+  state.engineering.error = String(error);
+  state.engineering.failureCode=hasErrorCode(error,'WORKER_TIMEOUT')?'engineering-progress-stalled':'engineering-build-failed';
+  state.engineering.status = state.engineering.snapshot ? 'partial' : 'error';
   job.update();
 }
 
@@ -226,12 +226,12 @@ function fail(state: AppState, job: EngineeringJob, error: unknown): void {
  * Cold File blobs and warm lazy sources share one extraction protocol.
  */
 export function beginEngineeringBuild(state: AppState, files: Map<string, File>, options: EngineeringBuildOptions = {}): Promise<void> {
-  state.engineeringCleanup?.();
-  state.engineeringBuildPending=true;
+  state.engineering.cleanup?.();
+  state.engineering.buildPending=true;
   state.sourceGeometryCachePending=false;
   state.sourceGeometryCacheError='';
-  state.engineeringProgress=null;
-  state.engineeringFailureCode=null;
+  state.engineering.progress=null;
+  state.engineering.failureCode=null;
   let resolveGeometry!: EngineeringJob['resolveGeometry'];
   let resolveProjection!: EngineeringJob['resolveProjection'];
   let resolveEvidence!:EngineeringJob['resolveEvidence'];
@@ -240,28 +240,28 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
   state.sourceGeometryReady = new Promise(resolve => { resolveGeometry = resolve; }); state.sourceGeometryCatalog = null;
   const session = state.captureProjectSession(), controller = new AbortController();
   if (typeof Worker === 'undefined' && !options.createWorker) {
-    state.engineeringBuildPending=false;
+    state.engineering.buildPending=false;
     resolveGeometry(null);
-    state.engineeringSources = null; state.engineeringSnapshot = null; state.engineeringNavigation = null; state.engineeringNavigationCacheHit = false;
-    state.engineeringTreeStatus='error';state.engineeringStatus = 'error'; state.engineeringError = '当前环境无法启动工程实体构建 Worker';
+    state.engineering.sources = null; state.engineering.snapshot = null; state.engineering.navigation = null; state.engineering.navigationCacheHit = false;
+    state.engineering.treeStatus='error';state.engineering.status = 'error'; state.engineering.error = '当前环境无法启动工程实体构建 Worker';
     state.notifyEngineeringChanged(); options.onUpdate?.();
     return Promise.resolve();
   }
   const update = () => { if (state.isCurrentSession(session) && !controller.signal.aborted) { state.notifyEngineeringChanged(); options.onUpdate?.(); } };
   let job: EngineeringJob;
   const client = (options.createWorker ?? EngineeringWorkerClient.create)(() => !!job && current(state, job), controller.signal,
-    (stage,completed)=>{if(job&&current(state,job))state.engineeringProgress={stage,completed};});
+    (stage,completed)=>{if(job&&current(state,job))state.engineering.progress={stage,completed};});
   const persistent = isTauri() && session.projectId != null && /^[a-f\d]{64}$/i.test(session.sourceSha256 ?? '');
   job = { session, controller, client, resolveGeometry, projectionReady, resolveProjection,evidenceReady,resolveEvidence,publishedBuildId:0, ready: Promise.resolve(), lastSpatial: null, finished: false, enriching: false, update, beforeCacheWrite: options.beforeCacheWrite,
     identity: persistent ? { sourceSha256: session.sourceSha256!, parserVersion: ENGINEERING_PARSER_CONTRACT, entries: [...files.keys()] } : undefined };
   jobs.set(state, job);
   const disposeProjection=installCompositionProjection(state,complete=>job.resolveProjection(complete));
-  state.engineeringCleanup = () => { disposeProjection();resolveGeometry(null);resolveProjection(false);resolveEvidence(); controller.abort(); client.close();
-    if (jobs.get(state) === job) {state.engineeringBuildPending=false;jobs.delete(state);} };
-  state.engineeringSources = null; state.engineeringSnapshot = null; state.engineeringNavigation = null; state.engineeringNavigationCacheHit = false;
-  state.engineeringStatus = 'loading'; state.engineeringError = ''; state.engineeringCacheStatus = 'none'; state.engineeringCacheError = ''; update();
-  state.engineeringTreeStatus = 'loading';
-  state.engineeringPipelineMetrics=null;
+  state.engineering.cleanup = () => { disposeProjection();resolveGeometry(null);resolveProjection(false);resolveEvidence(); controller.abort(); client.close();
+    if (jobs.get(state) === job) {state.engineering.buildPending=false;jobs.delete(state);} };
+  state.engineering.sources = null; state.engineering.snapshot = null; state.engineering.navigation = null; state.engineering.navigationCacheHit = false;
+  state.engineering.status = 'loading'; state.engineering.error = ''; state.engineering.cacheStatus = 'none'; state.engineering.cacheError = ''; update();
+  state.engineering.treeStatus = 'loading';
+  state.engineering.pipelineMetrics=null;
   const run = async () => {
     const initialized=client.init(session.sourceSha256 || `session:${session.generation}`, [...files.keys()]).then(()=>job.resolveEvidence());
     void initialized.catch(()=>{});
@@ -339,20 +339,20 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
           if (!result.sources.complete || !engineeringSourceCacheMatchesFiles(result.sources, files.keys())) {
             // Never turn a decoded-but-IFC-less body into a partial "hit".
             // Fall through to a controlled rebuild from the actual inventory.
-            state.engineeringCacheStatus = 'partial';
-            state.engineeringCacheError = '缓存来源未覆盖当前 IFC 清单，已从来源重建';
+            state.engineering.cacheStatus = 'partial';
+            state.engineering.cacheError = '缓存来源未覆盖当前 IFC 清单，已从来源重建';
           } else {
             // A source-only restore is not a full warm hit: entity/navigation
             // were rebuilt from the source body and still need re-encoding.
             const completeHit = result.entityCacheHit === true && result.navigationCacheHit === true;
-            state.engineeringCacheStatus = completeHit ? 'hit' : 'partial';
-            if (!completeHit) state.engineeringCacheError = '部分缓存命中：实体/导航缓存已从来源重建';
+            state.engineering.cacheStatus = completeHit ? 'hit' : 'partial';
+            if (!completeHit) state.engineering.cacheError = '部分缓存命中：实体/导航缓存已从来源重建';
             publish(state, job, result);
             await finishBuild(state,job,result); return;
           }
-        } catch (error) { if (!current(state, job)) return; state.engineeringCacheError = String(error); }
+        } catch (error) { if (!current(state, job)) return; state.engineering.cacheError = String(error); }
       }
-      state.engineeringCacheStatus = 'miss'; update();
+      state.engineering.cacheStatus = 'miss'; update();
     }
     const graph = await client.extract();
     if (!current(state, job)) return;

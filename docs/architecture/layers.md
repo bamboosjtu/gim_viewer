@@ -69,9 +69,11 @@ bootstrap
   └─ viewerUIBinding（选择/高亮/相机/属性路由）
 ```
 
-`app/presentationBindings` 将 DOM 句柄、展示回调和惰性视图加载器注入 services；services 不直接值导入 ui。Viewer 使用 `shared/viewerState`、会话和选择契约，不引用 AppState。
+`app/presentationBindings` 是展示端口的组合根。`ProjectPresentation` 管理树渲染、面板清理、展开状态、选择反馈和候选交互；`SourceInspectorPresentation` 接收来源文档/空间上下文与回调，UI 持有分页与 DOM 监听；`ViewerPresentation` 提供属性/模型展示及绑定释放器；加载遮罩与计时由 `LoadingPresentation` 的 UI 实现持有。状态栏端口仅声明状态命令，不从 UI 模块推导接口。services 不直接值导入 ui，不查询或修改 DOM。Viewer 使用 `shared/viewerState`、会话和选择契约，不引用 AppState。
 
-独立设备打开使用显式 `EquipmentPresentationPort`：服务提交工程身份、导航树、选择回调与会话 signal，UI 的 `equipmentProjectView` 负责工程栏、导航 DOM、搜索、空态及设备状态栏；端口返回仅属于该视图实例的释放器。旧释放器不能移除新导航。设备运行时不访问 DOM 或 `loadPresentation`，边界脚本单独禁止其退回通用 UI 模块加载器和旧 DOM 适配器。通用加载遮罩仍使用既有 `gimOpenCore` 入口；其他运行面的展示迁移见开放问题。
+旧视图加载器只允许 `scripts/presentation-legacy-budget.json` 登记的 22 个调用、10 个模块和 9 个 key；边界脚本检查 registry key、别名调用、字面量及逐调用模块预算，禁止新增 key/调用点和 service DOM 操作。尚未迁完的选择/线路视图使用受限旧适配器，新增能力使用显式意图端口。
+
+独立设备打开使用显式 `EquipmentPresentationPort`：服务提交工程身份、导航树、选择回调与会话 signal，UI 的 `equipmentProjectView` 负责工程栏、导航 DOM、搜索、空态及设备状态栏；端口返回仅属于该视图实例的释放器。旧释放器不能移除新导航。设备运行时不访问 DOM 或 `loadPresentation`，边界脚本单独禁止其退回通用 UI 模块加载器和旧 DOM 适配器。通用加载遮罩保留 `gimOpenCore` 公开入口，内部只转发加载展示端口；DOM、进度格式和计时器均属于 UI。
 
 `AppState` 只持有会话、请求和已发布结果；工程实体、导航、几何目录的构建由服务层启动，UI 通过订阅/回调刷新。工程切换后，旧 Worker、旧请求和旧投影必须释放或拒绝提交。
 

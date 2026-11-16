@@ -7,7 +7,7 @@ describe('session ownership and background requests',()=>{
   it.each(['activate','reset','invalidate'])('%s releases runtimes even when another disposer throws',entry=>{
     const state=new AppState(),release=vi.fn(),session=state.captureProjectSession();
     state.deviceLodRuntime={release,clearSelection:vi.fn(),select:vi.fn(),diagnostics:{}};
-    const failure=Error('broken disposer');state.engineeringCleanup=()=>{throw failure;};
+    const failure=Error('broken disposer');state.engineering.cleanup=()=>{throw failure;};
     const log=vi.spyOn(console,'error').mockImplementation(()=>{});
     if(entry==='activate')state.activateProject(1,'b');else if(entry==='reset')state.resetGimState();else state.invalidatePendingLoads();
     expect(release).toHaveBeenCalledTimes(1);expect(state.deviceLodRuntime).toBeNull();expect(state.isCurrentSession(session)).toBe(false);

@@ -19,20 +19,32 @@ export function setupSelection(
   onSelectionCleared: (request: SelectionRequest) => void = () => {},
   onRegionalSelected?: (runtime:IfcRegionalRuntime,object:RegionalObject,request:SelectionRequest)=>void | boolean | Promise<boolean | void>,
   onDevSelected?: (rootOccurrence:string,instanceKey:string,request:SelectionRequest,hint?:import('../engineering/representations.js').DevRepresentationHint)=>void,
-): void {
+): () => void {
+  const abort = new AbortController();
+  const signal = abort.signal;
   let pointer: {id: number; x: number; y: number; moved: boolean} | null = null;
   let suppressClick = false, pickSerial = 0;
   let hoverSerial = 0, hoverTimer: ReturnType<typeof setTimeout> | undefined, hoverBusy = false;
   let hoverPoint: {x: number; y: number} | null = null;
-  state.hoverCleanup = () => { hoverSerial++; hoverPoint = null; clearTimeout(hoverTimer); clearHoverOutline(state); };
+  const clearHover = () => { hoverSerial++; hoverPoint = null; clearTimeout(hoverTimer); clearHoverOutline(state); };
+  state.hoverCleanup = clearHover;
   const cameraIntent = () => { state.cameraNavigationVersion++; state.viewerUserInteracted = true; state.hasFittedCamera = true; pickSerial++; state.hoverCleanup?.(); };
+  const dispose = () => {
+    if(signal.aborted)return;
+    abort.abort();pointer=null;pickSerial++;
+    clearHover();
+    if(state.hoverCleanup===clearHover)state.hoverCleanup=null;
+    (ctx.world.camera.controls as any)?.removeEventListener?.('controlstart', cameraIntent);
+  };
+
+  try {
   (ctx.world.camera.controls as any)?.addEventListener?.('controlstart', cameraIntent);
-  container.addEventListener('wheel', cameraIntent, { passive: true });
+  container.addEventListener('wheel', cameraIntent, { passive: true, signal });
   const runHover = async () => {
     if (hoverBusy || pointer || !hoverPoint || !state.initialized) return;
     hoverBusy = true;
     const serial = hoverSerial, point = hoverPoint, session = state.captureProjectSession(), selection = state.selectionRequest;
-    const current = () => serial === hoverSerial && state.isCurrentSession(session) && state.selectionRequest === selection;
+    const current = () => !signal.aborted && serial === hoverSerial && state.isCurrentSession(session) && state.selectionRequest === selection;
     try {
       const canvas = container.querySelector('canvas'), dom = canvas ?? container, rect = dom.getBoundingClientRect();
       if (!rect.width || !rect.height) return;
@@ -54,28 +66,28 @@ export function setupSelection(
         else await showFragmentHover(ctx,state,far.fragments.modelId,far.localId,current);
       } else clearHoverOutline(state);
     } catch (error) { if (current()) { clearHoverOutline(state); console.warn('[Hover]',error); } }
-    finally { hoverBusy=false;if(hoverPoint && hoverSerial!==serial)hoverTimer=setTimeout(runHover,100); }
+    finally { hoverBusy=false;if(!signal.aborted && hoverPoint && hoverSerial!==serial)hoverTimer=setTimeout(runHover,100); }
   };
   container.addEventListener('pointermove', event => {
     if (!canvasTarget(event.target) || pointer || event.buttons) return;
     hoverPoint={x:event.clientX,y:event.clientY};hoverSerial++;clearTimeout(hoverTimer);hoverTimer=setTimeout(runHover,100);
-  });
-  container.addEventListener('pointerleave', () => state.hoverCleanup?.());
+  }, {signal});
+  container.addEventListener('pointerleave', () => state.hoverCleanup?.(), {signal});
   const canvasTarget = (target: EventTarget | null) => target === container || target === container.querySelector('canvas');
   container.addEventListener('pointerdown', event => {
     if (!canvasTarget(event.target)) { suppressClick = true; return; }
     cameraIntent();
     suppressClick = event.button !== 0 || event.ctrlKey || event.shiftKey || event.altKey || event.isPrimary === false;
     pointer = {id: event.pointerId, x: event.clientX, y: event.clientY, moved: suppressClick};
-  });
+  }, {signal});
   window.addEventListener('pointermove', event => {
     if (pointer && event.pointerId === pointer.id && Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 5) pointer.moved = true;
-  });
+  }, {signal});
   window.addEventListener('pointerup', event => {
     if (pointer && event.pointerId === pointer.id) { suppressClick = pointer.moved || Math.hypot(event.clientX-pointer.x,event.clientY-pointer.y)>5; pointer = null; }
     if (canvasTarget(event.target) && !event.buttons) { hoverPoint={x:event.clientX,y:event.clientY};hoverSerial++;clearTimeout(hoverTimer);hoverTimer=setTimeout(runHover,100); }
-  });
-  window.addEventListener('pointercancel', () => { pointer = null; suppressClick = true; });
+  }, {signal});
+  window.addEventListener('pointercancel', () => { pointer = null; suppressClick = true; }, {signal});
   container.addEventListener('click', async (e: MouseEvent) => {
     if (!state.initialized || e.button !== 0 || suppressClick || e.ctrlKey || e.shiftKey || e.altKey) return;
     const canvas=container.querySelector('canvas');
@@ -96,13 +108,14 @@ export function setupSelection(
         dom:canvas as HTMLCanvasElement || container,
       });
       const result=await picking;
-      if (serial !== pickSerial || !state.isCurrentSession(session) || state.selectionRequest !== previous) return;
+      if (signal.aborted || serial !== pickSerial || !state.isCurrentSession(session) || state.selectionRequest !== previous) return;
       const near=regional[0];
       // A miss during isolation preserves the logical selection and its filter.
       // Camera gestures never start a request or clear a fine representation.
       if (!result && !near && !devHit && state.onlySelected) return;
       const request=state.beginSelection({kind:'ifc-element',key:''}, 'viewport');
-      const guard=state.selectionGuard(request);
+      const owner=state.selectionGuard(request);
+      const guard={...owner,isCurrent:()=>!signal.aborted&&owner.isCurrent(),isSessionCurrent:()=>!signal.aborted&&owner.isSessionCurrent()};
       const ifcDistance=result ? (result.rayDistance??result.distance??Infinity) : Infinity;
       if(onDevSelected && devHit && devHit.distance<Math.min(near?.distance??Infinity,ifcDistance)) {
         request.target={kind:'cbm',key:devHit.rootOccurrence};
@@ -133,5 +146,7 @@ export function setupSelection(
         if (guard.isSessionCurrent()) state.highlightedItems=items as any;
       });
     } catch (error) { console.warn('射线拾取失败:',error); }
-  });
+  }, {signal});
+  return dispose;
+  } catch(error) {dispose();throw error;}
 }

@@ -10,7 +10,7 @@ import { downloadEngineeringTree, copyEngineeringTree } from './engineeringTreeE
 interface Navigation {
   generation: number;
   data: EngineeringNavigationData | null;
-  mode: AppState['engineeringNavMode'];
+  mode: AppState['viewState']['mode'];
   bar: HTMLElement;
   quality: HTMLElement;
   outline?: OutlineElement;
@@ -23,16 +23,16 @@ const navigations = new WeakMap<AppState, Navigation>();
 function rowKey(state: AppState, data: EngineeringNavigationData): string {
   const target = state.selectionRequest?.target;
   if (!target) return '';
-  if(state.engineeringNavMode==='inventory'){
+  if(state.viewState.mode==='inventory'){
     if(target.kind==='engineering-group')return data.inventory?.nodes.has(target.key)?target.key:'';
     if(target.kind==='engineering-source')return data.inventory?.rowsBySource.get(target.key)??'';
     return target.kind==='engineering'?data.inventory?.rowsByEntity.get(target.key)?.[0]??'':'';
   }
-  if (state.engineeringNavMode === 'composition') {
+  if (state.viewState.mode === 'composition') {
     if (target.kind === 'engineering-group') return data.composition.nodes.has(target.key) ? target.key : '';
     if(target.kind==='engineering-source')for(const node of data.composition.nodes.values())if(node.sourceId===target.key)return node.key;
     const owner = target.kind === 'engineering' ? target.key
-      : state.engineeringSnapshot?.memberships.find(m => m.sourceId === target.key)?.ownerId;
+      : state.engineering.snapshot?.memberships.find(m => m.sourceId === target.key)?.ownerId;
     return owner ? data.composition.rowsByEntity.get(owner)?.[0] ?? '' : '';
   }
   if (target.kind === 'engineering-source') {
@@ -49,20 +49,20 @@ function rowKey(state: AppState, data: EngineeringNavigationData): string {
     }
   }
   if (target.kind === 'engineering') {
-    const source = state.engineeringSnapshot?.memberships.find(m => m.ownerId === target.key);
+    const source = state.engineering.snapshot?.memberships.find(m => m.ownerId === target.key);
     return source ? data.sourceRows.get(source.sourceId) ?? '' : '';
   }
   return '';
 }
 
 function qualityText(state: AppState): string {
-  if(state.engineeringTreeStatus==='loading')return '模型树加载中…';
-  if(state.engineeringTreeStatus==='error')return '模型树加载未完成';
-  const snapshot = state.engineeringSnapshot;
-  if (!snapshot) return state.engineeringStatus === 'error' ? '工程来源未能建立' : '正在建立工程来源…';
+  if(state.engineering.treeStatus==='loading')return '模型树加载中…';
+  if(state.engineering.treeStatus==='error')return '模型树加载未完成';
+  const snapshot = state.engineering.snapshot;
+  if (!snapshot) return state.engineering.status === 'error' ? '工程来源未能建立' : '正在建立工程来源…';
   return `整体候选 ${snapshot.entities.length.toLocaleString()} · 待归集合 ${snapshot.pending.length.toLocaleString()}`
-    + (state.engineeringNavigation?.compositionCoverage === 'partial' ? ' · 部分 IFC 范围不可用' : '')
-    + (state.engineeringStatus === 'partial' ? ' · 来源未完成' : state.engineeringStatus === 'error' ? ' · 来源未完成' : '');
+    + (state.engineering.navigation?.compositionCoverage === 'partial' ? ' · 部分 IFC 范围不可用' : '')
+    + (state.engineering.status === 'partial' ? ' · 来源未完成' : state.engineering.status === 'error' ? ' · 来源未完成' : '');
 }
 
 function qualityDetail(state: AppState): string {
@@ -73,7 +73,7 @@ function qualityDetail(state: AppState): string {
     'source-graph-incomplete': '部分来源引用存在缺失或循环',
     'source-reference-unresolved': '部分来源文件引用未能解析',
   };
-  return [state.engineeringError, ...(state.engineeringSources?.incompleteReasons ?? []).map(reason => labels[reason] ?? '部分来源尚未确认完整')]
+  return [state.engineering.error, ...(state.engineering.sources?.incompleteReasons ?? []).map(reason => labels[reason] ?? '部分来源尚未确认完整')]
     .filter(Boolean).join('；');
 }
 
@@ -88,8 +88,8 @@ export function syncEngineeringTreeSelection(state: AppState): void {
     cbmTreePanel.querySelectorAll('.tree-row.selected').forEach(row => row.classList.remove('selected'));
     return;
   }
-  const expanded = state.engineeringExpandedRows[state.engineeringNavMode];
-  const nodes = state.engineeringNavMode === 'composition' ? nav.data.composition.nodes : state.engineeringNavMode==='inventory'?nav.data.inventory!.nodes:nav.data.sourceNodes;
+  const expanded = state.viewState.expanded[state.viewState.mode];
+  const nodes = state.viewState.mode === 'composition' ? nav.data.composition.nodes : state.viewState.mode==='inventory'?nav.data.inventory!.nodes:nav.data.sourceNodes;
   let cursor = nodes.get(key)?.parent;
   const seen = new Set<string>();
   while (cursor && !seen.has(cursor)) { seen.add(cursor); expanded.add(cursor); cursor = nodes.get(cursor)?.parent; }
@@ -98,21 +98,21 @@ export function syncEngineeringTreeSelection(state: AppState): void {
 
 export function renderEngineeringTree(state: AppState): void {
   if (state.currentProjectType !== 'substation') return;
-  setEngineeringDeviceCount(state.engineeringSnapshot ? state.engineeringSnapshot.entities.filter(entity => entity.category.startsWith('E')).length : null);
+  setEngineeringDeviceCount(state.engineering.snapshot ? state.engineering.snapshot.entities.filter(entity => entity.category.startsWith('E')).length : null);
   let nav = navigations.get(state);
-  if (!nav || nav.generation !== state.projectGeneration || !state.engineeringListeners.has(nav.listener)) {
+  if (!nav || nav.generation !== state.projectGeneration || !state.engineering.listeners.has(nav.listener)) {
     state.engineeringNavigationCleanup?.();
     const listener = () => renderEngineeringTree(state);
-    nav = { generation: state.projectGeneration, data: null, mode: state.engineeringNavMode,
+    nav = { generation: state.projectGeneration, data: null, mode: state.viewState.mode,
       bar: document.createElement('div'), quality: document.createElement('span'), query: { composition: '', source: '', inventory:'' }, scroll: { composition: 0, source: 0, inventory:0 }, listener };
-    navigations.set(state, nav); state.engineeringListeners.add(listener);
+    navigations.set(state, nav); state.engineering.listeners.add(listener);
     const owned = nav;
     state.engineeringNavigationCleanup = () => {
-      state.engineeringListeners.delete(listener);
+      state.engineering.listeners.delete(listener);
       if (navigations.get(state) === owned) { navigations.delete(state); state.engineeringNavigationCleanup = null; }
     };
   }
-  const data = state.engineeringTreeStatus==='loading'||state.engineeringTreeStatus==='error'?null:getEngineeringNavigation(state), mode = state.engineeringNavMode;
+  const data = state.engineering.treeStatus==='loading'||state.engineering.treeStatus==='error'?null:getEngineeringNavigation(state), mode = state.viewState.mode;
   if (nav.data === data && nav.mode === mode && cbmTreePanel.contains(nav.bar)) {
     nav.quality.textContent = qualityText(state); nav.quality.title = qualityDetail(state);
     return;
@@ -131,7 +131,7 @@ export function renderEngineeringTree(state: AppState): void {
     const button = document.createElement('button'); button.type = 'button'; button.className = 'substation-nav-mode-btn';
     button.dataset.engineeringMode = value; button.textContent = label; button.classList.toggle('active', value === mode);
     button.setAttribute('aria-pressed', String(value === mode));
-    button.addEventListener('click', () => { state.engineeringNavMode = value; renderEngineeringTree(state); }); bar.append(button);
+    button.addEventListener('click', () => { state.viewState.mode = value; renderEngineeringTree(state); }); bar.append(button);
   }
   const quality = document.createElement('span'); quality.className = 'substation-nav-quality'; quality.textContent = qualityText(state);
   quality.title = qualityDetail(state); nav.quality = quality; bar.append(quality);
@@ -148,7 +148,7 @@ export function renderEngineeringTree(state: AppState): void {
   const host = document.createElement('div'); host.className = 'tree-view-host'; host.setAttribute('role', 'tree'); cbmTreePanel.append(bar, host);
   if (!data) {
     const empty = document.createElement('div'); empty.className = 'props-empty';
-    empty.textContent = state.engineeringError || '模型树加载中，正在准备完整工程组成…'; host.append(empty); return;
+    empty.textContent = state.engineering.error || '模型树加载中，正在准备完整工程组成…'; host.append(empty); return;
   }
   const generation = state.projectGeneration;
   const select = async (key: string) => {
@@ -183,7 +183,7 @@ export function renderEngineeringTree(state: AppState): void {
     } catch (error) { if (generation === state.projectGeneration) { state.selectionMessage = String(error); quality.textContent = '该对象暂未能打开，来源仍保留'; quality.title = String(error); } }
     if (generation === state.projectGeneration) syncEngineeringTreeSelection(state);
   };
-  const expanded = state.engineeringExpandedRows[mode];
+  const expanded = state.viewState.expanded[mode];
   const root = mode === 'composition' ? data.composition.rootKey : mode==='inventory'?data.inventory!.rootKey:data.sourceRoot;
   expanded.add(root);
   const outlineNode = (key: string): OutlineNode => {
@@ -228,8 +228,8 @@ export function renderEngineeringTree(state: AppState): void {
 }
 
 export function revealEngineeringSource(state: AppState, sourceId: string): void {
-  if(state.engineeringNavMode==='inventory'){renderEngineeringTree(state);syncEngineeringTreeSelection(state);return;}
-  state.engineeringNavMode = 'source'; renderEngineeringTree(state); syncEngineeringTreeSelection(state);
+  if(state.viewState.mode==='inventory'){renderEngineeringTree(state);syncEngineeringTreeSelection(state);return;}
+  state.viewState.mode = 'source'; renderEngineeringTree(state); syncEngineeringTreeSelection(state);
   const nav = navigations.get(state), key = nav?.data?.sourceRows.get(sourceId);
   if (key) nav?.outline?.__gimRevealOutline?.(key);
 }

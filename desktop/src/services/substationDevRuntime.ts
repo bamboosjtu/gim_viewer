@@ -1,5 +1,6 @@
+import * as statusPresentation from './presentation/shell_statusBar.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
-import { loadPresentation } from './presentationPort.js';
+
 /** DEV post-IFC LOD startup and geometry recovery. */
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
@@ -75,7 +76,7 @@ export async function autoLoadModStlPostIfc(
         state.projectSourceToViewerMatrix = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
       }
       await startDeviceLod(state, resourceCtx, session, (text, detail) => {
-        if (state.isCurrentSession(session)) void Promise.resolve(loadPresentation('shell_statusBar').then(({ setDeviceStatus }) => { if (state.isCurrentSession(session)) setDeviceStatus(text, detail); })).catch(reportBackgroundError);
+        if (state.isCurrentSession(session)) void Promise.resolve(Promise.resolve(statusPresentation).then(({ setDeviceStatus }) => { if (state.isCurrentSession(session)) setDeviceStatus(text, detail); })).catch(reportBackgroundError);
       });
       if (!state.isCurrentSession(session)) return;
       finishModStl(undefined, { path: 'device-lod-directory', onDemand: true });

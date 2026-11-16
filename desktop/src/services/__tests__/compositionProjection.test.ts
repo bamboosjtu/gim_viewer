@@ -31,8 +31,8 @@ async function fixture(){
   const graph=await extractEngineeringSourceGraph({paths:['project.cbm','建筑.ifc'],readText:async()=>''});
   const objects:IfcSpatialObject[]=['墙','楼板','柱'].map((name,i)=>({key:`m#${i+1}`,modelId:'m',expressId:i+1,ifcType:['IFCWALL','IFCSLAB','IFCCOLUMN'][i],name,globalId:`g${i}`,geometryStatus:'unrepresented',parentObjectKey:null,childObjectKeys:[],relationshipCount:0,hostObjectKey:null,spatialKey:null,spatialKeys:[],spatialContainment:null,sourcePath:'建筑.ifc'}));
   const built=buildTestEngineeringSources('p',graph,objects,[]);
-  built.sources.incompleteReasons=[];state.engineeringStatus='ready';built.sources.models=[{modelId:'m',path:'建筑.ifc'}];state.engineeringSnapshot=built.snapshot;state.engineeringSources=built.sources;
-  state.engineeringNavigation=projectEngineeringNavigation(built.sources,built.snapshot);
+  built.sources.incompleteReasons=[];state.engineering.status='ready';built.sources.models=[{modelId:'m',path:'建筑.ifc'}];state.engineering.snapshot=built.snapshot;state.engineering.sources=built.sources;
+  state.engineering.navigation=projectEngineeringNavigation(built.sources,built.snapshot);
   state.ifcRegionalRuntimes.set('m',{index:{objects:objects.map(o=>({...o,bounds:[0,0,-10,10,4,0]}))},release:vi.fn()} as never);
   vi.useFakeTimers();ProjectionWorker.instances=[];vi.stubGlobal('Worker',ProjectionWorker);
   const dispose=installCompositionProjection(state);
@@ -42,40 +42,40 @@ async function fixture(){
 afterEach(()=>{vi.useRealTimers();vi.unstubAllGlobals();vi.clearAllMocks();});
 
 it('refines only composition, preserves semantic inputs and does not accumulate search text',async()=>{
-  const f=await fixture(),snapshot=f.state.engineeringSnapshot!,before=JSON.stringify(snapshot),sources=f.state.engineeringSources,base=f.state.engineeringNavigation!;
+  const f=await fixture(),snapshot=f.state.engineering.snapshot!,before=JSON.stringify(snapshot),sources=f.state.engineering.sources,base=f.state.engineering.navigation!;
   try {
-    f.state.engineeringExpandedRows.composition.add(base.composition.rootKey);
-    f.state.engineeringExpandedRows.composition.add('obsolete-path');
+    f.state.viewState.expanded.composition.add(base.composition.rootKey);
+    f.state.viewState.expanded.composition.add('obsolete-path');
     f.run().reply();
-    const first=f.state.engineeringNavigation!;
+    const first=f.state.engineering.navigation!;
     expect(first.compositionSearch.every(r=>r.subtitle.includes('空间推断'))).toBe(true);
     expect([...first.composition.nodes.values()].some(n=>n.kind==='group'&&n.inferred)).toBe(true);
     expect(first.sourceNodes).toBe(base.sourceNodes);expect(first.inventory).toBe(base.inventory);
-    expect(f.state.engineeringExpandedRows.composition).toEqual(new Set([base.composition.rootKey]));
-    f.run().reply();expect(f.state.engineeringNavigation!.compositionSearch).toEqual(first.compositionSearch);
-    expect(f.state.engineeringSnapshot).toBe(snapshot);expect(JSON.stringify(snapshot)).toBe(before);expect(f.state.engineeringSources).toBe(sources);
-    f.state.ifcRegionalRuntimes.clear();f.run();expect(f.state.engineeringNavigation).not.toBeNull();
+    expect(f.state.viewState.expanded.composition).toEqual(new Set([base.composition.rootKey]));
+    f.run().reply();expect(f.state.engineering.navigation!.compositionSearch).toEqual(first.compositionSearch);
+    expect(f.state.engineering.snapshot).toBe(snapshot);expect(JSON.stringify(snapshot)).toBe(before);expect(f.state.engineering.sources).toBe(sources);
+    f.state.ifcRegionalRuntimes.clear();f.run();expect(f.state.engineering.navigation).not.toBeNull();
   }finally{f.dispose();}
 });
 
 it('does not rebuild a cached navigation projection on warm geometry evidence',async()=>{
   const f=await fixture();
   try {
-    f.state.engineeringNavigationCacheHit=true;f.state.engineeringNavigation!.compositionComplete=true;f.state.engineeringNavigation!.compositionCoverage='full';
+    f.state.engineering.navigationCacheHit=true;f.state.engineering.navigation!.compositionComplete=true;f.state.engineering.navigation!.compositionCoverage='full';
     f.state.engineeringGeometryEvidenceChanged?.();
     vi.advanceTimersByTime(500);
     expect(ProjectionWorker.instances).toHaveLength(0);
-    expect(f.state.engineeringNavigation).toBeTruthy();
+    expect(f.state.engineering.navigation).toBeTruthy();
   } finally { f.dispose(); }
 });
 
 it('rejects workers superseded during debounce, snapshot replacement, project switch and disposal',async()=>{
-  const f=await fixture(),base=f.state.engineeringNavigation;
-  const first=f.run();f.state.engineeringGeometryEvidenceChanged?.();first.reply();expect(f.state.engineeringNavigation).toBe(base);
+  const f=await fixture(),base=f.state.engineering.navigation;
+  const first=f.run();f.state.engineeringGeometryEvidenceChanged?.();first.reply();expect(f.state.engineering.navigation).toBe(base);
   vi.advanceTimersByTime(500);const second=ProjectionWorker.instances[ProjectionWorker.instances.length-1];
-  f.state.engineeringSnapshot={...f.state.engineeringSnapshot!};second.reply();expect(f.state.engineeringNavigation).toBe(base);
-  const third=f.run();f.state.activateProject(2,'other');third.reply();expect(f.state.engineeringNavigation).toBe(base);
-  f.dispose();third.reply();expect(f.state.engineeringNavigation).toBe(base);expect(third.terminate).toHaveBeenCalled();
+  f.state.engineering.snapshot={...f.state.engineering.snapshot!};second.reply();expect(f.state.engineering.navigation).toBe(base);
+  const third=f.run();f.state.activateProject(2,'other');third.reply();expect(f.state.engineering.navigation).toBe(base);
+  f.dispose();third.reply();expect(f.state.engineering.navigation).toBe(base);expect(third.terminate).toHaveBeenCalled();
 });
 
 it('clears a vanished group range and rebinds an existing entity without fitting or refinement',async()=>{
@@ -83,57 +83,57 @@ it('clears a vanished group range and rebinds an existing entity without fitting
   try {
     const request=f.state.beginSelection({kind:'engineering-group',key:'vanished'});
     f.state.onlySelected=true;
-    f.state.engineeringSelection={requestId:request.id,snapshot:f.state.engineeringSnapshot!,ownerIds:new Set(),sourceIds:new Set(['s']),devRoots:new Set(['root']),ifc:[]};
+    f.state.engineeringSelection={requestId:request.id,snapshot:f.state.engineering.snapshot!,ownerIds:new Set(),sourceIds:new Set(['s']),devRoots:new Set(['root']),ifc:[]};
     f.state.representationSelection={requestId:request.id,devRoots:new Set(['root']),ifc:[],isCurrent:()=>true};
     await reconcileProjectionSelection(f.state);
     expect(f.state.onlySelected).toBe(false);expect(f.state.engineeringSelection).toBeNull();expect(f.state.representationSelection).toBeNull();
     expect(f.state.selectionRequest?.target).toBeNull();expect(clearEngineeringHighlight).toHaveBeenCalled();
-    const entity=f.state.engineeringSnapshot!.entities[0],next=f.state.beginSelection({kind:'engineering',key:entity.id});
+    const entity=f.state.engineering.snapshot!.entities[0],next=f.state.beginSelection({kind:'engineering',key:entity.id});
     await reconcileProjectionSelection(f.state);
     expect(selectEngineeringTarget).toHaveBeenLastCalledWith(f.state,{kind:'engineering',key:entity.id},next,{fit:false,load:false});
   }finally{f.dispose();}
 });
 
 it('keeps the semantic view usable if the projection worker cannot start or returns an error',async()=>{
-  const f=await fixture(),base=f.state.engineeringNavigation,log=vi.spyOn(console,'warn').mockImplementation(()=>{});
+  const f=await fixture(),base=f.state.engineering.navigation,log=vi.spyOn(console,'warn').mockImplementation(()=>{});
   try{
-    f.run().reply();expect(f.state.engineeringNavigation).not.toBe(base);
+    f.run().reply();expect(f.state.engineering.navigation).not.toBe(base);
     const owned=f.run();owned.onmessage?.({data:{error:'projection failed'}} as MessageEvent);
-    expect(f.state.engineeringNavigation?.compositionCoverage).toBe('partial');
+    expect(f.state.engineering.navigation?.compositionCoverage).toBe('partial');
     vi.stubGlobal('Worker',class{constructor(){throw Error('worker unavailable');}});
-    expect(()=>f.run()).not.toThrow();expect(f.state.engineeringNavigation?.compositionCoverage).toBe('partial');
-    expect(f.state.engineeringSnapshot).not.toBeNull();expect(log).toHaveBeenCalledTimes(2);
+    expect(()=>f.run()).not.toThrow();expect(f.state.engineering.navigation?.compositionCoverage).toBe('partial');
+    expect(f.state.engineering.snapshot).not.toBeNull();expect(log).toHaveBeenCalledTimes(2);
   }finally{f.dispose();log.mockRestore();}
 });
 it('waits for every IFC range before publishing one complete navigation',async()=>{
  const f=await fixture();try{
-  f.state.engineeringTreeStatus='loading';f.state.engineeringSources!.models=[{modelId:'m',path:'建筑.ifc'},{modelId:'n',path:'结构.ifc'}];
-  f.run();expect(ProjectionWorker.instances).toHaveLength(0);expect(f.state.engineeringTreeStatus).toBe('loading');
+  f.state.engineering.treeStatus='loading';f.state.engineering.sources!.models=[{modelId:'m',path:'建筑.ifc'},{modelId:'n',path:'结构.ifc'}];
+  f.run();expect(ProjectionWorker.instances).toHaveLength(0);expect(f.state.engineering.treeStatus).toBe('loading');
   f.state.ifcRegionalRuntimes.set('n',{index:{objects:[]},release:vi.fn()} as never);
-  f.run().reply();expect(f.state.engineeringTreeStatus).toBe('ready');expect(f.state.engineeringNavigation!.compositionComplete).toBe(true);
+  f.run().reply();expect(f.state.engineering.treeStatus).toBe('ready');expect(f.state.engineering.navigation!.compositionComplete).toBe(true);
  }finally{f.dispose();}
 });
 it('reapplies a warm selection as geometry arrives without rebuilding the cached tree',async()=>{
  const f=await fixture();try{
-  const view=f.state.engineeringNavigation!;view.compositionComplete=true;view.compositionCoverage='full';f.state.engineeringNavigationCacheHit=true;
-  const target={kind:'engineering' as const,key:f.state.engineeringSnapshot!.entities[0].id};f.state.beginSelection(target);
-  f.run();await Promise.resolve();expect(ProjectionWorker.instances).toHaveLength(0);expect(f.state.engineeringNavigation).toBe(view);
+  const view=f.state.engineering.navigation!;view.compositionComplete=true;view.compositionCoverage='full';f.state.engineering.navigationCacheHit=true;
+  const target={kind:'engineering' as const,key:f.state.engineering.snapshot!.entities[0].id};f.state.beginSelection(target);
+  f.run();await Promise.resolve();expect(ProjectionWorker.instances).toHaveLength(0);expect(f.state.engineering.navigation).toBe(view);
   await vi.waitFor(()=>expect(selectEngineeringTarget).toHaveBeenCalledWith(f.state,target,expect.anything(),{fit:false,load:false}));
  }finally{f.dispose();}
 });
 
 it('publishes a partial tree after one IFC is skipped and keeps the source and inventory pages',async()=>{
  const f=await fixture();try{
-  f.state.engineeringTreeStatus='loading';f.state.engineeringIfcGeometryFinished=true;
-  f.state.engineeringSources!.models=[{modelId:'m',path:'建筑.ifc'},{modelId:'n',path:'skipped.ifc'}];
+  f.state.engineering.treeStatus='loading';f.state.engineering.ifcGeometryFinished=true;
+  f.state.engineering.sources!.models=[{modelId:'m',path:'建筑.ifc'},{modelId:'n',path:'skipped.ifc'}];
   const ready=vi.fn();f.dispose();
   const dispose=installCompositionProjection(f.state,ready);
   try{
    f.run().reply();
-   expect(f.state.engineeringTreeStatus).toBe('ready');
-   expect(f.state.engineeringNavigation?.compositionCoverage).toBe('partial');
-   expect(f.state.engineeringNavigation?.sourceNodes.size).toBeGreaterThan(0);
-   expect(f.state.engineeringNavigation?.inventory?.nodes.size).toBeGreaterThan(0);
+   expect(f.state.engineering.treeStatus).toBe('ready');
+   expect(f.state.engineering.navigation?.compositionCoverage).toBe('partial');
+   expect(f.state.engineering.navigation?.sourceNodes.size).toBeGreaterThan(0);
+   expect(f.state.engineering.navigation?.inventory?.nodes.size).toBeGreaterThan(0);
    expect(ready).toHaveBeenCalledWith(false);
   }finally{dispose();}
  }finally{f.dispose();}

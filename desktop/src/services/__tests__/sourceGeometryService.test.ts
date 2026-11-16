@@ -26,7 +26,7 @@ it('renders repeated actual source instances without a CBM display tree or entit
   const graph = await extractEngineeringSourceGraph({ paths: [...files.keys()], readText: p => files.get(p)!.text() });
   const state = new AppState(), session = state.activateProject(1, 'sha'); state.currentProjectType = 'substation';
   state.currentFiles = files; state.sourceGeometryCatalog = collectSourceGeometryOccurrences(graph);
-  expect(state.currentCbmTree).toBeNull(); expect(state.engineeringSnapshot).toBeNull();
+  expect(state.currentCbmTree).toBeNull(); expect(state.engineering.snapshot).toBeNull();
   const roots = await getSourceGeometryOccurrences(state, session);
   expect(roots.map(r => r.placementMatrix[12])).toEqual([1000, 5000]);
   const compile = vi.fn(async () => new Uint8Array([1]));
@@ -43,7 +43,7 @@ it('renders repeated actual source instances without a CBM display tree or entit
   expect(placed.map(g => g.userData.rootOccurrence)).toEqual(roots.map(r => r.id));
   expect(placed.map(g => new THREE.Box3().setFromObject(g).getCenter(new THREE.Vector3()).x)).toEqual([1, 5]);
 
-  const built = buildTestEngineeringSources('sha', graph, [], []); state.engineeringSources = built.sources; state.engineeringSnapshot = built.snapshot;
+  const built = buildTestEngineeringSources('sha', graph, [], []); state.engineering.sources = built.sources; state.engineering.snapshot = built.snapshot;
   const index = getEngineeringRepresentations(state)!.index;
   for (const root of roots) {
     const body = index.resolveDev(root.id, { assemblyPath: '' }), box = index.resolveDev(root.id, { assemblyPath: 'sub:2' });

@@ -1,3 +1,4 @@
+import {projectPresentation} from './projectPresentationPort.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import {hasErrorCode} from '@desktop/contracts.js';
 import { loadPresentation } from './presentationPort.js';
@@ -7,7 +8,7 @@ import type { LineParserWorkerResult } from './lineParserWorkerClient.js';
 import type { LineParserWorkerFile } from './lineParserWorker.js';
 import type { GimRuntimeOpenContext } from './gimOpenCore.js';
 import { currentPerfSession, hideLoading, showLoading } from './gimOpenCore.js';
-import { emptyTipEl } from './presentation/dom.js';
+
 import { isTauri } from '@desktop/runtime.js';
 import { DEBUG_GIM_CACHE, DEBUG_RUNTIME_LOGS } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
@@ -216,7 +217,7 @@ export async function openPowerlineProject(context: GimRuntimeOpenContext): Prom
               undefined,
               perfSession,
             );
-            emptyTipEl.style.display = 'none';
+            projectPresentation().hideEmptyState();
 
             hideLoading();
             state.lineCachePersistence = 'saved';

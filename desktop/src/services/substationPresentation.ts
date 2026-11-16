@@ -5,9 +5,9 @@ import { isSubstationViewerInteractive } from './substationLoadingState.js';
 import { setSelectionStatus } from './presentation/shell_statusBar.js';
 import type { CbmNode } from '../gim/types.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
-import { buildAndRenderCbmTree } from './presentation/cbmTreeView.js';
-import { renderFileDevPanel } from './presentation/fileDevView.js';
-import { emptyTipEl } from './presentation/dom.js';
+import {projectPresentation} from './projectPresentationPort.js';
+
+
 import { perfBegin, perfMarkProductMoment, type PerfSession } from '../utils/perfTimings.js';
 import { showLoading } from './gimOpenCore.js';
 
@@ -29,7 +29,7 @@ export function createNodeClickHandler(state: AppState, showMessage: (text: stri
     if (!state.isCurrentSession(session)) return;
     if (state.currentProjectType === 'substation') {
       const request = state.beginSelection({ kind: 'engineering-source', key: `document:${node.path}` });
-      if (!state.engineeringSources) {
+      if (!state.engineering.sources) {
         state.selectionMessage = '工程来源正在准备，完成后可定位该对象'; setSelectionStatus(state.selectionMessage);
         void Promise.resolve(import('./engineeringSelection.js').then(({ clearEngineeringHighlight }) => clearEngineeringHighlight(state, request))).catch(reportBackgroundError); return;
       }
@@ -75,7 +75,7 @@ export function setupSldGridIdInteraction(
         }
         if (state.currentProjectType === 'substation') {
           if (!state.isCurrentSelection(request)) return;
-          if (!state.engineeringSources) { state.selectionMessage = '工程来源正在准备，完成后可定位单线图对象'; setSelectionStatus(state.selectionMessage); return; }
+          if (!state.engineering.sources) { state.selectionMessage = '工程来源正在准备，完成后可定位单线图对象'; setSelectionStatus(state.selectionMessage); return; }
           if (nodes.length === 1) {
             const { selectEngineeringCbmSource } = await import('./engineeringCbmSelection.js');
             if (state.isCurrentSelection(request)) await selectEngineeringCbmSource(state, nodes[0].path, request);
@@ -130,9 +130,8 @@ export async function renderSubstationCoreUi(
   if (!state.isCurrentSession(session)) return;
   const endUi = perfBegin(label, undefined, perfSession);
   const clickHandler = createNodeClickHandler(state, showMessage);
-  buildAndRenderCbmTree(state, clickHandler);
-  renderFileDevPanel(state, clickHandler);
-  if (emptyTipEl) emptyTipEl.style.display = 'none';
+  await projectPresentation().renderNavigation(state,clickHandler,()=>state.isCurrentSession(session));
+  if(!state.isCurrentSession(session))return;
   endUi(undefined, {
     cbmNodes: collectCbmNodeCount(state.currentCbmTree),
     ifcModels: state.currentIfcEntries.length,

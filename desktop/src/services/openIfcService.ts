@@ -1,8 +1,9 @@
+import {projectPresentation} from './projectPresentationPort.js';
 import { scheduleHideLoading } from './gimOpenCore.js';
 import type { AppState } from '../app/state.js';
 import { ensureEngineReady, loadIfcBuffer } from '../viewer/ifcLoader.js';
 import { fitCameraToScene } from '../viewer/camera.js';
-import { emptyTipEl, fileInput, btnLoadLocal } from './presentation/dom.js';
+import { fileInput, btnLoadLocal } from './presentation/dom.js';
 import { isTauri } from '@desktop/runtime.js';
 import { openIfcFilePaths } from '@desktop/fileDialog.js';
 import { showLoading, hideLoading } from './gimOpenCore.js';
@@ -51,7 +52,7 @@ export async function openIfcWithDialog(
         );
       }
       if (!state.isCurrentSession(session)) return;
-      emptyTipEl.style.display = 'none';
+      projectPresentation().hideEmptyState();
       fitCameraToScene(runtime.ctx, state);
     } catch (err) {
       if (!state.isCurrentSession(session)) return;
@@ -97,7 +98,7 @@ export async function openIfcWithDialog(
           );
         }
         if (!state.isCurrentSession(session)) return;
-        emptyTipEl.style.display = 'none';
+        projectPresentation().hideEmptyState();
         fitCameraToScene(runtime.ctx, state);
       } catch (err) {
         if (!state.isCurrentSession(session)) return;

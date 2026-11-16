@@ -1,4 +1,4 @@
-import { loadPresentation } from './presentationPort.js';
+import {projectPresentation} from './projectPresentationPort.js';
 import type { AppState } from '../app/state.js';
 
 /**
@@ -20,18 +20,9 @@ function storageKey(state: AppState): string {
   return `${STORAGE_PREFIX}|${session.sourceSha256 || `project:${session.projectId ?? 'none'}`}`;
 }
 
-function findExpandedPaths(): string[] {
-  const result: string[] = [];
-  document.querySelectorAll<HTMLElement>('#cbm-tree-panel .tree-toggle.expanded').forEach((toggle) => {
-    const row = toggle.closest<HTMLElement>('.tree-row');
-    if (row?.dataset.nodePath) result.push(row.dataset.nodePath);
-  });
-  return result;
-}
-
 export function saveViewState(state: AppState): void {
   const stored: StoredViewState = {
-    expandedPaths: findExpandedPaths(),
+    expandedPaths: projectPresentation().expandedTreePaths(),
     updatedAt: Date.now(),
   };
   try { localStorage.setItem(storageKey(state), JSON.stringify(stored)); } catch { /* ignore */ }
@@ -51,7 +42,6 @@ function loadStored(state: AppState): StoredViewState | null {
 export function restoreTreeState(state: AppState): void {
   const stored = loadStored(state);
   if (!stored) return;
-  void loadPresentation('cbmTreeView').then(async ({ expandTreeToPaths }) => {
-    await expandTreeToPaths((stored.expandedPaths ?? []).slice(0, 48));
-  }).catch(() => { /* tree restore is best effort */ });
+  const session=state.captureProjectSession();
+  void projectPresentation().restoreExpandedTree((stored.expandedPaths??[]).slice(0,48),()=>state.isCurrentSession(session)).catch(() => { /* tree restore is best effort */ });
 }

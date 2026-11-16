@@ -1,3 +1,4 @@
+import {projectPresentation} from './projectPresentationPort.js';
 import {componentDefinition} from '../engineering/catalogLabels.js';
 import {setRenderVisibility} from '../viewer/demandRendering.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
@@ -65,7 +66,7 @@ function context(state: AppState): Context {
   state.engineeringGeometryFilter = root => applyGeometryFilter(state, root);
   state.engineeringRepresentationChanged = rootOccurrence => {
     const owned = contexts.get(state)!;
-    if (state.engineeringSelection && state.engineeringSelection.snapshot !== state.engineeringSnapshot && state.selectionRequest) {
+    if (state.engineeringSelection && state.engineeringSelection.snapshot !== state.engineering.snapshot && state.selectionRequest) {
       void Promise.resolve(reconcileEngineeringSelection(state, state.selectionRequest)).catch(reportBackgroundError); return;
     }
     if (rootOccurrence && !state.engineeringSelection?.devRoots.has(rootOccurrence)) return;
@@ -90,7 +91,7 @@ export function applyGeometryFilter(state: AppState, onlyRoot?: THREE.Object3D):
     for (const [root, baseline] of owned.rootBaseline) setRenderVisibility(root,baseline);
     owned.meshBaseline.clear(); owned.rootBaseline.clear(); return;
   }
-  const current = selection?.snapshot === state.engineeringSnapshot && !!representation;
+  const current = selection?.snapshot === state.engineering.snapshot && !!representation;
   for (const root of onlyRoot ? [onlyRoot] : roots(state)) {
     const occurrence = root.userData.rootOccurrence;
     if (!state.deviceLodRuntime) {
@@ -107,7 +108,7 @@ export function applyGeometryFilter(state: AppState, onlyRoot?: THREE.Object3D):
 
 function makeScope(state: AppState, request: SelectionRequest, ownerIds: Set<string>, sourceIds: Set<string>): EngineeringSelectionScope | null {
   const representations = getEngineeringRepresentations(state);
-  if (!representations || !state.engineeringSnapshot) return null;
+  if (!representations || !state.engineering.snapshot) return null;
   const byGuid = representations.ifcGuidCounts;
   const ifc: EngineeringSelectionScope['ifc'] = [];
   for (const id of sourceIds) {
@@ -115,15 +116,15 @@ function makeScope(state: AppState, request: SelectionRequest, ownerIds: Set<str
     if (binding?.kind === 'ifc' && !binding.nonphysical) ifc.push({ modelId: binding.modelId, expressId: binding.expressId,
       globalId: byGuid.get(JSON.stringify([binding.modelId, binding.globalId])) === 1 ? binding.globalId : '' });
   }
-  return { requestId: request.id, snapshot: state.engineeringSnapshot, ownerIds, sourceIds,
+  return { requestId: request.id, snapshot: state.engineering.snapshot, ownerIds, sourceIds,
     devRoots: representations.index.rootsForSources(sourceIds), ifc };
 }
 
 export async function updateEngineeringHighlight(state: AppState, request: SelectionRequest, fit = true, whole = false, automatic = false): Promise<void> {
   const baseGuard = state.selectionGuard(request), scope = state.engineeringSelection;
-  const guard = { ...baseGuard, isCurrent: () => baseGuard.isCurrent() && state.engineeringSelection === scope && state.engineeringSnapshot === scope?.snapshot };
+  const guard = { ...baseGuard, isCurrent: () => baseGuard.isCurrent() && state.engineeringSelection === scope && state.engineering.snapshot === scope?.snapshot };
   const representations = getEngineeringRepresentations(state);
-  if (!guard.isCurrent() || !scope || scope.requestId !== request.id || scope.snapshot !== state.engineeringSnapshot || !representations || !state.initialized) return;
+  if (!guard.isCurrent() || !scope || scope.requestId !== request.id || scope.snapshot !== state.engineering.snapshot || !representations || !state.initialized) return;
   const [{ getViewerRuntimeWithUI }, graphics, highlight, { frameBox }] = await Promise.all([
     import('./viewerUIBinding.js'), import('three'), import('../viewer/highlight.js'), import('../viewer/camera.js')]);
   if (!guard.isCurrent()) return;
@@ -178,7 +179,7 @@ export async function updateEngineeringHighlight(state: AppState, request: Selec
   state.selectionGeometry = { status: ambiguousMeshes || missingBindings || rangeOutlined&&!available ? 'partial' : available ? 'available' : 'not-loaded',
     detail: ambiguousMeshes ? '部分粗表示包含多个整体，范围尚未分离。' : missingBindings ? '部分来源尚未映射到可选表示。' : available ? '按工程整体的来源成员选择可用表示。' : '当前来源尚无可用表示；来源与整体仍可查看。' };
   if(rangeOutlined&&!available)state.selectionGeometry.detail='已标出所选来源的空间范围，构件表示尚在恢复。';
-  const note = document.querySelector<HTMLElement>('[data-engineering-geometry-note]'); if (note) note.textContent = state.selectionGeometry.detail;
+  projectPresentation().geometryFeedback(state.selectionGeometry.detail);
   state.selectionGeometry.evidence=representationEvidenceState(scope.devRoots.size||scope.ifc.length?'physical':'unknown',state.selectionGeometry.status==='available'?'available':state.selectionGeometry.status==='partial'?'partial':'not_requested',representations.index.resolveSources([...scope.sourceIds]));
   if (fit && (!automatic || state.canAutoLocate(request))) {
     const box = new graphics.Box3();
@@ -189,8 +190,7 @@ export async function updateEngineeringHighlight(state: AppState, request: Selec
       if (sorted[0] > 30 && sorted[0] > 10 * Math.max(sorted[1], .01)) {
         const axis = widths.indexOf(sorted[0]), centre = box.getCenter(new graphics.Vector3()).getComponent(axis);
         box.min.setComponent(axis, Math.max(box.min.getComponent(axis), centre - 6)); box.max.setComponent(axis, Math.min(box.max.getComponent(axis), centre + 6));
-        const button = document.getElementById('engineering-fit'); if (button) button.textContent = '定位整件';
-        if (note) note.textContent += ' 长构件当前显示中心局部，可定位整件。';
+        projectPresentation().geometryFeedback(state.selectionGeometry.detail+' 长构件当前显示中心局部，可定位整件。',true);
       }
     }
     if (!box.isEmpty() && guard.isCurrent()) await frameBox(ctx, box, guard);
@@ -202,12 +202,12 @@ export async function updateEngineeringHighlight(state: AppState, request: Selec
  */
 export async function selectEngineeringTarget(state: AppState, target: { kind: 'engineering' | 'engineering-source' | 'engineering-group'; key: string },
   existing?: SelectionRequest, options: { fit?: boolean; load?: boolean } = {}): Promise<boolean> {
-  const snapshot = state.engineeringSnapshot, sources = state.engineeringSources;
+  const snapshot = state.engineering.snapshot, sources = state.engineering.sources;
   const representations = getEngineeringRepresentations(state);
   if (!snapshot || !sources || !representations) return false;
   const entity = snapshot.entities.find(entity => entity.id === target.key), pending = snapshot.pending.find(p => p.id === target.key);
   const single = engineeringSourceRecord(state, target.key);
-  const groupNodes=state.engineeringNavigation?.inventory?.nodes.has(target.key)?state.engineeringNavigation.inventory.nodes:state.engineeringNavigation?.composition.nodes;
+  const groupNodes=state.engineering.navigation?.inventory?.nodes.has(target.key)?state.engineering.navigation.inventory.nodes:state.engineering.navigation?.composition.nodes;
   const groupNode = target.kind === 'engineering-group' ? groupNodes?.get(target.key) : undefined;
   if (target.kind === 'engineering' ? !entity && !pending : target.kind === 'engineering-source' ? !single : !groupNode || !['group', 'project', 'template'].includes(groupNode.kind)) return false;
   const unbound = !!groupNode && 'unbound' in groupNode && groupNode.unbound === true;
@@ -219,7 +219,7 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
     state.selectionMessage = '该分组来自来源声明，尚未绑定工程整体，暂不可选择空间范围。';
   }
   const request = existing ?? state.beginSelection(target), baseGuard = state.selectionGuard(request);
-  const guard = { ...baseGuard, isCurrent: () => baseGuard.isCurrent() && state.engineeringSnapshot === snapshot };
+  const guard = { ...baseGuard, isCurrent: () => baseGuard.isCurrent() && state.engineering.snapshot === snapshot };
   if (!guard.isCurrent()) return true;
   request.target = target;
   const ownerIds = new Set(target.kind === 'engineering' ? [target.key] : []);
@@ -232,7 +232,7 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
   state.engineeringSelection = scope;
   state.representationSelection = {
     requestId: request.id, devRoots: scope.devRoots, ifc: scope.ifc,
-    isCurrent: () => state.isCurrentSelection(request) && state.engineeringSelection === scope && state.engineeringSnapshot === snapshot,
+    isCurrent: () => state.isCurrentSelection(request) && state.engineeringSelection === scope && state.engineering.snapshot === snapshot,
   };
   context(state);
   // A declaration without members has no isolation range. Leave a previous
@@ -262,7 +262,7 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
     onSource: sourceId => { if (guard.isCurrent()) void Promise.resolve(selectEngineeringTarget(state, { kind: 'engineering-source', key: sourceId })).catch(reportBackgroundError); },
     onOwner: single && representations.index.ownerBySource.get(single.id) ? () => {
       if (!guard.isCurrent()) return;
-      state.engineeringNavMode = state.engineeringNavMode==='inventory'?'inventory':'composition'; tree.renderEngineeringTree(state);
+      state.viewState.mode = state.viewState.mode==='inventory'?'inventory':'composition'; tree.renderEngineeringTree(state);
       void Promise.resolve(selectEngineeringTarget(state, { kind: 'engineering', key: representations.index.ownerBySource.get(single.id)! })).catch(reportBackgroundError);
     } : undefined,
     onDocument: path => {
@@ -324,7 +324,7 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
 }
 
 async function refineEngineeringRange(state: AppState, request: SelectionRequest, scope: EngineeringSelectionScope, progress: (message: string) => void): Promise<void> {
-  const current = () => state.isCurrentSelection(request) && state.engineeringSelection === scope && state.engineeringSnapshot === scope.snapshot;
+  const current = () => state.isCurrentSelection(request) && state.engineeringSelection === scope && state.engineering.snapshot === scope.snapshot;
   let count = 0; const total = scope.devRoots.size + scope.ifc.length;
   const indexed = new Map([...state.ifcRegionalRuntimes].map(([id, runtime]) => [id, new Map(runtime.index.objects.map(object => [object.expressId, object]))]));
   for (const root of scope.devRoots) {
@@ -346,12 +346,12 @@ async function refineEngineeringRange(state: AppState, request: SelectionRequest
  * a new snapshot; ambiguous changes require an explicit choice.
  */
 export async function reconcileEngineeringSelection(state: AppState, request: SelectionRequest): Promise<void> {
-  const previous = state.engineeringSelection, snapshot = state.engineeringSnapshot, target = request.target;
+  const previous = state.engineeringSelection, snapshot = state.engineering.snapshot, target = request.target;
   if (!state.isCurrentSelection(request) || !previous || !snapshot || previous.snapshot === snapshot || !target) return;
   const ownerIds = new Set([...snapshot.entities, ...snapshot.pending].map(entity => entity.id));
   const validTarget = target.kind === 'engineering' ? ownerIds.has(target.key)
     : target.kind === 'engineering-source' ? snapshot.memberships.some(member => member.sourceId === target.key)
-      : target.kind === 'engineering-group' && (state.engineeringNavigation?.composition.nodes.has(target.key) || state.engineeringNavigation?.inventory?.nodes.has(target.key));
+      : target.kind === 'engineering-group' && (state.engineering.navigation?.composition.nodes.has(target.key) || state.engineering.navigation?.inventory?.nodes.has(target.key));
   if (validTarget && (target.kind === 'engineering' || target.kind === 'engineering-source' || target.kind === 'engineering-group')) {
     await selectEngineeringTarget(state, { kind: target.kind, key: target.key }, request, { fit: false, load: false }); return;
   }
@@ -362,7 +362,7 @@ export async function reconcileEngineeringSelection(state: AppState, request: Se
     await selectEngineeringTarget(state, { kind: 'engineering', key: [...candidates][0] }, request, { fit: false, load: false }); return;
   }
   state.engineeringSelection = null; state.representationSelection = null; applyGeometryFilter(state); state.deviceLodRuntime?.clearSelection();
-  const baseGuard = state.selectionGuard(request), guard = { ...baseGuard, isCurrent: () => baseGuard.isCurrent() && state.engineeringSnapshot === snapshot };
+  const baseGuard = state.selectionGuard(request), guard = { ...baseGuard, isCurrent: () => baseGuard.isCurrent() && state.engineering.snapshot === snapshot };
   if (state.initialized) {
     const [{ getViewerRuntimeWithUI }, { commitSelectionHighlight }] = await Promise.all([import('./viewerUIBinding.js'), import('../viewer/highlight.js')]);
     if (!guard.isCurrent()) return;
@@ -372,13 +372,9 @@ export async function reconcileEngineeringSelection(state: AppState, request: Se
   if (!guard.isCurrent()) return;
   state.setOnlySelected(state.onlySelected);
   state.selectionGeometry = { status: 'not-loaded', detail: '来源更新后，原选择的整体边界需要重新确认。' };
-  const [{ renderInspectorTabs, sectionHtml, openPropsDrawerUI }, { escHtml }] = await Promise.all([loadPresentation('propsDrawer'), import('../shared/html.js')]);
-  if (!guard.isCurrent()) return;
-  const choices = [...candidates], names = new Map(snapshot.entities.map(entity => [entity.id, entity.name]));
-  openPropsDrawerUI(); renderInspectorTabs('<div class="props-header">选择范围待确认</div>', {
-    overview: sectionHtml('范围变化', [['状态', state.selectionGeometry.detail]]) + choices.map((id, index) => `<button class="prop-ref-link" data-engineering-choice="${index}">${escHtml(names.get(id) ?? '待归整体集合')}</button>`).join(''), params: '', relations: '', source: '',
-  });
-  document.querySelectorAll<HTMLElement>('[data-engineering-choice]').forEach(button => button.addEventListener('click', () => {
-    if (guard.isCurrent()) void Promise.resolve(selectEngineeringTarget(state, { kind: 'engineering', key: choices[Number(button.dataset.engineeringChoice)] })).catch(reportBackgroundError);
-  }));
+  const names = new Map(snapshot.entities.map(entity => [entity.id, entity.name]));
+  await projectPresentation().chooseEngineeringRange(state.selectionGeometry.detail,[...candidates].map(id=>({
+    label:names.get(id)??'待归整体集合',
+    choose:()=>{if(guard.isCurrent())void selectEngineeringTarget(state,{kind:'engineering',key:id}).catch(reportBackgroundError);},
+  })),guard.isCurrent);
 }

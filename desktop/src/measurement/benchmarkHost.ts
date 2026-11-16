@@ -58,7 +58,7 @@ export function installBenchmarkHost(state:AppState):void {
       moments:Object.fromEntries(Object.entries(perfProductMomentSnapshot()).map(([key,value])=>[key,value?.atMs??null])),
       cachePersistence:((moment)=>({observed:moment!==null,available:moment?.meta?.available!==false}))
         (perfProductMomentSnapshot().cachePersistenceReady),
-      engineering:{status:state.engineeringStatus,cacheStatus:state.engineeringCacheStatus,complete:state.engineeringSources?.complete??false}};},
+      engineering:{status:state.engineering.status,cacheStatus:state.engineering.cacheStatus,complete:state.engineering.sources?.complete??false}};},
     finishOperation(settledAtMs:number|null){const run=measurementRun();if(settledAtMs!==null)run.probe.trace(openMeasurementContext()??measurementContext(),{type:'milestone',action:'observed',name:'settledMs'},settledAtMs);finishMeasurementOperation();},
     async evidence(){const evidence=await benchmarkEvidence(state);return {...evidence,evidenceAtMs:performance.now()};},
     templateDiagnostics(){return (state.deviceLodRuntime as {templateDiagnostics?:()=>unknown[]}|null)?.templateDiagnostics?.()??[];},

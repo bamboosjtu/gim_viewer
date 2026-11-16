@@ -7,11 +7,11 @@ export type { EngineeringNavigationData, EngineeringSourceNode } from '../gim/en
 /** The Worker builds/restores the projections. UI access never reclassifies or
  * reconstructs a large project on the main thread. */
 export function getEngineeringNavigation(state: AppState): EngineeringNavigationData | null {
-  return state.engineeringNavigation;
+  return state.engineering.navigation;
 }
 const records = new WeakMap<object, Map<string, SourceRecord>>();
 export function engineeringSourceRecord(state: AppState, id: string): SourceRecord | undefined {
-  const sources = state.engineeringSources; if (!sources) return undefined;
+  const sources = state.engineering.sources; if (!sources) return undefined;
   let index = records.get(sources);
   if (!index) { index = new Map(engineeringSourceRecords(sources.graph,sources.ifcRecords).map(record => [record.id, record])); records.set(sources, index); }
   return index.get(id);

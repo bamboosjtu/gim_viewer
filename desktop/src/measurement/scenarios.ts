@@ -55,7 +55,7 @@ export async function projectResourceState(state:AppState,measurementResources?:
   return {sourceFiles:state.currentFiles?.size??0,cbmNodes:state.cbmNodeIndex.size,lineNodes:state.currentGimGraph?.nodesByPath.size??0,
     fragmentModels:viewer?.ctx.fragments.list.size??0,
     ifcModels:state.loadedModels.size,ifcRuntimes:state.ifcRegionalRuntimes.size,devRuntime:Number(!!state.deviceLodRuntime),
-    modGroups:state.loadedXmlModGroups.size,stlGroups:state.loadedStlGroups.size,engineeringSources:state.engineeringSnapshot?.memberships.length??0,
+    modGroups:state.loadedXmlModGroups.size,stlGroups:state.loadedStlGroups.size,engineeringSources:state.engineering.snapshot?.memberships.length??0,
     pendingTasks:measurement?.pendingTasks??snapshot?.activeTasks.length??0,trackedHostBuffers:measurement?.trackedHostBuffers??snapshot?.hostResources?.uniqueAllocations??0,
     activeWorkers:measurement?.activeWorkers??Object.values(snapshot?.workers??{}).filter(worker=>worker.state!=='terminated'&&worker.state!=='failed').length};
 }

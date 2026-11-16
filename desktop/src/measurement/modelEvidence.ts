@@ -16,29 +16,29 @@ export function benchmarkProgress(state:AppState){
     :spatialMoment===null?'pending':spatialMoment.meta?.available===false?'failed':'ready';
   const cachePersistenceStatus=state.currentProjectType!=='substation'?'not-applicable':
     moments.cachePersistenceReady?.meta?.available===false?'failed':moments.cachePersistenceReady?'ready':'not-observed';
-  const semantic=line?!!state.currentGimGraph:state.currentProjectType==='equipment'?!!state.currentCbmTree:state.engineeringStatus==='ready'||state.engineeringStatus==='partial';
+  const semantic=line?!!state.currentGimGraph:state.currentProjectType==='equipment'?!!state.currentCbmTree:state.engineering.status==='ready'||state.engineering.status==='partial';
   const semanticFailure=state.currentProjectType==='substation'&&
-    (state.engineeringStatus==='error'||['engineering-build-failed','engineering-progress-stalled'].includes(state.engineeringFailureCode??''));
+    (state.engineering.status==='error'||['engineering-build-failed','engineering-progress-stalled'].includes(state.engineering.failureCode??''));
   const backgroundSettled=backgroundStatus!=='pending'&&(state.currentProjectType!=='substation'||semantic);
-  const engineeringTreeSettled=state.currentProjectType!=='substation'||['ready','error'].includes(state.engineeringTreeStatus);
+  const engineeringTreeSettled=state.currentProjectType!=='substation'||['ready','error'].includes(state.engineering.treeStatus);
   const baseSettled=dev?dev.baseRepresentationsSettled===true:!state.ifcBackgroundPending&&state.loadedModels.size===state.currentIfcEntries.length;
-  const engineeringBuildPending=state.currentProjectType==='substation'&&state.engineeringBuildPending;
-  return {semantic,semanticFailure,semanticStatus:state.engineeringStatus,engineeringBuildPending,
+  const engineeringBuildPending=state.currentProjectType==='substation'&&state.engineering.buildPending;
+  return {semantic,semanticFailure,semanticStatus:state.engineering.status,engineeringBuildPending,
     automaticTimingPolicy:'semantic-base-without-cache-v1',
     geometryTimingPolicy:'in-viewport-model-draw-submitted-v1',
     engineeringTreeSettled,
-    engineeringProgress:state.engineeringProgress?{...state.engineeringProgress}:null,engineeringFailureCode:state.engineeringFailureCode,
+    engineeringProgress:state.engineering.progress?{...state.engineering.progress}:null,engineeringFailureCode:state.engineering.failureCode,
     automaticSettled:semantic&&!engineeringBuildPending&&!state.ifcBackgroundPending&&(line||baseSettled)&&n(dev?.pending)===0&&n(dev?.viewPendingOccurrences)===0,
     backgroundSettled:backgroundSettled&&!engineeringBuildPending&&engineeringTreeSettled,backgroundStatus,cachePersistenceStatus,
-    cacheSettled:(state.currentProjectType!=='substation'||semantic)&&!engineeringBuildPending&&!state.sourceGeometryCachePending&&(!dev||dev.cacheWritesSettled===true)&&!['loading','saving'].includes(state.engineeringCacheStatus)&&ifcPublication.settled>=state.currentIfcEntries.length
+    cacheSettled:(state.currentProjectType!=='substation'||semantic)&&!engineeringBuildPending&&!state.sourceGeometryCachePending&&(!dev||dev.cacheWritesSettled===true)&&!['loading','saving'].includes(state.engineering.cacheStatus)&&ifcPublication.settled>=state.currentIfcEntries.length
       &&(!line||linePersistence==='saved'||linePersistence==='failed'||linePersistence==='not-applicable'),
     workload:{cbmNodes:state.cbmNodeIndex.size,lineNodes:state.currentGimGraph?.nodesByPath.size??0,
-      sources:state.engineeringSnapshot?.memberships.length??0,entities:state.engineeringSnapshot?.entities.length??0,
+      sources:state.engineering.snapshot?.memberships.length??0,entities:state.engineering.snapshot?.entities.length??0,
       ifcSources:state.currentIfcEntries.length,loadedIfcSources:state.loadedModels.size,
       connectionObjects:n(state.substationConnectionPreview?.diagnostics?.objects),
       occurrences:n(dev?.occurrences),devSources:n(dev?.uniqueDevSources),shown:n(dev?.shown),failed:n(dev?.failedOccurrences),empty:n(dev?.emptyOccurrences),partial:n(dev?.partialOccurrences),unsupported:n(dev?.unsupportedOccurrences),
       pending:n(dev?.pending),sourcePlacementWarnings:n(dev?.sourcePlacementWarnings)},
-    cache:{engineering:state.engineeringCacheStatus,linePersistence,devCatalogHits:n(dev?.catalogHits),devLodHits:Array.isArray(dev?.lodHits)?[...dev.lodHits]:[],devLodMisses:Array.isArray(dev?.lodMisses)?[...dev.lodMisses]:[],
+    cache:{engineering:state.engineering.cacheStatus,linePersistence,devCatalogHits:n(dev?.catalogHits),devLodHits:Array.isArray(dev?.lodHits)?[...dev.lodHits]:[],devLodMisses:Array.isArray(dev?.lodMisses)?[...dev.lodMisses]:[],
       writePending:n(dev?.cacheWritePendingCount)+(state.sourceGeometryCachePending?1:0),writeFailures:n(dev?.artifactWriteFailures)+n(dev?.catalogWriteFailures)+ifcPublication.failed+(linePersistence==='failed'?1:0)+(state.sourceGeometryCacheError?1:0),readFailures:n(dev?.cacheReadErrorCount)},
   };
 }
@@ -71,8 +71,8 @@ async function geometryEvidence(state:AppState){
     fingerprintKind:'structural-counts-bounds-transforms',quantizationMetres:1e-6};
 }
 export async function benchmarkEvidence(state:AppState){
-  const session=state.captureProjectSession(),snapshot=state.engineeringSnapshot,progress=benchmarkProgress(state);
-  const sources=state.engineeringSources;
+  const session=state.captureProjectSession(),snapshot=state.engineering.snapshot,progress=benchmarkProgress(state);
+  const sources=state.engineering.sources;
   const referenceStatuses:Record<string,number>={};
   for(const reference of sources?.graph.references??[])referenceStatuses[reference.status]=(referenceStatuses[reference.status]??0)+1;
   const canonicalIfc=(path:string)=>path.replace(/\\/g,'/').toLowerCase();

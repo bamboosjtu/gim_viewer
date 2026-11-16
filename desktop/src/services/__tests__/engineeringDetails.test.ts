@@ -17,7 +17,7 @@ async function select(owner:boolean){
   const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async p=>raw[p]});
   const built=buildTestEngineeringSources('scope',graph,[],[]),state=new AppState();state.activateProject(1,'scope');state.currentProjectType='substation';
   if(!owner){built.snapshot.entities=[];built.snapshot.pending=[];built.snapshot.memberships=built.snapshot.memberships.map(m=>({...m,ownerId:null,disposition:'source_only'}));}
-  state.engineeringSources=built.sources;state.engineeringSnapshot=built.snapshot;state.engineeringNavigation=projectEngineeringNavigation(built.sources,built.snapshot);
+  state.engineering.sources=built.sources;state.engineering.snapshot=built.snapshot;state.engineering.navigation=projectEngineeringNavigation(built.sources,built.snapshot);
   const {configurePresentation}=await import('../../app/presentationBindings.js');configurePresentation();
   const {selectEngineeringTarget}=await import('../engineeringSelection.js');
   await selectEngineeringTarget(state,{kind:'engineering-source',key:graph.records[0].id});
@@ -42,7 +42,7 @@ it('does not submit a DEV detail query after the selection changes during ensure
   expect(evidence.query).not.toHaveBeenCalled();
 });
 it('shows readable attribute assignments and continues the same evidence revision on the next page',async()=>{
-  const state=await select(true),source=state.engineeringSources!.graph.records[0];
+  const state=await select(true),source=state.engineering.sources!.graph.records[0];
   evidence.query.mockResolvedValueOnce({revision:7,nextOffset:200,coverage:[],
     attributes:[{id:'vendor-attribute',rawKey:'vendor',rawValue:'observed-value'}],assignments:[
       {attributeId:'vendor-attribute',sourceId:source.id,status:'confirmed',candidateSourceIds:[source.id]},

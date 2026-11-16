@@ -13,8 +13,9 @@ export interface ViewerContext {
 }
 
 /** 初始化 OBC 引擎并返回上下文 */
-export function createViewerEngine(container: HTMLElement): ViewerContext {
+export async function createViewerEngine(container: HTMLElement): Promise<ViewerContext> {
   const components = new OBC.Components();
+  try {
   const worlds = components.get(OBC.Worlds);
   const world = worlds.create();
   (world as any).scene = new OBC.SimpleScene(components);
@@ -52,4 +53,8 @@ export function createViewerEngine(container: HTMLElement): ViewerContext {
   (window as any).__gimFragments = fragments;
 
   return { components, world, ifcLoader, fragments };
+  } catch (error) {
+    try {await components.dispose();} catch(cleanupError) {console.warn('[Viewer initialization cleanup]',cleanupError);}
+    throw error;
+  }
 }

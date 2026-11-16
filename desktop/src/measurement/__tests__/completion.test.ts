@@ -25,16 +25,16 @@ it('waits for line persistence and substation spatial work without changing auto
   expect(benchmarkProgress(state).backgroundSettled).toBe(false);
   perfMarkProductMoment('spatialSemanticReady',{available:true});
   expect(benchmarkProgress(state)).toMatchObject({semantic:false,backgroundSettled:false,cacheSettled:false});
-  state.engineeringStatus='ready';
-  state.engineeringTreeStatus='ready';
+  state.engineering.status='ready';
+  state.engineering.treeStatus='ready';
   expect(benchmarkProgress(state).backgroundSettled).toBe(true);
-  state.engineeringBuildPending=true;
+  state.engineering.buildPending=true;
   expect(benchmarkProgress(state)).toMatchObject({semantic:true,engineeringBuildPending:true,
     backgroundSettled:false,cacheSettled:false,automaticSettled:false});
-  state.engineeringBuildPending=false;
-  state.engineeringStatus='error';
+  state.engineering.buildPending=false;
+  state.engineering.status='error';
   expect(benchmarkProgress(state)).toMatchObject({semantic:false,semanticFailure:true,backgroundSettled:false});
-  state.engineeringStatus='partial';state.engineeringFailureCode='engineering-build-failed';
+  state.engineering.status='partial';state.engineering.failureCode='engineering-build-failed';
   expect(benchmarkProgress(state).semanticFailure).toBe(true);
   perfReset();perfMarkProductMoment('spatialSemanticReady',{available:false});
   expect(benchmarkProgress(state).backgroundStatus).toBe('failed');

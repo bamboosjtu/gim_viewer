@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import {checkPresentationSource,checkPresentationRegistry} from './presentation-boundaries.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../src');
 const measurementCoreRoot = resolve(root, '../../packages/measurement-core/src');
@@ -15,6 +16,14 @@ function* files(dir) {
   }
 }
 const failures = [];
+const presentationBudget=JSON.parse(readFileSync(new URL('./presentation-legacy-budget.json',import.meta.url),'utf8'));
+failures.push(...checkPresentationRegistry(readFileSync(resolve(root,'services/presentationPort.ts'),'utf8'),
+  new Set(Object.values(presentationBudget).flatMap(Object.keys))));
+for(const path of files(resolve(root,'services'))) {
+  const local=relative(root,path).replaceAll('\\','/');
+  if(local==='services/presentationPort.ts')continue;
+  failures.push(...checkPresentationSource(readFileSync(path,'utf8'),local,presentationBudget[local]));
+}
 // The measurement core is deliberately inlined as source until SDK packaging.
 // All desktop access goes through one facade; the core cannot import runtime layers.
 for (const path of files(measurementCoreRoot)) {
