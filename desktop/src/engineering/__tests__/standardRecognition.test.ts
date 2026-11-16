@@ -54,7 +54,7 @@ it.each(['SYSCLASSIFYNAME','PARTNAME'])('R09 confirms individually reviewed exac
     const result=interpretObject(toObjectEvidence(graph.records[0]));
     expect(result).toMatchObject({category:'E05',categoryStatus:'confirmed',equipmentType:{id:'gis',status:'confirmed'}});
     expect(result.vocabularyObservations?.[0]).toMatchObject({field,rawValue:'GIS',status:'mapped',dictionaryVersion:'source-keywords-1'});
-    expect(result.vocabularyObservations?.[0].dictionaryEvidence).toContain('C14');
+    expect(result.vocabularyObservations?.[0].dictionaryEvidence).toContain('D14');
     expect(result.classificationEvidence?.some(id=>id.includes('project.cbm'))).toBe(true);
   }
   for(const value of ['0AFD*002','GIS-unknown','&GN']){
@@ -65,7 +65,7 @@ it.each(['SYSCLASSIFYNAME','PARTNAME'])('R09 confirms individually reviewed exac
   expect(interpretObject(toObjectEvidence(record('x','OTHERS'))).vocabularyObservations).toBeUndefined();
 });
 
-it.each([['本体','body','A2'],['散热器','radiator','A10'],['Body','body','B2']])('maps exact PARTNAME=%s with field-level dictionary evidence',(value,id,cell)=>{
+it.each([['本体','body','B2'],['散热器','radiator','B10'],['Body','body','C2']])('maps exact PARTNAME=%s with field-level dictionary evidence',(value,id,cell)=>{
   const result=interpretObject(toObjectEvidence(record('x','OTHERS',{properties:[{keys:['PARTNAME'],value,path:'a.cbm',line:1}]})));
   expect(result.componentType).toMatchObject({id,status:'confirmed'});
   expect(result.vocabularyObservations?.[0]).toMatchObject({rawValue:value,status:'mapped',dictionaryVersion:'source-keywords-1'});

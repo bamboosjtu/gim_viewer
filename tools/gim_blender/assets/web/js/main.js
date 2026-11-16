@@ -902,6 +902,7 @@ function applyLook(dx,dy){
 }
 
 function setupUI() {
+  if (params.get('catalog') === '1') document.querySelector('.level-back')?.removeAttribute('hidden');
 
   document.getElementById('resume-btn').addEventListener('click', () => {
     if (runtimeFailure) { location.reload(); return; }
@@ -968,7 +969,7 @@ function setupUI() {
       return;
     }
     if (e.repeat) return;
-    if (code === 'KeyQ' && (hostBridge || document.querySelector('.level-back'))) {
+    if (code === 'KeyQ' && (hostBridge || document.querySelector('.level-back:not([hidden])'))) {
       clearInput(); releasePointerLock();
       if(hostBridge)notifyHost('gim-exit');else window.location.href = document.querySelector('.level-back').href;
       return;

@@ -11,7 +11,7 @@ const decisions=[
   {rule:'R04',lines:'TYPE=ACPorcelainCircuitBreaker',category:'E06',status:'confirmed',equipment:'ac_porcelain_circuit_breaker',component:undefined,purpose:undefined,part:false,independent:false},
   {rule:'R05',lines:'TYPE=Body',category:'',status:'unresolved',equipment:undefined,component:'body',purpose:undefined,part:true,independent:false},
   {rule:'R06',lines:'TYPE=ControlCabinet\nOBJECTROLE=内部部件',category:'',status:'unresolved',equipment:undefined,component:'control_cabinet',purpose:undefined,part:true,independent:false},
-  {rule:'R07',lines:'TYPE=ControlCabinet\nOBJECTROLE=独立',category:'E17',status:'confirmed',equipment:undefined,component:undefined,purpose:undefined,part:false,independent:true},
+  {rule:'R07',lines:'TYPE=ControlCabinet\nOBJECTROLE=独立',category:'E17',status:'confirmed',equipment:'control_cabinet',component:undefined,purpose:undefined,part:false,independent:true},
   {rule:'R08',lines:'TYPE=GIS\nEQUIPMENTTYPE=HGIS',category:'U-OBJECT',status:'unresolved',equipment:undefined,component:undefined,purpose:undefined,part:false,independent:false},
   {rule:'R09',lines:'SYSCLASSIFYNAME=GIS',category:'E05',status:'confirmed',equipment:'gis',component:undefined,purpose:undefined,part:false,independent:false},
   {rule:'R10',lines:'TYPE=Radiator',category:'',status:'unresolved',equipment:undefined,component:'radiator',purpose:undefined,part:true,independent:false},

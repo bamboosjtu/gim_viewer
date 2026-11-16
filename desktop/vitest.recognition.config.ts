@@ -7,6 +7,7 @@ export default defineConfig({test:{environment:'node',poolOptions:{forks:{minFor
   'src/engineering/__tests__/standardCatalog.test.ts',
   'src/gim/engineering/__tests__/componentVocabulary.test.ts',
   'src/gim/engineering/__tests__/sourceEvidence.test.ts',
+  'src/gim/engineering/__tests__/confirmedSemantics.test.ts',
   'src/gim/engineering/__tests__/recognitionFieldIndex.test.ts',
   'src/engineering/__tests__/standardRecognition.test.ts',
   'src/engineering/__tests__/recognition*.test.ts',

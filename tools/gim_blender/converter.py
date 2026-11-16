@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from library import Library, resources, read_json, write_json, now, remove_owned_tree
+from library import Library, resources, read_json, write_json, now, remove_owned_tree, node_runtime, demo_runtime
 
 SIG7Z = bytes.fromhex('377abcaf271c')
 
@@ -105,8 +105,6 @@ def nav_bounds(ifc, placements):
     if not all(math.isfinite(x) for x in [*lo[:2], *hi[:2]]):
         raise ValueError('未找到可用的工程空间范围')
     result = [math.floor(lo[0]-20), math.floor(lo[1]-20), math.ceil(hi[0]+20), math.ceil(hi[1]+20)]
-    if result[2]-result[0] > 400 or result[3]-result[1] > 400:
-        raise ValueError('工程范围超过当前变电站漫游导航范围 400m，请核对源坐标')
     return result
 
 def convert(home, source):
@@ -119,10 +117,13 @@ def convert(home, source):
     folder = library.project(rec['id'])
     work = folder/'work'
     try:
+        template = demo_runtime()
+        if not (template/'index.html').is_file():
+            raise FileNotFoundError('工具缺少网页资源 demo/index.html，请完整解压程序包后重试；GIM 已缓存，无需删除。')
         blender = find_blender(library.home)
         if not blender:
             raise ValueError('未找到 Blender。请安装 Blender，或将便携版放在程序旁 runtime/blender/ 下，然后重新导入。也可设置 GIM_BLENDER_EXE。')
-        node = resources()/'runtime/node.exe'
+        node = node_runtime()
         if not node.is_file():
             node = Path(shutil.which('node') or '')
         if not node.is_file():
@@ -169,16 +170,14 @@ def convert(home, source):
         if ifc['counts']['triangles'] + gim['stats']['tris'] == 0:
             raise ValueError('工程中没有可显示的几何')
         python_stage('derive_profile.py', ['--build', build, '--source', rec['sourceName'], '--slug', 'project'])
-        identity = importlib.import_module('project_identity').describe_project(folder/'source.gim', root)
-        if identity['sourceSha256'] != rec['id']:
-            raise ValueError('源文件身份发生变化')
+        identity = importlib.import_module('project_identity').describe_project(folder/'source.gim', root, source_sha256=rec['id'])
         write_json(build/'identity.json', identity)
         rec['title'] = identity['displayName']
         library.save(rec)
         progress(5, '正在生成 Blender 与 GLB')
         run([blender, '-b', '--factory-startup', '--python', resources()/'scripts/build_scene.py'], env, work)
         progress(6, '正在生成 HTML 与设备碰撞')
-        shutil.copytree(resources()/'web', work/'web', dirs_exist_ok=True)
+        shutil.copytree(template, work/'web', dirs_exist_ok=True)
         python_stage('prepare_web_assets.py')
         progress(7, '正在发布本地结果')
         result = work/'result.staging'
@@ -192,8 +191,10 @@ def convert(home, source):
                    projectInfo=identity, runtime=scene['buildVersion'])
         manifest = {'version': 1, 'sourceSha256': rec['id'], 'sourceName': rec['sourceName'],
                     'compilerDataVersion': 'gim-blender-v1', 'navBounds': bounds, 'counts': rec['counts'],
-                    'ifcFiles': list(ifc['files']), 'geometry': rec['geometry'], 'assemblyParity': gim['viewerParity'],
+                    'ifcFiles': list(ifc['files']), 'geometry': rec['geometry'],
                     'outputs': {'blender': 'project.blend', 'html': 'web/index.html', 'glb': 'project.glb'}}
+        if 'viewerParity' in gim:
+            manifest['assemblyParity'] = gim['viewerParity']
         write_json(result/'manifest.json', manifest)
         if (folder/'result').exists():
             remove_owned_tree(folder/'result')

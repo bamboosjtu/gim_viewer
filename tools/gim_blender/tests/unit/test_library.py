@@ -1,17 +1,14 @@
-import json
-import os
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import unittest
-from unittest.mock import patch, Mock
-from urllib.request import urlopen
-from urllib.error import HTTPError
+from unittest.mock import patch
 
 TOOL = Path(__file__).resolve().parents[2]
 REPO = TOOL.parent.parent
 sys.path.insert(0, str(TOOL))
-from library import Library, DemoServer, write_json
+from library import Library
 
 class CacheTests(unittest.TestCase):
     def setUp(self):
@@ -50,24 +47,6 @@ class CacheTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.library.project('../escape')
 
-    def test_http_only_serves_ready_web_and_escapes_titles(self):
-        rec, source = self.record()
-        server = DemoServer(self.library)
-        url = server.start()
-        try:
-            self.assertEqual(server.start(), url)
-            body = urlopen(url).read().decode()
-            self.assertIn('&lt;img', body)
-            self.assertNotIn('<img src=x', body)
-            self.assertEqual(urlopen(url+rec['id']+'/index.html').read(), b'test DTO')
-            self.assertIn(b'prepareStaticModel', urlopen(url+rec['id']+'/js/main.js').read(), 'cached projects use the installed runtime')
-            for route in ['data/projects/', rec['id']+'/source.gim', rec['id']+'/%2e%2e/source.gim', rec['id']+'/%5c..%5csource.gim']:
-                with self.assertRaises(HTTPError) as error:
-                    urlopen(url+route)
-                self.assertEqual(error.exception.code, 404)
-        finally:
-            server.stop()
-
     def test_three_ui_actions(self):
         import tkinter as tk
         from app import Window
@@ -78,25 +57,46 @@ class CacheTests(unittest.TestCase):
             window = Window(root, self.library.home)
             labels = [b.cget('text') for b in [window.import_button,window.delete_button,window.start_button]]
             self.assertEqual(labels, ['导入 GIM','删除所选','启动 HTML Demo'])
-            helper = Mock()
-            helper.poll.return_value = 0
-            with patch('app.subprocess.Popen', return_value=helper) as opened:
+            with patch.object(window.service,'launch') as launched, patch.object(window.service,'status',return_value={'url':'http://127.0.0.1:8768/','port':8768,'pid':123}):
                 window.start_demo()
-                command = opened.call_args.args[0]
-                self.assertIn('--open-browser', command)
-                self.assertTrue(command[command.index('--open-browser')+1].startswith('http://127.0.0.1:'))
-                write_json(window.browser_result, {'ok':True})
-                window.server.page_requested.set()
-                window.poll_browser(helper)
-                self.assertIn('已打开默认浏览器', window.message.get())
-            window.server.stop()
+                window.root.after_cancel(window.service_timer)
+                window.poll_service()
+                launched.assert_called_once_with(open_browser=True)
+                self.assertEqual(window.demo_url.get(),'http://127.0.0.1:8768/')
+                self.assertIn('8768',window.service_state.get())
             item = window.tree.get_children()[0]
             window.tree.selection_set(item)
             with patch('tkinter.messagebox.askyesno', return_value=True):
                 window.delete_file()
+            window.delete_future.result(timeout=5)
+            root.after_cancel(window.delete_timer)
+            window.poll_delete()
             self.assertFalse(window.tree.get_children())
         finally:
-            root.destroy()
+            window.close()
+
+    def test_cache_deletion_leaves_tk_event_loop_responsive(self):
+        import tkinter as tk
+        from app import Window
+        rec,_=self.record();root=tk.Tk();root.withdraw()
+        window=Window(root,self.library.home)
+        entered,release=threading.Event(),threading.Event()
+        delete=window.library.delete
+        def slow_delete(identity):
+            entered.set();release.wait(3);delete(identity)
+        try:
+            window.tree.selection_set(rec['id'])
+            with patch.object(window.library,'delete',side_effect=slow_delete),patch('tkinter.messagebox.askyesno',return_value=True):
+                window.delete_file()
+                self.assertTrue(entered.wait(1))
+                beats=[];root.after(0,lambda:beats.append(True));root.update()
+                self.assertTrue(beats)
+                self.assertFalse(window.delete_future.done())
+                release.set();window.delete_future.result(timeout=5)
+                root.after_cancel(window.delete_timer);window.poll_delete()
+                self.assertFalse(window.tree.get_children())
+        finally:
+            release.set();window.close()
 
 if __name__=='__main__':
     unittest.main()

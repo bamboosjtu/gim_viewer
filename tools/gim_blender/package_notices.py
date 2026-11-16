@@ -10,7 +10,7 @@ def main():
     assert bundle.is_relative_to(tool/'dist') and (bundle/'gim_blender.exe').is_file()
     for name in ['README.md','THIRD_PARTY.md','snapshot.json']:
         shutil.copy2(tool/name, bundle/name)
-    node = bundle/'_internal/assets/runtime/node.exe'
+    node = bundle/'runtime/node.exe'
     installed_node = Path(shutil.which('node.exe') or shutil.which('node') or '')
     license_file = installed_node.parent/'LICENSE'
     if not license_file.is_file():

@@ -162,3 +162,5 @@ button { font: inherit; }
 
 .embedded .level-back { display:none; }
 .brand-sub { max-width:36vw; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+[hidden] { display: none !important; }
+.level-back { position:fixed;right:18px;bottom:18px;z-index:90;padding:10px 14px;color:#79e6ec;background:#071923;border:1px solid #365564;border-radius:6px;text-decoration:none;font:12px "Microsoft YaHei",sans-serif; }

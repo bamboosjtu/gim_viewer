@@ -1,3 +1,6 @@
+import sys
+from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 """Explicit local frozen-EXE smoke for the picker and its import handoff.
 
 Uses the app's widgets and Tk event loop; no Windows UI automation or Shell
@@ -71,3 +74,12 @@ def run(home, source, result):
     root.after(15000, lambda:finish('picker check timed out'))
     root.mainloop()
     return 0 if report['passed'] else 1
+
+if __name__=='__main__':
+    import argparse
+    parser=argparse.ArgumentParser()
+    parser.add_argument('--home',required=True)
+    parser.add_argument('--source',required=True)
+    parser.add_argument('--result',required=True)
+    args=parser.parse_args()
+    raise SystemExit(run(Path(args.home),args.source,args.result))

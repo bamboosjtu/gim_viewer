@@ -41,6 +41,8 @@ try {
         $env:PYINSTALLER_CONFIG_DIR=Join-Path $taskTemp 'pyinstaller-cache'
         & $buildPython -m PyInstaller --noconfirm --clean --workpath (Join-Path $taskTemp 'build') --distpath $dist (Join-Path $PSScriptRoot 'tool.spec')
         if($LASTEXITCODE -ne 0){throw 'PyInstaller failed'}
+        & $buildPython (Join-Path $PSScriptRoot 'package_assets.py')
+        if($LASTEXITCODE -ne 0){throw 'Independent service packaging failed'}
         if($BlenderDirectory) {
             $blenderRoot=(Get-Item -LiteralPath $BlenderDirectory).FullName
             if(-not (Test-Path -LiteralPath (Join-Path $blenderRoot 'blender.exe'))){throw 'Blender directory has no blender.exe'}

@@ -11,7 +11,7 @@
 
 所有工具都持有自己的实现与资源，运行和打包不导入、不调用、不读取 GIM Viewer 主程序。`gim_element` 自带标准索引、分类词典和 Python 识别算法，通过数据版本、共同的纯数据用例及开发者本地结果对照验证一致性。它的输出可辅助审查主程序，不能替代工程实例的人工真值。`gim_info` 默认浏览文件与指针，不建立三维模型。
 
-`gim_blender` 的窗口仅有“导入 GIM、删除所选、启动 HTML Demo”。数据与日志位于 exe 旁 `data/`，独立 Node/IFC/网页资源随包分发；可额外打包 Blender 便携运行时。其构建与本地验证入口见 [工具说明](gim_blender/README.md)，不适用下面三个 Qt 工具的 smoke 参数。
+`gim_blender` 的窗口仅有“导入 GIM、删除所选、启动 HTML Demo”。启动只调用独立 Node 命令行服务，窗口顶部显示实际端口和地址，关闭 GUI 后服务继续运行；也可通过 `start_demo.cmd`、`stop_demo.cmd` 单独管理。数据与日志位于 exe 旁 `data/`，Node、服务、漫游前端和 IFC 资源随包分发；可额外打包 Blender 便携运行时。其构建与本地验证入口见 [工具说明](gim_blender/README.md)，不适用下面三个 Qt 工具的 smoke 参数。
 
 ## 运行与构建
 

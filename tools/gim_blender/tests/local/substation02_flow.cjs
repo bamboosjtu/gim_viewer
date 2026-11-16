@@ -1,4 +1,4 @@
-// Explicit local test of a freshly imported substation02, served by the frozen GUI.
+// Explicit local test of freshly imported substation02 on the independent service.
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const {chromium}=require('playwright-core');
 async function main(){
@@ -12,9 +12,9 @@ async function main(){
  async function walk(predicate,arg,timeout=20000){await page.keyboard.down('KeyW');try{await frame.waitForFunction(predicate,arg,{timeout})}finally{await page.keyboard.up('KeyW')}await page.waitForTimeout(120)}
  try{
   await page.goto(url);const original=page.url();assert.equal(await page.locator('[data-level]').count(),1);await page.click('[data-level]');
-  frame=await (await page.waitForSelector('#simulation-frame')).contentFrame();
+  frame=page;
   await frame.waitForFunction(()=>window.__tour?.ready&&window.__tour.state().started,null,{timeout:300000});
-  await frame.waitForFunction(()=>window.__tour.state().pointerLocked,null,{timeout:10000});assert.equal(page.url(),original);
+  await page.click('#scene');await frame.waitForFunction(()=>window.__tour.state().pointerLocked,null,{timeout:10000});assert.notEqual(page.url(),original);
   const decoded=await frame.evaluate(async()=>{
    const THREE=await import('three'),t=window.__tour,chunks=[],files=new Set();t.scene.updateMatrixWorld(true);
    t.scene.traverse(o=>{if(!o.isMesh)return;if(o.userData.source_kind==='IFC'&&o.userData.source_file)files.add(o.userData.source_file);if(o.userData.source_kind!=='GIM')return;
@@ -94,7 +94,7 @@ async function main(){
   await frame.evaluate(()=>window.__tour.setPaused(true));
   const overview=await frame.evaluate(async()=>{const THREE=await import('three'),t=window.__tour,b=t.sceneData.nav.bounds,center=new THREE.Vector3((b.x0+b.x1)/2,3,-(b.y0+b.y1)/2),distance=Math.max(b.x1-b.x0,b.y1-b.y0);const labels=t.scene.getObjectByName('LandmarkLabels');if(labels)labels.visible=false;t.camera.fov=44;t.camera.position.copy(center).add(new THREE.Vector3(distance*.85,distance*.75,distance*.85));t.camera.lookAt(center);t.camera.updateProjectionMatrix();t.renderer.render(t.scene,t.camera);return t.renderer.domElement.toDataURL('image/png').split(',')[1]});
   fs.writeFileSync(path.join(out,'substation02-overview.png'),Buffer.from(overview,'base64'));
-  await page.keyboard.press('KeyQ');await page.waitForFunction(()=>!document.getElementById('simulation-frame'));
+  await page.keyboard.press('KeyQ');await page.waitForSelector('[data-level]');
   assert.deepEqual(errors,[]);fs.writeFileSync(path.join(out,'browser.json'),JSON.stringify({passed:true,decoded,cases,errors,browser:browser.version()},null,2));console.log(JSON.stringify({passed:true,cases}));
  }catch(e){fs.writeFileSync(path.join(out,'browser.json'),JSON.stringify({passed:false,cases,errors,error:String(e),state:frame?await state().catch(()=>null):null},null,2));await page.screenshot({path:path.join(out,'browser-failure.png')}).catch(()=>{});throw e}
  finally{await browser.close()}

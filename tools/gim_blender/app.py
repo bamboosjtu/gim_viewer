@@ -4,12 +4,12 @@ import argparse
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 import time
 import uuid
-from library import Library, DemoServer, application_home, resources, read_json
+from concurrent.futures import ThreadPoolExecutor
+from library import Library, application_home, resources, node_runtime, demo_runtime
 
 STATUS = {'ready':'可漫游', 'partial':'可漫游 · 部分表示', 'converting':'转换中', 'error':'导入失败'}
 
@@ -26,13 +26,16 @@ class Window:
         from tkinter import ttk
         self.root = root
         self.library = Library(home)
-        self.server = DemoServer(self.library)
+        from service_launcher import ServiceLauncher
+        self.service = ServiceLauncher(self.library.home)
         self.process = None
+        self.delete_executor = None
+        self.delete_future = None
+        self.delete_timer = None
         self.picker = None
         self.import_directory = self.library.home
-        self.browser_process = None
-        self.browser_outcome = None
-        self.browser_timer = None
+        self.service_starting = False
+        self.service_timer = None
         self.log_offset = 0
         self.log_buffer = ''
         self.root.title('GIM Blender · 变电站漫游')
@@ -44,34 +47,44 @@ class Window:
         style.configure('Treeview', rowheight=32)
         frame = ttk.Frame(root, padding=24)
         frame.pack(fill='both', expand=True)
-        ttk.Label(frame, text='GIM Blender', font=('Microsoft YaHei UI', 22, 'bold')).pack(anchor='w')
-        ttk.Label(frame, text='导入变电站 GIM，自动生成 Blender 与 HTML，在浏览器中第一人称巡视。').pack(anchor='w', pady=(5, 20))
-        self.tree = ttk.Treeview(frame, columns=('status', 'file'), show='tree headings', selectmode='browse')
+        frame.columnconfigure(0,weight=1)
+        frame.rowconfigure(3,weight=1)
+        ttk.Label(frame,text='GIM Blender',font=('Microsoft YaHei UI',22,'bold')).grid(row=0,column=0,sticky='w')
+        ttk.Label(frame,text='导入转换与 HTML 服务独立运行；关闭本窗口不会停止服务。').grid(row=1,column=0,sticky='w',pady=(5,12))
+        self.tree = ttk.Treeview(frame, columns=('status', 'file'), show='tree headings', selectmode='browse', height=6)
         self.tree.heading('#0', text='工程')
         self.tree.heading('status', text='状态')
         self.tree.heading('file', text='导入文件')
         self.tree.column('#0', width=360)
         self.tree.column('status', width=130, stretch=False)
         self.tree.column('file', width=220)
-        self.tree.pack(fill='both', expand=True)
+        self.tree.grid(row=3,column=0,sticky='nsew')
         actions = ttk.Frame(frame)
-        actions.pack(fill='x', pady=(18, 12))
+        actions.grid(row=4,column=0,sticky='ew',pady=(14,10))
         self.import_button = ttk.Button(actions, text='导入 GIM', command=self.import_file)
         self.delete_button = ttk.Button(actions, text='删除所选', command=self.delete_file)
         self.start_button = ttk.Button(actions, text='启动 HTML Demo', command=self.start_demo)
         for button in (self.import_button, self.delete_button, self.start_button):
             button.pack(side='left', padx=(0, 12), ipadx=12, ipady=5)
         self.progress = ttk.Progressbar(frame, maximum=8, mode='determinate')
-        self.progress.pack(fill='x')
-        self.message = tk.StringVar(value='选择 GIM 文件开始；已导入项目会保存在程序旁 data/ 中。')
-        ttk.Label(frame, textvariable=self.message, wraplength=820).pack(anchor='w', pady=(9, 0))
+        self.progress.grid(row=5,column=0,sticky='ew')
+        self.message = tk.StringVar(value='选择 GIM 文件开始，模型缓存在程序旁 data/ 中。')
+        ttk.Label(frame, textvariable=self.message, wraplength=820).grid(row=6,column=0,sticky='w',pady=(8,0))
         self.demo_url = tk.StringVar()
-        url_label = ttk.Label(frame, textvariable=self.demo_url, foreground='#176a89', cursor='hand2')
-        url_label.pack(anchor='w', pady=(4, 0))
-        url_label.bind('<Button-1>', lambda event:self.start_demo())
+        self.service_state = tk.StringVar(value='独立服务未启动')
+        status = ttk.Frame(frame)
+        status.grid(row=2,column=0,sticky='ew',pady=(0,12))
+        status.columnconfigure(1,weight=1)
+        ttk.Label(status,textvariable=self.service_state).grid(row=0,column=0,columnspan=2,sticky='w')
+        ttk.Label(status,text='服务地址：').grid(row=1,column=0,sticky='w',pady=(5,0))
+        self.url_entry=ttk.Entry(status,textvariable=self.demo_url,state='readonly')
+        self.url_entry.grid(row=1,column=1,sticky='ew',pady=(5,0))
         self.tree.bind('<<TreeviewSelect>>', lambda e:self.selection_message())
         self.root.protocol('WM_DELETE_WINDOW', self.close)
         self.refresh()
+        status = self.service.status()
+        if status:
+            self.show_service_status(status)
 
     def refresh(self):
         selected = self.tree.selection()
@@ -87,7 +100,7 @@ class Window:
                 self.tree.insert('', 'end', iid=ident, text=rec['title'], values=values)
         if selected and self.tree.exists(selected[0]):
             self.tree.selection_set(selected[0])
-        busy = self.process is not None
+        busy = self.process is not None or self.delete_future is not None
         self.import_button.configure(state='disabled' if busy else 'normal')
         self.delete_button.configure(state='disabled' if busy else 'normal')
         self.start_button.configure(state='normal' if any(self.library.ready(r) for r in self.rows.values()) else 'disabled')
@@ -100,7 +113,7 @@ class Window:
                 self.message.set(rec['error'])
 
     def import_file(self):
-        if self.process:
+        if self.process or self.delete_future:
             return
         if self.picker is not None:
             self.picker.window.lift()
@@ -117,7 +130,7 @@ class Window:
         self.begin_import(source)
 
     def begin_import(self, source):
-        if self.process:
+        if self.process or self.delete_future:
             return
         self.log_path = self.library.data/'tmp'/('import-'+uuid.uuid4().hex+'.log')
         args = [sys.executable]
@@ -162,84 +175,78 @@ class Window:
     def delete_file(self):
         from tkinter import messagebox
         selected = self.tree.selection()
-        if not selected or self.process:
+        if not selected or self.process or self.delete_future:
             return
         ident = selected[0]
         if not messagebox.askyesno('删除已导入项目', '删除“'+self.rows[ident]['title']+'”的缓存和转换结果？\n原始导入文件不会被删除。', parent=self.root):
             return
+        if self.delete_executor is None:
+            self.delete_executor = ThreadPoolExecutor(max_workers=1)
+        self.delete_future = self.delete_executor.submit(self.library.delete, ident)
+        self.progress.configure(mode='indeterminate')
+        self.progress.start(15)
+        self.message.set('正在删除所选缓存…')
+        self.refresh()
+        self.delete_timer = self.root.after(100, self.poll_delete)
+
+    def poll_delete(self):
+        from tkinter import messagebox
+        self.delete_timer = None
+        if not self.delete_future.done():
+            self.delete_timer = self.root.after(100, self.poll_delete)
+            return
+        completed, self.delete_future = self.delete_future, None
+        self.progress.stop()
+        self.progress.configure(mode='determinate', value=0)
         try:
-            self.server.stop()
-            self.library.delete(ident)
+            completed.result()
             self.message.set('已删除所选项目。')
-            self.refresh()
         except Exception as exc:
             messagebox.showerror('删除失败', str(exc), parent=self.root)
+        self.refresh()
 
     def start_demo(self):
         from tkinter import messagebox
-        if self.browser_process is not None:
+        if self.service_starting:
             return
         try:
-            url = self.server.start()
-            self.server.page_requested.clear()
-            self.demo_url.set(url)
-            self.message.set('漫游服务已启动，正在打开默认浏览器…')
-            self.browser_outcome = None
-            self.browser_result = self.library.data/'tmp'/('browser-'+uuid.uuid4().hex+'.json')
-            args = [sys.executable]
-            if not getattr(sys, 'frozen', False):
-                args.append(str(Path(__file__).resolve()))
-            args += ['--open-browser', url, '--browser-result', str(self.browser_result)]
-            flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-            process = subprocess.Popen(args, creationflags=flags, cwd=self.library.home, env=os.environ.copy())
-            self.browser_process = process
-            self.browser_deadline = time.monotonic()+15
-            self.browser_timer = self.root.after(100, lambda:self.poll_browser(process))
+            self.service.launch(open_browser=True)
+            self.service_starting=True
+            self.service_deadline=time.monotonic()+12
+            self.service_state.set('正在启动独立命令行服务…')
+            self.message.set('服务启动后会显示端口；也可以双击 start_demo.cmd 单独运行。')
+            self.service_timer=self.root.after(100,self.poll_service)
         except Exception as exc:
-            messagebox.showerror('无法启动 Demo', str(exc), parent=self.root)
+            messagebox.showerror('无法启动独立服务',str(exc),parent=self.root)
 
-    def poll_browser(self, process):
-        if self.browser_timer is not None:
-            self.root.after_cancel(self.browser_timer)
-            self.browser_timer = None
-        if self.browser_process is not process:
-            return
-        if process.poll() is None and time.monotonic() < self.browser_deadline:
-            self.browser_timer = self.root.after(100, lambda:self.poll_browser(process))
-            return
-        if process.poll() is None:
-            process.kill()
-            process.wait()
-            outcome = {'ok': False, 'error': '打开浏览器超时'}
+    def poll_service(self):
+        self.service_timer=None
+        status=self.service.status()
+        if status:
+            self.service_starting=False
+            self.show_service_status(status)
+            self.message.set('地址已就绪，已请求用 Chrome 打开。可复制上方地址；关闭本窗口服务仍运行。')
+        elif time.monotonic()<self.service_deadline:
+            self.service_timer=self.root.after(150,self.poll_service)
         else:
-            try:
-                outcome = read_json(self.browser_result)
-            except (OSError, ValueError):
-                outcome = {'ok': False, 'error': '浏览器启动进程未返回结果'}
-        if outcome.get('ok') and not self.server.page_requested.is_set():
-            if time.monotonic() < self.browser_deadline:
-                self.browser_timer = self.root.after(100, lambda:self.poll_browser(process))
-                return
-            outcome = {**outcome, 'ok':False, 'error':'浏览器没有访问 Demo 页面'}
-        self.browser_process = None
-        self.browser_outcome = outcome
-        if outcome.get('ok'):
-            self.message.set('已打开默认浏览器。关闭本窗口会停止漫游服务。')
-        else:
-            self.message.set('服务已启动，浏览器未打开：'+outcome.get('error', '未知错误')+'。点击下方地址重试。')
+            self.service_starting=False
+            self.service_state.set('独立服务未能启动')
+            self.message.set('请查看 '+str(self.service.log_file))
+
+    def show_service_status(self, status):
+        self.demo_url.set(status['url'])
+        self.service_state.set(f"独立服务运行中 · 端口 {status['port']} · PID {status['pid']}")
 
     def close(self):
         from tkinter import messagebox
         if self.picker is not None:
             self.picker.cancel()
-        if self.browser_timer is not None:
-            self.root.after_cancel(self.browser_timer)
-            self.browser_timer = None
-        if self.browser_process is not None:
-            if self.browser_process.poll() is None:
-                self.browser_process.kill()
-                self.browser_process.wait()
-            self.browser_process = None
+        if self.service_timer is not None:
+            self.root.after_cancel(self.service_timer)
+            self.service_timer=None
+        if self.delete_timer is not None:
+            self.root.after_cancel(self.delete_timer)
+            self.delete_timer=None
         if self.process:
             if not messagebox.askyesno('退出 GIM Blender', '正在导入。退出会中止本次转换，之后可重新导入。', parent=self.root):
                 return
@@ -253,7 +260,8 @@ class Window:
                 if rec['status']=='converting':
                     rec.update(status='error', error='转换已中止，请重新导入。')
                     self.library.save(rec)
-        self.server.stop()
+        if self.delete_executor:
+            self.delete_executor.shutdown(wait=False)
         self.root.destroy()
 
 def main():
@@ -262,34 +270,19 @@ def main():
     parser.add_argument('--worker-import', default='', help=argparse.SUPPRESS)
     parser.add_argument('--home', default='', help=argparse.SUPPRESS)
     parser.add_argument('--log', default='', help=argparse.SUPPRESS)
-    parser.add_argument('--serve', action='store_true', help=argparse.SUPPRESS)
-    parser.add_argument('--url-file', default='', help=argparse.SUPPRESS)
-    parser.add_argument('--picker-check', default='', help=argparse.SUPPRESS)
-    parser.add_argument('--check-result', default='', help=argparse.SUPPRESS)
-    parser.add_argument('--open-browser', default='', help=argparse.SUPPRESS)
-    parser.add_argument('--browser-result', default='', help=argparse.SUPPRESS)
-    parser.add_argument('--flow-check', default='', help=argparse.SUPPRESS)
     args = parser.parse_args()
     home = Path(args.home).resolve() if args.home else application_home()
     if args.self_check:
         import tkinter as tk
         import numpy, py7zr
-        assert all((resources()/name).is_file() for name in ['node/export_gim.mjs','node/export_ifc.cjs','runtime/node.exe','web/index.html'])
+        assert all((resources()/name).is_file() for name in ['node/export_gim.mjs','node/export_ifc.cjs'])
+        assert node_runtime().is_file() and (demo_runtime()/'index.html').is_file()
         root = tk.Tk()
         root.withdraw()
         root.update_idletasks()
         root.destroy()
         return 0
     setup_temp(home)
-    if args.open_browser:
-        from browser_launcher import open_demo
-        return open_demo(args.open_browser, args.browser_result)
-    if args.flow_check:
-        from flow_check import run
-        return run(home, args.flow_check, args.check_result)
-    if args.picker_check:
-        from picker_check import run
-        return run(home, args.picker_check, args.check_result)
     if args.worker_import:
         stream = open(args.log, 'w', encoding='utf-8', buffering=1) if args.log else sys.stdout
         sys.stdout = sys.stderr = stream
@@ -300,17 +293,6 @@ def main():
             import traceback
             traceback.print_exc()
             return 1
-        return 0
-    if args.serve:
-        server = DemoServer(Library(home))
-        url = server.start()
-        if args.url_file:
-            Path(args.url_file).write_text(url, encoding='utf-8')
-        try:
-            while True:
-                time.sleep(.25)
-        except KeyboardInterrupt:
-            server.stop()
         return 0
     import tkinter as tk
     root = tk.Tk()

@@ -1,23 +1,25 @@
-"""The tool's v1 cache and localhost-only serving boundary."""
+"""The tool's source-identified v1 import cache."""
 from __future__ import annotations
 import hashlib
-import html
 import json
 import os
 from pathlib import Path
 import re
 import shutil
 import sys
-import threading
 from datetime import datetime, timezone
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import unquote, urlsplit
 
 def resources() -> Path:
     return Path(getattr(sys, '_MEIPASS', Path(__file__).parent)) / 'assets'
 
 def application_home() -> Path:
     return Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent
+
+def node_runtime() -> Path:
+    return application_home()/'runtime/node.exe' if getattr(sys, 'frozen', False) else resources()/'runtime/node.exe'
+
+def demo_runtime() -> Path:
+    return application_home()/'demo' if getattr(sys, 'frozen', False) else resources()/'web'
 
 def write_json(path: Path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -116,106 +118,3 @@ class Library:
             raise ValueError('这不是已导入的项目目录')
         # Check the complete owned tree before recursive deletion on Windows.
         remove_owned_tree(folder)
-
-    def catalog_html(self):
-        cards = []
-        for rec in self.entries():
-            if not self.ready(rec):
-                continue
-            title = html.escape(rec['title'])
-            partial = '<span class="badge">部分表示</span>' if rec['status'] == 'partial' else ''
-            cards.append(f'<a class="card" href="/{rec["id"]}/index.html" data-level="{rec["id"]}">'
-                         f'<span class="badge">变电站巡检</span>{partial}<h2>{title}</h2>'
-                         '<p>从整站大门出发，步行巡视设备区，开门进入建筑。</p><b>进入漫游 →</b></a>')
-        return ('<!doctype html><html lang="zh-CN"><meta charset="utf-8">'
-                '<meta name="viewport" content="width=device-width,initial-scale=1">'
-                '<title>GIM Blender · 变电站巡检</title><link rel="icon" href="data:,">'
-                '<link rel="stylesheet" href="/catalog.css"><main id="catalog-welcome">'
-                '<small>GIM BLENDER / VIRTUAL INSPECTION</small><h1>走进一座<span>变电站</span></h1>'
-                '<p>选择工程，从整站大门开始第一人称模拟巡视。Esc 暂停并释放鼠标。</p>'
-                '<div class="controls">WASD 行走　鼠标 环顾　E 开关门　Space 跳跃　M 地图　R 返回大门　Q 返回工程选择</div>'
-                '<section>' + ''.join(cards) + '</section></main>'
-                '<button id="catalog-back" hidden>← 返回工程选择 (Q)</button>'
-                '<script src="/catalog.js"></script></html>').encode('utf-8')
-
-class DemoServer:
-    def __init__(self, library: Library):
-        self.library = library
-        self.server = None
-        self.thread = None
-        self.on_html_request = None
-        self.page_requested = threading.Event()
-
-    def start(self):
-        if self.server:
-            return self.url
-        library = self.library
-        class Handler(SimpleHTTPRequestHandler):
-            def log_message(self, *args):
-                pass
-
-            def do_GET(self):
-                route = unquote(urlsplit(self.path).path)
-                if route in ('/', '/index.html'):
-                    body = library.catalog_html()
-                    self.send_response(200)
-                    self.send_header('Content-Type', 'text/html; charset=utf-8')
-                    self.send_header('Content-Length', str(len(body)))
-                    self.send_header('Cache-Control', 'no-store')
-                    self.end_headers()
-                    self.wfile.write(body)
-                    if self.headers.get('User-Agent', '').startswith('Mozilla/'):
-                        owner.page_requested.set()
-                    if owner.on_html_request:
-                        owner.on_html_request({'route':route, 'userAgent':self.headers.get('User-Agent', '')})
-                    return
-                pieces = route.strip('/').split('/')
-                folder = None
-                if route in ('/catalog.js', '/catalog.css'):
-                    folder = resources() / 'catalog'
-                    pieces = [pieces[0]]
-                elif len(pieces) > 1 and re.fullmatch('[a-f0-9]{64}', pieces[0]):
-                    project = library.project(pieces.pop(0))
-                    try:
-                        if library.ready(read_json(project / 'project.json')):
-                            # Runtime belongs to the installed tool; geometry
-                            # belongs to the source-identified import. Updating
-                            # controls/rendering must not require reconversion.
-                            folder = resources()/'web' if pieces[0] in ('js','css','vendor') else project/'result/web'
-                    except (OSError, ValueError):
-                        pass
-                if folder is None or any(x in ('', '.', '..') or '\\' in x or ':' in x for x in pieces):
-                    self.send_error(404)
-                    return
-                target = folder.joinpath(*pieces)
-                if not target.resolve().is_relative_to(folder.resolve()) or not target.is_file():
-                    self.send_error(404)
-                    return
-                # No directory listings, original GIM, work files or write APIs.
-                try:
-                    with target.open('rb') as inp:
-                        self.send_response(200)
-                        content_type = {'.js': 'application/javascript', '.wasm': 'application/wasm', '.glb': 'model/gltf-binary'}.get(target.suffix, self.guess_type(str(target)))
-                        self.send_header('Content-Type', content_type)
-                        self.send_header('Content-Length', str(target.stat().st_size))
-                        self.send_header('Cache-Control', 'no-cache')
-                        self.end_headers()
-                        shutil.copyfileobj(inp, self.wfile)
-                except (BrokenPipeError, ConnectionResetError):
-                    pass
-
-            def do_HEAD(self):
-                self.send_error(405)
-        owner = self
-        self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
-        self.server.daemon_threads = True
-        self.url = 'http://127.0.0.1:' + str(self.server.server_port) + '/'
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-        self.thread.start()
-        return self.url
-
-    def stop(self):
-        if self.server:
-            self.server.shutdown()
-            self.server.server_close()
-            self.server = None

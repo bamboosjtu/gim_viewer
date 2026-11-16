@@ -11,9 +11,11 @@ it('attaches a configured exact component by a real assembly edge and preserves 
  expect(result.memberships[1].interpretation).toMatchObject({meaning:'part',membershipStatus:'confirmed'});
  expect(result.memberships[1].interpretation.membershipEvidence).toEqual(expect.arrayContaining(['assembly:host->part','policy:composition-policy-v1:radiator']));
 });
-it.each([['GIS','Radiator','component_host_incompatible'],['OilImmersedTransformer','Ladder','component_host_unconfigured']])('preserves %s / %s as a pending incompatible or unconfigured component',(host,part,reason)=>{
- const result=build([source('host',host),source('part',part,{parent:'host'})]);
- expect(result.entities[0].sourceIds).toEqual(['host']);expect(result.pending[0].reason).toBe(reason);expect(result.memberships[1].interpretation.membershipStatus).toBe('unresolved');
+it.each([['GIS','Radiator'],['OilImmersedTransformer','Ladder']])('allows every equipment kind to host typed components: %s / %s',(host,part)=>{
+ const result=build([source('host',host),source('part',part,{parent:'host'})]);expect(result.entities[0].sourceIds).toEqual(['host','part']);expect(result.pending).toHaveLength(0);
+});
+it('rejects material hosts and keeps unknown host kinds unresolved',()=>{
+ for(const host of ['GroundingMaterial','OTHERS']){const result=build([source('host',host),source('part','Radiator',{parent:'host'})]);expect(result.pending).toHaveLength(1);}
 });
 it('never infers ownership from an accessory name or same-category parent',()=>{
  const result=build([source('host','OilImmersedTransformer'),source('part','OTHERS',{name:'1号主变_散热器',parent:'host'})]);
@@ -23,8 +25,8 @@ it('keeps explicit independent boxes separate even in a compatible assembly',()=
  const result=build([source('host','GIS'),source('box','TerminalBox',{parent:'host',properties:props({OBJECTROLE:'independent'})})]);
  expect(result.entities).toHaveLength(2);expect(result.entities.find(e=>e.sourceIds.includes('box'))?.category).toBe('M04');
 });
-it('requires component context for collision terms even in a real assembly',()=>{
- expect(build([source('host','GIS'),source('box','TerminalBox',{parent:'host'})]).entities).toHaveLength(2);
+it('uses a real equipment assembly to resolve a terminal box',()=>{
+ expect(build([source('host','GIS'),source('box','TerminalBox',{parent:'host'})]).entities).toHaveLength(1);
  expect(build([source('host','GIS'),source('box','TerminalBox',{parent:'host',properties:props({OBJECTROLE:'part'})})]).entities).toHaveLength(1);
 });
 it('never groups peers by a name prefix, shared template or engineering code alone',()=>{

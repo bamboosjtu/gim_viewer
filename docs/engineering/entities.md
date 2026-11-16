@@ -57,15 +57,15 @@
 
 [目录](catalogs/README.md)由独立 JSON 维护；工作簿只提供参考来源，不参与配置加载和构建。Standard Catalog 提供目录数据，Recognition Policy 定义私有用途/粒度，Source Compatibility Policy 解释格式枚举，Composition Policy 判断归属。内部角色不是标准目录编号或标准原文。
 
-`SourceRecord` 在 gim 适配为中立 `ObjectEvidence`。优先消费当前对象 FAM/IFC 类型和角色字段，按精确标准条目、格式适配枚举、名称候选的顺序解释。自由文本型号不参与模糊类别匹配。名称只提供候选类别和候选部件，不决定 independent、part、source_only 或整体宿主；不按“模型<n>_”前缀合并片段。
+`SourceRecord` 在 gim 适配为中立 `ObjectEvidence`。优先消费当前对象 FAM/IFC 类型和角色字段，按精确标准条目、格式适配枚举、名称候选的顺序解释。自由文本型号不参与模糊类别匹配。名称只提供候选类别和候选部件，或消解已有类型词义；不能单独证明角色或整体宿主；不按“模型<n>_”前缀合并片段。
 
-模型与部件使用独立词汇空间。TerminalBox、GroundResistance 没有字段或角色语境时保持未决；不能同时赋予模型和部件身份。MATERIALTYPE/EQUIPMENTTYPE/SYSCLASSIFYNAME 等模型字段或明确 independent 角色选择模型；明确部件字段、part 角色或宿主声明选择部件。模型多条目歧义保留全部来源，观察状态为 ambiguous。标准与格式别名同词冲突时精确标准词义优先，另存兼容冲突观察记录。
+模型与部件使用独立词汇空间，按[已确认规则](catalogs/reference-gaps.md)处理语境：TerminalBox 在设备内为本体端子箱部件，独立为材料；GroundResistance 独立作为设备时为成套装置，非设备整体时为材料。优先使用当前对象的有效中文分类声明，再用英文声明；显示名称仅最后兜底，中文名优先。均压屏蔽装置默认金具，ProtectionEquipment 默认保护设备，明确细分信息仍可覆盖默认，原词汇的多条来源证据继续保留。
 
 `categoryStatus`、`equipmentType`、`componentType`、`purpose`、`objectRole` 独立保存状态与证据。确定油浸式变压器类型不等于确定主变/站用用途；分类确认也不自动确认整体边界。跨分段/Pset/实例与类型范围的候选保留上下文，当前对象明确属性相互矛盾时保留未决。
 
 识别只扫描一次原始属性列表，按 `recognitionFields.json` 建立字段到原始序号的临时索引。查询按字段合并并恢复来源顺序，保留原始文件/行/键，不复制其余属性。IFC 请求相同字段子集，其余详情继续 deferred/truncated；未读取字段不视为缺失。
 
-真实装配边、部件类型、独立角色、显式宿主编码/名称分别保留证据。只有确认部件、真实装配边和已配置的兼容宿主共同支持时才能确认归属；明确 part 角色与实际装配也可证明组成。independent 角色保留独立整体，不能被装配边覆盖。宿主不兼容或尚未配置时部件进入待归集合，并记录原因及策略依据。构件安装和独立设备仍建整体并保存关联，不因为处于另一个设备的装配下就默认吞并。
+真实装配边、部件类型、独立角色、显式宿主编码/名称分别保留证据。所有设备均可以有部件；确认的部件类型、真实装配边与设备宿主共同支持归属；明确 part 角色与实际装配也可证明组成。independent 角色保留独立整体，不能被装配边覆盖。宿主是材料/构件或宿主类型未知时部件进入待归集合，并记录原因及策略依据。构件安装和独立设备仍建整体并保存关联，不因为处于另一个设备的装配下就默认吞并。
 
 宿主恢复使用当前对象明确宿主 ID、编码或名称，全部声明共同支持唯一宿主才确认；同名多候选、矛盾、无匹配分别诊断。对象自己的 PROJECTNAME、显示名称和名称前缀不作为宿主声明。仅有明确带编号宿主声明、兼容部件和内部策略时，可建立候选宿主。原始 parent、DEV occurrence 和物理表示地址始终保留。
 
@@ -113,7 +113,7 @@ EntityRelationship { from, to, kind: 'associated_with', evidence }
 | `neutral_set_main_unresolved` | 中性点装置对应主变不明 |
 | `component_whole_unresolved` | 组件没有明确整体宿主 |
 | `component_host_incompatible` | 部件与已配置宿主范围不兼容 |
-| `component_host_unconfigured` | 尚无可用的部件宿主策略 |
+| `component_host_unconfigured` | 宿主是否为设备尚未确认 |
 
 别名：
 

@@ -1,10 +1,10 @@
-import {COMPOSITION_POLICY,componentHostCompatibility,separateInstallation} from './compositionPolicy.js';
+import {COMPOSITION_POLICY,componentHostCompatibility,separateInstallation,isEquipmentHost} from './compositionPolicy.js';
 import { ENGINEERING_RULES_VERSION, explicitMain, interpretRecognitionObject as interpretObject, categoryFromName } from './classify.js';
 import { assertEngineeringPartition } from './validate.js';
 import { categoryDefinition,publishDirectoryClassification } from './catalogLabels.js';
 import { classificationDetails } from './classificationDetails.js';
 import {recoverComponentMembership} from './recoverMembership.js';
-import type { EngineeringEntity, EngineeringSnapshot, ObjectEvidence, PendingWhole, SourceAlias } from './types.js';
+import type { EngineeringEntity, EngineeringSnapshot, ObjectEvidence, ObjectInterpretation, PendingWhole, SourceAlias } from './types.js';
 
 /** Lossless package-local identity. No class version, tree parent or traversal counter. */
 const identity = (scope: string, kind: string, seed: string) => `${kind}:${JSON.stringify([scope, seed])}`;
@@ -95,13 +95,20 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
   }
 
   const visiting = new Set<string>();
+  const equipmentContexts=new Map<string,boolean>();
+  const declaredEquipment=(value:ObjectInterpretation)=>isEquipmentHost(value)&&!['object_name','standard_name_candidate','family_identity_candidate','unknown'].includes(value.basis);
   function assign(sourceId: string): string | null {
     if (owners.has(sourceId)) return owners.get(sourceId)!;
     if (visiting.has(sourceId)) throw new Error(`Source assembly cycle: ${sourceId}`);
     visiting.add(sourceId);
     const row = raw.get(sourceId)!;
-    const m = meaning.get(sourceId)!;
+    let m = meaning.get(sourceId)!;
     const above = row.assemblyParentId && raw.has(row.assemblyParentId) ? assign(row.assemblyParentId) : null;
+    const parentMeaning=row.assemblyParentId?meaning.get(row.assemblyParentId):undefined;
+    const parentEquipment=!!(row.assemblyParentId&&(equipmentContexts.get(row.assemblyParentId)||parentMeaning&&declaredEquipment(parentMeaning)));
+    if(row.equipmentMemberVariant&&parentEquipment){
+      m=interpretObject(row.equipmentMemberVariant,parents.has(sourceId));meaning.set(sourceId,m);
+    }
     const aboveCategory = above ? entities.get(above)?.category : undefined;
     const associate = (proof: string, evidence: string) => {
       const entity = addEntity(sourceId, m.category, wholeName(row,m.category), proof, [sourceId]);
@@ -138,6 +145,7 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
     } else {
       addEntity(sourceId, m.category, wholeName(row,m.category), m.category === 'U-OBJECT' ? 'outward_object_boundary_unconfirmed' : 'object_identity', [sourceId]);
     }
+    equipmentContexts.set(sourceId,declaredEquipment(m)||parentEquipment&&['part','container','detail','source_only'].includes(m.meaning));
     visiting.delete(sourceId);
     return owners.get(sourceId)!;
   }

@@ -15,19 +15,22 @@ for item in STANDARD['items']:item['recognitionCode']=POLICY['terms'][item['term
 LABELS={c['code']:c['label'] for c in POLICY['recognitionCodes']};TERMS=collections.defaultdict(list)
 def norm(value):return re.sub(r'\s+','',unicodedata.normalize('NFKC',value)).casefold()
 for item in STANDARD['items']:
-    names=[item['term'],item['label'],*item['term'].split('/'),*item['aliases']]
+    names=[item['term'],item['label'],*item['label'].split('/'),*item['term'].split('/'),*item['aliases']]
     for name in names:
         key=norm(name)
         if item not in TERMS[key]:TERMS[key].append(item)
-NAME_TERMS=sorted({norm(label) for item in STANDARD['items'] for label in [item['label'],*item['aliases']] if len(label)>=2 and re.search('[\u3400-\u9fff]',label)},key=lambda label:(-len(label),label))
+NAME_TERMS=sorted({norm(label) for item in STANDARD['items'] for label in [item['label'],*item['label'].split('/'),*item['aliases']] if len(label)>=2 and re.search('[\u3400-\u9fff]',label)},key=lambda label:(-len(label),label))
 NAME_EXPRESSION=re.compile('|'.join(re.escape(label) for label in NAME_TERMS))
+def resolved_terms(value):
+    items=TERMS.get(norm(value),[]);preferred=POLICY['standardTermDefaults'].get(norm(value))
+    return [item for item in items if item['id']==preferred] if preferred else items
 def named_catalog(text):
-    exact=TERMS.get(norm(text),[])
+    exact=resolved_terms(text)
     if exact:return exact
     hits=list(NAME_EXPRESSION.finditer(text))
     if not hits:return []
     longest=max(len(hit[0]) for hit in hits)
-    return list({item['id']:item for hit in hits if len(hit[0])==longest for item in TERMS[hit[0]]}.values())
+    return list({item['id']:item for hit in hits if len(hit[0])==longest for item in resolved_terms(hit[0])}.values())
 REFINEMENTS={'E-T':['E01','E03'],'E-R':['E02','E11'],'E16':['E16.panel_cabinet','E16.control_cabinet'],'C-B4':['C-B2','C-B3','C-B9'],'C-A4':['C-A4.steel'],'C-A3':['C-A3.steel']}
 def compatible(coarse,fine):return coarse==fine or fine in REFINEMENTS.get(coarse,[])
 COMPONENTS=VOCAB['componentDictionary']['entries']
@@ -56,17 +59,19 @@ def numbered(value):
 @functools.lru_cache(maxsize=4096)
 def name_category(name):
     categories={item['recognitionCode'] for item in named_catalog(norm(name))}
+    contextual=POLICY['contextualTerms'].get(norm(name),{})
+    if not categories and contextual.get('defaultKind')=='material':categories={contextual['materialRecognitionCode']}
     if not categories:
         matches=[c for c in CATALOG['categories'] if c['label'] in norm(name)];longest=max((len(c['label']) for c in matches),default=0)
         categories={DIRECTORY_ROLES[c['code']] for c in matches if len(c['label'])==longest}
     return next(iter(categories)) if len(categories)==1 else 'U-OBJECT'
 def category_value(value):
-    items=TERMS.get(norm(value),[])
+    items=resolved_terms(value)
     if items:return items[0]['recognitionCode'] if len(items)==1 else 'U-OBJECT'
     if value in DIRECTORY_BY_CODE:return DIRECTORY_ROLES[DIRECTORY_BY_CODE[value]['code']]
     alias=ALIASES.get('structured',{}).get(value,ALIASES['dev'].get(value.casefold(),ALIASES['ifc'].get(value.upper())))
     return ('E-T' if alias=='E01' else alias) if alias else 'U-OBJECT'
-def interpret(row,has_children=False):
+def interpret(row,has_children=False,equipment_member=False):
     if not isinstance(row,EvidenceRecord):row=EvidenceRecord(row)
     type=row['source_type'];props=values(row,'TYPE','DEVICETYPE','EQUIPMENTTYPE','设备类型','设备类别','材料类型','构件类型','MATERIALTYPE','CONSTRUCTIONTYPE','MATERIALSUBTYPE','EQUIPMENTSUBTYPE','材料子类','设备子类','SYSCLASSIFYNAME','PARTNAME','COMPONENTTYPE','部件类型')
     roles=set()
@@ -75,34 +80,52 @@ def interpret(row,has_children=False):
         if re.search(r'独立|independent',p['value'],re.I):roles.add('independent')
         for role,label in [('source_only','非物理来源'),('detail','细部'),('container','装配容器')]:
             if p['value'].strip().casefold() in (role,label):roles.add(role)
-    component_context='part' in roles or bool(values(row,'COMPONENTTYPE','部件类型','所属设备编码','宿主设备编码','HOSTEQUIPMENTID','HOSTEQUIPMENTCODE','PARENTEQUIPMENTID','所属设备名称','所属设备工程中名称','宿主设备名称','HOSTEQUIPMENTNAME','PARENTEQUIPMENTNAME'))
-    model_context='independent' in roles or bool(values(row,'EQUIPMENTTYPE','MATERIALTYPE','CONSTRUCTIONTYPE','设备类型','材料类型','构件类型','SYSCLASSIFYNAME'))
-    declarations=[{'keys':['source_type'],'value':type,'path':row['source'],'line':0},*props]
+    component_context=equipment_member or 'part' in roles or bool(row.get('declaredHosts')) or bool(values(row,'COMPONENTTYPE','部件类型','所属设备编码','宿主设备编码','HOSTEQUIPMENTID','HOSTEQUIPMENTCODE','PARENTEQUIPMENTID','所属设备名称','所属设备工程中名称','宿主设备名称','HOSTEQUIPMENTNAME','PARENTEQUIPMENTNAME'))
+    raw_declarations=[{'keys':['source_type'],'value':type,'path':row['source'],'line':0},*props]
+    chinese=[p for p in raw_declarations if re.search('[\u3400-\u9fff]',p['value']) and (resolved_terms(p['value']) or p['value'].strip().casefold() in COMPONENTS)]
+    declarations=chinese or raw_declarations
+    def context_rule(value):return POLICY['contextualTerms'].get(value.strip().casefold(),{})
+    def ground_word(value):return bool(context_rule(value).get('materialRecognitionCode'))
+    needs_hint=any(p['value'].strip().casefold() in COMPONENTS and (len(COMPONENTS[p['value'].strip().casefold()]['componentIds'])>1 or COMPONENTS[p['value'].strip().casefold()].get('defaultComponentId') or resolved_terms(p['value'])) for p in declarations)
+    hint=next((COMPONENTS[p.strip().casefold()] for p in [*[v['value'] for v in values(row,'设备名称','DEVICENAME')],row['name']] if re.search('[\u3400-\u9fff]',p) and p.strip().casefold() in COMPONENTS),None) if needs_hint else None
+    material_rule=next((context_rule(p['value']) for p in declarations if ground_word(p['value'])),None)
+    ground_material=bool(material_rule) and (material_rule.get('defaultKind')=='material' or component_context and 'independent' not in roles or any(ground_word(p['value']) for p in values(row,'MATERIALTYPE','材料类型')) or hint and material_rule['componentId'] in hint['componentIds'])
+    ground_member=ground_material and component_context and 'independent' not in roles
+    if ground_member:roles.add('part')
+    def model_terms(value):return [] if ground_material and ground_word(value) else resolved_terms(value)
     standard=[];component=[];ambiguous_namespace=[]
-    def verified(entry):return entry.get('evidence',{}).get('verification')=='verified' and entry.get('evidence',{}).get('sourceLocation')
+    def verified(entry):return entry.get('defaultCatalogId') or entry.get('defaultComponentId') or entry.get('evidence',{}).get('verification')=='verified' and entry.get('evidence',{}).get('sourceLocation')
     for original in declarations:
-        p=dict(original);word=p['value'].strip().casefold();items=TERMS.get(norm(p['value']),[]);part=COMPONENTS.get(word)
-        if part and items and not component_context and not model_context:ambiguous_namespace.append(word);continue
-        if part and 'independent' not in roles and (not items or component_context):
-            if not verified(part):p['confidence']='candidate'
-            component.extend((id,p) for id in part['componentIds']);continue
+        p=dict(original);word=p['value'].strip().casefold();items=model_terms(p['value']);part=COMPONENTS.get(word)
+        use_part=False
+        if part and not ground_word(p['value']) and 'independent' not in roles:
+            if not items or component_context:use_part=True
+            elif context_rule(p['value']):use_part=bool(hint and set(hint['componentIds'])&set(part['componentIds']))
+            elif word in POLICY['modelPreferredTerms']:use_part=bool(hint and set(hint['componentIds'])&set(part['componentIds']))
+            else:ambiguous_namespace.append(word);continue
+        if use_part:
+            ids=[id for id in part['componentIds'] if hint and id in hint['componentIds']] or ([part['defaultComponentId']] if part.get('defaultComponentId') else part['componentIds'])
+            if not verified(part) and not hint:p['confidence']='candidate'
+            component.extend((id,p) for id in ids);continue
         family=DIRECTORY_BY_CODE.get(p['value'])
         if not items and family:items=[{'id':'category:'+family['code'],'kind':family['kind'],'label':family['label'],'term':family['code'],'category':family['code'],'recognitionCode':DIRECTORY_ROLES[family['code']],'catalogCategory':family['label'],'catalogGroup':family['groupLabel']}]
         if any(k.upper() in ('SYSCLASSIFYNAME','PARTNAME') for k in p['keys']) and not verified(VOCAB['keywordDictionary']['entries'].get(word,{})):p['confidence']='candidate'
         standard.extend((item,p) for item in items)
+    if ground_member:component.append((material_rule['componentId'],next(p for p in declarations if ground_word(p['value']))))
     structured=[(item['recognitionCode'],p) for item,p in standard if p['keys']!=['source_type']]
-    structured += [(category_value(p['value']),p) for p in props if not TERMS.get(norm(p['value'])) and p['value'].strip().casefold() not in COMPONENTS]
+    structured += [(category_value(p['value']),p) for p in props if p in declarations and not resolved_terms(p['value']) and not (ground_material and ground_word(p['value'])) and p['value'].strip().casefold() not in COMPONENTS]
     structured=[(c,p) for c,p in structured if c not in ('U-OBJECT','part')]
-    typed=category_value(type)
-    if any(p['keys']==['source_type'] for c,p in component):typed='part'
+    typed=material_rule['materialRecognitionCode'] if ground_material else category_value(type)
+    if component and not standard and not ground_material:typed='part'
+    elif ground_material:typed=material_rule['materialRecognitionCode']
     elif ambiguous_namespace:typed='U-OBJECT'
-    elif standard and not TERMS.get(norm(type)):typed='U-OBJECT'
-    if not component and not standard and typed=='U-OBJECT' and not TERMS.get(norm(row['name'])):
+    elif not any(p['keys']==['source_type'] for p in declarations) or standard and not resolved_terms(type):typed='U-OBJECT'
+    if not component and not standard and not structured and typed=='U-OBJECT' and not TERMS.get(norm(row['name'])):
         own=row['name'].strip().casefold();tail=re.split(r'[_－:：]',row['name'])[-1].strip().casefold();hit=COMPONENT_EXPRESSION.search(row['name'])
         word=own if own in COMPONENTS else tail if tail in COMPONENTS else hit[0] if hit else None
         if word:component=[(id,{'keys':['Name'],'value':row['name'],'path':row['source'],'line':0,'confidence':'candidate'}) for id in COMPONENTS[word]['componentIds']]
     if type=='IFCBUILDINGELEMENTPROXY':structured += [(PROXIES['categories'][p['value'].strip()],p) for p in values(row,'类别(Category)','类别','Category') if p['value'].strip() in PROXIES['categories']]
-    for p in values(row,'IFC.PredefinedType'):
+    for p in ([] if chinese else values(row,'IFC.PredefinedType')):
         enum=ALIASES.get('ifcPredefined',{}).get(type+'.'+p['value'].upper())
         if enum:typed=enum;structured.append((enum,p))
     if typed=='E01' and type!='E01':typed='E-T'
@@ -122,7 +145,8 @@ def interpret(row,has_children=False):
                 if category=='U-OBJECT' or compatible(category,c):category=c;basis='object_attribute'
                 elif not compatible(c,category):category='U-OBJECT';basis='attribute_conflict';break
         if basis!='attribute_conflict' and category=='U-OBJECT':
-            category=name_category(row['name']);basis='object_name' if category!='U-OBJECT' else 'unknown';status='candidate'
+            fallback_name=next((name for name in [*[p['value'] for p in values(row,'设备名称','DEVICENAME','PROJECTNAME','工程中名称')],row['name']] if re.search('[\u3400-\u9fff]',name) and name_category(name)!='U-OBJECT'),row['name'])
+            category=name_category(fallback_name);basis='object_name' if category!='U-OBJECT' else 'unknown';status='candidate'
         if basis=='unknown':
             for p in values(row,'设备名称','DEVICENAME','PROJECTNAME','工程中名称'):
                 named=name_category(p['value'])
@@ -150,7 +174,7 @@ def interpret(row,has_children=False):
         for p in values(row,field):
             word=p['value'].strip().casefold();model_entry=VOCAB['keywordDictionary']['entries'].get(word);part_entry=COMPONENTS.get(word)
             entry=part_entry if any(proof(row,candidate)==proof(row,p) for id,candidate in component) else model_entry
-            ambiguous=word in ambiguous_namespace or len(TERMS.get(norm(p['value']),[]))>1 or entry and entry['evidence']['verification']=='ambiguous'
+            ambiguous=word in ambiguous_namespace or len(resolved_terms(p['value']))>1 or entry and entry['evidence']['verification']=='ambiguous' and not (entry.get('defaultCatalogId') or entry.get('defaultComponentId'))
             observations.append({'field':field,'rawValue':p['value'],'status':'ambiguous' if ambiguous else 'mapped' if entry else 'unresolved','verification':'ambiguous' if ambiguous else entry['evidence']['verification'] if entry else 'unverified','evidenceId':proof(row,p),'dictionaryVersion':VOCAB['keywordDictionary']['version'],'dictionaryEvidence':json.dumps(entry.get('evidences',[entry['evidence']]),ensure_ascii=False) if entry else ''})
     if observations:result['vocabularyObservations']=observations
     if len(unique)==1:
@@ -163,7 +187,7 @@ def normalize(rows,scope):
     for r in rows:
         if r['parent']:children[r['parent']].append(r)
     if len(raw)!=len(rows):raise ValueError('Duplicate source occurrence identity')
-    parents={r['parent'] for r in rows if r['parent']};meanings={r['id']:interpret(r,r['id'] in parents) for r in rows};entities={};pending={};owners={};diagnostics=[];visiting=set()
+    parents={r['parent'] for r in rows if r['parent']};meanings={r['id']:interpret(r,r['id'] in parents) for r in rows};entities={};pending={};owners={};diagnostics=[];visiting=set();equipment_contexts={}
     def entity(seed,category,name,proof,sources):
         id='entity:'+identity([scope,seed]);m=meanings[sources[0]]
         if id in entities:return id
@@ -173,9 +197,8 @@ def normalize(rows,scope):
     def bundle(source,reason,seed=None):
         id='pending:'+identity([scope,source if seed is None else seed]);pending.setdefault(id,{'id':id,'reason':reason,'sourceIds':[]});owners[source]=id;return id
     def host_compatibility(meaning,host):
-        allowed=COMPOSITION['componentHosts'].get((meaning.get('componentType') or {}).get('id'))
-        if allowed is None:return 'unconfigured'
-        return 'compatible' if host.get('recognitionCode',host['category']) in allowed else 'incompatible'
+        code=host.get('recognitionCode',host['category'])
+        return 'compatible' if code.startswith('E') else 'unconfigured' if code in ('','U-OBJECT') else 'incompatible'
     def accepts_host(meaning,host):return host_compatibility(meaning,host)=='compatible'
     # Explicit single-phase designations, never common names or directories.
     banks=collections.defaultdict(list)
@@ -190,10 +213,14 @@ def normalize(rows,scope):
             for r in members:bundle(r['id'],'transformer_bank_identity_conflict')
             continue
         id=entity('main-bank:'+number,'E01',number.replace(':reserve','号备用')+'号主变','explicit_main_designation+single_phase_bodies',[r['id'] for r in members]);entities[id]['kind']='transformer_bank';entities[id]['boundaryStatus']='candidate'
+    def declared_equipment(m):return m['category'].startswith('E') and m['basis'] not in ('object_name','standard_name_candidate','family_identity_candidate','unknown')
     def assign(id):
         if id in owners:return owners[id]
         if id in visiting:raise ValueError('Source assembly cycle: '+id)
         visiting.add(id);r=raw[id];m=meanings[id];above=assign(r['parent']) if r['parent'] in raw else None;cat=entities.get(above,{}).get('category');role={p['value'].casefold() for p in values(r,'OBJECTROLE','对象角色','COMPONENTROLE','组件角色')};independent=bool(role&{'independent','独立'})
+        parent_meaning=meanings.get(r['parent']);parent_equipment=equipment_contexts.get(r['parent'],False) or bool(parent_meaning and declared_equipment(parent_meaning))
+        if parent_equipment and not independent and any(p['value'].strip().casefold() in POLICY['contextualTerms'] for p in [{'value':r['source_type']},*values(r,'TYPE','DEVICETYPE','EQUIPMENTTYPE','MATERIALTYPE','SYSCLASSIFYNAME','PARTNAME','设备类型','设备类别','材料类型','材料子类','MATERIALSUBTYPE','设备子类','EQUIPMENTSUBTYPE','COMPONENTTYPE','部件类型')]):
+            m=interpret(r,id in parents,equipment_member=True);meanings[id]=m
         if m['basis']=='attribute_conflict':bundle(id,'object_attributes_conflict')
         elif m['meaning']=='neutral_set':
             if cat in ('E01','E-T','E03') and not independent:owners[id]=above
@@ -209,6 +236,7 @@ def normalize(rows,scope):
             elif above:owners[id]=above;m['membershipStatus']='confirmed'
             else:bundle(id,'component_whole_unresolved')
         else:entity(id,m['category'],r['name'],'object_identity' if m['category']!='U-OBJECT' else 'outward_object_boundary_unconfirmed',[id])
+        equipment_contexts[id]=declared_equipment(m) or parent_equipment and m['meaning'] in ('part','container','detail','source_only')
         visiting.remove(id);return owners.get(id)
     for r in rows:assign(r['id'])
     def host_key(value):
@@ -218,7 +246,7 @@ def normalize(rows,scope):
     def index_hosts():
         for r in rows:
             owner=owners.get(r['id']);m=meanings[r['id']]
-            if owner not in entities or not entities[owner]['category'].startswith('E') or entities[owner]['category']=='E18' or m['meaning']!='object':continue
+            if owner not in entities or not entities[owner]['category'].startswith('E') or m['meaning']!='object':continue
             for p in values(r,'GRIDIDENTIFICATIONSYSTEMCODE','设备编码','电网工程标识系统编码'):codes[host_key(p['value'])].add(owner)
             for p in values(r,'PROJECTNAME','工程中名称'):names[host_key(p['value'])].add(owner)
             if numbered(r['name']):names[host_key(r['name'])].add(owner)
@@ -234,7 +262,7 @@ def normalize(rows,scope):
             proposed=explicit_names
         else:continue
         direct=[owners.get(s) for s in r.get('declaredHosts',[])]
-        constraints=[{owner} if owner in entities and entities[owner]['category'].startswith(('E','M')) else set() for owner in direct]+[codes[host_key(p['value'])] for p in explicit_codes]+[names[host_key(p['value'])] for p in proposed]
+        constraints=[{owner} if owner in entities and entities[owner]['category'].startswith('E') else set() for owner in direct]+[codes[host_key(p['value'])] for p in explicit_codes]+[names[host_key(p['value'])] for p in proposed]
         if not constraints:continue
         matched=set.intersection(*(set(v) for v in constraints));candidates={id for id in matched if accepts_host(m,entities[id])};evidence=[r.get('declaredHostEvidence',{}).get(s,'PARTINDEX:'+str(s)) for s in r.get('declaredHosts',[])]+[proof(r,p) for p in explicit_codes+proposed]
         resolved=[v for v in constraints if v];conflicting=len(resolved)>1 and not set.intersection(*(set(v) for v in resolved))

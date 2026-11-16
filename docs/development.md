@@ -95,7 +95,7 @@ npm test
 
 Python 工具位于 `tools/`，各自维护 `.venv` 与打包配置；构建、参数和排查见 [tools/README.md](../tools/README.md)。工具的目录归属见[项目目录](architecture.md#项目目录与模块归属)。
 
-独立漫游转换工具见 [gim_blender](../tools/gim_blender/README.md)：`tools/gim_blender/build.ps1` 生成目录包，可用 `-BlenderDirectory <便携目录> -Publish` 包含 Blender 并生成 ZIP；导入数据固定在 exe 旁 `data/`。它自带解析和几何实现副本，构建与运行不读取主程序资源。
+独立漫游转换工具见 [gim_blender](../tools/gim_blender/README.md)：`tools/gim_blender/build.ps1` 生成目录包，可用 `-BlenderDirectory <便携目录> -Publish` 包含 Blender 并生成 ZIP；导入数据固定在 exe 旁 `data/`。GUI 只调用独立 Node 服务，服务、漫游前端与转换器分别运行；`start_demo.cmd` / `stop_demo.cmd` 可脱离 GUI 启停，命令行和窗口顶部显示实际端口与地址。它自带解析和几何实现副本，构建与运行不读取主程序资源。
 
 ## 工作区与临时目录
 

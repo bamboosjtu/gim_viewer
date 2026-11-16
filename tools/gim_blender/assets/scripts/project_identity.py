@@ -31,8 +31,19 @@ def looks_like_project(text):
     if not text or re.search(r'设计院|设计公司|勘测院|有限公司|QGDW|^\d{4}[-/]\d',text,re.I):return False
     if re.fullmatch(r'(?:\d+(?:\.\d+)?\s*(?:kV|千伏)\s*)?(?:变电站|工程|变电工程)',text,re.I):return False
     return bool(re.search(r'变电站|工程|项目|电站|substation|project|station|站$',text,re.I))
-def describe_project(source, extract=None):
-    source=Path(source);raw=source.read_bytes();digest=hashlib.sha256(raw).hexdigest()
+def describe_project(source, extract=None, *, source_sha256=None):
+    source=Path(source)
+    # Import already hashes while copying. Metadata only needs the container
+    # header, so reuse that identity instead of reading/hashing the GIM again.
+    with source.open('rb') as stream:
+        raw=bytearray()
+        while block:=stream.read(4096):
+            raw.extend(block)
+            if bytes.fromhex('377abcaf271c') in raw:break
+    raw=bytes(raw)
+    if source_sha256 is None:
+        with source.open('rb') as stream:source_sha256=hashlib.file_digest(stream,'sha256').hexdigest()
+    digest=source_sha256
     fields=header_segments(raw);name='';name_source=None;kv=None;kv_source=None
     # These GIMPKGS layouts place the descriptive project text first. Do not
     # blindly take the second segment: it can be the design organization.

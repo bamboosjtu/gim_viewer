@@ -12,6 +12,8 @@ export interface ObjectNameEvidence extends EvidenceValue {
 }
 
 export interface ObjectEvidence {
+  /** Same source facts interpreted when a proven physical/declared host is equipment. */
+  equipmentMemberVariant?:ObjectEvidence;
   vocabularyAmbiguities?:readonly string[];
   standardClasses?:readonly StandardClassEvidence[];
   hostCodes?:readonly EvidenceValue[];

@@ -64,7 +64,7 @@ it('projects generic secondary equipment directly under E17 without changing its
  expect(inventory.nodes.get(node.parent!)!.kind).toBe('template');
  const modelGroup=inventory.nodes.get(inventory.nodes.get(node.parent!)!.parent!)!;
  expect(modelGroup.title).toBe(entity.standardClass!.label);
- expect(inventory.nodes.get(modelGroup.parent!)!.title).toBe('二次屏柜');
+ expect(modelGroup.title).toBe('二次屏柜');expect(inventory.nodes.get(modelGroup.parent!)!.title).toBe('设备');
  expect([...inventory.nodes.values()].some(n=>n.kind==='group'&&n.title==='具体类型待确认')).toBe(false);
  expect(JSON.stringify(built.snapshot)).toBe(before);
  expect(view.inventorySearch![0].subtitle).toContain('设备材料清册 / 设备 / 二次屏柜 /');

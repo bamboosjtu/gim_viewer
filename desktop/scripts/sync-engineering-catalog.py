@@ -25,19 +25,22 @@ def main():
  for item in standard['items']:
   eq=({'oilimmersedtransformer':'oil_immersed_transformer','gis':'gis','hgis':'hgis','acporcelaincircuitbreaker':'ac_porcelain_circuit_breaker'}.get(item['term'].lower()) or snake(item['term'])) if item['kind']=='equipment' else None
   e=item['evidence'];base={k:e[k] for k in ['sourceKind','workbookSha256','sheet','cellRange','verification','sourceLocation']}
-  for word in [item['label'],item['term'],*item['term'].split('/'),*item['aliases']]:
-   cell=e['termCells'][0] if word in [item['term'],*item['term'].split('/')] else 'D'+e['nameCell'][1:] if word in item['aliases'] else e['nameCell']
+  for word in [item['label'],*item['label'].split('/'),item['term'],*item['term'].split('/'),*item['aliases']]:
+   cell=e['termCells'][0] if word in [item['term'],*item['term'].split('/')] else e['nameCell']
    entry=insert(entries,word,item['id'],{**base,'cell':cell},'catalogIds')
    if eq:entry['equipmentType']=eq
   if eq:
    for word in [item['term'],*item['term'].split('/')]:vocab['equipment'][word.lower()]=eq
  for part in catalog['components']:
-  for word in [part['label'],part['term'],*part['aliases']]:
-   e=part['evidence'];cell=e['cell'].replace('B','C' if word in part['aliases'] else 'B' if word==part['term'] else 'A')
+  for word in [part['label'],*part['label'].split('/'),part['term'],*part['term'].split('/'),*part['aliases']]:
+   e=part['evidence'];cell=e['cell'] if word in [part['term'],*part['term'].split('/')] else e['cellRange'].split(':')[0]
    entry=insert(vocab['componentDictionary']['entries'],word,part['id'],{**e,'cell':cell},'componentIds')
    if word==part['term'] and len({p['label'] for p in catalog['components'] if p['term'].lower()==word.lower()})>1:entry['evidence']={**entry['evidence'],'verification':'ambiguous'}
    if len(entry['componentIds'])==1:entry['componentType']=part['id']
    if word==part['term'] or word in part['aliases']:vocab['components'][word.lower()]=part['id']
+ for word,id in policy['standardTermDefaults'].items():entries[word.lower()]['defaultCatalogId']=id
+ for word,id in policy['componentTermDefaults'].items():
+  entry=vocab['componentDictionary']['entries'][word.lower()];entry['defaultComponentId']=id;entry['componentType']=id;vocab['components'][word.lower()]=id
  for category in catalog['categories']:
   item=next(i for i in standard['items'] if i['id']==category['items'][0]);e=item['evidence']
   for word in [category['label'],category['code']]:

@@ -9,10 +9,13 @@ def publish(bundle, output):
     bundle, output = Path(bundle).resolve(), Path(output).resolve()
     if not (bundle/'gim_blender.exe').is_file() or not (bundle/'_internal').is_dir():
         raise ValueError('Incomplete application directory')
+    for name in ['demo/index.html','runtime/node.exe','server/server.cjs']:
+        if not (bundle/name).is_file():
+            raise ValueError('Application resource missing: '+name)
     output.parent.mkdir(parents=True, exist_ok=True)
     staging = output.with_suffix('.zip.staging')
     with zipfile.ZipFile(staging, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
-        for name in ['gim_blender.exe', 'README.md', 'THIRD_PARTY.md', 'snapshot.json', '_internal', 'runtime']:
+        for name in ['gim_blender.exe', 'README.md', 'THIRD_PARTY.md', 'snapshot.json', '_internal', 'runtime','demo','server','start_demo.cmd','stop_demo.cmd']:
             source = bundle/name
             if source.is_file():
                 archive.write(source, 'gim_blender/'+name)

@@ -1,4 +1,4 @@
-// Explicit local sample check: against a server run by the isolated frozen EXE.
+// Explicit local sample check against the independent command-line service.
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const {chromium}=require('playwright-core');
 async function main(){
@@ -7,9 +7,9 @@ async function main(){
  const page=await browser.newPage({viewport:{width:1440,height:810}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
  try{
   await page.goto(url);assert.equal(await page.locator('[data-level]').count(),1);await page.click('[data-level]');
-  const frame=await (await page.waitForSelector('#simulation-frame')).contentFrame();
+  const frame=page;
   await frame.waitForFunction(()=>window.__tour?.ready&&window.__tour.state().started,null,{timeout:180000});
-  await frame.waitForFunction(()=>window.__tour.state().pointerLocked,null,{timeout:10000});
+  await page.click('#scene');await frame.waitForFunction(()=>window.__tour.state().pointerLocked,null,{timeout:10000});
   const metadata=await frame.evaluate(()=>({sha:window.__tour.sceneData.projectInfo.sourceSha256,counts:window.__tour.sceneData.counts,runtime:window.__tour.sceneData.buildVersion,
    leaves:window.__tour.doors.length,nav:window.__tour.sceneData.nav.equipment.sourceMeshSha256}));
   assert(metadata.sha.startsWith('b8e8ef'));assert.equal(metadata.counts.gimRoots,427);assert.equal(metadata.counts.doors,50);
@@ -43,7 +43,7 @@ async function main(){
   await frame.evaluate(()=>window.__tour.setYaw(180));await page.keyboard.press('KeyE');await frame.waitForFunction(id=>window.__tour.doors.some(d=>d.id===id&&d.t<.01),door.id);
   await page.keyboard.press('KeyE');await frame.waitForFunction(id=>window.__tour.doors.some(d=>d.id===id&&d.t>.99),door.id);
   await page.keyboard.down('KeyW');try{await frame.waitForFunction(()=>window.__tour.state().py<-1.5,null,{timeout:8000})}finally{await page.keyboard.up('KeyW')}
-  await page.keyboard.press('KeyR');await page.keyboard.press('KeyQ');await page.waitForFunction(()=>!document.querySelector('#simulation-frame'));
+  await page.keyboard.press('KeyR');await page.keyboard.press('KeyQ');await page.waitForSelector('[data-level]');
   assert.deepEqual(errors,[]);fs.writeFileSync(path.join(out,'browser.json'),JSON.stringify({passed:true,metadata,cases:['one click entry and pointer lock','WASD','jump and landing','map','return to gate','solid wall blocking','small door E prompt','open, enter, close, reopen and exit','Q returns to catalog'],errors,browser:browser.version()},null,2));
  }finally{await browser.close()}
 }

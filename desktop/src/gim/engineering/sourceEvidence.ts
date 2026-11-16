@@ -1,3 +1,4 @@
+import recognitionPolicy from '../../engineering/recognitionPolicy.json';
 import {ENGINEERING_EVIDENCE_FIELDS} from './recognitionFieldPolicy.js';
 import aliases from './sourceCompatibilityPolicy.json';
 import type { EvidenceValue, ObjectEvidence, ObjectNameEvidence } from '../../engineering/types.js';
@@ -8,6 +9,9 @@ import sourceVocabulary from './sourceVocabulary.json';
 import {standardTerms,standardEquipmentId,STANDARD_CATALOG_VERSION} from '../../engineering/standardCatalog.js';
 const vocabulary:Record<string,string>={...sourceVocabulary.equipment,...sourceVocabulary.equipmentAliases};
 const components:Record<string,string>=sourceVocabulary.components;
+type ContextRule={modelId:string;componentId:string;materialRecognitionCode?:string;defaultKind?:string};
+const contextRules=recognitionPolicy.contextualTerms as Record<string,ContextRule>;
+const contextRule=(value:string)=>contextRules[value.trim().toLowerCase()];
 const componentWords=Object.keys(sourceVocabulary.componentDictionary.entries).filter(word=>/[\u3400-\u9fff]/.test(word)&&word.length>=3).sort((a,b)=>b.length-a.length);
 const componentNameExpression=new RegExp(componentWords.map(word=>word.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|'));
 // Data content invalidates semantic caches even while development contracts stay v1.
@@ -100,6 +104,7 @@ function createValueReader(record:SourceRecord):(labels:readonly string[])=>Evid
 /** Format labels and type enums end here; the engineering core does not read them. */
 export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
   const values=createValueReader(record);
+  const adapt=(equipmentMember=false):ObjectEvidence=>{
   const type = record.source_type;
   const devTypes: Readonly<Record<string, string>> = aliases.dev;
   const ifcTypes: Readonly<Record<string, string>> = aliases.ifc;
@@ -121,34 +126,51 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
     const value=(aliases.ifcPredefined as Record<string,string>)[`${type}.${p.value.trim().toUpperCase()}`];return value?[{...p,value}]:[];
   });
   const dictionary=sourceVocabulary.keywordDictionary;
-  const keywordEntries=dictionary.entries as Record<string,{equipmentType?:string;evidence:KeywordSourceEvidence}>;
-  const confidence=(entry:typeof keywordEntries[string])=>entry.evidence.verification==='verified'&&entry.evidence.sourceLocation?'confirmed' as const:'candidate' as const;
-  const componentEntries=sourceVocabulary.componentDictionary.entries as Record<string,{componentType?:string;componentIds:string[];evidence:KeywordSourceEvidence;evidences?:KeywordSourceEvidence[]}>;
+  const keywordEntries=dictionary.entries as Record<string,{equipmentType?:string;defaultCatalogId?:string;evidence:KeywordSourceEvidence}>;
+  const confidence=(entry:typeof keywordEntries[string])=>('defaultCatalogId' in entry||'defaultComponentId' in entry)||entry.evidence.verification==='verified'&&entry.evidence.sourceLocation?'confirmed' as const:'candidate' as const;
+  const componentEntries=sourceVocabulary.componentDictionary.entries as Record<string,{componentType?:string;componentIds:string[];defaultComponentId?:string;evidence:KeywordSourceEvidence;evidences?:KeywordSourceEvidence[]}>;
   const independent=values(['对象角色','组件角色','OBJECTROLE','COMPONENTROLE']).some(p=>/独立|independent/i.test(p.value));
   const partRole=values(['对象角色','组件角色','OBJECTROLE','COMPONENTROLE']).some(p=>/内部|组成|部件|component|part/i.test(p.value));
-  const componentContext=partRole||values(['COMPONENTTYPE','部件类型','所属设备编码','宿主设备编码','HOSTEQUIPMENTID','HOSTEQUIPMENTCODE','PARENTEQUIPMENTID','所属设备名称','所属设备工程中名称','宿主设备名称','HOSTEQUIPMENTNAME','PARENTEQUIPMENTNAME']).length>0;
-  const modelContext=independent||values(['EQUIPMENTTYPE','MATERIALTYPE','CONSTRUCTIONTYPE','设备类型','材料类型','构件类型','SYSCLASSIFYNAME']).length>0;
+  const componentContext=equipmentMember||partRole||record.attributeOnly&&!!record.relations?.some(r=>r.kind==='host')||values(['COMPONENTTYPE','部件类型','所属设备编码','宿主设备编码','HOSTEQUIPMENTID','HOSTEQUIPMENTCODE','PARENTEQUIPMENTID','所属设备名称','所属设备工程中名称','宿主设备名称','HOSTEQUIPMENTNAME','PARENTEQUIPMENTNAME']).length>0;
   const namespaceAmbiguities:string[]=[];
-  const declarations=[{value:type,evidenceId:`${record.id}:source_type:${type}`},...typeProperties,...values(['SYSCLASSIFYNAME','PARTNAME','COMPONENTTYPE','部件类型']).map(p=>({...p,confidence:keywordEntries[p.value.trim().toLowerCase()]?confidence(keywordEntries[p.value.trim().toLowerCase()]):componentEntries[p.value.trim().toLowerCase()]?confidence(componentEntries[p.value.trim().toLowerCase()]):'candidate' as const}))];
+  const rawDeclarations=[{value:type,evidenceId:`${record.id}:source_type:${type}`},...typeProperties,...values(['SYSCLASSIFYNAME','PARTNAME','COMPONENTTYPE','部件类型']).map(p=>({...p,confidence:keywordEntries[p.value.trim().toLowerCase()]?confidence(keywordEntries[p.value.trim().toLowerCase()]):componentEntries[p.value.trim().toLowerCase()]?confidence(componentEntries[p.value.trim().toLowerCase()]):'candidate' as const}))];
+  const chinese=rawDeclarations.filter(p=>/[\u3400-\u9fff]/.test(p.value)&&(standardTerms(p.value).length||componentEntries[p.value.trim().toLowerCase()]));
+  const declarations=chinese.length?chinese:rawDeclarations;
+  const needsChineseHint=declarations.some(p=>{const entry=componentEntries[p.value.trim().toLowerCase()];return entry&&(entry.componentIds.length>1||entry.defaultComponentId||standardTerms(p.value).length);});
+  const chineseName=needsChineseHint?[...values(['设备名称','DEVICENAME']).map(p=>p.value),record.name].find(name=>/[\u3400-\u9fff]/.test(name)&&componentEntries[name.trim().toLowerCase()]):undefined;
+  const componentHint=chineseName?componentEntries[chineseName.trim().toLowerCase()]:undefined;
+  const groundWord=(value:string)=>!!contextRule(value)?.materialRecognitionCode;
+  const materialRule=declarations.map(p=>contextRule(p.value)).find(rule=>rule?.materialRecognitionCode);
+  const materialDeclarations=values(['MATERIALTYPE','材料类型']).filter(p=>groundWord(p.value));
+  const groundMaterial=!!materialRule&&(materialRule.defaultKind==='material'||componentContext&&!independent||materialDeclarations.length>0||!!componentHint?.componentIds.includes(materialRule.componentId));
+  const groundMember=groundMaterial&&componentContext&&!independent;
+  const modelTerms=(value:string)=>groundMaterial&&groundWord(value)?[]:standardTerms(value);
   const useComponent=(value:string)=>{
-    const key=value.trim().toLowerCase();
-    if(!componentEntries[key])return false;
-    if(!standardTerms(value).length)return !independent;
-    if(componentContext&&!independent)return true;
-    if(modelContext)return false;
+    const key=value.trim().toLowerCase(),entry=componentEntries[key];
+    if(!entry||groundWord(value))return false;
+    const items=modelTerms(value);if(!items.length)return !independent;
+    if(independent)return false;
+    if(componentContext)return true;
+    if(contextRule(value))return !!componentHint&&componentHint.componentIds.some(id=>entry.componentIds.includes(id));
+    if(recognitionPolicy.modelPreferredTerms.includes(key))return !!componentHint&&componentHint.componentIds.some(id=>entry.componentIds.includes(id));
     namespaceAmbiguities.push(value);return false;
   };
   const componentDeclarations=declarations.filter(p=>useComponent(p.value));
   const standardDeclarations=declarations.filter(p=>!componentDeclarations.includes(p)&&!namespaceAmbiguities.includes(p.value));
+  const componentIds=(value:string)=>{
+    const entry=componentEntries[value.trim().toLowerCase()];
+    if(componentHint){const ids=entry.componentIds.filter(id=>componentHint.componentIds.includes(id));if(ids.length)return ids;}
+    return entry.defaultComponentId?[entry.defaultComponentId]:entry.componentIds;
+  };
   const standardClasses=standardDeclarations.flatMap(p=>{
-    const items=standardTerms(p.value),family=!items.length?directoryDefinition(p.value):undefined;
+    const items=modelTerms(p.value),family=!items.length?directoryDefinition(p.value):undefined;
     const matches=items.length?items:family?[{id:'category:'+family.code,kind:family.kind,label:family.label,term:family.code,category:family.code,recognitionCode:directoryRecognitionCode(family.code)!,catalogCategory:family.label,catalogGroup:family.groupLabel}]:[];
     return matches.map(item=>({...p,id:item.id,kind:item.kind as 'equipment'|'material'|'construction',label:item.label,term:item.term,category:item.category,recognitionCode:item.recognitionCode,catalogCategory:item.catalogCategory,catalogGroup:item.catalogGroup}));
   });
   const keywords=dictionary.fields.flatMap(field=>values([field]).map(p=>({field,property:p,entry:keywordEntries[p.value.trim().toLowerCase()]})));
   const vocabularyObservations=keywords.map(({field,property,entry})=>{
     const component=componentEntries[property.value.trim().toLowerCase()],selected=componentDeclarations.some(p=>p.evidenceId===property.evidenceId)?component:entry;
-    const terms=standardTerms(property.value),ambiguous=namespaceAmbiguities.includes(property.value)||terms.length>1||selected?.evidence.verification==='ambiguous';
+    const terms=standardTerms(property.value),ambiguous=namespaceAmbiguities.includes(property.value)||terms.length>1||selected?.evidence.verification==='ambiguous'&&!(selected&&('defaultCatalogId' in selected||'defaultComponentId' in selected));
     const evidences=selected&&'evidences' in selected?selected.evidences as KeywordSourceEvidence[]:selected?[selected.evidence]:[];
     return {field,rawValue:property.value,status:ambiguous?'ambiguous' as const:selected?'mapped' as const:'unresolved' as const,evidenceId:property.evidenceId,dictionaryVersion:dictionary.version,
       ...(selected?{verification:ambiguous?'ambiguous' as const:selected.evidence.verification as 'verified'|'unverified'|'ambiguous',sourceLocation:selected.evidence.sourceLocation,dictionaryEvidence:JSON.stringify(evidences.map(keywordEvidence))}:{})};
@@ -160,15 +182,11 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
     }
   }
   const modelProperties=values(['型号','MODEL','MODELSPEC']);
-  const needsNameCandidate=!components[type.toLowerCase()]&&!standardTypes.length&&!standardClasses.length&&(!devCategory||devCategory==='part')&&!standardTerms(record.name).length;
-  const nameTerm=needsNameCandidate?componentEntries[record.name.trim().toLowerCase()]??componentEntries[(record.name.split(/[_－:：]/).pop()??'').trim().toLowerCase()]:undefined;
-  const namedComponent=needsNameCandidate?nameTerm??componentEntries[componentNameExpression.exec(record.name)?.[0]??'']:undefined;
-  const componentNameCandidate=namedComponent?.componentType?
-    [{value:namedComponent.componentType,evidenceId:record.nameEvidence?.find(n=>n.value===record.name)?.evidenceId??`name:${record.id}`,confidence:'candidate' as const}]:[];
   const propertyCategories=[
-    ...predefinedCategories,
-    ...typeProperties.filter(p=>!standardClasses.some(c=>c.evidenceId===p.evidenceId)&&!componentDeclarations.some(c=>c.evidenceId===p.evidenceId)&&!namespaceAmbiguities.includes(p.value)).flatMap(p=>{const category=categoryValue(p.value);return category!=='U-OBJECT'&&category!=='part'?[{...p,value:category}]:[];}),
-    ...modelProperties.flatMap(p=>{const category=categoryValue(p.value);return category!=='U-OBJECT'&&category!=='part'?[{...p,value:category}]:[];}),
+    ...(groundMaterial?materialDeclarations.map(p=>({...p,value:materialRule!.materialRecognitionCode!})):[]),
+    ...(chinese.length?[]:predefinedCategories),
+    ...typeProperties.filter(p=>declarations.includes(p)&&!(groundMaterial&&groundWord(p.value))&&!standardClasses.some(c=>c.evidenceId===p.evidenceId)&&!componentDeclarations.some(c=>c.evidenceId===p.evidenceId)&&!namespaceAmbiguities.includes(p.value)).flatMap(p=>{const category=categoryValue(p.value);return category!=='U-OBJECT'&&category!=='part'?[{...p,value:category}]:[];}),
+    ...modelProperties.filter(p=>!chinese.length||/[\u3400-\u9fff]/.test(p.value)).flatMap(p=>{const category=categoryValue(p.value);return category!=='U-OBJECT'&&category!=='part'?[{...p,value:category}]:[];}),
   ];
   // Generic IFC proxies may still carry explicit authoring categories. Keep
   // this conservative: generic models/electrical equipment are not a type.
@@ -181,13 +199,19 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
     && proxyCategory.size === 1 && !['E19','C-D6'].includes([...proxyCategory][0])
     ? ENGINEERING_CATEGORY_LABELS[[...proxyCategory][0]] : undefined;
   const observedCategories=[...new Set(propertyCategories.map(p=>p.value))];
-  const typed=predefinedCategories.length===1?predefinedCategories[0].value:devCategory??ifcTypes[type]??(observedCategories.length===1?observedCategories[0]:undefined);
+  const declaredCategories=[...new Set(standardClasses.map(p=>p.recognitionCode))];
+  const typed=groundMaterial?materialRule!.materialRecognitionCode:declaredCategories.length===1?declaredCategories[0]:predefinedCategories.length===1?predefinedCategories[0].value:devCategory??ifcTypes[type]??(observedCategories.length===1?observedCategories[0]:undefined);
   for(const p of values(['用途','设备用途','PURPOSE'])){
     const category=/^(?:站用|station_service_transformer)$/i.test(p.value.trim())?'E03':/^(?:主变|main_transformer)$/i.test(p.value.trim())?'E01':categoryValue(p.value);
     // A service target such as “主变控制” is not this cabinet's identity.
     if((typed==='E01'||typed==='E-T')&&['E01','E03'].includes(category)||typed==='C-B4'&&['C-B2','C-B3'].includes(category)
       ||['IFCPUMP','IFCVALVE'].includes(type)&&/^(?:给排水设施|排水设施)$/.test(p.value))propertyCategories.push({...p,value:['IFCPUMP','IFCVALVE'].includes(type)?'C-D5':category});
   }
+  const needsNameCandidate=!components[type.toLowerCase()]&&!standardTypes.length&&!standardClasses.length&&!componentDeclarations.length&&!groundMaterial&&!propertyCategories.length&&(!devCategory||devCategory==='part')&&!standardTerms(record.name).length;
+  const nameTerm=needsNameCandidate?componentEntries[record.name.trim().toLowerCase()]??componentEntries[(record.name.split(/[_－:：]/).pop()??'').trim().toLowerCase()]:undefined;
+  const namedComponent=needsNameCandidate?nameTerm??componentEntries[componentNameExpression.exec(record.name)?.[0]??'']:undefined;
+  const componentNameCandidate=namedComponent?.componentType?
+    [{value:namedComponent.componentType,evidenceId:record.nameEvidence?.find(n=>n.value===record.name)?.evidenceId??`name:${record.id}`,confidence:'candidate' as const}]:[];
   return {
     declaredHostSourceIds:record.attributeOnly?record.relations?.filter(r=>r.kind==='host').map(r=>({value:r.targetSourceId,evidenceId:r.evidence})):[],
     standardClasses,
@@ -195,21 +219,21 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
     hostCodes:values(['所属设备编码','宿主设备编码','HOSTEQUIPMENTID','HOSTEQUIPMENTCODE','PARENTEQUIPMENTID']),
     hostDesignations:values(['所属设备名称','所属设备工程中名称','宿主设备名称','HOSTEQUIPMENTNAME','PARENTEQUIPMENTNAME']),
     vocabularyObservations,
-    equipmentTypeCandidates:standardDeclarations.flatMap(p=>{const items=standardTerms(p.value).filter(item=>item.kind==='equipment');return items.length?items.map(item=>({...p,value:standardEquipmentId(item)})):vocabulary[p.value.trim().toLowerCase()]?[{...p,value:vocabulary[p.value.trim().toLowerCase()]}]:[];}),
-    componentTypeCandidates:[...componentNameCandidate,...componentDeclarations.flatMap(p=>{const entry=componentEntries[p.value.trim().toLowerCase()];return entry.componentIds.map(id=>({...p,value:id,confidence:confidence(entry)}));})],
-    purposes:/^stationtransformer$/i.test(type)?[{value:'station_service_transformer',evidenceId:`${record.id}:source_type:${type}`}]:['E01','E-T','E03'].includes(typed)?values(['用途','设备用途','PURPOSE']).flatMap(p=>/^(?:主变|主变压器|main_transformer)$/i.test(p.value.trim())?[{...p,value:'main_transformer'}]:/^(?:站用|站用变压器|station_service_transformer)$/i.test(p.value.trim())?[{...p,value:'station_service_transformer'}]:[]):[],
+    equipmentTypeCandidates:standardDeclarations.flatMap(p=>{const items=modelTerms(p.value).filter(item=>item.kind==='equipment');return groundMaterial&&groundWord(p.value)?[]:items.length?items.map(item=>({...p,value:standardEquipmentId(item)})):vocabulary[p.value.trim().toLowerCase()]?[{...p,value:vocabulary[p.value.trim().toLowerCase()]}]:[];}),
+    componentTypeCandidates:[...(groundMember?[{value:materialRule!.componentId,evidenceId:declarations.find(p=>groundWord(p.value))!.evidenceId,confidence:'confirmed' as const}]:[]),...componentNameCandidate,...componentDeclarations.flatMap(p=>{const entry=componentEntries[p.value.trim().toLowerCase()];return componentIds(p.value).map(id=>({...p,value:id,confidence:entry.defaultComponentId||componentHint?'confirmed' as const:confidence(entry)}));})],
+    purposes:/^stationtransformer$/i.test(type)?[{value:'station_service_transformer',evidenceId:`${record.id}:source_type:${type}`}]:['E01','E-T','E03'].includes(typed??'')?values(['用途','设备用途','PURPOSE']).flatMap(p=>/^(?:主变|主变压器|main_transformer)$/i.test(p.value.trim())?[{...p,value:'main_transformer'}]:/^(?:站用|站用变压器|station_service_transformer)$/i.test(p.value.trim())?[{...p,value:'station_service_transformer'}]:[]):[],
     sourceId: record.id, name: proxyName || record.name, assemblyParentId: record.parent || undefined,
     names: record.nameEvidence,
-    typeCategory: namespaceAmbiguities.length?undefined:componentDeclarations.some(p=>p.value===type)?'part':new Set(standardClasses.map(p=>p.id)).size===1&&standardClasses.some(p=>p.evidenceId!==`${record.id}:source_type:${type}`)&&!standardTypes.length?undefined:/neutralpointequipment/i.test(type) ? 'neutral_set' : predefinedCategories.length===1?predefinedCategories[0].value:devCategory==='E01'&&type!=='E01'?'E-T':devCategory ?? ifcTypes[type.toUpperCase()],
-    typeEvidenceId: predefinedCategories.length===1?predefinedCategories[0].evidenceId:`${record.id}:source_type:${type}`,
+    typeCategory: groundMaterial?materialRule!.materialRecognitionCode:namespaceAmbiguities.length?undefined:componentDeclarations.length&&!standardClasses.length?'part':!declarations.some(p=>p.evidenceId===record.id+':source_type:'+type)?undefined:new Set(standardClasses.map(p=>p.id)).size===1&&standardClasses.some(p=>p.evidenceId!==`${record.id}:source_type:${type}`)&&!standardTypes.length?undefined:/neutralpointequipment/i.test(type) ? 'neutral_set' : predefinedCategories.length===1?predefinedCategories[0].value:devCategory==='E01'&&type!=='E01'?'E-T':devCategory ?? ifcTypes[type.toUpperCase()],
+    typeEvidenceId: groundMaterial?declarations.find(p=>groundWord(p.value))!.evidenceId:componentDeclarations.length&&!standardClasses.length?componentDeclarations[0].evidenceId:predefinedCategories.length===1?predefinedCategories[0].evidenceId:`${record.id}:source_type:${type}`,
     propertyCategories:[...propertyCategories,...standardClasses.filter(p=>p.evidenceId!==`${record.id}:source_type:${type}`).map(p=>({...p,value:p.recognitionCode!}))],
     typeRefinements:['IFCPUMP','IFCVALVE'].includes(type)?['C-D5']:['IFCBEAM','IFCBEAMSTANDARDCASE'].includes(type)?['C-A4.steel']:['IFCCOLUMN','IFCCOLUMNSTANDARDCASE'].includes(type)?['C-A3.steel']:type==='IFCMEMBER'?['C-A14','C-A3','C-A4','C-B5','C-B7']:[],
-    objectRoles:[...values(['对象角色','组件角色','OBJECTROLE','COMPONENTROLE']).flatMap(p=>/^(?:source_only|非物理来源)$/i.test(p.value)?[{...p,value:'source_only'}]:/^(?:detail|细部)$/i.test(p.value)?[{...p,value:'detail'}]:/^(?:container|装配容器)$/i.test(p.value)?[{...p,value:'container'}]:/内部|组成|部件|component|part/i.test(p.value)?[{...p,value:'part'}]:/独立|independent/i.test(p.value)?[{...p,value:'independent'}]:[]),
+    objectRoles:[...(groundMember?[{value:'part',evidenceId:'policy:'+recognitionPolicy.version+':material_member:'+materialRule!.componentId}]:[]),...values(['对象角色','组件角色','OBJECTROLE','COMPONENTROLE']).flatMap(p=>/^(?:source_only|非物理来源)$/i.test(p.value)?[{...p,value:'source_only'}]:/^(?:detail|细部)$/i.test(p.value)?[{...p,value:'detail'}]:/^(?:container|装配容器)$/i.test(p.value)?[{...p,value:'container'}]:/内部|组成|部件|component|part/i.test(p.value)?[{...p,value:'part'}]:/独立|independent/i.test(p.value)?[{...p,value:'independent'}]:[]),
       ...(type==='IFCPILE'?[{value:'part',evidenceId:`${record.id}:pile_foundation_component`}]:[])],
     traits: {
       fastener: ['IFCMECHANICALFASTENER', 'IFCFASTENER'].includes(type),
       assemblyContainer: ['IFCELEMENTASSEMBLY', 'IFCBUILDINGELEMENTPROXY'].includes(type),
-      materialType: !!devCategory?.startsWith('M'),
+      materialType: groundMaterial||!!devCategory?.startsWith('M'),
       nonphysical: isIfcFeatureSourceType(type),
     },
     designations: values( ['工程中名称', 'PROJECTNAME', 'Projectname']),
@@ -218,4 +242,11 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
     phases: values( ['相数','PHASECOUNT']).map(p=>({...p,value:/^(?:1|单相)$/.test(p.value)?'单相':p.value})),
     phaseLabels:values(['相别','PHASE','PHASELABEL']),
   };
+  };
+  const result=adapt();
+  const role=values(['对象角色','组件角色','OBJECTROLE','COMPONENTROLE']);
+  const contextual=[record.source_type,...values(['TYPE','DEVICETYPE','EQUIPMENTTYPE','MATERIALTYPE','SYSCLASSIFYNAME','PARTNAME','设备类型','设备类别','材料类型','材料子类','MATERIALSUBTYPE','设备子类','EQUIPMENTSUBTYPE','COMPONENTTYPE','部件类型']).map(p=>p.value)];
+  const resolvedPart=result.objectRoles?.some(p=>p.value==='part')||result.componentTypeCandidates?.some(p=>p.confidence!=='candidate');
+  if(!resolvedPart&&!role.some(p=>/独立|independent/i.test(p.value))&&contextual.some(value=>contextRule(value)))result.equipmentMemberVariant=adapt(true);
+  return result;
 }

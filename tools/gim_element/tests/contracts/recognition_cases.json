@@ -505,7 +505,7 @@
     }
   },
   {
-    "name": "ambiguous_shielding",
+    "name": "shielding_defaults_to_fitting",
     "records": [
       {
         "id": "x",
@@ -520,8 +520,8 @@
     "pending": 0,
     "expectedMember": {
       "sourceId": "x",
-      "category": "U-OBJECT",
-      "categoryStatus": "unresolved"
+      "category": "M03",
+      "categoryStatus": "confirmed"
     }
   },
   {
@@ -546,5 +546,118 @@
       "category": "E07",
       "categoryStatus": "confirmed"
     }
+  },
+  {
+    "name": "terminal_box_inside_equipment",
+    "records": [
+      {
+        "id": "host",
+        "type": "GIS"
+      },
+      {
+        "id": "p",
+        "type": "TerminalBox",
+        "parent": "host"
+      }
+    ],
+    "groups": [
+      [
+        "host",
+        "p"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "p",
+      "category": "",
+      "membershipStatus": "confirmed"
+    }
+  },
+  {
+    "name": "ground_resistance_inside_equipment_is_material",
+    "records": [
+      {
+        "id": "host",
+        "type": "GIS"
+      },
+      {
+        "id": "p",
+        "type": "GroundResistance",
+        "parent": "host"
+      }
+    ],
+    "groups": [
+      [
+        "host",
+        "p"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "p",
+      "category": "M06"
+    }
+  },
+  {
+    "name": "ground_resistance_standalone_is_device",
+    "records": [
+      {
+        "id": "p",
+        "type": "GroundResistance"
+      }
+    ],
+    "groups": [
+      [
+        "p"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "p",
+      "category": "E09"
+    }
+  },
+  {
+    "name": "chinese_classification_before_english",
+    "records": [
+      {
+        "id": "p",
+        "type": "GIS",
+        "props": {
+          "EQUIPMENTTYPE": "油浸式变压器"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "p"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "p",
+      "category": "E01"
+    }
+  },
+  {
+    "name": "protection_default_generic",
+    "records": [
+      {
+        "id": "host",
+        "type": "GIS"
+      },
+      {
+        "id": "p",
+        "type": "ProtectionEquipment",
+        "parent": "host"
+      }
+    ],
+    "groups": [
+      [
+        "host",
+        "p"
+      ]
+    ],
+    "pending": 0
   }
 ]

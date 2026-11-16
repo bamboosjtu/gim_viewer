@@ -10,8 +10,8 @@ async function fixture() {
   const files: Record<string, string> = {
     'project.cbm': 'SUBSYSTEM0=unit.cbm',
     'unit.cbm': 'ENTITYNAME=F2System\nOBJECTMODELPOINTER=body.dev\nNAME=主变系统',
-    'body.dev': 'SYMBOLNAME=1号主变压器\nSUBDEVICE0=box.dev\nSUBDEVICE1=radiator.dev',
-    'box.dev': 'SYMBOLNAME=1号主变测控柜', 'radiator.dev': 'TYPE=Radiator\nSYMBOLNAME=散热器',
+    'body.dev': 'TYPE=OilImmersedTransformer\nPURPOSE=主变\nSYMBOLNAME=1号主变压器\nSUBDEVICE0=box.dev\nSUBDEVICE1=radiator.dev',
+    'box.dev': 'TYPE=MeasurementAndControlCabinet\nOBJECTROLE=independent\nSYMBOLNAME=1号主变测控柜', 'radiator.dev': 'TYPE=Radiator\nSYMBOLNAME=散热器',
   };
   const graph = await extractEngineeringSourceGraph({ paths: Object.keys(files), readText: async p => files[p] });
   const state = new AppState(); state.activateProject(1, 'package'); state.currentProjectType = 'substation';
@@ -55,7 +55,7 @@ describe('engineering composition and provenance navigation', () => {
     const template=inventory.nodes.get(inventory.nodes.get(key)!.parent!)!;
     const group=inventory.nodes.get(template.parent!)!;
     expect(template.kind).toBe('template');expect(template.title).toBe('主变测控柜');
-    const modelLabel=STANDARD_CATALOG.find(item=>item.id==='equipment:secondarycabinet')!.label;
+    const modelLabel=STANDARD_CATALOG.find(item=>item.id==='equipment:measurementandcontrolcabinet')!.label;
     expect(group.title).toBe(modelLabel);
     const modelPath=modelLabel==='二次屏柜'?['二次屏柜']:['二次屏柜',modelLabel];
     expect(view.inventorySearch!.find(r=>r.key===f.box.id)?.subtitle).toBe(['设备材料清册','设备',...modelPath,'主变测控柜'].join(' / '));

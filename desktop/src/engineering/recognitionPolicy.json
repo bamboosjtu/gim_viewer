@@ -849,7 +849,6 @@
       "group": "materials",
       "grain": "item",
       "reference": "Private identity/purpose role; directory codes come from the configured catalog.",
-      "catalogId": "material:powerbox/lightingbox/maintenancebox",
       "catalogFamily": {
         "kind": "material",
         "label": "照明及动力"
@@ -1197,7 +1196,22 @@
     "firewall": "C-A1",
     "oilpool": "C-C3",
     "pool": "C-C3",
-    "hydraulicandhvacequipmentfoundation": "C-B2"
+    "hydraulicandhvacequipmentfoundation": "C-B2",
+    "arcextinguishingcoil": "E04",
+    "groundtransformer": "E04",
+    "opengroundingequipment": "E04",
+    "neutralpointequipment": "E04",
+    "dcarrester": "E15",
+    "filterarrester": "E15",
+    "controlcabinet": "E16.control_cabinet",
+    "controlpanel": "E16.control_cabinet",
+    "measurementandcontrolcabinet": "E16.control_cabinet",
+    "protectionpanel": "E16.panel_cabinet",
+    "protectioncabinet": "E16.panel_cabinet",
+    "relayprotectioncabinet": "E16.panel_cabinet",
+    "powerbox": "M12",
+    "lightingbox": "M12",
+    "maintenancebox": "M12"
   },
   "componentIds": {
     "body": "body",
@@ -1250,5 +1264,36 @@
     "oilfilledtransformer": "oil_immersed_transformer",
     "porcelainpillarcircuitbreaker": "ac_porcelain_circuit_breaker"
   },
-  "objectRoles": {}
+  "objectRoles": {},
+  "standardTermDefaults": {
+    "均压屏蔽装置": "material:voltageequalizationshieldingdevice"
+  },
+  "componentTermDefaults": {
+    "protectionequipment": "protective_device"
+  },
+  "modelPreferredTerms": [
+    "controlcabinet"
+  ],
+  "contextualTerms": {
+    "terminalbox": {
+      "modelId": "material:terminalbox",
+      "componentId": "terminal_box"
+    },
+    "groundresistance": {
+      "modelId": "equipment:groundresistance",
+      "materialRecognitionCode": "M06",
+      "componentId": "ground_resistance",
+      "defaultKind": "equipment"
+    },
+    "端子箱": {
+      "modelId": "material:terminalbox",
+      "componentId": "terminal_box"
+    },
+    "接地电阻": {
+      "modelId": "equipment:groundresistance",
+      "materialRecognitionCode": "M06",
+      "componentId": "ground_resistance",
+      "defaultKind": "material"
+    }
+  }
 }

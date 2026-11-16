@@ -18,6 +18,8 @@ export function categoryFromName(name:string):string {
   const old=nameCategories.get(name);if(old!==undefined)return old;
   const normalized=normalizedObjectName(name);
   const roles=new Set(standardTermsFromName(normalized).map(item=>item.recognitionCode));
+  const contextual=(policy.contextualTerms as Record<string,{defaultKind?:string;materialRecognitionCode?:string}>)[normalized.toLowerCase()];
+  if(!roles.size&&contextual?.defaultKind==='material'&&contextual.materialRecognitionCode)roles.add(contextual.materialRecognitionCode);
   if(!roles.size){
     const matches=ENGINEERING_CATEGORIES.filter(row=>normalized.includes(row.label));
     const longest=Math.max(0,...matches.map(row=>row.label.length));
@@ -44,6 +46,10 @@ const refinements:Record<string,string[]>={
   'C-A1':['C-C1','C-C4'],'C-A2':['C-C1','C-C5','C-B3'],'C-A5':['C-C1','M08'],'C-A4':['C-A4.steel'],'C-A3':['C-A3.steel'],
 };
 const compatible=(coarse:string,fine:string)=>coarse===fine||!!refinements[coarse]?.includes(fine);
+const preferredFallbackName=(object:ObjectEvidence)=>{
+  const names=[...object.identityNames.map(p=>p.value),object.name];
+  return names.find(value=>/[\u3400-\u9fff]/.test(value)&&categoryFromName(value)!=='U-OBJECT')??names.find(value=>categoryFromName(value)!=='U-OBJECT')??object.name;
+};
 
 function interpretClassification(object:ObjectEvidence,hasChildren=false):ObjectInterpretation {
   const name=object.name.trim();
@@ -81,10 +87,11 @@ function interpretClassification(object:ObjectEvidence,hasChildren=false):Object
   if(properties.length)evidence.push(...object.propertyCategories!.map(p=>p.evidenceId));
   if(basis!=='attribute_conflict'){
     if(category==='U-OBJECT'){
-      const named=categoryFromName(name);
+      const fallbackName=preferredFallbackName(object),named=categoryFromName(fallbackName);
       const identities=named==='U-OBJECT'?object.identityNames.map(p=>({category:categoryFromName(p.value),evidence:p.evidenceId})).filter(p=>p.category!=='U-OBJECT'):[];
       category=named!=='U-OBJECT'?named:identities[0]?.category??'U-OBJECT';
-      basis=named!=='U-OBJECT'?'object_name':identities.length?'family_identity_candidate':'unknown';
+      basis=named!=='U-OBJECT'?(fallbackName===name?'object_name':'family_identity_candidate'):identities.length?'family_identity_candidate':'unknown';
+      evidence.push(...object.identityNames.filter(p=>p.value===fallbackName).map(p=>p.evidenceId));
       evidence.push(...(object.names?.filter(n=>n.value===name).map(n=>n.evidenceId)??[`name:${object.sourceId}`]),...identities.filter(p=>p.category===category).map(p=>p.evidence));
     }
     if((category==='E-T'||category==='E01')&&explicitMain(object)){category='E01';evidence.push(...object.designations.map(p=>p.evidenceId));}
@@ -115,11 +122,11 @@ export function interpretRecognitionObject(object:ObjectEvidence,hasChildren=fal
       if(['material_subtype_evidence_insufficient','equipment_subtype_evidence_insufficient'].includes(result.unknownReason??''))delete result.unknownReason;
     }
   }else if(!classes.length&&!object.typeCategory&&!object.propertyCategories?.length&&result.meaning==='object'&&result.basis!=='attribute_conflict'){
-    const names=standardTermsFromName(object.name);
-    const namedCategory=categoryFromName(object.name);
+    const fallbackName=preferredFallbackName(object),names=standardTermsFromName(fallbackName);
+    const namedCategory=categoryFromName(fallbackName);
     // A generic catalog substring (电缆) cannot replace a more specific head
     // already recognized in the full name (电缆桥架).
-    if(names.length===1&&(namedCategory==='U-OBJECT'||namedCategory===categoryFromName(names[0].label))){const item=names[0],evidenceId=object.names?.find(n=>n.value===object.name)?.evidenceId??`name:${object.sourceId}`;
+    if(names.length===1&&(namedCategory==='U-OBJECT'||namedCategory===categoryFromName(names[0].label))){const item=names[0],evidenceId=object.names?.find(n=>n.value===fallbackName)?.evidenceId??object.identityNames.find(p=>p.value===fallbackName)?.evidenceId??`name:${object.sourceId}`;
       result.standardClass={...item,kind:item.kind as 'equipment'|'material'|'construction',value:item.term,evidenceId,status:'candidate',evidence:[evidenceId]};
       if(!object.typeCategory&&!object.propertyCategories?.length){
         if(!result.category.startsWith(`${item.recognitionCode}.`))result.category=item.recognitionCode;
@@ -155,7 +162,7 @@ export function interpretRecognitionObject(object:ObjectEvidence,hasChildren=fal
   // A vocabulary lookup is not proof that its mapping was checked against the standard.
   if(result.classificationStatus==='confirmed'&&!object.typeCategory&&object.propertyCategories?.length&&object.propertyCategories.every(p=>p.confidence==='candidate'))result.classificationStatus='candidate';
   result.categoryStatus=result.classificationStatus??'unresolved';
-  const roleEvidence=object.objectRoles?.map(p=>p.evidenceId)??[];
+  const roleEvidence=[...new Set([...(object.objectRoles?.map(p=>p.evidenceId)??[]),...(object.typeCategory==='part'?[...(object.componentTypeCandidates?.map(p=>p.evidenceId)??[]),...(object.typeEvidenceId?[object.typeEvidenceId]:[])]:[])])];
   result.objectRole={id:result.meaning,status:result.basis==='attribute_conflict'?'unresolved':roleEvidence.length||object.traits.nonphysical||object.traits.fastener||object.typeCategory==='part'?'confirmed':'candidate',evidence:roleEvidence};
   return result;
 }

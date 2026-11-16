@@ -6,12 +6,16 @@ export const STANDARD_CATALOG=catalog.items.map(item=>({...item,recognitionCode:
 const normalize=(value:string)=>value.normalize('NFKC').replace(/\s+/g,'').toLowerCase();
 type Item=typeof STANDARD_CATALOG[number];
 const terms=new Map<string,Item[]>();
-for(const item of STANDARD_CATALOG)for(const name of [item.label,item.term,...item.term.split('/'),...item.aliases]){
+for(const item of STANDARD_CATALOG)for(const name of [item.label,...item.label.split('/'),item.term,...item.term.split('/'),...item.aliases]){
   const key=normalize(name),rows=terms.get(key)??[];if(!rows.some(row=>row.id===item.id))rows.push(item);terms.set(key,rows);
 }
 /** Exact aliases can be ambiguous (e.g. two distinct shielding devices). */
-export function standardTerms(value:string):readonly Item[]{return terms.get(value.toLowerCase())??terms.get(normalize(value))??[];}
-const chinese=[...new Set(STANDARD_CATALOG.flatMap(row=>[row.label,...row.aliases]).filter(label=>/[\u3400-\u9fff]/.test(label)&&label.length>=2))];
+export function standardTerms(value:string):readonly Item[]{
+  const found=terms.get(value.toLowerCase())??terms.get(normalize(value))??[];
+  const preferred=(policy.standardTermDefaults as Record<string,string>)[normalize(value)];
+  return preferred?found.filter(item=>item.id===preferred):found;
+}
+const chinese=[...new Set(STANDARD_CATALOG.flatMap(row=>[row.label,...row.label.split('/'),...row.aliases]).filter(label=>/[\u3400-\u9fff]/.test(label)&&label.length>=2))];
 const byLength=chinese.sort((a,b)=>b.length-a.length||a.localeCompare(b));
 const expression=new RegExp(byLength.map(label=>label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|'),'g');
 /** Names provide candidates only. Structured source declarations stay authoritative. */

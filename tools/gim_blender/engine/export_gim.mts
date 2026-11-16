@@ -1,6 +1,6 @@
-/** Offline GIM mesh export using the actual desktop source/discovery/LOD1 code.
+/** Offline GIM mesh export using this tool's own source/discovery/compiler copy.
  * Source geometry stays Z-up metres. No DOM, IPC, DB or full app startup.
- * The separate Python root walk must agree before any geometry is published.
+ * Cross-implementation audits are an explicit developer diagnostic only.
  */
 import {readFileSync,readdirSync,statSync,writeFileSync,openSync,writeSync,closeSync,renameSync,mkdirSync} from 'node:fs';
 import {join,relative,resolve,basename} from 'node:path';
@@ -17,6 +17,7 @@ import {parseStlBinary} from './snapshot/core/src/viewer/stlLoader.js';
 const ROOT=resolve(process.env.GIM_BLENDER_EXTRACT!);
 const BUILD=resolve(process.env.GIM_BLENDER_BUILD!);
 const LOD=Number(process.env.GIM_BLENDER_GIM_LOD??'0') as 0|1;
+const VERIFY_ASSEMBLY=process.env.GIM_BLENDER_VERIFY_ASSEMBLY==='1';
 if(LOD!==0&&LOD!==1)throw Error('Offline browsing supports explicit GIM LOD 0 or 1');
 const paths:string[]=[];
 function walk(dir:string){for(const entry of readdirSync(dir,{withFileTypes:true})){
@@ -43,18 +44,27 @@ const catalog=collectSourceGeometryOccurrences(graph);
 if(catalog.diagnostics.length)throw Error('Viewer source occurrence diagnostics: '+JSON.stringify(catalog.diagnostics.slice(0,8)));
 const placementFile=join(BUILD,'gim_placements.json');
 const legacy=JSON.parse(readFileSync(placementFile,'utf8'));
-const actualByPath=new Map<string,any[]>();
-for(const row of legacy.placements){const key=canonical(row.dev),list=actualByPath.get(key)||[];list.push(row);actualByPath.set(key,list);}
+// Labels come from the same CBM document address. They never choose a geometry
+// representation or placement; those are owned by the source occurrence.
+const labelsByDocument=new Map(legacy.placements.map((row:any)=>[canonical(row.file),row]));
+const contexts=new Map(graph.cbmOccurrences.map(node=>[node.id,node]));
 const matched=new Set<any>(),roots:any[]=[];let maxRootDifferenceMm=0;
 for(const occ of catalog.occurrences){
- const candidates=actualByPath.get(canonical(occ.devPath))||[];
- let chosen:any=null,error=Infinity;
- for(const row of candidates){if(matched.has(row))continue;const d=Math.max(...row.matrix.map((x:number,i:number)=>Math.abs(x-occ.placementMatrix[i])));if(d<error){error=d;chosen=row;}}
- if(!chosen||error>2e-5)throw Error('Independent CBM root placement mismatch: '+occ.id+' '+error);
- matched.add(chosen);maxRootDifferenceMm=Math.max(maxRootDifferenceMm,error);
- roots.push({occ,row:chosen});
+ const context=contexts.get(occ.sourceContextId)!;
+ roots.push({occ,row:labelsByDocument.get(canonical(context.documentPath))||{label:occ.name}});
 }
-if(matched.size!==legacy.placements.length)throw Error('Independent root multiplicity mismatch');
+if(VERIFY_ASSEMBLY){
+ const actualByPath=new Map<string,any[]>();
+ for(const row of legacy.placements){const key=canonical(row.dev),list=actualByPath.get(key)||[];list.push(row);actualByPath.set(key,list);}
+ for(const {occ} of roots){
+  const candidates=actualByPath.get(canonical(occ.devPath))||[];
+  let chosen:any=null,error=Infinity;
+  for(const row of candidates){if(matched.has(row))continue;const d=Math.max(...row.matrix.map((x:number,i:number)=>Math.abs(x-occ.placementMatrix[i])));if(d<error){error=d;chosen=row;}}
+  if(!chosen||error>2e-5)throw Error('Independent CBM root placement mismatch: '+occ.id+' '+error);
+  matched.add(chosen);maxRootDifferenceMm=Math.max(maxRootDifferenceMm,error);
+ }
+ if(matched.size!==legacy.placements.length)throw Error('Independent root multiplicity mismatch');
+}
 
 type Chunk={name:string;category:string;color:number[];tile:number[];pos:Float32Array[];nor:Float32Array[];idx:Uint32Array[];vertexCount:number;indexCount:number;bbox:number[];sources:Set<string>};
 const chunks=new Map<string,Chunk>(),compiled=new Map<string,THREE.Group>(),leafRows:any[]=[],sourceRows=new Map<string,any>();
@@ -86,7 +96,7 @@ function add(mesh:THREE.Mesh,placement:number[],label:string,path:string,probe=f
  let c=chunks.get(key);
  if(!c){c={name:'GIM_'+chunks.size,category,color:rgba,tile,pos:[],nor:[],idx:[],vertexCount:0,indexCount:0,bbox:bbox.slice(),sources:new Set()};chunks.set(key,c);}
  else for(let a=0;a<3;a++){c.bbox[a]=Math.min(c.bbox[a],bbox[a]);c.bbox[a+3]=Math.max(c.bbox[a+3],bbox[a+3]);}
- if(probe){
+ if(VERIFY_ASSEMBLY&&probe){
   const sample=[0,Math.floor(p.count/2),p.count-1],local=new Float32Array(9);
   sample.forEach((vertex,i)=>{v.fromBufferAttribute(p,vertex).applyMatrix4(mesh.matrixWorld);local.set([v.x,v.y,v.z],i*3);});
   // An indexed probe keeps vertex identities stable. The product helper
@@ -156,18 +166,19 @@ for(const [index,{occ,row}] of roots.entries()){
  }
  if(index%100===0)console.log('viewer export roots',index+1,'/',roots.length,'leaves',leafRows.length,'triangles',stats.tris,'compiled',compiled.size);
 }
-// Empty/unsupported GIM is explicit; an IFC track may still represent the site.
-if(!Array.isArray(legacy.leaf_instances))throw Error('Regenerate the independent Python source/leaf inventory');
-const leafGroups=new Map<string,any[]>();
-for(const leaf of legacy.leaf_instances){const key=canonical(leaf.path),list=leafGroups.get(key)||[];list.push(leaf);leafGroups.set(key,list);}
 const usedLeaves=new Set<any>();let maxLeafDifferenceMm=0;
-for(const leaf of leafRows){
- let chosen:any=null,error=Infinity;
- for(const row of leafGroups.get(canonical(leaf.path))||[]){if(usedLeaves.has(row))continue;const d=Math.max(...row.matrix.map((v:number,i:number)=>Math.abs(v-leaf.matrix[i])));if(d<error){error=d;chosen=row;}}
- if(!chosen||error>2e-5)throw Error('Independent DEV/PHM leaf placement mismatch: '+leaf.path+' '+error);
- usedLeaves.add(chosen);maxLeafDifferenceMm=Math.max(maxLeafDifferenceMm,error);
+if(VERIFY_ASSEMBLY){
+ if(!Array.isArray(legacy.leaf_instances))throw Error('Regenerate the independent Python source/leaf inventory');
+ const leafGroups=new Map<string,any[]>();
+ for(const leaf of legacy.leaf_instances){const key=canonical(leaf.path),list=leafGroups.get(key)||[];list.push(leaf);leafGroups.set(key,list);}
+ for(const leaf of leafRows){
+  let chosen:any=null,error=Infinity;
+  for(const row of leafGroups.get(canonical(leaf.path))||[]){if(usedLeaves.has(row))continue;const d=Math.max(...row.matrix.map((v:number,i:number)=>Math.abs(v-leaf.matrix[i])));if(d<error){error=d;chosen=row;}}
+  if(!chosen||error>2e-5)throw Error('Independent DEV/PHM leaf placement mismatch: '+leaf.path+' '+error);
+  usedLeaves.add(chosen);maxLeafDifferenceMm=Math.max(maxLeafDifferenceMm,error);
+ }
+ if(usedLeaves.size!==legacy.leaf_instances.length)throw Error('Independent leaf occurrence multiplicity mismatch');
 }
-if(usedLeaves.size!==legacy.leaf_instances.length)throw Error('Independent leaf occurrence multiplicity mismatch');
 const temp=join(BUILD,'gim_scene.bin.staging'),fd=openSync(temp,'w');let offset=0;const metaChunks:any[]=[];
 function write(array:Float32Array|Uint32Array){const b=Buffer.from(array.buffer,array.byteOffset,array.byteLength);let done=0;while(done<b.length)done+=writeSync(fd,b,done,b.length-done);offset+=b.length;}
 try{for(const c of chunks.values()){
@@ -175,14 +186,17 @@ try{for(const c of chunks.values()){
  metaChunks.push({name:c.name,category:c.category,color:c.color,tile:c.tile,vertexCount:c.vertexCount,indexCount:c.indexCount,positionOffset:po,normalOffset:no,indexOffset:io,bbox:c.bbox,sourcePaths:[...c.sources]});
 }}finally{closeSync(fd);}
 renameSync(temp,join(BUILD,'gim_scene.bin'));stats.chunks=metaChunks.length;
+const audit=VERIFY_ASSEMBLY?{geometryProbes,probeFormatVersion:2,
+ viewerParity:{independentRootCount:matched.size,maxRootMatrixDifferenceMm:maxRootDifferenceMm,
+ independentLeafCount:usedLeaves.size,maxLeafMatrixDifferenceMm:maxLeafDifferenceMm,
+ strictDependencies:true,observedNonXmlControlCharacters:observedNonXmlControls,ifcFiles:graph.ifcPaths}}:{};
 const meta={version:2,source:process.env.GIM_BLENDER_SOURCE_NAME,coordinateSystem:'source-z-up-metres-v2',geometryBackend:`gim-blender-lod${LOD}`,geometryLod:LOD,
  stats,chunks:metaChunks,placements:roots.length,dev_instances:legacy.counts.dev_instances,phm_instances:legacy.counts.phm_instances,solids:leafRows.length,leaf_counts:sourceRows.size,leaf_instances:leafRows,
- source_geometry:[...sourceRows.values()],geometryFailures:failures,geometryProbes,probeFormatVersion:2,
- viewerParity:{independentRootCount:matched.size,maxRootMatrixDifferenceMm:maxRootDifferenceMm,
-  independentLeafCount:usedLeaves.size,maxLeafMatrixDifferenceMm:maxLeafDifferenceMm,
-  strictDependencies:true,observedNonXmlControlCharacters:observedNonXmlControls,ifcFiles:graph.ifcPaths},
+ source_geometry:[...sourceRows.values()],geometryFailures:failures,...audit,
  limits:[`Tool LOD${LOD} browsing approximation; local compiler snapshot, not an engineering accuracy proof.`]};
 writeFileSync(join(BUILD,'gim_scene.json'),JSON.stringify(meta));
-writeFileSync(join(BUILD,'viewer_reference_roots.json'),JSON.stringify({occurrenceCount:roots.length,diagnostics:catalog.diagnostics,rows:roots.map(({occ})=>({id:occ.id,sourceId:occ.sourceId,devPath:occ.devPath,matrix:occ.placementMatrix}))}));
-writeFileSync(join(BUILD,'viewer_reference_leaves.json'),JSON.stringify({roots:roots.length,leaves:leafRows,errors:[]}));
-console.log(JSON.stringify({stats,viewerParity:meta.viewerParity,geometryFailures:failures.length}));
+if(VERIFY_ASSEMBLY){
+ writeFileSync(join(BUILD,'viewer_reference_roots.json'),JSON.stringify({occurrenceCount:roots.length,diagnostics:catalog.diagnostics,rows:roots.map(({occ})=>({id:occ.id,sourceId:occ.sourceId,devPath:occ.devPath,matrix:occ.placementMatrix}))}));
+ writeFileSync(join(BUILD,'viewer_reference_leaves.json'),JSON.stringify({roots:roots.length,leaves:leafRows,errors:[]}));
+}
+console.log(JSON.stringify({stats,...audit,geometryFailures:failures.length}));

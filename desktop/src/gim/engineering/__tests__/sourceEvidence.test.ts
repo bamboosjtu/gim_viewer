@@ -8,12 +8,8 @@ it.each([['MetalFence','M09'],['DryTypeReactor','E02'],['PowerBox','M05'],['Ligh
   expect(result.category,field).toBe(category);expect(result.categoryStatus).toBe('confirmed');
  }
 });
-it.each(['TerminalBox','GroundResistance'])('keeps unqualified model/component collision %s unresolved',term=>{
- for(const props of [{},{TYPE:term}] as Record<string,string>[]){
-  const result=interpretObject(toObjectEvidence(record(Object.keys(props).length?'OTHERS':term,'unknown',props)));
-  expect(result).toMatchObject({category:'U-OBJECT',categoryStatus:'unresolved',basis:'vocabulary_namespace_ambiguous'});
-  expect(result.componentType).toBeUndefined();expect(result.equipmentType).toBeUndefined();
- }
+it.each([['TerminalBox','M04'],['GroundResistance','E09']])('uses the confirmed standalone default for %s',(term,category)=>{
+ for(const props of [{},{TYPE:term}] as Record<string,string>[]){expect(interpretObject(toObjectEvidence(record(Object.keys(props).length?'OTHERS':term,'unknown',props)))).toMatchObject({category,categoryStatus:'confirmed'});}
 });
 it.each([['TerminalBox','M04','terminal_box'],['GroundResistance','E09','ground_resistance']])('disambiguates %s with explicit model or component context',(term,category,part)=>{
  const model=interpretObject(toObjectEvidence(record(term,'unknown',{OBJECTROLE:'independent'})));
@@ -23,9 +19,9 @@ it.each([['TerminalBox','M04','terminal_box'],['GroundResistance','E09','ground_
 });
 it('retains both original locations for an ambiguous standard declaration',()=>{
  const result=interpretObject(toObjectEvidence(record('OTHERS','unknown',{SYSCLASSIFYNAME:'均压屏蔽装置'})));
- expect(result.categoryStatus).toBe('unresolved');
+ expect(result).toMatchObject({category:'M03',categoryStatus:'confirmed'});
  const observed=result.vocabularyObservations!.find(row=>row.field==='SYSCLASSIFYNAME')!;
- expect(observed).toMatchObject({status:'ambiguous',verification:'ambiguous'});
+ expect(observed).toMatchObject({status:'mapped'});
  const evidence=JSON.parse(observed.dictionaryEvidence!) as string[];expect(evidence).toHaveLength(2);expect(evidence[0]).not.toBe(evidence[1]);
 });
 it('keeps property names and free model strings from becoming category facts',()=>{
