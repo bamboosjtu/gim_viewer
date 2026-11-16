@@ -1,3 +1,4 @@
+use gim_native_core::NativeError;
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::mem::size_of;
@@ -11,16 +12,16 @@ const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
 struct FileTime { low:u32, high:u32 }
 struct ProcessHandle(*mut c_void);
 impl Drop for ProcessHandle {fn drop(&mut self){unsafe{CloseHandle(self.0);}}}
-fn opened(pid:u32)->Result<Option<(ProcessHandle,u64)>,String>{
+fn opened(pid:u32)->Result<Option<(ProcessHandle,u64)>, NativeError>{
     let handle=unsafe{OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,0,pid)};
-    if handle.is_null(){let error=unsafe{GetLastError()};return if error==87{Ok(None)}else{Err(format!("process-query-failed:{error}"))}}
+    if handle.is_null(){let error=unsafe{GetLastError()};return if error==87{Ok(None)}else{Err(format!("process-query-failed:{error}").into())}}
     let handle=ProcessHandle(handle);
     let(mut created,mut exited,mut kernel,mut user)=(FileTime::default(),FileTime::default(),FileTime::default(),FileTime::default());
     if unsafe{GetProcessTimes(handle.0,&mut created,&mut exited,&mut kernel,&mut user)}==0{return Err("process-times-unavailable".into())}
     if exited.low!=0||exited.high!=0{return Ok(None)}
     Ok(Some((handle,((created.high as u64)<<32)|created.low as u64)))
 }
-fn owned_descendants<H>(root_pid:u32,children:&HashMap<u32,Vec<u32>>,mut open:impl FnMut(u32)->Result<Option<(H,u64)>,String>)->Result<Vec<(u32,H,u64)>,String>{
+fn owned_descendants<H>(root_pid:u32,children:&HashMap<u32,Vec<u32>>,mut open:impl FnMut(u32)->Result<Option<(H,u64)>, NativeError>)->Result<Vec<(u32,H,u64)>, NativeError>{
     let root=open(root_pid)?.ok_or("root-exited")?;
     let mut processes=vec![(root_pid,root.0,root.1)];let mut cursor=0;
     while cursor<processes.len(){
@@ -184,7 +185,7 @@ pub(super) fn snapshot(root_pid: u32) -> Snapshot {
 
     // Holding every accepted handle also prevents PID reuse between discovery
     // and accounting. Toolhelp parent IDs alone can refer to a dead old parent.
-    let process_ids=match owned_descendants(root_pid,&children,opened){Ok(value)=>value,Err(reason)=>return unavailable_with_root(root_pid,reason)};
+    let process_ids=match owned_descendants(root_pid,&children,opened){Ok(value)=>value,Err(reason)=>return unavailable_with_root(root_pid,reason.to_string())};
 
     let mut total_rss = 0u64;
     let mut total_private = 0u64;

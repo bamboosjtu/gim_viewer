@@ -1,8 +1,9 @@
 //! SQLite schema and migrations; no file-cache or IPC responsibilities.
 
+use gim_native_core::NativeError;
 use rusqlite::Connection;
 
-fn create_schema(conn: &Connection) -> Result<(), String> {
+fn create_schema(conn: &Connection) -> Result<(), NativeError> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS gim_project (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -280,9 +281,9 @@ fn create_schema(conn: &Connection) -> Result<(), String> {
 }
 
 /// Unreleased physical schema. Remove the development database after structural changes.
-pub(super) fn initialize_schema(conn: &Connection) -> Result<(), String> {
+pub(super) fn initialize_schema(conn: &Connection) -> Result<(), NativeError> {
     create_schema(conn)?;
-    conn.pragma_update(None,"user_version",1).map_err(|e|e.to_string())
+    conn.pragma_update(None,"user_version",1).map_err(|e|e.to_string()).map_err(NativeError::from)
 }
 
 pub(super) const PER_PROJECT_TABLES: &[&str] = &[
@@ -292,7 +293,7 @@ pub(super) const PER_PROJECT_TABLES: &[&str] = &[
     "powerline_cbm_node", "powerline_cbm_child", "powerline_cbm_ref", "powerline_file_stat",
     "powerline_fam_property", "powerline_dev_property", "powerline_cache_session",
 ];
-pub(super) fn clear_project_tables(conn: &Connection, project_id: i64) -> Result<(), String> {
+pub(super) fn clear_project_tables(conn: &Connection, project_id: i64) -> Result<(), NativeError> {
     for table in PER_PROJECT_TABLES {
         conn.execute(&format!("DELETE FROM {table} WHERE project_id=?1"), [project_id]).map_err(|e|e.to_string())?;
     }

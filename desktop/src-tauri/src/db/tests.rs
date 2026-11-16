@@ -1,3 +1,4 @@
+use gim_native_core::NativeErrorCode;
 use std::collections::HashSet;
 #[test]
 fn queued_old_line_begin_cannot_clear_a_newer_session() {
@@ -22,7 +23,7 @@ fn queued_old_line_begin_cannot_clear_a_newer_session() {
     started_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
     save_line_graph_begin_blocking(&state,reserve_line_begin(),1,"new".into(),graph("new"),Some("same-source".into()),0,0).unwrap();
     resume_tx.send(()).unwrap();
-    let error=tauri::async_runtime::block_on(worker).unwrap().unwrap_err();assert!(error.contains("已被更新的会话取代"),"{error}");
+    let error=tauri::async_runtime::block_on(worker).unwrap().unwrap_err();assert!(error.message.contains("已被更新的会话取代"),"{error}");
     let conn=state.0.lock().unwrap();
     let session:String=conn.query_row("SELECT session_id FROM powerline_cache_session WHERE project_id=1",[],|r|r.get(0)).unwrap();
     assert_eq!(session,"new");
@@ -44,11 +45,11 @@ fn queued_native_publications_reject_replaced_sources_and_line_sessions() {
                 "cbm_nodes":[{"node_key":"project.cbm","path":"project.cbm","name":"old","sort_order":0}],
                 "ifc_models":[],"file_dev_entries":[],"fam_properties":[],"dev_properties":[]})).unwrap();
             let error=super::substation_index::save_gim_index_connection(&mut state.0.lock().unwrap(),payload).unwrap_err();
-            assert!(error.contains("源 GIM 已变化"),"{error}");
+            assert!(error.message.contains("源 GIM 已变化"),"{error}");
             let error=super::line_index::save_line_attrs_chunk_blocking(&state,1,"old-session".into(),vec![],vec![]).unwrap_err();
-            assert!(error.contains("session_id 不匹配"),"{error}");
+            assert!(error.message.contains("session_id 不匹配"),"{error}");
             let error=super::line_index::save_line_project_finish_blocking(&state,1,"old-session".into()).unwrap_err();
-            assert!(error.contains("session_id 不匹配"),"{error}");
+            assert!(error.message.contains("session_id 不匹配"),"{error}");
             Ok(())
         }).await
     }});
@@ -174,7 +175,7 @@ use std::os::windows::fs::MetadataExt;
         #[cfg(unix)]
         std::os::unix::fs::symlink(&file, &link).unwrap();
         let rejection = context.contains(1, "CBM/linked.ifc", &link).unwrap_err();
-        assert!(rejection.contains("reparse point"), "unexpected rejection: {}", rejection);
+        assert!(rejection.message.contains("reparse point"), "unexpected rejection: {}", rejection);
         #[cfg(windows)]
         assert!(!super::readable_source_of_size(&link, 5));
         #[cfg(windows)]
@@ -590,12 +591,12 @@ use std::os::windows::fs::MetadataExt;
 
         std::fs::write(&index_path, b"bad").unwrap();
         let error = read_line_semantic_pack_files(&root, false).unwrap_err();
-        assert!(error.starts_with("INDEX_INVALID:"));
+        assert_eq!(error.code,NativeErrorCode::IndexInvalid);
         std::fs::write(&index_path, &index_backup).unwrap();
 
         std::fs::write(&pack_path, b"a").unwrap();
         let error = read_line_semantic_pack_files(&root, false).unwrap_err();
-        assert!(error.starts_with("PACK_TRUNCATED:"));
+        assert_eq!(error.code,NativeErrorCode::PackTruncated);
         std::fs::write(&pack_path, b"abc").unwrap();
 
         let mut corrupted = index_backup.clone();
@@ -604,12 +605,12 @@ use std::os::windows::fs::MetadataExt;
         corrupted[offset_start..offset_start + 8].copy_from_slice(&u64::MAX.to_le_bytes());
         std::fs::write(&index_path, corrupted).unwrap();
         let error = read_line_semantic_pack_files(&root, false).unwrap_err();
-        assert!(error.starts_with("PACK_TRUNCATED:"));
+        assert_eq!(error.code,NativeErrorCode::PackTruncated);
 
         std::fs::write(&index_path, &index_backup).unwrap();
         std::fs::remove_file(&pack_path).unwrap();
         let error = read_line_semantic_pack_files(&root, false).unwrap_err();
-        assert!(error.starts_with("PACK_INVALID:"));
+        assert_eq!(error.code,NativeErrorCode::PackInvalid);
 
         // Both sidecars reduced to valid-looking empty headers must still be
         // rejected as an incomplete source; otherwise warm restore could
@@ -621,7 +622,7 @@ use std::os::windows::fs::MetadataExt;
         std::fs::write(&index_path, empty_index).unwrap();
         std::fs::write(&pack_path, Vec::<u8>::new()).unwrap();
         let error = read_line_semantic_pack_files(&root, false).unwrap_err();
-        assert!(error.starts_with("INDEX_INVALID:"));
+        assert_eq!(error.code,NativeErrorCode::IndexInvalid);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -678,7 +679,7 @@ use std::os::windows::fs::MetadataExt;
             &mut seen,
         )
         .unwrap_err();
-        assert!(duplicate.contains("重复"));
+        assert!(duplicate.message.contains("重复"));
     }
 
     #[test]
@@ -695,7 +696,7 @@ use std::os::windows::fs::MetadataExt;
                 &mut seen,
             )
             .unwrap_err();
-            assert!(!error.is_empty());
+            assert!(!error.message.is_empty());
         }
     }
 

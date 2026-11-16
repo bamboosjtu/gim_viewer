@@ -5,6 +5,7 @@
 //! `7z.exe` / `7z.dll` 以字节形式嵌入主程序，首次使用时释放到临时目录再
 //! 调用；LGPL 许可说明见 README 与 `License.txt`（嵌入资源）。
 
+use gim_native_core::{NativeError, NativeErrorCode};
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -48,7 +49,7 @@ fn file_matches(path: &Path, expected: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn write_verified(path: &Path, bytes: &[u8], expected: &str) -> Result<(), String> {
+fn write_verified(path: &Path, bytes: &[u8], expected: &str) -> Result<(), NativeError> {
     if file_matches(path, expected) {
         return Ok(());
     }
@@ -57,14 +58,14 @@ fn write_verified(path: &Path, bytes: &[u8], expected: &str) -> Result<(), Strin
     fs::write(&temp, bytes).map_err(|e| format!("写入 {} 失败: {e}", temp.display()))?;
     if !file_matches(&temp, expected) {
         let _ = fs::remove_file(&temp);
-        return Err(format!("{} 写入后 SHA-256 校验失败", temp.display()));
+        return Err(format!("{} 写入后 SHA-256 校验失败", temp.display()).into());
     }
     if path.exists() {
         fs::remove_file(path).map_err(|e| format!("替换 {} 失败: {e}", path.display()))?;
     }
     fs::rename(&temp, path).map_err(|e| format!("提交 {} 失败: {e}", path.display()))?;
     if !file_matches(path, expected) {
-        return Err(format!("{} 提交后 SHA-256 校验失败", path.display()));
+        return Err(format!("{} 提交后 SHA-256 校验失败", path.display()).into());
     }
     Ok(())
 }
@@ -89,7 +90,7 @@ pub fn locate_7z() -> Option<PathBuf> {
         .clone()
 }
 
-fn extract_embedded() -> Result<PathBuf, String> {
+fn extract_embedded() -> Result<PathBuf, NativeError> {
     let (exe_hash, dll_hash) = embedded_hashes();
     // 目录按内容哈希命名：不同版本/不同二进制不会复用同一可预测路径。
     let dir = embedded_runtime_root()
@@ -102,7 +103,7 @@ fn extract_embedded() -> Result<PathBuf, String> {
     write_verified(&dll, EMBEDDED_7Z_DLL, dll_hash)?;
     // 执行前最后再确认一次，覆盖释放期间被替换的窗口。
     if !file_matches(&exe, exe_hash) || !file_matches(&dll, dll_hash) {
-        return Err("随包 7z.exe/7z.dll 完整性校验失败".to_string());
+        return Err("随包 7z.exe/7z.dll 完整性校验失败".to_string().into());
     }
     Ok(exe)
 }
@@ -120,9 +121,9 @@ pub fn extract_stream<F>(
     entries: &[(String, u64)],
     temp_dir: &Path,
     mut sink: F,
-) -> Result<(), String>
+) -> Result<(), NativeError>
 where
-    F: FnMut(String, Vec<u8>) -> Result<(), String>,
+    F: FnMut(String, Vec<u8>) -> Result<(), NativeError>,
 {
     let seven_zip = locate_7z().ok_or_else(|| "随包 7z.exe 不可用".to_string())?;
     let temp_archive = temp_dir.join(".gim-archive-stream.7z");
@@ -138,7 +139,7 @@ where
     }
 
     let mut stderr_reader = None;
-    let result = (|| -> Result<(), String> {
+    let result = (|| -> Result<(), NativeError> {
         let mut command = Command::new(&seven_zip);
         command
             .arg("e")
@@ -173,7 +174,7 @@ where
                         return Err(format!(
                             "7z 输出提前结束（{entry_index}/{}，缺少 {path}）",
                             entries.len()
-                        ));
+                        ).into());
                     }
                     pending.extend_from_slice(&buffer[..read]);
                 }
@@ -196,7 +197,7 @@ where
         }
         let status = child.0.wait().map_err(|e| format!("等待 7z 退出失败: {e}"))?;
         if !status.success() {
-            return Err(format!("7z 解压失败（{status}）"));
+            return Err(format!("7z 解压失败（{status}）").into());
         }
         Ok(())
     })();
@@ -207,11 +208,16 @@ where
     let _ = fs::remove_file(&temp_archive);
     result.map_err(|error| {
         if !stderr_tail.is_empty() { eprintln!("[GIM private 7z diagnostic] {stderr_tail}"); }
-        match corrupt_stderr_code(&stderr_tail) {
-            Some(code) => format!("INPUT_CORRUPT:{code}; {error}"),
-            None => error,
-        }
+        decoder_error(error,&stderr_tail)
     })
+}
+
+fn decoder_error(error: NativeError, stderr: &str) -> NativeError {
+    if !matches!(error.code,NativeErrorCode::OperationFailed|NativeErrorCode::Io) {return error;}
+    match corrupt_stderr_code(stderr) {
+            Some(code) => NativeError::new(NativeErrorCode::InputCorrupt, format!("7z {code}; {error}")),
+            None => error,
+    }
 }
 
 fn bounded_stderr_tail(mut stderr: impl Read) -> String {
@@ -247,6 +253,9 @@ mod tests {
         assert_eq!(corrupt_stderr_code("ERROR: Data Error : source"), Some("DATA_ERROR"));
         assert_eq!(corrupt_stderr_code("CRC Failed"), Some("CRC_ERROR"));
         assert_eq!(corrupt_stderr_code("cannot create output"), None);
+        assert_eq!(decoder_error(NativeError::new(NativeErrorCode::Cancelled,"stop"),"CRC failed").code,NativeErrorCode::Cancelled);
+        assert_eq!(decoder_error(NativeError::new(NativeErrorCode::ResourceLimit,"limit"),"CRC failed").code,NativeErrorCode::ResourceLimit);
+        assert_eq!(decoder_error(NativeError::from("decoder failed"),"CRC failed").code,NativeErrorCode::InputCorrupt);
     }
 
     #[test]
@@ -304,7 +313,7 @@ mod process_guard_tests {
         let child=Command::new("powershell.exe").args(["-NoProfile","-Command","Start-Sleep -Seconds 60"])
             .creation_flags(0x08000000).stdout(Stdio::piped()).spawn().unwrap();
         let handle=unsafe{OpenProcess(0x00100000,0,child.id())};assert!(!handle.is_null());
-        let fail=||->Result<(),String>{let _owned=ReapedChild(child);Err("sink failure".into())};
+        let fail=||->Result<(), NativeError>{let _owned=ReapedChild(child);Err("sink failure".into())};
         assert!(fail().is_err());
         assert_eq!(unsafe{WaitForSingleObject(handle,0)},0,"child must be terminated and reaped before returning");
         unsafe{CloseHandle(handle);}

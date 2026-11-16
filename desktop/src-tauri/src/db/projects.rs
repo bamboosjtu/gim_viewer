@@ -1,5 +1,6 @@
 //! Project identity registration, source guards and project records.
 
+use gim_native_core::{NativeError, NativeErrorCode};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -31,7 +32,7 @@ pub struct GimProjectRecord {
     pub last_opened_at_ms: u64,
 }
 
-pub(crate) fn ensure_project_exists(conn: &Connection, project_id: i64) -> Result<(), String> {
+pub(crate) fn ensure_project_exists(conn: &Connection, project_id: i64) -> Result<(), NativeError> {
     ensure_cache_project_id(project_id)?;
     let exists: bool = conn
         .query_row(
@@ -41,7 +42,7 @@ pub(crate) fn ensure_project_exists(conn: &Connection, project_id: i64) -> Resul
         )
         .map_err(|e| format!("校验项目 {} 失败: {}", project_id, e))?;
     if !exists {
-        return Err(format!("项目 {} 不存在", project_id));
+        return Err(format!("项目 {} 不存在", project_id).into());
     }
     Ok(())
 }
@@ -55,16 +56,16 @@ pub(crate) fn ensure_project_exists(conn: &Connection, project_id: i64) -> Resul
 ///   不删除旧索引表数据；save_gim_index / save_line_gim_graph 会覆盖旧索引。
 /// - 若三者完全一致：仅更新访问时间，不碰 parser_version / project_type。
 #[tauri::command]
-pub async fn upsert_gim_project(app: tauri::AppHandle, info: FileInfoInput) -> Result<GimProjectRecord, String> {
+pub async fn upsert_gim_project(app: tauri::AppHandle, info: FileInfoInput) -> Result<GimProjectRecord, NativeError> {
     use tauri::Manager;
     tauri::async_runtime::spawn_blocking(move || upsert_gim_project_inner(&app.state::<DbState>(), info))
-        .await.map_err(|e| format!("项目登记任务失败: {}", e))?
+        .await.map_err(|e| NativeError::new(NativeErrorCode::Internal,format!("项目登记任务失败: {}", e)))?
 }
 
 pub(super) fn upsert_gim_project_inner(
     state: &DbState,
     info: FileInfoInput,
-) -> Result<GimProjectRecord, String> {
+) -> Result<GimProjectRecord, NativeError> {
     // 前端 picker 已返回 canonical path，但 command 也必须在后端重新规范化：
     // 这样大小写、斜杠以及 . / .. 差异不会为同一个 Windows 文件创建多条项目记录。
     let started = std::time::Instant::now();
@@ -76,7 +77,7 @@ pub(super) fn upsert_gim_project_inner(
         .and_then(|e| e.to_str())
         .unwrap_or_default();
     if !extension.eq_ignore_ascii_case("gim") {
-        return Err("项目源文件必须是 .gim".to_string());
+        return Err("项目源文件必须是 .gim".to_string().into());
     }
     let conn = state
         .0
@@ -149,13 +150,13 @@ pub(super) fn write_project_diagnostic(writer: &mut impl Write, message: std::fm
 }
 
 /// 根据 id 查询完整记录
-fn query_record(conn: &Connection, id: i64) -> Result<GimProjectRecord, String> {
+fn query_record(conn: &Connection, id: i64) -> Result<GimProjectRecord, NativeError> {
     conn.query_row(
         "SELECT id, path, name, size, modified_ms, sha256, created_at_ms, updated_at_ms, last_opened_at_ms FROM gim_project WHERE id = ?1",
         params![id],
         row_to_record,
     )
-    .map_err(|e| format!("查询项目记录失败: {}", e))
+    .map_err(|e| format!("查询项目记录失败: {}", e)).map_err(NativeError::from)
 }
 
 /// 从行解析为 GimProjectRecord
@@ -182,12 +183,12 @@ pub(super) fn ensure_project_source_sha(
     conn: &Connection,
     project_id: i64,
     expected_sha256: Option<&str>,
-) -> Result<(), String> {
+) -> Result<(), NativeError> {
     let Some(expected) = expected_sha256 else {
         return Ok(());
     };
     if expected.trim().is_empty() || expected.len() > 128 {
-        return Err("source_sha256 无效".to_string());
+        return Err("source_sha256 无效".to_string().into());
     }
     let actual: String = conn
         .query_row(
@@ -197,7 +198,7 @@ pub(super) fn ensure_project_source_sha(
         )
         .map_err(|e| format!("读取项目源 SHA-256 失败: {}", e))?;
     if actual != expected {
-        return Err("项目源 GIM 已变化，拒绝提交旧缓存".to_string());
+        return Err(NativeError::new(NativeErrorCode::SourceChanged,"项目源 GIM 已变化，拒绝提交旧缓存"));
     }
     Ok(())
 }

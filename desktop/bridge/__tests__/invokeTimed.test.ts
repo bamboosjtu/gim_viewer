@@ -30,6 +30,13 @@ describe('invokeTimed', () => {
     const stat = perfSnapshot().invokes.find((item) => item.command === 'batch_read_cached_files');
     expect(stat).toMatchObject({ count: 1, failures: 1 });
   });
+  it('preserves structured native codes and context without copying the request',async()=>{
+    invokeMock.mockRejectedValue({code:'SOURCE_CHANGED',message:'任意展示文本',context:{operation:'save_gim_index',project_id:7}});
+    await expect(invokeTimed('save_gim_index',{toJSON:()=>{throw Error('no serialization');}})).rejects.toMatchObject({
+      code:'SOURCE_CHANGED',message:'任意展示文本',context:{operation:'save_gim_index',project_id:7},
+    });
+    expect(perfSnapshot().invokes.find(item=>item.command==='save_gim_index')).toMatchObject({count:1,failures:1});
+  });
 
   it('工程切换后迟到的 command 结果不写入新 session', async () => {
     let resolveInvoke: ((value: ArrayBuffer) => void) | undefined;

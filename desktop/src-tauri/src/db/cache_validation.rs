@@ -1,5 +1,6 @@
 //! Domain cache validity and source/attribute completeness checks.
 
+use gim_native_core::{NativeError, NativeErrorCode};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use tauri::Manager;
@@ -127,7 +128,7 @@ pub(super) struct LineAttrDiagnostic {
 pub(super) fn compute_line_attr_diagnostic(
     conn: &Connection,
     project_id: i64,
-) -> Result<LineAttrDiagnostic, String> {
+) -> Result<LineAttrDiagnostic, NativeError> {
     use std::collections::HashSet;
 
     // 1. fam source count (DISTINCT file_name_lower in powerline_fam_property)
@@ -251,7 +252,7 @@ pub(super) fn inspect_line_semantic_pack(
 ) -> (String, Option<String>) {
     let root = match cache_project_root_for_batch(app_handle, project_id) {
         Ok(root) => root,
-        Err(error) => return ("invalid".to_string(), Some(semantic_error("PACK_INVALID", error))),
+        Err(error) => return ("invalid".to_string(), Some(semantic_error(NativeErrorCode::PackInvalid, error).to_string())),
     };
     let pack_path = root.join(LINE_SEMANTIC_PACK_FILE);
     let index_path = root.join(LINE_SEMANTIC_INDEX_FILE);
@@ -263,18 +264,18 @@ pub(super) fn inspect_line_semantic_pack(
     if !index_exists {
         return (
             "invalid".to_string(),
-            Some(semantic_error("INDEX_INVALID", "线路语义 pack index 缺失")),
+            Some(semantic_error(NativeErrorCode::IndexInvalid, "线路语义 pack index 缺失").to_string()),
         );
     }
     if !pack_exists {
         return (
             "invalid".to_string(),
-            Some(semantic_error("PACK_INVALID", "线路语义 pack 数据文件缺失")),
+            Some(semantic_error(NativeErrorCode::PackInvalid, "线路语义 pack 数据文件缺失").to_string()),
         );
     }
     match read_line_semantic_pack_files(&root, true) {
         Ok(_) => ("valid".to_string(), None),
-        Err(error) => ("invalid".to_string(), Some(error)),
+        Err(error) => ("invalid".to_string(), Some(error.to_string())),
     }
 }
 
@@ -292,11 +293,11 @@ pub async fn validate_gim_cache(
     app_handle: tauri::AppHandle,
     project_id: i64,
     expected_project_type: String,
-) -> Result<GimCacheValidation, String> {
+) -> Result<GimCacheValidation, NativeError> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app_handle.state::<DbState>();
         validate_gim_cache_blocking(app_handle.clone(), state, project_id, expected_project_type)
-    }).await.map_err(|e| format!("缓存后台校验失败: {}", e))?
+    }).await.map_err(|e| NativeError::new(NativeErrorCode::Internal,format!("缓存后台校验失败: {}", e)))?
 }
 
 fn validate_gim_cache_blocking(
@@ -304,7 +305,7 @@ fn validate_gim_cache_blocking(
     state: tauri::State<'_, DbState>,
     project_id: i64,
     expected_project_type: String,
-) -> Result<GimCacheValidation, String> {
+) -> Result<GimCacheValidation, NativeError> {
     let _profile = if expected_project_type == "substation" { Some(ValidationProfile::begin()) } else { None };
     let _total = ValidationSpan::new("total");
     let lock_timing = ValidationSpan::new("database_lock_wait");
@@ -351,7 +352,7 @@ fn validate_gim_cache_blocking(
         return Err(format!(
             "缓存校验需要明确的源工程类型，收到: {}",
             expected_project_type
-        ));
+        ).into());
     }
     // 关键边界：校验分支由当前 GIM source magic 决定，不能由旧缓存中的
     // project_type 反向决定。旧字段保留在响应中，只供诊断和迁移观察。
@@ -574,7 +575,7 @@ fn validate_gim_cache_blocking(
     // The snapshot must not outlive a concurrent publish/delete on the owner connection.
     let locked = state.0.lock().map_err(|e|e.to_string())?;
     if locked.query_row("SELECT total_changes()", [], |row| row.get::<_, i64>(0)).map_err(|e|e.to_string())? != revision || locked.pragma_query_value(None,"data_version",|r|r.get::<_,i64>(0)).map_err(|e|e.to_string())? != data_version {
-        return Err("缓存校验期间数据库已更新，请重试".to_string());
+        return Err("缓存校验期间数据库已更新，请重试".to_string().into());
     }
     super::ensure_project_source_sha(&locked, project_id, Some(&source_sha256))?;
     Ok(GimCacheValidation {
@@ -619,7 +620,7 @@ fn validate_gim_cache_blocking(
     })
 }
 
-pub(super) fn validation_snapshot(locked:&rusqlite::Connection)->Result<rusqlite::Connection,String> {
+pub(super) fn validation_snapshot(locked:&rusqlite::Connection)->Result<rusqlite::Connection, NativeError> {
     let mut conn = if let Some(path) = locked.path().filter(|path|!path.is_empty()) {
         let snapshot=rusqlite::Connection::open_with_flags(path,rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|e|e.to_string())?;
         snapshot.execute_batch("BEGIN").map_err(|e|e.to_string())?;

@@ -1,6 +1,6 @@
 //! Private local inventory using the same quota/path/container reader as the product.
 //! stdin: one JSON path per line. stdout: anonymous counts only, no source names/errors.
-use gim_native_core::{inspect_archive_entries, extract_from_path_with_quota, ExtractionQuota};
+use gim_native_core::{inspect_archive_entries, extract_from_path_with_quota, ExtractionQuota, NativeErrorCode};
 use std::{collections::BTreeMap, io::{self, BufRead}, path::Path};
 
 fn main() {
@@ -18,7 +18,7 @@ fn main() {
         let quota = ExtractionQuota::default();
         let (status, method) = match inspect_archive_entries(Path::new(&path), &quota) {
             Ok((_,_,entries)) => { for (name,size) in entries {add(&name,size);} ("available","native-archive-directory") },
-            Err(error) if error == "not-7z-archive" => {
+            Err(error) if error.code == NativeErrorCode::UnsupportedFormat => {
                 match extract_from_path_with_quota(Path::new(&path),&quota,|name,data| {add(&name,data.len() as u64);Ok(())}) {
                     Ok(_) => ("available","native-zip-stream"), Err(_) => ("unavailable","native-zip-stream")
                 }

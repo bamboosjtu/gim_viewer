@@ -1,5 +1,6 @@
 //! Read-only project/cache diagnostics for the frontend.
 
+use gim_native_core::NativeError;
 use tauri::Manager;
 use rusqlite::params;
 use serde::Serialize;
@@ -108,7 +109,7 @@ pub struct ProjectCacheDiagnostic {
 
 /// 返回当前 SQLite 文件路径
 #[tauri::command]
-pub async fn get_db_path(app_handle: tauri::AppHandle) -> Result<String, String> {
+pub async fn get_db_path(app_handle: tauri::AppHandle) -> Result<String, NativeError> {
     crate::native_command::blocking("get_db_path", move || {
         let path = db_path(&app_handle)?;
         Ok(path.to_string_lossy().to_string())
@@ -120,7 +121,7 @@ pub fn get_project_cache_diagnostic(
     app_handle: &tauri::AppHandle,
     state: tauri::State<'_, DbState>,
     project_id: i64,
-) -> Result<ProjectCacheDiagnostic, String> {
+) -> Result<ProjectCacheDiagnostic, NativeError> {
     let conn = state
         .0
         .lock()
@@ -388,7 +389,7 @@ pub fn get_project_cache_diagnostic(
 #[tauri::command]
 pub async fn get_latest_project_cache_diagnostic(
     app_handle: tauri::AppHandle,
-) -> Result<Option<ProjectCacheDiagnostic>, String> {
+) -> Result<Option<ProjectCacheDiagnostic>, NativeError> {
     crate::native_command::blocking("get_latest_project_cache_diagnostic", move || {
         let state = app_handle.state::<DbState>();
         let conn = state
@@ -422,7 +423,7 @@ pub async fn get_latest_project_cache_diagnostic(
 pub async fn get_project_diagnostic(
     app_handle: tauri::AppHandle,
     project_id: i64,
-) -> Result<ProjectCacheDiagnostic, String> {
+) -> Result<ProjectCacheDiagnostic, NativeError> {
     crate::native_command::blocking("get_project_diagnostic", move || {
         let state = app_handle.state::<DbState>();
         get_project_cache_diagnostic(&app_handle, state, project_id)

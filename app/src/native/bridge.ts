@@ -1,4 +1,9 @@
+import {nativeError} from '@gim/powerline-core/errors.js';
 import { invoke, isTauri } from '@tauri-apps/api/core';
+async function invokeCommand<T>(command:string,args?:Record<string,unknown>):Promise<T> {
+  try {return await invoke<T>(command,args);}catch(error){throw nativeError(error);}
+}
+
 import { listen } from '@tauri-apps/api/event';
 import { Channel } from '@tauri-apps/api/core';
 import { MOBILE_PARSER_VERSION, type PowerlineProject, type ProjectIdentity, type TowerPreview } from '@gim/powerline-core';
@@ -15,25 +20,25 @@ async function local<T>(store: string, key: string, value?: unknown, remove = fa
   const d = await db();
   return new Promise((resolve, reject) => { const tx = d.transaction(store, value !== undefined || remove ? 'readwrite' : 'readonly'); const s = tx.objectStore(store); const r = remove ? s.delete(key) : value !== undefined ? s.put(value, key) : s.get(key); let result: T | undefined; r.onsuccess = () => { result = r.result as T; }; tx.oncomplete = () => { d.close(); resolve(result); }; tx.onerror = () => { d.close(); reject(tx.error); }; });
 }
-export async function getSettings(): Promise<Settings> { if (native) return invoke('get_settings'); const old = localStorage.getItem('gim-preview-settings'); return old ? JSON.parse(old) : fetch('/__dev/settings').then(r => r.json()); }
-export async function saveSettings(settings: Settings): Promise<void> { if (native) return invoke('save_settings', { settings }); localStorage.setItem('gim-preview-settings', JSON.stringify(settings)); }
+export async function getSettings(): Promise<Settings> { if (native) return invokeCommand('get_settings'); const old = localStorage.getItem('gim-preview-settings'); return old ? JSON.parse(old) : fetch('/__dev/settings').then(r => r.json()); }
+export async function saveSettings(settings: Settings): Promise<void> { if (native) return invokeCommand('save_settings', { settings }); localStorage.setItem('gim-preview-settings', JSON.stringify(settings)); }
 export async function listProjects(): Promise<ProjectMeta[]> {
-  if (native) return invoke('list_projects');
+  if (native) return invokeCommand('list_projects');
   const d = await db(); return new Promise((resolve, reject) => { const tx = d.transaction('projects'); const r = tx.objectStore('projects').getAll(); r.onsuccess = () => { resolve((r.result as PowerlineProject[]).map(p => ({ id: p.id, name: p.name, sha256: p.sourceSha256, size: p.sourceSize, importedAt: 0, lastOpenedAt: 0, parserVersion: p.parserVersion, counts: p.counts }))); d.close(); }; r.onerror = () => reject(r.error); });
 }
-export async function chooseNativeFile(onProgress: (p: ImportProgress) => void): Promise<{ path: string; name: string; sha256: string; size: number; copyMs: number }> { return invoke('plugin:gim-import|pick', { progress: new Channel<ImportProgress>(onProgress) }); }
-export async function discardImport(path: string): Promise<void> { if (native) await invoke("discard_import", { path }); }
-export async function prepareNative(input: Awaited<ReturnType<typeof chooseNativeFile>>): Promise<Prepared> { return invoke('prepare_project', { input }); }
+export async function chooseNativeFile(onProgress: (p: ImportProgress) => void): Promise<{ path: string; name: string; sha256: string; size: number; copyMs: number }> { return invokeCommand('plugin:gim-import|pick', { progress: new Channel<ImportProgress>(onProgress) }); }
+export async function discardImport(path: string): Promise<void> { if (native) await invokeCommand("discard_import", { path }); }
+export async function prepareNative(input: Awaited<ReturnType<typeof chooseNativeFile>>): Promise<Prepared> { return invokeCommand('prepare_project', { input }); }
 export async function loadCache(id: string): Promise<PowerlineProject | undefined> {
-  const project = native ? await invoke<PowerlineProject | null>('get_project_cache', { id }) : await local<PowerlineProject>('projects', id);
+  const project = native ? await invokeCommand<PowerlineProject | null>('get_project_cache', { id }) : await local<PowerlineProject>('projects', id);
   return project?.parserVersion === MOBILE_PARSER_VERSION ? project : undefined;
 }
-export async function readEntries(id: string): Promise<{ path: string; text: string }[]> { return native ? invoke('read_text_entries', { id }) : (await local<{ path: string; text: string }[]>('sources', id)) ?? []; }
-export async function commit(project: PowerlineProject): Promise<void> { if (native) return invoke('commit_project', { id: project.id, payloadJson: JSON.stringify(project) }); await local('projects', project.id, project); }
-export async function readSource(id: string, path: string): Promise<string> { if (native) return invoke('read_source', { id, path }); return (await readEntries(id)).find(f => f.path.toLowerCase() === path.toLowerCase())?.text ?? ''; }
-export async function deleteProject(id: string): Promise<void> { if (native) return invoke('delete_project', { id }); await local('projects', id, undefined, true); await local('sources', id, undefined, true); const d = await db(); const tx = d.transaction('previews', 'readwrite'); tx.objectStore('previews').delete(IDBKeyRange.bound(`${id}:`, `${id}:\uffff`)); await new Promise<void>(r => { tx.oncomplete = () => { d.close(); r(); }; }); }
-export async function previewCache(id: string, key: string, data?: TowerPreview): Promise<TowerPreview | undefined> { return native ? (await invoke<TowerPreview | null>('preview_cache', { id, key, data: data ?? null })) ?? undefined : local('previews', `${id}:${key}`, data); }
-export async function cancelImport(): Promise<void> { if (native) await Promise.all([invoke('plugin:gim-import|cancel').catch(() => undefined), invoke('cancel_import').catch(() => undefined)]); }
+export async function readEntries(id: string): Promise<{ path: string; text: string }[]> { return native ? invokeCommand('read_text_entries', { id }) : (await local<{ path: string; text: string }[]>('sources', id)) ?? []; }
+export async function commit(project: PowerlineProject): Promise<void> { if (native) return invokeCommand('commit_project', { id: project.id, payloadJson: JSON.stringify(project) }); await local('projects', project.id, project); }
+export async function readSource(id: string, path: string): Promise<string> { if (native) return invokeCommand('read_source', { id, path }); return (await readEntries(id)).find(f => f.path.toLowerCase() === path.toLowerCase())?.text ?? ''; }
+export async function deleteProject(id: string): Promise<void> { if (native) return invokeCommand('delete_project', { id }); await local('projects', id, undefined, true); await local('sources', id, undefined, true); const d = await db(); const tx = d.transaction('previews', 'readwrite'); tx.objectStore('previews').delete(IDBKeyRange.bound(`${id}:`, `${id}:\uffff`)); await new Promise<void>(r => { tx.oncomplete = () => { d.close(); r(); }; }); }
+export async function previewCache(id: string, key: string, data?: TowerPreview): Promise<TowerPreview | undefined> { return native ? (await invokeCommand<TowerPreview | null>('preview_cache', { id, key, data: data ?? null })) ?? undefined : local('previews', `${id}:${key}`, data); }
+export async function cancelImport(): Promise<void> { if (native) await Promise.all([invokeCommand('plugin:gim-import|cancel').catch(() => undefined), invokeCommand('cancel_import').catch(() => undefined)]); }
 export async function importProgress(callback: (p: ImportProgress) => void): Promise<() => void> {
   if (!native) return () => {};
   const remove = await listen<ImportProgress>('import-progress', e => callback(e.payload));
@@ -48,15 +53,15 @@ export async function prepareSample(name: string): Promise<{ identity: ProjectId
 export type LocationPermission = 'prompt' | 'prompt-with-rationale' | 'granted' | 'denied';
 export interface LocationPermissions { location: LocationPermission; coarseLocation: LocationPermission }
 export interface CurrentPosition { longitude: number; latitude: number; accuracy: number; timestamp: number }
-export function checkLocationPermissions(): Promise<LocationPermissions> { return invoke('plugin:gim-import|check_location_permissions'); }
-export function requestLocationPermissions(): Promise<LocationPermissions> { return invoke('plugin:gim-import|request_location_permissions'); }
-export function getPosition(): Promise<CurrentPosition> { return invoke('plugin:gim-import|get_position'); }
+export function checkLocationPermissions(): Promise<LocationPermissions> { return invokeCommand('plugin:gim-import|check_location_permissions'); }
+export function requestLocationPermissions(): Promise<LocationPermissions> { return invokeCommand('plugin:gim-import|request_location_permissions'); }
+export function getPosition(): Promise<CurrentPosition> { return invokeCommand('plugin:gim-import|get_position'); }
 
 export interface WindowState { top: number; bottom: number; left: number; right: number; immersive: boolean; portraitLocked?: boolean }
-export function getWindowState(): Promise<WindowState> { return invoke('plugin:gim-import|get_window_state'); }
-export function setImmersive(enabled: boolean): Promise<WindowState> { return invoke('plugin:gim-import|set_immersive', { enabled }); }
+export function getWindowState(): Promise<WindowState> { return invokeCommand('plugin:gim-import|get_window_state'); }
+export function setImmersive(enabled: boolean): Promise<WindowState> { return invokeCommand('plugin:gim-import|set_immersive', { enabled }); }
 export async function readHeader(id: string): Promise<number[]> {
-  if (native) return invoke('read_project_header', { id });
+  if (native) return invokeCommand('read_project_header', { id });
   const names = await sampleNames();
   for (const name of names) {
     const data = await fetch(`/__dev/sample/${name}`).then(r => r.json());

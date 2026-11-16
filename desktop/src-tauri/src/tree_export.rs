@@ -1,3 +1,4 @@
+use gim_native_core::{NativeError, NativeErrorCode};
 use std::fs;
 use tauri_plugin_dialog::DialogExt;
 
@@ -7,7 +8,7 @@ pub async fn save_engineering_tree_json(
     app: tauri::AppHandle,
     filename: String,
     content: String,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, NativeError> {
     tauri::async_runtime::spawn_blocking(move || {
 
     if content.len() > 384 * 1024 * 1024 {
@@ -46,5 +47,5 @@ pub async fn save_engineering_tree_json(
         Ok(Some(path.to_string_lossy().into_owned()))
     })
     .await
-    .map_err(|e| format!("模型树导出任务失败：{e}"))?
+    .map_err(|e| NativeError::new(NativeErrorCode::Internal,format!("模型树导出任务失败：{e}")))?
 }

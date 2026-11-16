@@ -1,13 +1,15 @@
 //! Blocking command work owns its inputs and keeps locks entirely off the async/IPC threads.
 
-pub(crate) async fn blocking<T, F>(command: &'static str, work: F) -> Result<T, String>
+use gim_native_core::{NativeError, NativeErrorCode};
+pub(crate) async fn blocking<T, F>(command: &'static str, work: F) -> Result<T, NativeError>
 where
     T: Send + 'static,
-    F: FnOnce() -> Result<T, String> + Send + 'static,
+    F: FnOnce() -> Result<T, NativeError> + Send + 'static,
 {
     tauri::async_runtime::spawn_blocking(work)
         .await
-        .map_err(|error| format!("原生后台任务失败 ({command}): {error}"))?
+        .map_err(|error| NativeError::new(NativeErrorCode::Internal,format!("原生后台任务失败 ({command}): {error}")).operation(command))?
+        .map_err(|error| error.operation(command))
 }
 
 #[cfg(test)]
@@ -20,10 +22,13 @@ mod tests {
             let caller = std::thread::current().id();
             let worker = blocking("thread-test", || Ok(std::thread::current().id())).await.unwrap();
             assert_ne!(caller, worker);
-            assert_eq!(blocking::<(), _>("error-test", || Err("source changed".into())).await,
-                Err("source changed".into()));
+            let error=blocking::<(), _>("error-test", || Err("source changed".into())).await.unwrap_err();
+            assert_eq!(error.code,gim_native_core::NativeErrorCode::OperationFailed);
+            assert_eq!(error.message,"source changed");
+            assert_eq!(error.context.unwrap().operation.as_deref(),Some("error-test"));
             let error = blocking::<(), _>("panic-test", || panic!("worker panic")).await.unwrap_err();
-            assert!(error.contains("panic-test"));
+            assert!(error.message.contains("panic-test"));
+            assert_eq!(error.code,gim_native_core::NativeErrorCode::Internal);
             assert_eq!(blocking("recovery-test", || Ok(42)).await.unwrap(), 42);
         });
     }

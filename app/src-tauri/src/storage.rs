@@ -1,3 +1,4 @@
+use gim_native_core::{NativeError, NativeErrorCode};
 use gim_native_core::{extract_from_path_with_quota, ExtractionQuota};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
@@ -15,36 +16,36 @@ pub struct ImportFile { pub path: String, pub name: String, pub sha256: String, 
 pub struct Prepared { pub meta: ProjectMeta, pub duplicate: bool, pub cache: Option<serde_json::Value> }
 #[derive(Serialize)]
 pub struct TextEntry { pub path: String, pub text: String }
-fn error<E: std::fmt::Display>(e: E) -> String { e.to_string() }
+fn error<E: std::fmt::Display>(e: E) -> NativeError { NativeError::from(e.to_string()) }
 fn now() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() }
-pub fn validate_id(id: &str) -> Result<(), String> { if id.len() == 64 && id.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) { Ok(()) } else { Err("无效工程 ID".into()) } }
-pub fn dir(root: &Path, id: &str) -> Result<PathBuf, String> { validate_id(id)?; Ok(root.join("projects").join(id)) }
-fn database(root: &Path, id: &str) -> Result<Connection, String> {
+pub fn validate_id(id: &str) -> Result<(), NativeError> { if id.len() == 64 && id.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) { Ok(()) } else { Err("无效工程 ID".into()) } }
+pub fn dir(root: &Path, id: &str) -> Result<PathBuf, NativeError> { validate_id(id)?; Ok(root.join("projects").join(id)) }
+fn database(root: &Path, id: &str) -> Result<Connection, NativeError> {
     let path = dir(root, id)?.join("cache/project.sqlite");
     if !path.is_file() { return Err("工程缓存不存在".into()); }
     Connection::open(path).map_err(error)
 }
-pub fn read_meta(root: &Path, id: &str) -> Result<ProjectMeta, String> { serde_json::from_slice(&fs::read(dir(root, id)?.join("metadata.json")).map_err(error)?).map_err(error) }
-pub fn validate_source(root: &Path, id: &str) -> Result<(), String> {
+pub fn read_meta(root: &Path, id: &str) -> Result<ProjectMeta, NativeError> { serde_json::from_slice(&fs::read(dir(root, id)?.join("metadata.json")).map_err(error)?).map_err(error) }
+pub fn validate_source(root: &Path, id: &str) -> Result<(), NativeError> {
     let meta = read_meta(root, id)?;
     let mut file = fs::File::open(dir(root, id)?.join("source/original.gim")).map_err(error)?;
-    if meta.id != id || meta.sha256 != id || file.metadata().map_err(error)?.len() != meta.size { return Err("私有源包身份或大小不匹配".into()); }
+    if meta.id != id || meta.sha256 != id || file.metadata().map_err(error)?.len() != meta.size { return Err(NativeError::new(NativeErrorCode::SourceChanged,"私有源包身份或大小不匹配")); }
     let mut header = [0u8; 7]; file.read_exact(&mut header).map_err(error)?;
-    if &header != b"GIMPKGT" { return Err("私有源包类型错误，不能使用线路缓存".into()); }
+    if &header != b"GIMPKGT" { return Err(NativeError::new(NativeErrorCode::SourceChanged,"私有源包类型错误，不能使用线路缓存")); }
     let mut digest = Sha256::new(); digest.update(header); let mut buffer = [0u8; 256*1024];
     loop { let n = file.read(&mut buffer).map_err(error)?; if n == 0 { break; } digest.update(&buffer[..n]); }
-    if format!("{:x}", digest.finalize()) != id { return Err("私有源包 SHA 校验失败，不能使用缓存".into()); }
+    if format!("{:x}", digest.finalize()) != id { return Err(NativeError::new(NativeErrorCode::SourceChanged,"私有源包 SHA 校验失败，不能使用缓存")); }
     Ok(())
 }
 /// Source identity is rechecked; only the bounded header, never the archive, crosses IPC.
-pub fn header(root: &Path, id: &str) -> Result<Vec<u8>, String> {
+pub fn header(root: &Path, id: &str) -> Result<Vec<u8>, NativeError> {
     validate_source(root, id)?;
     let file = fs::File::open(dir(root, id)?.join("source/original.gim")).map_err(error)?;
     let mut bytes = Vec::new(); file.take(1024 * 1024 + 7).read_to_end(&mut bytes).map_err(error)?;
     let end = (7..bytes.len()).find(|&i| bytes[i..].starts_with(&[0x37,0x7a,0xbc,0xaf,0x27,0x1c]) || bytes[i..].starts_with(&[0x50,0x4b,0x03,0x04])).ok_or("头部搜索窗口内未找到压缩载荷")?;
     bytes.truncate(end); Ok(bytes)
 }
-fn write_meta(path: &Path, meta: &ProjectMeta) -> Result<(), String> {
+fn write_meta(path: &Path, meta: &ProjectMeta) -> Result<(), NativeError> {
     let temp = path.join("metadata.pending"); fs::write(&temp, serde_json::to_vec(meta).map_err(error)?).map_err(error)?;
     let target = path.join("metadata.json");
     // Android rename replaces atomically. On Windows the destination must first be removed.
@@ -57,27 +58,27 @@ pub fn list(root: &Path) -> Vec<ProjectMeta> {
     if let Ok(entries) = fs::read_dir(root.join("projects")) { for entry in entries.flatten() { let id = entry.file_name().to_string_lossy().into_owned(); if let Ok(meta) = read_meta(root, &id) { result.push(meta); } } }
     result.sort_by_key(|m| std::cmp::Reverse(m.last_opened_at)); result
 }
-pub fn source(root: &Path, id: &str, path: &str) -> Result<String, String> {
+pub fn source(root: &Path, id: &str, path: &str) -> Result<String, NativeError> {
     if path.len() > 4096 || !["cbm", "fam", "dev", "phm", "mod"].contains(&path.rsplit('.').next().unwrap_or("").to_lowercase().as_str()) { return Err("只允许查看业务对象关联的文本来源".into()); }
     database(root, id)?.query_row("SELECT text FROM entries WHERE key=?1", [normalize_entry_key(path)], |r| r.get(0)).map_err(error)
 }
-fn stored_text_entries(root: &Path, id: &str) -> Result<Vec<TextEntry>, String> {
+fn stored_text_entries(root: &Path, id: &str) -> Result<Vec<TextEntry>, NativeError> {
     let db = database(root, id)?;
     let mut statement = db.prepare("SELECT path,text FROM entries ORDER BY rowid").map_err(error)?;
     let rows = statement.query_map([], |r| Ok(TextEntry { path: r.get(0)?, text: r.get(1)? })).map_err(error)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(error)
 }
-pub fn text_entries(root: &Path, id: &str) -> Result<Vec<TextEntry>, String> {
+pub fn text_entries(root: &Path, id: &str) -> Result<Vec<TextEntry>, NativeError> {
     validate_source(root, id)?;
     match stored_text_entries(root, id) { Ok(v) if !v.is_empty() => Ok(v), _ => { rebuild_entries(root, id)?; stored_text_entries(root, id) } }
 }
-fn rebuild_entries(root: &Path, id: &str) -> Result<(), String> {
+fn rebuild_entries(root: &Path, id: &str) -> Result<(), NativeError> {
     let project = dir(root, id)?; let meta = read_meta(root, id)?; let source = project.join("source/original.gim");
     let mut file = fs::File::open(&source).map_err(error)?;
-    if file.metadata().map_err(error)?.len() != meta.size || meta.sha256 != id { return Err("私有源包身份不匹配，不能重建缓存".into()); }
+    if file.metadata().map_err(error)?.len() != meta.size || meta.sha256 != id { return Err(NativeError::new(NativeErrorCode::SourceChanged,"私有源包身份不匹配，不能重建缓存")); }
     let mut hash = Sha256::new(); let mut buffer = [0u8; 256*1024];
     loop { let n = file.read(&mut buffer).map_err(error)?; if n == 0 { break; } hash.update(&buffer[..n]); }
-    if format!("{:x}", hash.finalize()) != id { return Err("私有源包 SHA 校验失败，不能重建缓存".into()); }
+    if format!("{:x}", hash.finalize()) != id { return Err(NativeError::new(NativeErrorCode::SourceChanged,"私有源包 SHA 校验失败，不能重建缓存")); }
     drop(file);
     let pending = project.join("cache/project.rebuilding.sqlite"); if pending.exists() { fs::remove_file(&pending).map_err(error)?; }
     let result = (|| {
@@ -102,13 +103,13 @@ fn rebuild_entries(root: &Path, id: &str) -> Result<(), String> {
     if pending.exists() { let _ = fs::remove_file(&pending); }
     result
 }
-pub fn cached(root: &Path, id: &str) -> Result<Option<serde_json::Value>, String> {
+pub fn cached(root: &Path, id: &str) -> Result<Option<serde_json::Value>, NativeError> {
     Ok(checked_cache(root,id)?.map(|(value,_)| value))
 }
-pub fn cached_json(root: &Path, id: &str) -> Result<Option<String>, String> {
+pub fn cached_json(root: &Path, id: &str) -> Result<Option<String>, NativeError> {
     Ok(checked_cache(root,id)?.map(|(_,json)| json))
 }
-fn checked_cache(root: &Path, id: &str) -> Result<Option<(serde_json::Value,String)>, String> {
+fn checked_cache(root: &Path, id: &str) -> Result<Option<(serde_json::Value,String)>, NativeError> {
     validate_source(root, id)?;
     if read_meta(root,id)?.parser_version != PARSER { return Ok(None); }
     let db = database(root, id)?;
@@ -129,14 +130,14 @@ fn checked_cache(root: &Path, id: &str) -> Result<Option<(serde_json::Value,Stri
         Ok(Some((payload,text)))
     } else { Ok(None) }
 }
-pub fn touch(root: &Path, id: &str) -> Result<(), String> { let mut m = read_meta(root, id)?; m.last_opened_at = now(); write_meta(&dir(root, id)?, &m) }
-pub fn delete(root: &Path, id: &str) -> Result<(), String> { let d = dir(root, id)?; if d.exists() { fs::remove_dir_all(d).map_err(error)?; } Ok(()) }
-pub fn clean_imports(root: &Path) -> Result<(), String> {
+pub fn touch(root: &Path, id: &str) -> Result<(), NativeError> { let mut m = read_meta(root, id)?; m.last_opened_at = now(); write_meta(&dir(root, id)?, &m) }
+pub fn delete(root: &Path, id: &str) -> Result<(), NativeError> { let d = dir(root, id)?; if d.exists() { fs::remove_dir_all(d).map_err(error)?; } Ok(()) }
+pub fn clean_imports(root: &Path) -> Result<(), NativeError> {
     let staging = root.join("projects/.imports"); if staging.exists() { fs::remove_dir_all(&staging).map_err(error)?; } fs::create_dir_all(staging).map_err(error)?;
     for meta in list(root).into_iter().filter(|m| m.parser_version.is_empty()) { delete(root, &meta.id)?; }
     Ok(())
 }
-pub fn discard(root: &Path, input: &str) -> Result<(), String> {
+pub fn discard(root: &Path, input: &str) -> Result<(), NativeError> {
     let imports = root.join("projects/.imports").canonicalize().map_err(error)?;
     let path = PathBuf::from(input);
     if !path.exists() { return Ok(()); }
@@ -145,7 +146,7 @@ pub fn discard(root: &Path, input: &str) -> Result<(), String> {
     if path.file_name().and_then(|v| v.to_str()) != Some("original.gim") || parent.parent() != Some(imports.as_path()) { return Err("无效暂存文件".into()); }
     fs::remove_dir_all(parent).map_err(error)
 }
-pub fn prepare(root: &Path, input: ImportFile, cancelled: &AtomicBool, mut progress: impl FnMut(&str, u64, Option<u64>)) -> Result<Prepared, String> {
+pub fn prepare(root: &Path, input: ImportFile, cancelled: &AtomicBool, mut progress: impl FnMut(&str, u64, Option<u64>)) -> Result<Prepared, NativeError> {
     let imports = root.join("projects/.imports").canonicalize().map_err(error)?;
     let input_path = PathBuf::from(&input.path).canonicalize().map_err(error)?;
     if !input_path.starts_with(&imports) || input_path.file_name().and_then(|s| s.to_str()) != Some("original.gim") { return Err("导入文件必须来自应用私有暂存目录".into()); }
@@ -157,11 +158,11 @@ pub fn prepare(root: &Path, input: ImportFile, cancelled: &AtomicBool, mut progr
         if &header != b"GIMPKGT" { return Err("当前移动端只支持 GIMPKGT 输电线路工程".into()); }
         let mut digest = Sha256::new(); digest.update(header);
         let mut buffer = [0u8; 256 * 1024]; let mut done = 7u64;
-        loop { if cancelled.load(Ordering::Relaxed) { return Err("导入已取消".into()); } let n = file.read(&mut buffer).map_err(error)?; if n == 0 { break; } digest.update(&buffer[..n]); done += n as u64; if done % (1024 * 1024) < buffer.len() as u64 { progress("识别工程与校验", done, Some(size)); } }
+        loop { if cancelled.load(Ordering::Relaxed) { return Err(NativeError::new(NativeErrorCode::Cancelled,"导入已取消")); } let n = file.read(&mut buffer).map_err(error)?; if n == 0 { break; } digest.update(&buffer[..n]); done += n as u64; if done % (1024 * 1024) < buffer.len() as u64 { progress("识别工程与校验", done, Some(size)); } }
         let sha = format!("{:x}", digest.finalize()); if sha != input.sha256 { return Err("SHA 校验失败".into()); }
         drop(file);
         let project = dir(root, &sha)?;
-        if project.exists() { let meta = read_meta(root, &sha)?; if meta.sha256 != sha || meta.size != size { return Err("现有工程身份不匹配".into()); } let cache = cached(root, &sha).unwrap_or(None); touch(root, &sha)?; return Ok(Prepared { meta, duplicate: true, cache }); }
+        if project.exists() { let meta = read_meta(root, &sha)?; if meta.sha256 != sha || meta.size != size { return Err(NativeError::new(NativeErrorCode::SourceChanged,"现有工程身份不匹配")); } let cache = cached(root, &sha).unwrap_or(None); touch(root, &sha)?; return Ok(Prepared { meta, duplicate: true, cache }); }
         fs::create_dir_all(staging.join("source")).map_err(error)?;
         fs::create_dir_all(staging.join("cache/semantic")).map_err(error)?;
         fs::create_dir_all(staging.join("cache/previews")).map_err(error)?;
@@ -171,7 +172,7 @@ pub fn prepare(root: &Path, input: ImportFile, cancelled: &AtomicBool, mut progr
         progress("解压归档", 0, None);
         let quota = gim_native_core::extraction_limits().mobile.clone();
         let metadata = extract_from_path_with_quota(&input_path, &quota, |path, bytes| {
-            if cancelled.load(Ordering::Relaxed) { return Err("导入已取消".into()); }
+            if cancelled.load(Ordering::Relaxed) { return Err(NativeError::new(NativeErrorCode::Cancelled,"导入已取消")); }
             count += 1;
             if ["cbm", "fam", "dev", "phm", "mod"].contains(&path.rsplit('.').next().unwrap_or("").to_lowercase().as_str()) {
                 let text = String::from_utf8(bytes).map_err(|_| format!("文本编码无效: {}", path))?;
@@ -181,7 +182,7 @@ pub fn prepare(root: &Path, input: ImportFile, cancelled: &AtomicBool, mut progr
         })?;
         tx.commit().map_err(error)?; drop(db);
         if metadata.magic != "GIMPKGT" { return Err("只支持线路工程".into()); }
-        if cancelled.load(Ordering::Relaxed) { return Err("导入已取消".into()); }
+        if cancelled.load(Ordering::Relaxed) { return Err(NativeError::new(NativeErrorCode::Cancelled,"导入已取消")); }
         fs::rename(&input_path, staging.join("source/original.gim")).map_err(error)?;
         let name = metadata.project_name.filter(|n| !n.trim().is_empty()).unwrap_or(input.name.trim_end_matches(".gim").to_string());
         let meta = ProjectMeta { id: sha.clone(), name, sha256: sha, size, imported_at: now(), last_opened_at: now(), parser_version: String::new(), counts: serde_json::json!({}) };
@@ -193,10 +194,10 @@ pub fn prepare(root: &Path, input: ImportFile, cancelled: &AtomicBool, mut progr
     result
 }
 #[cfg(test)]
-pub fn commit(root: &Path, id: &str, payload: serde_json::Value) -> Result<(), String> {
+pub fn commit(root: &Path, id: &str, payload: serde_json::Value) -> Result<(), NativeError> {
     commit_json(root,id,serde_json::to_string(&payload).map_err(error)?)
 }
-pub fn commit_json(root: &Path, id: &str, json: String) -> Result<(), String> {
+pub fn commit_json(root: &Path, id: &str, json: String) -> Result<(), NativeError> {
     validate_source(root, id)?;
     if json.len() > 64*1024*1024 { return Err("语义缓存超过 64 MiB 限额".into()); }
     let payload: serde_json::Value = serde_json::from_str(&json).map_err(error)?;
@@ -208,7 +209,7 @@ pub fn commit_json(root: &Path, id: &str, json: String) -> Result<(), String> {
     tx.commit().map_err(error)?;
     meta.name = payload["name"].as_str().unwrap_or(&meta.name).to_string(); meta.parser_version = PARSER.into(); meta.counts = payload["counts"].clone(); write_meta(&dir(root, id)?, &meta)
 }
-pub fn preview(root: &Path, id: &str, key: &str, data: Option<serde_json::Value>) -> Result<Option<serde_json::Value>, String> {
+pub fn preview(root: &Path, id: &str, key: &str, data: Option<serde_json::Value>) -> Result<Option<serde_json::Value>, NativeError> {
     if key.len() > 8192 { return Err("无效预览键".into()); }
     let db = database(root, id)?;
     if let Some(v) = data { db.execute("INSERT OR REPLACE INTO previews(key,json) VALUES(?1,?2)", params![key, serde_json::to_string(&v).map_err(error)?]).map_err(error)?; return Ok(Some(v)); }
@@ -242,7 +243,7 @@ mod tests {
         let bytes = b"GIMPKGTcancel-test"; let path = stage.join("original.gim"); fs::write(&path, bytes).unwrap();
         let input = ImportFile { path: path.to_string_lossy().into(), name: "test.gim".into(), size: bytes.len() as u64, sha256: format!("{:x}", Sha256::digest(bytes)) };
         let err = prepare(&root, input, &AtomicBool::new(true), |_,_,_| {}).err().unwrap();
-        assert!(err.contains("取消")); assert!(!stage.exists()); assert!(list(&root).is_empty());
+        assert!(err.message.contains("取消")); assert!(!stage.exists()); assert!(list(&root).is_empty());
         let outside = root.join("original.gim"); fs::write(&outside, bytes).unwrap();
         assert!(discard(&root, &outside.to_string_lossy()).is_err()); assert!(outside.exists());
         fs::remove_dir_all(root).unwrap();
@@ -263,11 +264,11 @@ mod tests {
         assert_eq!(fs::read(p.join("source/original.gim")).unwrap(), bytes);
         commit(&root, &id, good.clone()).unwrap(); assert_eq!(cached(&root, &id).unwrap(), Some(good));
         fs::write(p.join("source/original.gim"), b"GIMPKGS").unwrap();
-        assert!(cached_json(&root,&id).unwrap_err().contains("类型")); assert!(text_entries(&root,&id).is_err());
+        assert!(cached_json(&root,&id).unwrap_err().message.contains("类型")); assert!(text_entries(&root,&id).is_err());
         fs::write(p.join("source/original.gim"), b"GIMPKGTchanged").unwrap();
-        assert!(cached_json(&root,&id).unwrap_err().contains("大小"));
+        assert!(cached_json(&root,&id).unwrap_err().message.contains("大小"));
         let mut m = read_meta(&root,&id).unwrap(); m.size = 14; write_meta(&p,&m).unwrap();
-        assert!(cached_json(&root,&id).unwrap_err().contains("SHA"));
+        assert!(cached_json(&root,&id).unwrap_err().message.contains("SHA"));
         delete(&root, &id).unwrap(); assert!(!p.exists()); fs::remove_dir_all(root).unwrap();
     }
     #[test]
@@ -280,7 +281,7 @@ mod tests {
         let m = ProjectMeta { id:id.clone(),name:"anonymous".into(),sha256:id.clone(),size:bytes.len() as u64,imported_at:0,last_opened_at:0,parser_version:PARSER.into(),counts:serde_json::json!({}) };
         write_meta(&p,&m).unwrap(); assert_eq!(header(&root,&id).unwrap(),bytes[..784]);
         bytes[20] = 1; fs::write(p.join("source/original.gim"), &bytes).unwrap();
-        assert!(header(&root,&id).unwrap_err().contains("SHA")); assert!(header(&root,"../escape").is_err());
+        assert!(header(&root,&id).unwrap_err().message.contains("SHA")); assert!(header(&root,"../escape").is_err());
         fs::remove_dir_all(root).unwrap();
     }
     #[test]

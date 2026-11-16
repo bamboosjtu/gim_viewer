@@ -1,4 +1,5 @@
 import { GIM_LIMITS } from '../src/shared/gimLimits.js';
+import {GimError} from './contracts.js';
 import type { ParseCopyReceipt } from './substationParseCopy.js';
 /**
  * 原生解压 Tauri 桥接（acc-plan P0-2）。
@@ -219,7 +220,7 @@ function assertSafeEntryPath(path: string): void {
   if (!normalized || UTF8_ENCODER.encode(normalized).byteLength > MAX_NATIVE_PATH_BYTES
     || normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized)
     || normalized.split('/').some((part) => !part || part === '.' || part === '..')) {
-    throw new Error(`原生解压条目路径不安全: ${path}`);
+    throw new GimError('INVALID_PATH',`原生解压条目路径不安全: ${path}`);
   }
 }
 
@@ -245,7 +246,7 @@ export function parseExtractionPayload(
     throw new Error('manifest GIM 魔数无效');
   }
   if (!Array.isArray(manifest.entries)) throw new Error('manifest 缺少 entries');
-  if (manifest.entries.length > MAX_NATIVE_ENTRIES) throw new Error(`manifest 条目数超过 ${MAX_NATIVE_ENTRIES}`);
+  if (manifest.entries.length > MAX_NATIVE_ENTRIES) throw new GimError('RESOURCE_LIMIT',`manifest 条目数超过 ${MAX_NATIVE_ENTRIES}`);
 
   const files = new Map<string, File>();
   const cachePaths = new Map<string, string>();
@@ -254,8 +255,8 @@ export function parseExtractionPayload(
   let totalBytes = 0;
   for (const e of manifest.entries) {
     assertSafeEntryPath(e.path);
-    if (!Number.isSafeInteger(e.offset) || !Number.isSafeInteger(e.size)
-      || e.size > MAX_NATIVE_FILE_BYTES) throw new Error(`条目 ${e.path} 大小无效或超限`);
+    if (!Number.isSafeInteger(e.offset) || !Number.isSafeInteger(e.size)) throw new Error(`条目 ${e.path} 大小无效或超限`);
+    if (e.size > MAX_NATIVE_FILE_BYTES) throw new GimError('RESOURCE_LIMIT',`条目 ${e.path} 大小无效或超限`);
     if (e.offset < 0 || e.size < 0 || e.offset > Number.MAX_SAFE_INTEGER - e.size) {
       throw new Error(`条目 ${e.path} 数据越界`);
     }
@@ -267,7 +268,7 @@ export function parseExtractionPayload(
     }
     totalBytes += e.size;
     if (!Number.isSafeInteger(totalBytes) || totalBytes > MAX_NATIVE_TOTAL_BYTES) {
-      throw new Error(`原生解压总大小超过 ${MAX_NATIVE_TOTAL_BYTES}`);
+      throw new GimError('RESOURCE_LIMIT',`原生解压总大小超过 ${MAX_NATIVE_TOTAL_BYTES}`);
     }
     const name = e.path.split('/').pop() || e.path;
     if (hasInlineBlob || options.cacheProjectId == null) {
@@ -319,7 +320,11 @@ export async function extractGimArchiveNative(
   experiments: { traceEntries?: boolean; substationParseCopy?: boolean; expectedSourceSha256?: string } = {},
 ): Promise<NativeExtractionResult> {
   const buf = await invokeTimed<ArrayBuffer>('extract_gim_archive', { filePath, projectId, ...experiments });
-  return parseExtractionPayload(buf, { cacheProjectId: projectId });
+  try {return parseExtractionPayload(buf, { cacheProjectId: projectId });}
+  catch(error){
+    if(error instanceof GimError)throw error;
+    throw new GimError('RESPONSE_INVALID',error instanceof Error?error.message:'原生解压响应无效');
+  }
 }
 
 /** 上次成功解压留下的清单（索引未提交就切换工程时复用已解压文件）。 */

@@ -1,4 +1,6 @@
 import type { ProjectLoadSession } from '../shared/projectSession.js';
+import {hasErrorCode} from '@desktop/contracts.js';
+
 import { scheduleHideLoading } from './gimOpenCore.js';
 import { SUBSTATION_EARLY_SEMANTIC_DEFAULT } from '../config/features.js';
 import type { AppState } from '../app/state.js';
@@ -37,6 +39,14 @@ import { openSubstationProject, onGimExtracted, loadAllIfcFiles } from './substa
 import { chooseBrowserGimFile } from './browserGimChooser.js';
 
 export { onGimExtracted, loadAllIfcFiles };
+
+export function canFallbackFromNativeExtraction(error: unknown): boolean {
+  return hasErrorCode(error, 'BACKEND_UNAVAILABLE', 'UNSUPPORTED_FORMAT', 'IO');
+}
+export function canRecoverNativeExtractionReceipt(error: unknown): boolean {
+  return canFallbackFromNativeExtraction(error) || hasErrorCode(error,'RESPONSE_INVALID');
+}
+
 
 /**
  * 仅开发构建使用的本地性能采集入口。
@@ -246,7 +256,7 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
         endNative?.('（失败）', { error: nativeMessage });
         if (earlyRequested) throw nativeError;
         // 资源配额是安全边界，不得通过 WASM 回退绕过。
-        if (/INPUT_CORRUPT:|超出资源配额|资源配额|压缩比超限|条目数超限|单文件.*超限|总解压量.*超限/i.test(nativeMessage)) {
+        if (!canRecoverNativeExtractionReceipt(nativeError)) {
           throw nativeError;
         }
         // The native command may have committed its source cache before a
@@ -256,6 +266,7 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
         if (recovered) {
           extracted = recovered;
         } else {
+        if (!canFallbackFromNativeExtraction(nativeError)) throw nativeError;
         console.warn('[Shared Core] 原生解压不可用，回退 libarchive.js WASM 路径:', nativeError);
         const { readFileBytes } = await import('@desktop/fileReader.js');
         showLoading('正在读取 GIM 文件...');

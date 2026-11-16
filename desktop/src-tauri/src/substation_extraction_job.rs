@@ -1,4 +1,5 @@
 //! Opt-in desktop 7z job. Early sources are session-local, not a published cache.
+use gim_native_core::{NativeError, NativeErrorCode};
 use crate::db::{
     commit_cache_staging, create_cache_staging_dir, ensure_project_exists,
     remove_cache_dir_if_safe, BatchCachePathResolver, CacheStagingWriter, DbState,
@@ -67,7 +68,7 @@ pub struct JobSnapshot {
     semantic_ready_at_ms: Option<f64>,
     materialization_complete_at_ms: Option<f64>,
     materialized_entries: usize,
-    error: Option<String>,
+    error: Option<NativeError>,
     profile: Option<ExtractionProfile>,
     trace: Vec<ExtractionEntryTiming>,
     cache_root: Option<String>,
@@ -99,15 +100,15 @@ struct Job {
     ready: HashSet<String>,
     cancelled: Arc<AtomicBool>,
 }
-fn get(id: &str) -> Result<SharedJob, String> {
+fn get(id: &str) -> Result<SharedJob, NativeError> {
     registry()
         .lock()
         .map_err(|e| e.to_string())?
         .get(id)
         .map(|entry| entry.job.clone())
-        .ok_or("extraction job unavailable".into())
+        .ok_or_else(||NativeError::new(NativeErrorCode::Cancelled,"extraction job unavailable"))
 }
-pub(crate) fn source_sha(path: &Path) -> Result<String, String> {
+pub(crate) fn source_sha(path: &Path) -> Result<String, NativeError> {
     use std::io::Read;
     let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
     let mut hash = Sha256::new();
@@ -127,7 +128,7 @@ pub(crate) fn source_sha(path: &Path) -> Result<String, String> {
 pub async fn inspect_substation_early_eligibility(
     app: tauri::AppHandle,
     file_path: String, project_id: i64, source_sha256: String,
-) -> Result<crate::gim_extract::SubstationEarlyEligibility, String> {
+) -> Result<crate::gim_extract::SubstationEarlyEligibility, NativeError> {
     tauri::async_runtime::spawn_blocking(move || {
         let access=app.state::<AuthorizedFilePaths>();
         let db=app.state::<DbState>();
@@ -140,13 +141,13 @@ pub async fn inspect_substation_early_eligibility(
                 "SELECT path, sha256 FROM gim_project WHERE id=?1", [project_id], |r| Ok((r.get(0)?,r.get(1)?)))
                 .map_err(|e| e.to_string())?;
             if record_sha != source_sha256 || crate::canonical_identity(Path::new(&record_path))?.1 != crate::canonical_identity(&path)?.1 {
-                return Err("extraction project/source identity mismatch".into());
+                return Err(NativeError::new(NativeErrorCode::SourceChanged,"extraction project/source identity mismatch"));
             }
         }
 
-        if source_sha(&path)? != source_sha256 { return Err("extraction source SHA mismatch".into()); }
+        if source_sha(&path)? != source_sha256 { return Err(NativeError::new(NativeErrorCode::SourceChanged,"extraction source SHA mismatch")); }
         crate::gim_extract::inspect_substation_eligibility(&path, &ExtractionQuota::default())
-    }).await.map_err(|e| e.to_string())?
+    }).await.map_err(|e| NativeError::new(NativeErrorCode::Internal,e.to_string()))?
 }
 
 #[tauri::command]
@@ -155,7 +156,7 @@ pub async fn start_substation_extraction(
     file_path: String,
     project_id: i64,
     source_sha256: String,
-) -> Result<JobSnapshot, String> {
+) -> Result<JobSnapshot, NativeError> {
     // Reserve arrival order and the close lease before yielding; validation may finish out of order.
     let (ticket, start_lease) = reserve_start()?;
     crate::native_command::blocking("start_substation_extraction", move || {
@@ -164,7 +165,7 @@ pub async fn start_substation_extraction(
         let db=app.state::<DbState>();
 
         if CLOSING.load(Ordering::Acquire) {
-            return Err("application closing".into());
+            return Err(NativeError::new(NativeErrorCode::Cancelled,"application closing"));
         }
         let path = require_authorized_path(&access, &file_path, Some("gim"))?;
         {
@@ -181,17 +182,17 @@ pub async fn start_substation_extraction(
                 || crate::canonical_identity(Path::new(&record_path))?.1
                     != crate::canonical_identity(&path)?.1
             {
-                return Err("extraction project/source identity mismatch".into());
+                return Err(NativeError::new(NativeErrorCode::SourceChanged,"extraction project/source identity mismatch"));
             }
         }
         claim_start(registry(), &CURRENT_START, &CLOSING, ticket)?;
         let entries = inspect_substation_entries(&path, &ExtractionQuota::default())?;
         let actual_sha = source_sha(&path)?;
         if CURRENT_START.load(Ordering::Acquire) != ticket || CLOSING.load(Ordering::Acquire) {
-            return Err("extraction start superseded".into());
+            return Err(NativeError::new(NativeErrorCode::SessionSuperseded,"extraction start superseded"));
         }
         if actual_sha != source_sha256 {
-            return Err("extraction source SHA mismatch".into());
+            return Err(NativeError::new(NativeErrorCode::SourceChanged,"extraction source SHA mismatch"));
         }
         let (final_root, staging) = create_cache_staging_dir(&app, project_id)?;
         let id = format!("{}-{}", std::process::id(), ticket);
@@ -225,7 +226,7 @@ pub async fn start_substation_extraction(
                 drop(jobs);
                 let staging = job.lock().map_err(|e| e.to_string())?.staging.clone();
                 let _ = remove_cache_dir_if_safe(&staging, " superseded staging");
-                return Err("extraction start superseded".into());
+                return Err(NativeError::new(NativeErrorCode::SessionSuperseded,"extraction start superseded"));
             }
             jobs.insert(id, RegisteredJob {job:job.clone(),cancelled});
         }
@@ -241,7 +242,7 @@ pub async fn start_substation_extraction(
                 let staging = {
                     let mut j = job.lock().unwrap_or_else(|e| e.into_inner());
                     j.snapshot.status = "failed".into();
-                    j.snapshot.error = Some("extraction worker panicked".into());
+                    j.snapshot.error = Some(NativeError::new(NativeErrorCode::Internal,"extraction worker panicked"));
                     j.staging.clone()
                 };
                 let _ = remove_cache_dir_if_safe(&staging, " failed early staging");
@@ -267,7 +268,7 @@ fn run_job(app: tauri::AppHandle, path: PathBuf, job: SharedJob) {
                 .count(),
         )
     };
-    let result = (|| -> Result<(), String> {
+    let result = (|| -> Result<(), NativeError> {
         let mut writer = CacheStagingWriter::new(&staging)?;
         let expected_sizes: HashMap<String, u64> = job
             .lock()
@@ -291,7 +292,7 @@ fn run_job(app: tauri::AppHandle, path: PathBuf, job: SharedJob) {
             &ExtractionQuota::default(),
             |p, bytes| {
                 if cancelled.load(Ordering::Acquire) {
-                    return Err("extraction cancelled".into());
+                    return Err(NativeError::new(NativeErrorCode::Cancelled,"extraction cancelled"));
                 }
                 if expected_sizes.get(&p) != Some(&(bytes.len() as u64)) {
                     return Err("decoded source size mismatch".into());
@@ -332,7 +333,7 @@ fn run_job(app: tauri::AppHandle, path: PathBuf, job: SharedJob) {
         // cancel and commit are a short serialized publication phase. Partial staging is never valid.
         if j.cancelled.load(Ordering::Acquire) || CURRENT_START.load(Ordering::Acquire) != j.ticket
         {
-            return Err("extraction cancelled".into());
+            return Err(NativeError::new(NativeErrorCode::Cancelled,"extraction cancelled"));
         }
         if j.ready.len() != j.snapshot.entries.len() || semantic_written != required {
             return Err("incomplete extraction".into());
@@ -362,7 +363,7 @@ fn run_job(app: tauri::AppHandle, path: PathBuf, job: SharedJob) {
 pub async fn substation_extraction_status(
     job_id: String,
     details: Option<bool>,
-) -> Result<JobSnapshot, String> {
+) -> Result<JobSnapshot, NativeError> {
     crate::native_command::blocking("substation_extraction_status", move || {
 
         let job = get(&job_id)?;
@@ -386,14 +387,15 @@ pub async fn substation_extraction_status(
 pub async fn read_substation_extraction_source(
     job_id: String,
     entry_path: Option<String>,
-) -> Result<tauri::ipc::Response, String> {
+) -> Result<tauri::ipc::Response, NativeError> {
     crate::native_command::blocking("read_substation_extraction_source", move || {
 
         let job = get(&job_id)?;
         let j = job.lock().map_err(|e| e.to_string())?;
-        if j.cancelled.load(Ordering::Acquire) || j.snapshot.status == "failed" {
-            return Err("extraction unavailable".into());
+        if j.cancelled.load(Ordering::Acquire) {
+            return Err(NativeError::new(NativeErrorCode::Cancelled,"extraction unavailable"));
         }
+        if j.snapshot.status == "failed" { return Err(j.snapshot.error.clone().unwrap_or_else(||NativeError::new(NativeErrorCode::OperationFailed,"extraction unavailable"))); }
         let (path, expected_size) = if let Some(path) = entry_path {
             let expected = j
                 .snapshot
@@ -403,7 +405,7 @@ pub async fn read_substation_extraction_source(
                 .ok_or("unknown source entry")?
                 .1;
             if !j.ready.contains(&path) {
-                return Err("source materializing".into());
+                return Err(NativeError::new(NativeErrorCode::SourceMaterializing,"source materializing"));
             }
             (path, expected)
         } else {
@@ -412,7 +414,7 @@ pub async fn read_substation_extraction_source(
                 j.snapshot
                     .semantic_copy
                     .as_ref()
-                    .ok_or("source materializing")?
+                    .ok_or_else(||NativeError::new(NativeErrorCode::SourceMaterializing,"source materializing"))?
                     .size as u64,
             )
         };
@@ -427,45 +429,45 @@ pub async fn read_substation_extraction_source(
         use std::io::Read;
         let file = std::fs::File::open(file_path).map_err(|e| e.to_string())?;
         if file.metadata().map_err(|e| e.to_string())?.len() != expected_size {
-            return Err("source size mismatch".into());
+            return Err(NativeError::new(NativeErrorCode::SourceChanged,"source size mismatch"));
         }
         let mut bytes = Vec::with_capacity(expected_size as usize);
         file.take(expected_size + 1)
             .read_to_end(&mut bytes)
             .map_err(|e| e.to_string())?;
         if bytes.len() as u64 != expected_size {
-            return Err("source size mismatch".into());
+            return Err(NativeError::new(NativeErrorCode::SourceChanged,"source size mismatch"));
         }
-        if j.cancelled.load(Ordering::Acquire) { return Err("extraction unavailable".into()); }
+        if j.cancelled.load(Ordering::Acquire) { return Err(NativeError::new(NativeErrorCode::Cancelled,"extraction unavailable")); }
         Ok(tauri::ipc::Response::new(bytes))
 
     }).await
 }
 
 #[tauri::command]
-pub fn cancel_substation_extraction(job_id: String) -> Result<(), String> {
+pub fn cancel_substation_extraction(job_id: String) -> Result<(), NativeError> {
     cancel_job(registry(), &job_id)
 }
 
 // Control-plane operations never wait for a job's read/commit lifecycle mutex.
-fn cancel_job(jobs: &Mutex<HashMap<String, RegisteredJob>>, id: &str) -> Result<(), String> {
+fn cancel_job(jobs: &Mutex<HashMap<String, RegisteredJob>>, id: &str) -> Result<(), NativeError> {
     let entry = jobs.lock().map_err(|error| error.to_string())?.remove(id)
         .ok_or("extraction job unavailable")?;
     entry.cancelled.store(true, Ordering::Release);
     Ok(())
 }
 
-fn reserve_start() -> Result<(u64, WorkerLease), String> {
-    if CLOSING.load(Ordering::Acquire) { return Err("application closing".into()); }
+fn reserve_start() -> Result<(u64, WorkerLease), NativeError> {
+    if CLOSING.load(Ordering::Acquire) { return Err(NativeError::new(NativeErrorCode::Cancelled,"application closing")); }
     ACTIVE.fetch_add(1, Ordering::AcqRel);
     Ok((NEXT.fetch_add(1, Ordering::Relaxed), WorkerLease))
 }
 
-fn claim_start(jobs: &Mutex<HashMap<String, RegisteredJob>>, current: &AtomicU64, closing: &AtomicBool, ticket: u64) -> Result<(), String> {
+fn claim_start(jobs: &Mutex<HashMap<String, RegisteredJob>>, current: &AtomicU64, closing: &AtomicBool, ticket: u64) -> Result<(), NativeError> {
     let jobs = jobs.lock().map_err(|error| error.to_string())?;
     let previous = current.fetch_max(ticket, Ordering::AcqRel);
     if previous > ticket || closing.load(Ordering::Acquire) {
-        return Err("extraction start superseded".into());
+        return Err(NativeError::new(NativeErrorCode::SessionSuperseded,"extraction start superseded"));
     }
     // Claim and cancellation share one registry lock: a delayed older preflight
     // cannot cancel a newer job inserted between its claim and revocation loop.

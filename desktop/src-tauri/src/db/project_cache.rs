@@ -1,5 +1,6 @@
 //! Settings, recent projects, source authorization and cache deletion.
 
+use gim_native_core::NativeError;
 use tauri::Manager;
 use rusqlite::params;
 use serde::Serialize;
@@ -27,7 +28,7 @@ pub struct CachedProjectSummary {
 #[tauri::command]
 pub async fn get_app_settings(
     app_handle: tauri::AppHandle,
-) -> Result<HashMap<String, String>, String> {
+) -> Result<HashMap<String, String>, NativeError> {
     crate::native_command::blocking("get_app_settings", move || {
         let state = app_handle.state::<DbState>();
         let conn = state
@@ -57,15 +58,15 @@ pub async fn set_app_setting(
     app_handle: tauri::AppHandle,
     key: String,
     value: String,
-) -> Result<(), String> {
+) -> Result<(), NativeError> {
     crate::native_command::blocking("set_app_setting", move || {
         let state = app_handle.state::<DbState>();
         let key = key.trim();
         if key.is_empty() || key.len() > 128 {
-            return Err("设置键无效".to_string());
+            return Err("设置键无效".to_string().into());
         }
         if value.len() > 4096 {
-            return Err("设置值过长".to_string());
+            return Err("设置值过长".to_string().into());
         }
         let conn = state
             .0
@@ -84,7 +85,7 @@ pub async fn set_app_setting(
 /// 列出所有缓存的项目（只读，按最近打开排序）
 #[tauri::command]
 pub async fn list_cached_projects(
-    app_handle: tauri::AppHandle,) -> Result<Vec<CachedProjectSummary>, String> {
+    app_handle: tauri::AppHandle,) -> Result<Vec<CachedProjectSummary>, NativeError> {
     crate::native_command::blocking("list_cached_projects", move || {
         let state = app_handle.state::<DbState>();
         let conn = state
@@ -122,7 +123,7 @@ pub async fn list_cached_projects(
 /// 更新最近打开时间；只在成功打开后调用，不参与打开关键路径。
 #[tauri::command]
 pub async fn touch_gim_project_opened(
-    app_handle: tauri::AppHandle, project_id: i64) -> Result<(), String> {
+    app_handle: tauri::AppHandle, project_id: i64) -> Result<(), NativeError> {
     crate::native_command::blocking("touch_gim_project_opened", move || {
         let state = app_handle.state::<DbState>();
         let conn = state
@@ -145,7 +146,7 @@ pub async fn authorize_cached_gim_project(
     app_handle: tauri::AppHandle,
 
     project_id: i64,
-) -> Result<String, String> {
+) -> Result<String, NativeError> {
     crate::native_command::blocking("authorize_cached_gim_project", move || {
         let access = app_handle.state::<crate::AuthorizedFilePaths>();
         let state = app_handle.state::<DbState>();
@@ -173,7 +174,7 @@ pub async fn authorize_cached_gim_project(
 pub async fn delete_project_cache(
     app_handle: tauri::AppHandle,
     project_id: i64,
-) -> Result<String, String> {
+) -> Result<String, NativeError> {
     crate::native_command::blocking("delete_project_cache", move || {
         let state = app_handle.state::<DbState>();
         let mut conn = state
@@ -192,7 +193,7 @@ pub async fn delete_project_cache(
             .execute("DELETE FROM gim_project WHERE id = ?1", params![project_id])
             .map_err(|e| format!("删除 gim_project 失败: {}", e))?;
         if deleted == 0 {
-            return Err(format!("项目 {} 不存在或已被删除", project_id));
+            return Err(format!("项目 {} 不存在或已被删除", project_id).into());
         }
 
         tx.commit().map_err(|e| format!("提交事务失败: {}", e))?;

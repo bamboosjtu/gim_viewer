@@ -15,6 +15,12 @@ use std::io::{self, Cursor, Read, Seek, SeekFrom};
 use std::path::Path;
 use std::time::Instant;
 use serde::Serialize;
+mod error;
+#[path = "../../../contracts/generated/native.rs"]
+mod native_contracts;
+pub use native_contracts::*;
+#[cfg(test)]
+mod contract_tests;
 
 /// 解压结果：条目列表（相对路径 + 字节）与头部信息
 #[derive(Debug)]
@@ -118,23 +124,23 @@ fn normalize_path(name: &str) -> String {
 
 /// 归档条目路径安全校验。压缩包内路径不应被当作绝对路径或带 `..` 的
 /// 文件系统路径；同时限制长度，避免异常长键污染内存/数据库。
-fn validate_archive_path(path: &str) -> Result<(), String> {
+fn validate_archive_path(path: &str) -> Result<(), NativeError> {
     if path.is_empty() || path.len() > extraction_limits().max_path_bytes {
-        return Err(format!(
+        return Err(NativeError::new(NativeErrorCode::InvalidPath,format!(
             "归档条目路径无效或过长（>{} 字节）",
             extraction_limits().max_path_bytes
-        ));
+        )));
     }
     if path.starts_with('/') || path.starts_with('\\') || path.contains('\0') {
-        return Err(format!("归档条目路径不安全: {}", path));
+        return Err(NativeError::new(NativeErrorCode::InvalidPath,format!("归档条目路径不安全: {}", path)));
     }
     let bytes = path.as_bytes();
     if bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic() {
-        return Err(format!("归档条目路径包含盘符: {}", path));
+        return Err(NativeError::new(NativeErrorCode::InvalidPath,format!("归档条目路径包含盘符: {}", path)));
     }
     for part in path.split('/') {
         if part.is_empty() || part == "." || part == ".." {
-            return Err(format!("归档条目路径包含非法组件: {}", path));
+            return Err(NativeError::new(NativeErrorCode::InvalidPath,format!("归档条目路径包含非法组件: {}", path)));
         }
     }
     Ok(())
@@ -167,8 +173,29 @@ impl Default for ExtractionQuota {
     }
 }
 
-fn quota_err(msg: String) -> String {
-    format!("解压终止（超出资源配额）: {}", msg)
+fn quota_err(msg: String) -> NativeError {
+    NativeError::new(NativeErrorCode::ResourceLimit, format!("解压终止（超出资源配额）: {}", msg))
+}
+
+fn remember_sevenz_error(error: NativeError, original: &mut Option<NativeError>) -> sevenz_rust::Error {
+    let message=error.to_string();
+    *original=Some(error);
+    sevenz_rust::Error::other(message)
+}
+
+fn archive_error(error: sevenz_rust::Error) -> NativeError {
+    let code=match &error {
+        sevenz_rust::Error::UnsupportedVersion {..} | sevenz_rust::Error::UnsupportedCompressionMethod(_)
+        | sevenz_rust::Error::Unsupported(_) | sevenz_rust::Error::ExternalUnsupported => NativeErrorCode::BackendUnavailable,
+        sevenz_rust::Error::MaxMemLimited {..} => NativeErrorCode::ResourceLimit,
+        _ => NativeErrorCode::InputCorrupt,
+    };
+    NativeError::new(code,error.to_string())
+}
+
+fn zip_error(error: zip::result::ZipError) -> NativeError {
+    let code=if matches!(error,zip::result::ZipError::UnsupportedArchive(_)) {NativeErrorCode::BackendUnavailable} else {NativeErrorCode::InputCorrupt};
+    NativeError::new(code,error.to_string())
 }
 
 /// GIM 头部与归档元数据。原生磁盘路径只返回这部分信息，条目内容由
@@ -289,7 +316,7 @@ impl<R: Read + Seek> Seek for OffsetReader<R> {
     }
 }
 
-fn parse_archive_prefix(data: &[u8]) -> Result<(usize, ExtractionMetadata, bool), String> {
+fn parse_archive_prefix(data: &[u8]) -> Result<(usize, ExtractionMetadata, bool), NativeError> {
     let offset = find_archive_offset(data)
         .ok_or_else(|| "未找到有效的 GIMPKG* 头部或压缩数据签名".to_string())?;
     let (project_id, project_name) = parse_header_fields(data, offset);
@@ -315,7 +342,7 @@ fn check_declared_size(
     declared: u64,
     archive_len: u64,
     quota: &ExtractionQuota,
-) -> Result<(), String> {
+) -> Result<(), NativeError> {
     if *entry_count >= quota.max_entries {
         return Err(quota_err(format!("条目数超限（>{}）", quota.max_entries)));
     }
@@ -351,7 +378,7 @@ fn read_entry_bytes<R: Read + ?Sized>(
     total_uncompressed: u64,
     archive_len: u64,
     quota: &ExtractionQuota,
-) -> Result<(Vec<u8>, u64), String> {
+) -> Result<(Vec<u8>, u64), NativeError> {
     // 声明大小不可信：限制读取上限，并将预分配封顶，避免恶意条目造成
     // 巨量单次分配。调用方已完成声明大小配额检查。
     let capacity = declared.min(quota.max_file_bytes).min(64 * 1024 * 1024) as usize;
@@ -359,7 +386,8 @@ fn read_entry_bytes<R: Read + ?Sized>(
     stream
         .take(quota.max_file_bytes.saturating_add(1))
         .read_to_end(&mut buf)
-        .map_err(|e| format!("读取条目 {} 失败: {}", path, e))?;
+        .map_err(|error| error.get_ref().and_then(|cause|cause.downcast_ref::<NativeError>()).cloned()
+            .unwrap_or_else(||NativeError::new(NativeErrorCode::InputCorrupt,format!("读取条目 {} 失败: {}",path,error))))?;
     if buf.len() as u64 > quota.max_file_bytes {
         return Err(quota_err(format!(
             "单文件 {} 实际解压大小超过 {}",
@@ -392,7 +420,7 @@ impl Read for CancelAwareReader<'_> {
     fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
         if self.cancelled.load(std::sync::atomic::Ordering::Acquire) {
             // Interrupted is retried by read_to_end; use a terminal error instead.
-            return Err(io::Error::new(io::ErrorKind::Other, "extraction cancelled"));
+            return Err(io::Error::new(io::ErrorKind::Other, NativeError::new(NativeErrorCode::Cancelled,"extraction cancelled")));
         }
         let limit = bytes.len().min(64 * 1024);
         self.inner.read(&mut bytes[..limit])
@@ -428,10 +456,10 @@ fn extract_archive_reader<R, F>(
     mut observer: Option<&mut dyn FnMut(ExtractionEntryTiming)>,
     semantic_order: bool,
     cancelled: Option<&std::sync::atomic::AtomicBool>,
-) -> Result<(), String>
+) -> Result<(), NativeError>
 where
     R: Read + Seek,
-    F: FnMut(String, Vec<u8>) -> Result<(), String>,
+    F: FnMut(String, Vec<u8>) -> Result<(), NativeError>,
 {
     let trace_started = Instant::now();
     let mut entry_count = 0usize;
@@ -440,7 +468,7 @@ where
     if is_sevenz {
         let mut archive_reader =
             sevenz_rust::SevenZReader::new(&mut reader, archive_len, sevenz_rust::Password::empty())
-                .map_err(|e| format!("打开 7z 归档失败: {}", e))?;
+                .map_err(archive_error)?;
         let entry_lookup = if observer.is_some() {
             archive_reader.archive().files.iter().enumerate().map(|(i, e)|
                 (e.name.clone(), (i, archive_reader.archive().stream_map.file_folder_index[i])))
@@ -448,12 +476,13 @@ where
         } else { std::collections::HashMap::new() };
         let archive = semantic_order.then(|| archive_reader.archive().clone());
         // The borrowed reader is released before ordered independent-folder decoding.
+        let mut source_error=None;
         let mut each = |entry: &sevenz_rust::SevenZArchiveEntry, stream: &mut dyn Read| {
                 if entry.is_directory() {
                     return Ok(true);
                 }
                 let path = normalize_path(&entry.name);
-                validate_archive_path(&path).map_err(sevenz_rust::Error::other)?;
+                validate_archive_path(&path).map_err(|error| remember_sevenz_error(error, &mut source_error))?;
                 check_declared_size(
                     &mut entry_count,
                     total_uncompressed,
@@ -462,14 +491,14 @@ where
                     archive_len,
                     quota,
                 )
-                .map_err(sevenz_rust::Error::other)?;
+                .map_err(|error| remember_sevenz_error(error, &mut source_error))?;
                 let decode_started = Instant::now();
                 let (bytes, actual_total) = if let Some(cancelled) = cancelled {
                     read_entry_bytes(&mut CancelAwareReader { inner: stream, cancelled },
                         &path, entry.size(), total_uncompressed, archive_len, quota)
                 } else {
                     read_entry_bytes(stream, &path, entry.size(), total_uncompressed, archive_len, quota)
-                }.map_err(sevenz_rust::Error::other)?;
+                }.map_err(|error| remember_sevenz_error(error, &mut source_error))?;
                 let decode_ms = elapsed_ms(decode_started);
                 profile.decode_ms += decode_ms;
                 if decode_ms > profile.max_entry_decode_ms {
@@ -481,7 +510,7 @@ where
                 profile.total_bytes = actual_total;
                 let path_for_profile = path.clone();
                 let write_started = Instant::now();
-                sink(path, bytes).map_err(sevenz_rust::Error::other)?;
+                sink(path, bytes).map_err(|error| remember_sevenz_error(error, &mut source_error))?;
                 let write_ms = elapsed_ms(write_started);
                 profile.write_ms += write_ms;
                 if write_ms > profile.max_entry_write_ms {
@@ -527,21 +556,15 @@ where
         } else {
             archive_reader.for_each_entries(&mut each)
         };
-        decode_result.map_err(|e| {
-                let msg = e.to_string();
-                if msg.starts_with("解压终止") {
-                    msg
-                } else {
-                    format!("7z 解压失败: {}", e)
-                }
-            })?;
+        drop(each);
+        decode_result.map_err(|error| source_error.take().unwrap_or_else(|| archive_error(error)))?;
     } else {
         let mut archive =
-            zip::ZipArchive::new(reader).map_err(|e| format!("打开 ZIP 归档失败: {}", e))?;
+            zip::ZipArchive::new(reader).map_err(zip_error)?;
         for i in 0..archive.len() {
             let mut file = archive
                 .by_index(i)
-                .map_err(|e| format!("ZIP 条目读取失败: {}", e))?;
+                .map_err(zip_error)?;
             if file.is_dir() {
                 continue;
             }
@@ -607,9 +630,9 @@ pub fn extract_from_path_with_quota<F>(
     path: &Path,
     quota: &ExtractionQuota,
     sink: F,
-) -> Result<ExtractionMetadata, String>
+) -> Result<ExtractionMetadata, NativeError>
 where
-    F: FnMut(String, Vec<u8>) -> Result<(), String>,
+    F: FnMut(String, Vec<u8>) -> Result<(), NativeError>,
 {
     let (metadata, _) = extract_from_path_with_quota_profile(path, quota, sink)?;
     Ok(metadata)
@@ -621,9 +644,9 @@ pub fn extract_from_path_with_quota_profile<F>(
     path: &Path,
     quota: &ExtractionQuota,
     sink: F,
-) -> Result<(ExtractionMetadata, ExtractionProfile), String>
+) -> Result<(ExtractionMetadata, ExtractionProfile), NativeError>
 where
-    F: FnMut(String, Vec<u8>) -> Result<(), String>,
+    F: FnMut(String, Vec<u8>) -> Result<(), NativeError>,
 {
     extract_from_path_with_quota_profile_impl(path, quota, sink, None, false, None)
 }
@@ -632,8 +655,8 @@ where
 pub fn extract_from_path_with_quota_profile_observed<F>(
     path: &Path, quota: &ExtractionQuota, sink: F,
     observer: &mut dyn FnMut(ExtractionEntryTiming),
-) -> Result<(ExtractionMetadata, ExtractionProfile), String>
-where F: FnMut(String, Vec<u8>) -> Result<(), String> {
+) -> Result<(ExtractionMetadata, ExtractionProfile), NativeError>
+where F: FnMut(String, Vec<u8>) -> Result<(), NativeError> {
     extract_from_path_with_quota_profile_impl(path, quota, sink, Some(observer), false, None)
 }
 
@@ -641,16 +664,16 @@ where F: FnMut(String, Vec<u8>) -> Result<(), String> {
 /// Every compressed folder still decodes once, with unchanged internal stream order.
 pub fn extract_substation_semantic_order<F>(
     path: &Path, quota: &ExtractionQuota, sink: F, observer: &mut dyn FnMut(ExtractionEntryTiming),
-) -> Result<(ExtractionMetadata, ExtractionProfile), String>
-where F: FnMut(String, Vec<u8>) -> Result<(), String> {
+) -> Result<(ExtractionMetadata, ExtractionProfile), NativeError>
+where F: FnMut(String, Vec<u8>) -> Result<(), NativeError> {
     extract_from_path_with_quota_profile_impl(path, quota, sink, Some(observer), true, None)
 }
 
 pub fn extract_substation_semantic_order_cancellable<F>(
     path: &Path, quota: &ExtractionQuota, sink: F, observer: &mut dyn FnMut(ExtractionEntryTiming),
     cancelled: &std::sync::atomic::AtomicBool,
-) -> Result<(ExtractionMetadata, ExtractionProfile), String>
-where F: FnMut(String, Vec<u8>) -> Result<(), String> {
+) -> Result<(ExtractionMetadata, ExtractionProfile), NativeError>
+where F: FnMut(String, Vec<u8>) -> Result<(), NativeError> {
     extract_from_path_with_quota_profile_impl(path, quota, sink, Some(observer), true, Some(cancelled))
 }
 
@@ -676,12 +699,12 @@ pub struct SubstationEarlyEligibility {
     pub checkpoint_decoded_bytes: u64,
     pub total_decoded_bytes: u64,
 }
-pub fn inspect_substation_eligibility(path: &Path, quota: &ExtractionQuota) -> Result<SubstationEarlyEligibility, String> {
+pub fn inspect_substation_eligibility(path: &Path, quota: &ExtractionQuota) -> Result<SubstationEarlyEligibility, NativeError> {
     Ok(inspect_substation_preflight(path, quota)?.0)
 }
-pub fn inspect_substation_entries(path: &Path, quota: &ExtractionQuota) -> Result<Vec<(String, u64)>, String> {
+pub fn inspect_substation_entries(path: &Path, quota: &ExtractionQuota) -> Result<Vec<(String, u64)>, NativeError> {
     let (capability, entries) = inspect_substation_preflight(path, quota)?;
-    if !capability.eligible { return Err(format!("early capability not supported: {}", capability.reason)); }
+    if !capability.eligible { return Err(format!("early capability not supported: {}", capability.reason).into()); }
     Ok(entries)
 }
 
@@ -690,20 +713,20 @@ pub fn inspect_substation_entries(path: &Path, quota: &ExtractionQuota) -> Resul
 pub fn inspect_archive_entries(
     path: &Path,
     quota: &ExtractionQuota,
-) -> Result<(ExtractionMetadata, u64, Vec<(String, u64)>), String> {
-    let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
+) -> Result<(ExtractionMetadata, u64, Vec<(String, u64)>), NativeError> {
+    let metadata = std::fs::metadata(path).map_err(NativeError::from)?;
     if metadata.len() > quota.max_archive_bytes {
         return Err(quota_err("GIM 大小超限".into()));
     }
-    let mut file = File::open(path).map_err(|e| e.to_string())?;
+    let mut file = File::open(path).map_err(NativeError::from)?;
     let mut prefix = vec![0; metadata.len().min(SIGNATURE_SEARCH_LIMIT as u64) as usize];
-    file.read_exact(&mut prefix).map_err(|e| e.to_string())?;
+    file.read_exact(&mut prefix).map_err(NativeError::from)?;
     let (offset, info, sevenz) = parse_archive_prefix(&prefix)?;
     if !sevenz {
-        return Err("not-7z-archive".into());
+        return Err(NativeError::new(NativeErrorCode::UnsupportedFormat,"not-7z-archive"));
     }
     let len = metadata.len() - offset as u64;
-    let reader = OffsetReader::new(file, offset as u64, len).map_err(|e| e.to_string())?;
+    let reader = OffsetReader::new(file, offset as u64, len).map_err(NativeError::from)?;
     let archive = sevenz_rust::SevenZReader::new(reader, len, sevenz_rust::Password::empty())
         .map_err(|e| e.to_string())?;
     let mut paths = std::collections::HashSet::new();
@@ -719,7 +742,7 @@ pub fn inspect_archive_entries(
         };
         validate_archive_path(&path)?;
         if !paths.insert(path.to_ascii_lowercase()) {
-            return Err("duplicate archive path".into());
+            return Err(NativeError::new(NativeErrorCode::InvalidPath,"duplicate archive path"));
         }
         if entry.is_directory() {
             continue;
@@ -730,18 +753,18 @@ pub fn inspect_archive_entries(
     }
     Ok((info, offset as u64, entries))
 }
-fn inspect_substation_preflight(path: &Path, quota: &ExtractionQuota) -> Result<(SubstationEarlyEligibility, Vec<(String,u64)>), String> {
-    let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
+fn inspect_substation_preflight(path: &Path, quota: &ExtractionQuota) -> Result<(SubstationEarlyEligibility, Vec<(String,u64)>), NativeError> {
+    let metadata = std::fs::metadata(path).map_err(NativeError::from)?;
     if metadata.len() > quota.max_archive_bytes { return Err(quota_err("GIM 大小超限".into())); }
-    let mut file = File::open(path).map_err(|e| e.to_string())?;
+    let mut file = File::open(path).map_err(NativeError::from)?;
     let mut prefix = vec![0; metadata.len().min(SIGNATURE_SEARCH_LIMIT as u64) as usize];
-    file.read_exact(&mut prefix).map_err(|e| e.to_string())?;
+    file.read_exact(&mut prefix).map_err(NativeError::from)?;
     let (offset, info, sevenz) = parse_archive_prefix(&prefix)?;
     let mut capability = SubstationEarlyEligibility { reason: "not-gs-7z".into(), ..Default::default() };
     capability.archive_format = if sevenz { "7z" } else { "zip" }.into();
     if info.magic != "GIMPKGS" || !sevenz { return Ok((capability, Vec::new())); }
     let len = metadata.len() - offset as u64;
-    let reader = OffsetReader::new(file, offset as u64, len).map_err(|e| e.to_string())?;
+    let reader = OffsetReader::new(file, offset as u64, len).map_err(NativeError::from)?;
     let archive = sevenz_rust::SevenZReader::new(reader, len, sevenz_rust::Password::empty()).map_err(|e| e.to_string())?;
     let mut paths = std::collections::HashSet::new();
     let mut entries = Vec::new(); let mut count = 0; let mut total = 0;
@@ -749,7 +772,7 @@ fn inspect_substation_preflight(path: &Path, quota: &ExtractionQuota) -> Result<
         let raw_path = normalize_path(&file.name);
         let path = if file.is_directory() { raw_path.strip_suffix('/').unwrap_or(&raw_path).to_string() } else { raw_path };
         validate_archive_path(&path)?;
-        if !paths.insert(path.to_ascii_lowercase()) { return Err("duplicate archive path".into()); }
+        if !paths.insert(path.to_ascii_lowercase()) { return Err(NativeError::new(NativeErrorCode::InvalidPath,"duplicate archive path")); }
         if file.is_directory() { continue; }
         check_declared_size(&mut count, total, &path, file.size, len, quota)?;
         total += file.size;
@@ -799,8 +822,8 @@ fn extract_from_path_with_quota_profile_impl<F>(
     observer: Option<&mut dyn FnMut(ExtractionEntryTiming)>,
     semantic_order: bool,
     cancelled: Option<&std::sync::atomic::AtomicBool>,
-) -> Result<(ExtractionMetadata, ExtractionProfile), String>
-where F: FnMut(String, Vec<u8>) -> Result<(), String> {
+) -> Result<(ExtractionMetadata, ExtractionProfile), NativeError>
+where F: FnMut(String, Vec<u8>) -> Result<(), NativeError> {
     let started = Instant::now();
     let metadata =
         std::fs::metadata(path).map_err(|e| format!("读取 GIM 文件元信息失败: {}", e))?;
@@ -811,12 +834,12 @@ where F: FnMut(String, Vec<u8>) -> Result<(), String> {
             quota.max_archive_bytes
         )));
     }
-    let mut file = File::open(path).map_err(|e| format!("打开 GIM 文件失败: {}", e))?;
+    let mut file = File::open(path).map_err(|e| NativeError::new(NativeErrorCode::Io,format!("打开 GIM 文件失败: {}", e)))?;
     let prefix_len = usize::try_from(metadata.len().min(SIGNATURE_SEARCH_LIMIT as u64))
         .map_err(|_| "GIM 头部窗口长度溢出".to_string())?;
     let mut prefix = vec![0u8; prefix_len];
     file.read_exact(&mut prefix)
-        .map_err(|e| format!("读取 GIM 头部失败: {}", e))?;
+        .map_err(|e| NativeError::new(NativeErrorCode::Io,format!("读取 GIM 头部失败: {}", e)))?;
     let (offset, info, is_sevenz) = parse_archive_prefix(&prefix)?;
     let header_ms = elapsed_ms(started);
     let archive_len = metadata
@@ -824,7 +847,7 @@ where F: FnMut(String, Vec<u8>) -> Result<(), String> {
         .checked_sub(offset as u64)
         .ok_or_else(|| "GIM 归档偏移越界".to_string())?;
     let reader = OffsetReader::new(file, offset as u64, archive_len)
-        .map_err(|e| format!("定位 GIM 归档失败: {}", e))?;
+        .map_err(|e| NativeError::new(NativeErrorCode::Io,format!("定位 GIM 归档失败: {}", e)))?;
     let archive_started = Instant::now();
     let mut profile = ExtractionProfile {
         header_ms,
@@ -845,7 +868,7 @@ where F: FnMut(String, Vec<u8>) -> Result<(), String> {
 pub fn extract_from_bytes_with_quota(
     data: &[u8],
     quota: &ExtractionQuota,
-) -> Result<ExtractedArchive, String> {
+) -> Result<ExtractedArchive, NativeError> {
     if data.len() as u64 > quota.max_archive_bytes {
         return Err(quota_err(format!(
             "GIM 文件大小 {} 超限（>{}）",
@@ -873,8 +896,9 @@ pub fn extract_from_bytes_with_quota(
             archive_data.len() as u64,
             sevenz_rust::Password::empty(),
         )
-        .map_err(|e| format!("打开 7z 归档失败: {}", e))?;
-        reader
+        .map_err(archive_error)?;
+        let mut source_error=None;
+        let decode_result=reader
             .for_each_entries(|entry, stream| {
                 if entry.is_directory() {
                     return Ok(true);
@@ -882,40 +906,40 @@ pub fn extract_from_bytes_with_quota(
 
                 // ── 配额校验（声明大小先行，防止 with_capacity 过度分配）──
                 if entries.len() + 1 > quota.max_entries {
-                    return Err(sevenz_rust::Error::other(quota_err(format!(
+                    return Err(remember_sevenz_error(quota_err(format!(
                         "条目数超限（>{}）",
                         quota.max_entries
-                    ))));
+                    )), &mut source_error));
                 }
                 let declared = entry.size();
                 if declared > quota.max_file_bytes {
-                    return Err(sevenz_rust::Error::other(quota_err(format!(
+                    return Err(remember_sevenz_error(quota_err(format!(
                         "单文件 {} 解压大小 {} 超限（>{})",
                         normalize_path(&entry.name),
                         declared,
                         quota.max_file_bytes
-                    ))));
+                    )), &mut source_error));
                 }
                 let declared_total = total_uncompressed.checked_add(declared).ok_or_else(|| {
-                    sevenz_rust::Error::other(quota_err("总解压量溢出".to_string()))
+                    remember_sevenz_error(quota_err("总解压量溢出".to_string()), &mut source_error)
                 })?;
                 if declared_total > quota.max_total_uncompressed_bytes {
-                    return Err(sevenz_rust::Error::other(quota_err(format!(
+                    return Err(remember_sevenz_error(quota_err(format!(
                         "总解压量 {} 超限（>{})",
                         declared_total, quota.max_total_uncompressed_bytes
-                    ))));
+                    )), &mut source_error));
                 }
                 if declared_total
                     > (archive_data.len() as u64).saturating_mul(quota.max_compression_ratio)
                 {
-                    return Err(sevenz_rust::Error::other(quota_err(format!(
+                    return Err(remember_sevenz_error(quota_err(format!(
                         "压缩比超限（>{}×，疑似压缩炸弹）",
                         quota.max_compression_ratio
-                    ))));
+                    )), &mut source_error));
                 }
 
                 let path = normalize_path(&entry.name);
-                validate_archive_path(&path).map_err(sevenz_rust::Error::other)?;
+                validate_archive_path(&path).map_err(|error| remember_sevenz_error(error, &mut source_error))?;
                 // 声明大小不可信：用 take 再读一字节，防止恶意条目实际膨胀到无界。
                 let capacity = declared.min(quota.max_file_bytes).min(64 * 1024 * 1024) as usize;
                 let mut buf = Vec::with_capacity(capacity);
@@ -924,31 +948,31 @@ pub fn extract_from_bytes_with_quota(
                     .read_to_end(&mut buf)
                     .map_err(sevenz_rust::Error::io)?;
                 if buf.len() as u64 > quota.max_file_bytes {
-                    return Err(sevenz_rust::Error::other(quota_err(format!(
+                    return Err(remember_sevenz_error(quota_err(format!(
                         "单文件 {} 实际解压大小超过 {}",
                         path, quota.max_file_bytes
-                    ))));
+                    )), &mut source_error));
                 }
 
                 // 实际解压量复核（声明值可能伪造）
                 let actual_total = total_uncompressed
                     .checked_add(buf.len() as u64)
                     .ok_or_else(|| {
-                        sevenz_rust::Error::other(quota_err("总解压量溢出".to_string()))
+                        remember_sevenz_error(quota_err("总解压量溢出".to_string()), &mut source_error)
                     })?;
                 if actual_total > quota.max_total_uncompressed_bytes {
-                    return Err(sevenz_rust::Error::other(quota_err(format!(
+                    return Err(remember_sevenz_error(quota_err(format!(
                         "实际总解压量 {} 超限（>{}）",
                         actual_total, quota.max_total_uncompressed_bytes
-                    ))));
+                    )), &mut source_error));
                 }
                 if actual_total
                     > (archive_data.len() as u64).saturating_mul(quota.max_compression_ratio)
                 {
-                    return Err(sevenz_rust::Error::other(quota_err(format!(
+                    return Err(remember_sevenz_error(quota_err(format!(
                         "实际压缩比超限（>{}×，疑似压缩炸弹）",
                         quota.max_compression_ratio
-                    ))));
+                    )), &mut source_error));
                 }
                 total_uncompressed = actual_total;
 
@@ -956,22 +980,15 @@ pub fn extract_from_bytes_with_quota(
                     entries.push((path, buf));
                 }
                 Ok(true)
-            })
-            .map_err(|e| {
-                let msg = e.to_string();
-                if msg.starts_with("解压终止") {
-                    msg // 配额错误原样透传
-                } else {
-                    format!("7z 解压失败: {}", e)
-                }
-            })?;
+            });
+        decode_result.map_err(|error| source_error.take().unwrap_or_else(|| archive_error(error)))?;
     } else {
         let mut archive = zip::ZipArchive::new(Cursor::new(archive_data))
-            .map_err(|e| format!("打开 ZIP 归档失败: {}", e))?;
+            .map_err(zip_error)?;
         for i in 0..archive.len() {
             let file = archive
                 .by_index(i)
-                .map_err(|e| format!("ZIP 条目读取失败: {}", e))?;
+                .map_err(zip_error)?;
             if file.is_dir() {
                 continue;
             }
@@ -1098,8 +1115,8 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert!(entries.iter().any(|(p, len)| p.ends_with("empty.mod") && *len == 0));
         let quota = ExtractionQuota { max_entries: 1, ..ExtractionQuota::default() };
-        assert!(extract_from_bytes_with_quota(&gim, &quota).is_err());
-        assert!(extract_from_path_with_quota(&root.join("source.gim"), &quota, |_, _| Ok(())).is_err());
+        assert_eq!(extract_from_bytes_with_quota(&gim, &quota).unwrap_err().code,NativeErrorCode::ResourceLimit);
+        assert_eq!(extract_from_path_with_quota(&root.join("source.gim"), &quota, |_, _| Ok(())).unwrap_err().code,NativeErrorCode::ResourceLimit);
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -1221,7 +1238,7 @@ mod tests {
         };
 
         let err = extract_from_bytes_with_quota(&gim, &quota).unwrap_err();
-        assert!(err.contains("条目数超限"), "实际错误: {}", err);
+        assert_eq!(err.code,NativeErrorCode::ResourceLimit);
     }
 
     #[test]
@@ -1238,7 +1255,7 @@ mod tests {
         let mut source = Source { cancelled: &cancelled, calls: 0, max: 0 };
         let mut reader = CancelAwareReader { inner: &mut source, cancelled: &cancelled };
         let error = read_entry_bytes(&mut reader, "CBM/a.ifc", 1024 * 1024, 0, 1024 * 1024, &ExtractionQuota::default()).unwrap_err();
-        assert!(error.contains("cancelled")); assert_eq!(source.calls, 1); assert!(source.max <= 64 * 1024);
+        assert_eq!(error.code,NativeErrorCode::Cancelled); assert_eq!(source.calls, 1); assert!(source.max <= 64 * 1024);
     }
 
     #[test]
@@ -1277,7 +1294,7 @@ mod tests {
         let mut right = ordered.clone(); right.sort_by(|a,b| a.0.cmp(&b.0)); assert_eq!(left, right);
         assert_eq!(trace.len(), 5); assert_eq!(trace.last().unwrap().cumulative_bytes, left.iter().map(|e| e.1.len() as u64).sum::<u64>());
         let quota = ExtractionQuota { max_entries: 2, ..ExtractionQuota::default() };
-        assert!(inspect_substation_entries(&path, &quota).unwrap_err().contains("配额"));
+        assert_eq!(inspect_substation_entries(&path, &quota).unwrap_err().code,NativeErrorCode::ResourceLimit);
         let mut seen = 0;
         assert!(extract_substation_semantic_order(&path, &ExtractionQuota::default(), |_,_| { seen += 1; if seen > 3 { Err("cancelled".into()) } else { Ok(()) } }, &mut |_| {}).is_err());
         assert_eq!(seen, 4);
@@ -1304,7 +1321,7 @@ mod tests {
         };
 
         let err = extract_from_bytes_with_quota(&gim, &quota).unwrap_err();
-        assert!(err.contains("单文件"), "实际错误: {}", err);
+        assert_eq!(err.code,NativeErrorCode::ResourceLimit);
     }
 
     /// P1 评审 #4：总解压量超配额 → 拒绝解压
@@ -1328,7 +1345,7 @@ mod tests {
         };
 
         let err = extract_from_bytes_with_quota(&gim, &quota).unwrap_err();
-        assert!(err.contains("总解压量"), "实际错误: {}", err);
+        assert_eq!(err.code,NativeErrorCode::ResourceLimit);
     }
 
     /// P1 评审 #4：默认配额下正常样本不受影响

@@ -13,6 +13,7 @@
 //! SQLite 缓存目录（app_data_dir/extracted/{project_id}/），前端只接收
 //! manifest；不会构造完整解压 Vec，也不会通过 IPC 回传条目字节。
 
+use gim_native_core::{NativeError, NativeErrorCode};
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 use std::path::Path;
@@ -73,15 +74,15 @@ pub(crate) struct ExtractionManifestEntry {
 pub async fn read_extraction_manifest(
     app_handle: tauri::AppHandle,
     project_id: i64,
-) -> Result<Option<ExtractionManifest>, String> {
+) -> Result<Option<ExtractionManifest>, NativeError> {
     crate::native_command::blocking("read_extraction_manifest", move || {
         let path = crate::db::cache_file_path(&app_handle, project_id, EXTRACTION_MANIFEST_FILE)?;
         match std::fs::read(&path) {
             Ok(bytes) => serde_json::from_slice(&bytes)
                 .map(Some)
-                .map_err(|e| format!("解压清单解析失败: {}", e)),
+                .map_err(|e| NativeError::new(NativeErrorCode::PackInvalid,format!("解压清单解析失败: {}", e))),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(format!("读取解压清单失败: {}", error)),
+            Err(error) => Err(format!("读取解压清单失败: {}", error).into()),
         }
     }).await
 }
@@ -142,8 +143,8 @@ pub async fn extract_gim_archive(
     trace_entries: Option<bool>,
     substation_parse_copy: Option<bool>,
     expected_source_sha256: Option<String>,
-) -> Result<tauri::ipc::Response, String> {
-    let payload = tauri::async_runtime::spawn_blocking(move || -> Result<Vec<u8>, String> {
+) -> Result<tauri::ipc::Response, NativeError> {
+    let payload = tauri::async_runtime::spawn_blocking(move || -> Result<Vec<u8>, NativeError> {
         let access = app_handle.state::<AuthorizedFilePaths>();
         let db_state = app_handle.state::<DbState>();
         let authorized_path = require_authorized_path(&access, &file_path, Some("gim"))?;
@@ -155,7 +156,7 @@ pub async fn extract_gim_archive(
                 "解压终止（超出资源配额）: GIM 文件大小 {} 超限（>{})",
                 metadata.len(),
                 quota.max_archive_bytes
-            ));
+            ).into());
         }
         if let Some(pid) = project_id {
             let conn = db_state
@@ -166,7 +167,7 @@ pub async fn extract_gim_archive(
             if let Some(expected) = expected_source_sha256.as_ref() {
                 let (record_path,record_sha):(String,String)=conn.query_row("SELECT path,sha256 FROM gim_project WHERE id=?1",[pid],|r|Ok((r.get(0)?,r.get(1)?))).map_err(|e|e.to_string())?;
                 if &record_sha != expected || crate::canonical_identity(std::path::Path::new(&record_path))?.1 != crate::canonical_identity(&authorized_path)?.1 {
-                    return Err("extraction project/source identity mismatch".into());
+                    return Err(NativeError::new(NativeErrorCode::SourceChanged,"extraction project/source identity mismatch"));
                 }
             }
         }
@@ -193,7 +194,7 @@ pub async fn extract_gim_archive(
         }
         if let Some(expected) = expected_source_sha256.as_ref() {
             if crate::substation_extraction_job::source_sha(&authorized_path)? != *expected {
-                return Err("extraction source SHA mismatch".into());
+                return Err(NativeError::new(NativeErrorCode::SourceChanged,"extraction source SHA mismatch"));
             }
         }
         if let Some(pid) = project_id {
@@ -289,7 +290,7 @@ pub async fn extract_gim_archive(
             };
             // 7-Zip 原生解码比 sevenz-rust 快一个数量级；归档是 7z 且随包
             // 7z.exe 可用时优先走流式外部解码，失败则保留原有解码路径。
-            let mut cli_extraction: Option<Result<(crate::gim_extract::ExtractionMetadata, crate::gim_extract::ExtractionProfile), String>> = None;
+            let mut cli_extraction: Option<Result<(crate::gim_extract::ExtractionMetadata, crate::gim_extract::ExtractionProfile), NativeError>> = None;
             if (substation_sources || line_pack_enabled || bare_sevenz) && crate::seven_zip_cli::is_available() {
                 if let Ok((info, offset, entries)) =
                     crate::gim_extract::inspect_archive_entries(&authorized_path, &quota)
@@ -423,7 +424,7 @@ pub async fn extract_gim_archive(
         }
     })
     .await
-    .map_err(|e| format!("解压任务执行失败: {}", e))??;
+    .map_err(|e| NativeError::new(NativeErrorCode::Internal,format!("解压任务执行失败: {}", e)))??;
 
     Ok(tauri::ipc::Response::new(payload))
 }
@@ -468,7 +469,7 @@ fn build_manifest_payload(
     command_started: std::time::Instant,
     parse_copy: Option<crate::substation_parse_copy::CopyReceipt>,
     entry_trace: Option<Vec<crate::gim_extract::ExtractionEntryTiming>>,
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, NativeError> {
     // 先以零值 profile 序列化一次，测出 manifest 的实际组装耗时；再把
     // 计时写回 manifest。使用借用视图，避免为第二次序列化复制数万条
     // entry 元数据（这部分虽不是解压字节，但会放大冷启动峰值）。
@@ -538,7 +539,7 @@ fn build_payload(
     app_handle: tauri::AppHandle,
     mut extracted: crate::gim_extract::ExtractedArchive,
     project_id: Option<i64>,
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, NativeError> {
     let disk_first = project_id.is_some();
     let mut blob: Vec<u8> = if disk_first {
         Vec::new()
@@ -562,7 +563,7 @@ fn build_payload(
                     atomic_write(&dest, &bytes, " 原生解压")?;
                     Some(dest.to_string_lossy().to_string())
                 }
-                Err(e) => return Err(format!("原生解压缓存路径解析失败: {} — {}", path, e)),
+                Err(e) => return Err(format!("原生解压缓存路径解析失败: {} — {}", path, e).into()),
             },
             None => None,
         };

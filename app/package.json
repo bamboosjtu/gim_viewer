@@ -12,7 +12,9 @@
     "tauri": "tauri",
     "android:init": "tauri android init",
     "android:dev": "tauri android dev",
-    "android:build": "tauri android build --target aarch64 --apk"
+    "android:build": "tauri android build --target aarch64 --apk",
+    "prebuild": "node ../contracts/generate-native.mjs --check",
+    "check:native-contracts": "node ../contracts/generate-native.mjs --check"
   },
   "dependencies": {
     "@gim/plugin-api": "file:../packages/plugin-api",

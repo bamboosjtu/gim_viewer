@@ -1,4 +1,5 @@
 //! Optional cold-parse acceleration copy. Independent extracted files remain authoritative.
+use gim_native_core::NativeError;
 use tauri::Manager;
 use crate::db::{cache_file_path, ensure_project_exists, DbState};
 use serde::Serialize;
@@ -28,7 +29,7 @@ pub struct ParseCopy {
 }
 
 impl ParseCopy {
-    pub fn append(&mut self, path: &str, bytes: &[u8]) -> Result<(), String> {
+    pub fn append(&mut self, path: &str, bytes: &[u8]) -> Result<(), NativeError> {
         if path.to_ascii_lowercase().ends_with(".ifc") || bytes.len() > 256 * 1024 {
             return Ok(());
         }
@@ -50,7 +51,7 @@ impl ParseCopy {
         Ok(())
     }
 
-    pub fn finish(self, staging: &Path) -> Result<CopyReceipt, String> {
+    pub fn finish(self, staging: &Path) -> Result<CopyReceipt, NativeError> {
         let index = serde_json::to_vec(&self.entries).map_err(|e| e.to_string())?;
         if index.len() > MAX_COPY_BYTES {
             return Err("parse copy index exceeds limit".into());
@@ -78,7 +79,7 @@ impl ParseCopy {
 pub async fn read_substation_parse_copy(
     app: tauri::AppHandle,
     project_id: i64,
-) -> Result<tauri::ipc::Response, String> {
+) -> Result<tauri::ipc::Response, NativeError> {
     crate::native_command::blocking("read_substation_parse_copy", move || {
         let db = app.state::<DbState>();
         {

@@ -41,6 +41,8 @@ npm run tauri:dev     # Tauri 开发窗口
 | `npm run check:version` | npm/Cargo 版本一致性；构建前自动执行 |
 | `npm run check:types` | TypeScript 检查（含测试替身的接口完整性） |
 | `npm run check:engineering-boundaries` | 纯领域、来源与 Viewer 边界检查 |
+| `npm run generate:native-contracts` | 从 contracts/native-v1.json 生成 TS/Rust FAM/DEV DTO 和错误契约 |
+| `npm run test:native-contracts` | 生成漂移、类型所有权与共享夹具 TS 编译检查，无工程样本 |
 | `cargo test --manifest-path src-tauri/Cargo.toml --lib command_registry --locked` | 桌面与 Android 命令注册表 AST 线程边界检查，无工程样本 |
 | `npm run sync:engineering-catalog` | 同步独立 JSON 词汇、工具配置副本和目录文档，不读取 XLSX |
 | `npm run check:engineering-catalog` | JSON 目录、词汇命名空间、独立工具数据副本及目录文档一致性 |

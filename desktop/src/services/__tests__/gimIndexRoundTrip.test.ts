@@ -105,6 +105,7 @@ function payloadToResult(payload: GimIndexPayload, projectId: number): GimIndexR
   }));
 
   const fam_properties: FamPropertyRecord[] = payload.fam_properties.map((p) => ({
+    source_line:p.source_line ?? 0, raw_property_json:p.raw_property_json ?? null,
     id: nextId(),
     project_id: projectId,
     source_path: p.source_path,

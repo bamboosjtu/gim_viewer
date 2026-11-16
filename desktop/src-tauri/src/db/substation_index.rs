@@ -1,5 +1,8 @@
 //! Transactional substation source/index persistence and geometry references.
 
+use gim_native_core::{NativeError, NativeErrorCode};
+pub use gim_native_core::{FamPropertyPayload, DevPropertyPayload, FamPropertyRecord, DevPropertyRecord};
+
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
@@ -67,23 +70,7 @@ pub struct FileDevEntryPayload {
     pub sort_order: i64,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct FamPropertyPayload {
-    pub source_line: Option<i64>,
-    pub raw_property_json: Option<String>,
-    pub source_path: String,
-    pub section_name: String,
-    pub prop_key: String,
-    pub prop_value: Option<String>,
-    pub sort_order: i64,
-}
 
-#[derive(Debug, Deserialize)]
-pub struct DevPropertyPayload {
-    pub dev_path: String,
-    pub prop_key: String,
-    pub prop_value: Option<String>,
-}
 
 #[derive(Debug, Deserialize)]
 pub struct GimIndexPayload {
@@ -98,7 +85,7 @@ pub struct GimIndexPayload {
     pub dev_properties: Vec<DevPropertyPayload>,
 }
 
-fn validate_index_payload(payload: &GimIndexPayload) -> Result<(), String> {
+fn validate_index_payload(payload: &GimIndexPayload) -> Result<(), NativeError> {
     ensure_cache_project_id(payload.project_id)?;
     const MAX_INDEX_ENTRIES: usize = 1_000_000;
     const MAX_INDEX_NODES: usize = 1_000_000;
@@ -112,7 +99,7 @@ fn validate_index_payload(payload: &GimIndexPayload) -> Result<(), String> {
         || payload.fam_properties.len() > MAX_INDEX_PROPERTIES
         || payload.dev_properties.len() > MAX_INDEX_PROPERTIES
     {
-        return Err("GIM 索引 payload 数量超过安全上限".to_string());
+        return Err("GIM 索引 payload 数量超过安全上限".to_string().into());
     }
     let entry_paths: std::collections::HashMap<&str, &str> = payload
         .entries
@@ -135,7 +122,7 @@ fn validate_index_payload(payload: &GimIndexPayload) -> Result<(), String> {
             || e.file_name.len() > 4096
             || e.file_size > 8 * 1024 * 1024 * 1024
         {
-            return Err(format!("GIM entry 字段无效: {}", e.entry_path));
+            return Err(format!("GIM entry 字段无效: {}", e.entry_path).into());
         }
         if e.entry_type != "IFC"
             && e.entry_type != "CBM"
@@ -148,14 +135,14 @@ fn validate_index_payload(payload: &GimIndexPayload) -> Result<(), String> {
             && e.entry_type != "STD"
             && e.entry_type != "SLD"
         {
-            return Err(format!("不支持的 entry_type: {}", e.entry_type));
+            return Err(format!("不支持的 entry_type: {}", e.entry_type).into());
         }
     }
     for n in &payload.cbm_nodes {
         validate_entry_path(&n.node_key)?;
         validate_entry_path(&n.path)?;
         if n.node_key.trim().is_empty() || n.path.trim().is_empty() || n.name.len() > 4096 {
-            return Err("CBM 节点缺少 node_key/path 或文本过长".to_string());
+            return Err("CBM 节点缺少 node_key/path 或文本过长".to_string().into());
         }
         for text in [
             n.entity_name.as_deref(),
@@ -167,35 +154,35 @@ fn validate_index_payload(payload: &GimIndexPayload) -> Result<(), String> {
             n.transform_matrix.as_deref(),
         ] {
             if text.map(|v| v.len() > 8192).unwrap_or(false) {
-                return Err("CBM 节点字段过长".to_string());
+                return Err("CBM 节点字段过长".to_string().into());
             }
         }
         if let Some(parent) = n.parent_key.as_deref() {
             if !node_keys.contains(parent) {
-                return Err(format!("CBM 节点 parent_key 不存在: {}", parent));
+                return Err(format!("CBM 节点 parent_key 不存在: {}", parent).into());
             }
         }
     }
     for m in &payload.ifc_models {
         if m.model_id.trim().is_empty() || m.model_id.len() > 4096 || m.name.len() > 4096 {
-            return Err("IFC 模型字段无效".to_string());
+            return Err("IFC 模型字段无效".to_string().into());
         }
         validate_entry_path(&m.entry_path)?;
         if !model_ids.contains(m.model_id.as_str()) {
-            return Err("IFC model_id 无效".to_string());
+            return Err("IFC model_id 无效".to_string().into());
         }
         if entry_paths.get(m.entry_path.as_str()) != Some(&"IFC") {
             return Err(format!(
                 "IFC 模型 entry_path 未指向 IFC entry: {}",
                 m.entry_path
-            ));
+            ).into());
         }
     }
     for f in &payload.file_dev_entries {
         // DGN/缺失/重复 basename 的来源记录可以保留为证据，但没有可解析的
         // IFC model_id；只有非空 model_id 才必须引用本次索引中的模型。
         if !f.model_id.trim().is_empty() && !model_ids.contains(f.model_id.as_str()) {
-            return Err(format!("文件设备关系引用未知 IFC model_id: {}", f.model_id));
+            return Err(format!("文件设备关系引用未知 IFC model_id: {}", f.model_id).into());
         }
         if f.device_count < 0
             || f.device_count > MAX_INDEX_NODES as i64
@@ -204,7 +191,7 @@ fn validate_index_payload(payload: &GimIndexPayload) -> Result<(), String> {
             || f.source_design_file.as_ref().map(|v| v.len() > 4096).unwrap_or(false)
             || f.device_cbm.len() > 4096
         {
-            return Err("文件设备关系字段无效".to_string());
+            return Err("文件设备关系字段无效".to_string().into());
         }
     }
     for p in &payload.fam_properties {
@@ -218,7 +205,7 @@ fn validate_index_payload(payload: &GimIndexPayload) -> Result<(), String> {
                 .unwrap_or(false)
             || p.sort_order < 0
         {
-            return Err("FAM 属性字段无效或过长".to_string());
+            return Err("FAM 属性字段无效或过长".to_string().into());
         }
     }
     for p in &payload.dev_properties {
@@ -230,7 +217,7 @@ fn validate_index_payload(payload: &GimIndexPayload) -> Result<(), String> {
                 .map(|v| v.len() > MAX_LINE_TEXT_BYTES)
                 .unwrap_or(false)
         {
-            return Err("DEV 属性字段无效或过长".to_string());
+            return Err("DEV 属性字段无效或过长".to_string().into());
         }
     }
     Ok(())
@@ -243,15 +230,15 @@ fn validate_index_payload(payload: &GimIndexPayload) -> Result<(), String> {
 pub async fn save_gim_index(
     app_handle: tauri::AppHandle,
     payload: GimIndexPayload,
-) -> Result<(), String> {
+) -> Result<(), NativeError> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app_handle.state::<DbState>();
         let mut conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
         save_gim_index_connection(&mut conn, payload)
-    }).await.map_err(|e| format!("索引后台任务失败: {}", e))?
+    }).await.map_err(|e| NativeError::new(NativeErrorCode::Internal,format!("索引后台任务失败: {}", e)))?
 }
 
-pub(super) fn save_gim_index_connection(conn: &mut Connection, payload: GimIndexPayload) -> Result<(), String> {
+pub(super) fn save_gim_index_connection(conn: &mut Connection, payload: GimIndexPayload) -> Result<(), NativeError> {
 
     validate_index_payload(&payload)?;
 
@@ -419,7 +406,7 @@ pub struct CbmNodeRecord {
 
 // Publication receipt belongs to the existing semantic domain. It detects
 // truncated/deleted index rows on the next open without depending on GLBs.
-fn substation_index_receipt(conn: &Connection, project_id: i64) -> Result<String, String> {
+fn substation_index_receipt(conn: &Connection, project_id: i64) -> Result<String, NativeError> {
     let _timing = ValidationSpan::new("receipt");
     let sha: String = conn.query_row("SELECT sha256 FROM gim_project WHERE id=?1", params![project_id], |r| r.get(0))
         .map_err(|e| e.to_string())?;
@@ -430,10 +417,10 @@ fn substation_index_receipt(conn: &Connection, project_id: i64) -> Result<String
         counts.insert(table, count_rows(conn,table,project_id)?);
     }
     if counts["substation_cbm_node"] == 0 || counts["substation_gim_entry"] == 0 {
-        return Err("拒绝发布不完整变电语义索引".to_string());
+        return Err("拒绝发布不完整变电语义索引".to_string().into());
     }
     serde_json::to_string(&serde_json::json!({"sha256":sha,"version":SUBSTATION_PARSER_VERSION,"counts":counts}))
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string()).map_err(NativeError::from)
 }
 
 pub(super) fn substation_index_receipt_matches(conn: &Connection, project_id: i64) -> bool {
@@ -466,12 +453,12 @@ pub(super) fn substation_light_source_scan(
         && receipt_valid
 }
 
-pub(super) fn missing_substation_sources(conn: &Connection, app: &tauri::AppHandle, project_id: i64) -> Result<Vec<String>,String> {
+pub(super) fn missing_substation_sources(conn: &Connection, app: &tauri::AppHandle, project_id: i64) -> Result<Vec<String>, NativeError> {
     let context = CacheValidationContext::for_project(app, project_id).ok();
     missing_substation_sources_with_context(conn, project_id, context.as_ref())
 }
 
-pub(super) fn missing_substation_sources_with_context(conn: &Connection, project_id: i64, context: Option<&CacheValidationContext>) -> Result<Vec<String>,String> {
+pub(super) fn missing_substation_sources_with_context(conn: &Connection, project_id: i64, context: Option<&CacheValidationContext>) -> Result<Vec<String>, NativeError> {
     let _timing = ValidationSpan::new("source_scan_path_files");
     let mut stmt = conn.prepare("SELECT entry_path, local_cache_path, file_size FROM substation_gim_entry WHERE project_id=?1").map_err(|e|e.to_string())?;
     let rows = stmt.query_map(params![project_id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,i64>(2)?))).map_err(|e|e.to_string())?;
@@ -558,30 +545,8 @@ pub struct FileDevEntryRecord {
 }
 
 /// substation_fam_property 表完整记录
-#[derive(Debug, Serialize)]
-pub struct FamPropertyRecord {
-    pub source_line: i64,
-    pub raw_property_json: Option<String>,
-    pub id: i64,
-    pub project_id: i64,
-    pub source_path: String,
-    pub section_name: String,
-    pub prop_key: String,
-    pub prop_value: Option<String>,
-    pub sort_order: i64,
-    pub created_at_ms: u64,
-}
 
 /// substation_dev_property 表完整记录
-#[derive(Debug, Serialize)]
-pub struct DevPropertyRecord {
-    pub id: i64,
-    pub project_id: i64,
-    pub dev_path: String,
-    pub prop_key: String,
-    pub prop_value: Option<String>,
-    pub created_at_ms: u64,
-}
 
 /// get_gim_index 返回结构
 #[derive(Debug, Serialize)]
@@ -654,7 +619,7 @@ fn row_to_dev_property(row: &rusqlite::Row<'_>) -> rusqlite::Result<DevPropertyR
 pub async fn get_gim_index(
     app_handle: tauri::AppHandle,
     project_id: i64,
-) -> Result<GetGimIndexResult, String> {
+) -> Result<GetGimIndexResult, NativeError> {
     crate::native_command::blocking("get_gim_index", move || {
         let state = app_handle.state::<DbState>();
         let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
@@ -662,7 +627,7 @@ pub async fn get_gim_index(
     }).await
 }
 
-pub(super) fn get_gim_index_connection(conn: &Connection, project_id: i64) -> Result<GetGimIndexResult, String> {
+pub(super) fn get_gim_index_connection(conn: &Connection, project_id: i64) -> Result<GetGimIndexResult, NativeError> {
     ensure_project_exists(&conn, project_id)?;
 
     // 1. substation_gim_entry
@@ -826,7 +791,7 @@ pub struct GeometryRefsPayload {
     pub phm_solid_models: Vec<PhmSolidModelPayload>,
 }
 
-fn validate_geometry_refs_payload(payload: &GeometryRefsPayload) -> Result<(), String> {
+fn validate_geometry_refs_payload(payload: &GeometryRefsPayload) -> Result<(), NativeError> {
     ensure_cache_project_id(payload.project_id)?;
     for p in &payload.dev_solid_models {
         validate_entry_path(&p.dev_path)?;
@@ -837,14 +802,14 @@ fn validate_geometry_refs_payload(payload: &GeometryRefsPayload) -> Result<(), S
             return Err(format!(
                 "DEV solid_model_path 类型无效: {}",
                 p.solid_model_path
-            ));
+            ).into());
         }
     }
     for p in &payload.dev_sub_devices {
         validate_entry_path(&p.dev_path)?;
         validate_entry_path(&p.child_dev_path)?;
         if !p.child_dev_path.to_ascii_lowercase().ends_with(".dev") {
-            return Err(format!("child_dev_path 类型无效: {}", p.child_dev_path));
+            return Err(format!("child_dev_path 类型无效: {}", p.child_dev_path).into());
         }
     }
     for p in &payload.phm_solid_models {
@@ -855,7 +820,7 @@ fn validate_geometry_refs_payload(payload: &GeometryRefsPayload) -> Result<(), S
             return Err(format!(
                 "PHM solid_model_path 类型无效: {}",
                 p.solid_model_path
-            ));
+            ).into());
         }
     }
     Ok(())
@@ -870,15 +835,15 @@ fn validate_geometry_refs_payload(payload: &GeometryRefsPayload) -> Result<(), S
 pub async fn save_geometry_refs(
     app_handle: tauri::AppHandle,
     payload: GeometryRefsPayload,
-) -> Result<(), String> {
+) -> Result<(), NativeError> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app_handle.state::<DbState>();
         let mut conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
         save_geometry_refs_connection(&mut conn, payload)
-    }).await.map_err(|e| format!("几何引用后台任务失败: {}", e))?
+    }).await.map_err(|e| NativeError::new(NativeErrorCode::Internal,format!("几何引用后台任务失败: {}", e)))?
 }
 
-pub(super) fn save_geometry_refs_connection(conn: &mut Connection, payload: GeometryRefsPayload) -> Result<(), String> {
+pub(super) fn save_geometry_refs_connection(conn: &mut Connection, payload: GeometryRefsPayload) -> Result<(), NativeError> {
 
     validate_geometry_refs_payload(&payload)?;
     ensure_project_exists(&conn, payload.project_id)?;
@@ -927,7 +892,7 @@ pub struct SubstationSemanticRestPayload {
 pub async fn save_substation_semantic_rest(
     app_handle: tauri::AppHandle,
     payload: SubstationSemanticRestPayload,
-) -> Result<(), String> {
+) -> Result<(), NativeError> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app_handle.state::<DbState>();
         let mut conn = state
@@ -937,15 +902,15 @@ pub async fn save_substation_semantic_rest(
         save_substation_semantic_rest_connection(&mut conn, payload)
     })
     .await
-    .map_err(|e| format!("索引补写后台任务失败: {}", e))?
+    .map_err(|e| NativeError::new(NativeErrorCode::Internal,format!("索引补写后台任务失败: {}", e)))?
 }
 
 fn save_substation_semantic_rest_connection(
     conn: &mut Connection,
     payload: SubstationSemanticRestPayload,
-) -> Result<(), String> {
+) -> Result<(), NativeError> {
     if payload.refs.project_id != payload.project_id {
-        return Err("索引补写与引用链的工程标识不一致".to_string());
+        return Err("索引补写与引用链的工程标识不一致".to_string().into());
     }
     validate_geometry_refs_payload(&payload.refs)?;
     ensure_project_exists(conn, payload.project_id)?;
@@ -965,7 +930,7 @@ fn save_substation_semantic_rest_connection(
         )
         .map_err(|e| format!("读取变电版本失败: {}", e))?;
     if version.as_deref() != Some(SUBSTATION_PARSER_VERSION) {
-        return Err("索引核心尚未提交，拒绝补写引用与属性".to_string());
+        return Err("索引核心尚未提交，拒绝补写引用与属性".to_string().into());
     }
     let tx = conn
         .transaction()
@@ -1021,7 +986,7 @@ fn save_substation_semantic_rest_connection(
     Ok(())
 }
 
-fn replace_geometry_refs(tx: &Connection, payload: &GeometryRefsPayload, now: u64) -> Result<(), String> {
+fn replace_geometry_refs(tx: &Connection, payload: &GeometryRefsPayload, now: u64) -> Result<(), NativeError> {
     let pid = payload.project_id;
     // 1. 清空旧数据
     tx.execute(

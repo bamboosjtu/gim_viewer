@@ -1,3 +1,4 @@
+use gim_native_core::{NativeError, NativeErrorCode};
 mod db;
 mod native_command;
 #[cfg(test)]
@@ -118,18 +119,18 @@ pub struct AuthorizedFilePaths(pub std::sync::Mutex<HashSet<String>>);
 const MAX_SOURCE_FILE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_SOURCE_HEAD_BYTES: u64 = 1024 * 1024;
 
-fn canonical_identity(path: &Path) -> Result<(PathBuf, String), String> {
+fn canonical_identity(path: &Path) -> Result<(PathBuf, String), NativeError> {
     let canonical = fs::canonicalize(path).map_err(|e| format!("规范化文件路径失败: {}", e))?;
     let meta = fs::metadata(&canonical).map_err(|e| format!("读取文件元信息失败: {}", e))?;
     if !meta.is_file() {
-        return Err("选择的路径不是普通文件".to_string());
+        return Err("选择的路径不是普通文件".to_string().into());
     }
     if meta.len() > MAX_SOURCE_FILE_BYTES {
         return Err(format!(
             "源文件过大（{} 字节，超过 {} 字节上限）",
             meta.len(),
             MAX_SOURCE_FILE_BYTES
-        ));
+        ).into());
     }
     let mut identity = canonical.to_string_lossy().replace('\\', "/");
     #[cfg(windows)]
@@ -143,7 +144,7 @@ pub(crate) fn authorize_selected_path(
     access: &AuthorizedFilePaths,
     path: &Path,
     expected_extension: Option<&str>,
-) -> Result<String, String> {
+) -> Result<String, NativeError> {
     let (canonical, identity) = canonical_identity(path)?;
     if let Some(ext) = expected_extension {
         let actual = canonical
@@ -151,7 +152,7 @@ pub(crate) fn authorize_selected_path(
             .and_then(|e| e.to_str())
             .unwrap_or_default();
         if !actual.eq_ignore_ascii_case(ext) {
-            return Err(format!("只允许选择 .{} 文件", ext));
+            return Err(format!("只允许选择 .{} 文件", ext).into());
         }
     }
     let mut paths = access
@@ -166,7 +167,7 @@ pub(crate) fn require_authorized_path(
     access: &AuthorizedFilePaths,
     path: &str,
     expected_extension: Option<&str>,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, NativeError> {
     let (canonical, identity) = canonical_identity(Path::new(path))?;
     if let Some(ext) = expected_extension {
         let actual = canonical
@@ -174,7 +175,7 @@ pub(crate) fn require_authorized_path(
             .and_then(|e| e.to_str())
             .unwrap_or_default();
         if !actual.eq_ignore_ascii_case(ext) {
-            return Err(format!("只允许读取 .{} 文件", ext));
+            return Err(format!("只允许读取 .{} 文件", ext).into());
         }
     }
     let paths = access
@@ -182,7 +183,7 @@ pub(crate) fn require_authorized_path(
         .lock()
         .map_err(|e| format!("获取文件授权锁失败: {}", e))?;
     if !paths.contains(&identity) {
-        return Err("文件路径未经原生文件对话框授权".to_string());
+        return Err(NativeError::new(NativeErrorCode::Unauthorized,"文件路径未经原生文件对话框授权"));
     }
     Ok(canonical)
 }
@@ -197,7 +198,7 @@ mod file_dialog_commands {
     pub async fn authorize_gim_file_path_for_dev(
         app_handle: tauri::AppHandle,
         path: String,
-    ) -> Result<String, String> {
+    ) -> Result<String, NativeError> {
         crate::native_command::blocking("authorize_gim_file_path_for_dev", move || {
             let access = app_handle.state::<AuthorizedFilePaths>();
             #[cfg(debug_assertions)]
@@ -207,7 +208,7 @@ mod file_dialog_commands {
             #[cfg(not(debug_assertions))]
             {
                 let _ = (access, path);
-                Err("开发性能采集命令仅在 debug 构建可用".to_string())
+                Err("开发性能采集命令仅在 debug 构建可用".to_string().into())
             }
 
         }).await
@@ -217,7 +218,7 @@ mod file_dialog_commands {
     #[tauri::command]
     pub async fn pick_gim_file_path(
         app_handle: tauri::AppHandle,
-    ) -> Result<Option<String>, String> {
+    ) -> Result<Option<String>, NativeError> {
         crate::native_command::blocking("pick_gim_file_path", move || {
             let access=app_handle.state::<AuthorizedFilePaths>();
             let selected = app_handle
@@ -239,7 +240,7 @@ mod file_dialog_commands {
     #[tauri::command]
     pub async fn pick_ifc_file_paths(
         app_handle: tauri::AppHandle,
-    ) -> Result<Option<Vec<String>>, String> {
+    ) -> Result<Option<Vec<String>>, NativeError> {
         crate::native_command::blocking("pick_ifc_file_paths", move || {
             let access=app_handle.state::<AuthorizedFilePaths>();
             let selected = app_handle
@@ -266,7 +267,7 @@ mod file_dialog_commands {
 async fn get_file_info(
     app_handle: tauri::AppHandle,
     path: String,
-) -> Result<FileInfo, String> {
+) -> Result<FileInfo, NativeError> {
     crate::native_command::blocking("get_file_info", move || {
         let access=app_handle.state::<AuthorizedFilePaths>();
         inspect_authorized_file(&access, &path)
@@ -437,7 +438,7 @@ fn current_process_rss_bytes() -> Option<u64> {
 }
 
 #[tauri::command]
-async fn get_process_memory() -> Result<ProcessMemorySnapshot, String> {
+async fn get_process_memory() -> Result<ProcessMemorySnapshot, NativeError> {
     crate::native_command::blocking("get_process_memory", move || {
 #[cfg(windows)]
     let pid = current_process_id();
@@ -473,7 +474,7 @@ async fn get_process_memory() -> Result<ProcessMemorySnapshot, String> {
 async fn read_file_bytes(
     app_handle: tauri::AppHandle,
     path: String,
-) -> Result<tauri::ipc::Response, String> {
+) -> Result<tauri::ipc::Response, NativeError> {
     crate::native_command::blocking("read_file_bytes", move || {
         let access = app_handle.state::<AuthorizedFilePaths>();
         let p = require_authorized_path(&access, &path, None)?;
@@ -488,7 +489,7 @@ async fn read_file_head(
     app_handle: tauri::AppHandle,
     path: String,
     max_bytes: Option<u64>,
-) -> Result<tauri::ipc::Response, String> {
+) -> Result<tauri::ipc::Response, NativeError> {
     crate::native_command::blocking("read_file_head", move || {
         let access = app_handle.state::<AuthorizedFilePaths>();
         let p = require_authorized_path(&access, &path, Some("gim"))?;
@@ -596,17 +597,17 @@ fn workspace_test_temp() -> std::path::PathBuf {
 }
 
 /// Acceptance executables embed a workspace-only data root; production keeps Tauri's normal location.
-pub(crate) fn application_data_dir(app:&tauri::AppHandle)->Result<PathBuf,String> {
+pub(crate) fn application_data_dir(app:&tauri::AppHandle)->Result<PathBuf, NativeError> {
     #[cfg(feature = "benchmark")]
     { let _=app; benchmark::data_root() }
     #[cfg(not(feature = "benchmark"))]
     {
         if let Some(root)=option_env!("GIM_ACCEPTANCE_DATA_ROOT") {return Ok(PathBuf::from(root));}
-        app.path().app_data_dir().map_err(|error|error.to_string())
+        app.path().app_data_dir().map_err(|error|error.to_string()).map_err(NativeError::from)
     }
 }
 
-fn inspect_authorized_file(access: &AuthorizedFilePaths, path: &str) -> Result<FileInfo, String> {
+fn inspect_authorized_file(access: &AuthorizedFilePaths, path: &str) -> Result<FileInfo, NativeError> {
     let p = require_authorized_path(access, path, None)?;
     let meta = fs::metadata(&p).map_err(|e| e.to_string())?;
     let name = p

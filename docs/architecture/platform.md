@@ -4,6 +4,8 @@
 
 ## 原生命令线程边界
 
+原生命令错误采用 `contracts/native-v1.json` 生成的 `NativeError`，结构为 code、message 和可选 context。桌面、Android 应用及 SAF/定位/窗口插件共用生成模型；bridge 将其规范化为 `GimError`，只按 code 选择恢复或重试。FAM/DEV payload 与读取 record 同样由该文件生成。来源、字段 null/缺省和生成规则见 [v1 契约](../../contracts/README.md)。错误结构与生成器固定 v1，不提供旧字符串或旧开发格式迁移。
+
 桌面与 Android 注册的 Tauri 工作命令使用 async 入口。文件 I/O、路径 canonicalize/stat、SHA、解压、同步数据库锁/查询/事务和大 JSON 导出解析均在 `spawn_blocking` 内执行；桌面的 `native_command::blocking` 统一转发任务及 JoinError，已有直接 `spawn_blocking` 入口保留。工作闭包持有 AppHandle、路径、payload 等所有权，数据库锁和事务在闭包内取得并释放，不跨 await。
 
 同步例外只有桌面 `cancel_substation_extraction` 和 Android `cancel_import`。它们只撤销内存权限或写原子标志，不进入阻塞池排队；桌面取消不获取文件读/提交持有的 job mutex。早期解压在首次 await 前预留启动票据和关闭租约，验证成功后以注册表短锁认领单调票据并撤销旧任务；延迟的旧预检不能取消或覆盖新任务。关闭继续等待预检和解压实际结束，Android 导入的 busy 租约在成功、失败或 panic 后释放，取消标志不由迟到任务重置。

@@ -6,9 +6,20 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { parseExtractionPayload, createDiskBackedFile } from '../gimExtract.js';
+import { parseExtractionPayload, createDiskBackedFile, extractGimArchiveNative } from '../gimExtract.js';
+const native = vi.hoisted(()=>({invoke:vi.fn()}));
+vi.mock('@tauri-apps/api/core',async importActual=>({...await importActual<typeof import('@tauri-apps/api/core')>(),invoke:native.invoke}));
 const reads = vi.hoisted(() => ({ readCachedEntry: vi.fn() }));
 vi.mock('../database.js', () => reads);
+
+it('distinguishes response decoding failures from native safety failures for receipt recovery',async()=>{
+  native.invoke.mockResolvedValue(new ArrayBuffer(0));
+  await expect(extractGimArchiveNative('source.gim',1)).rejects.toMatchObject({code:'RESPONSE_INVALID'});
+  native.invoke.mockRejectedValue({code:'RESOURCE_LIMIT',message:'no keyword required'});
+  await expect(extractGimArchiveNative('source.gim',1)).rejects.toMatchObject({code:'RESOURCE_LIMIT'});
+  native.invoke.mockResolvedValue(buildPayload([{path:'CBM/../unsafe.cbm',data:'x'}]));
+  await expect(extractGimArchiveNative('source.gim',1)).rejects.toMatchObject({code:'INVALID_PATH'});
+});
 
 it('full disk reads retain their owned buffer while slices remain precisely bounded', async () => {
   const input = new Uint8Array([1, 2, 3, 4]);

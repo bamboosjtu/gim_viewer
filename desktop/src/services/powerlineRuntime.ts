@@ -1,4 +1,5 @@
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
+import {hasErrorCode} from '@desktop/contracts.js';
 import { loadPresentation } from './presentationPort.js';
 import { scheduleHideLoading } from './gimOpenCore.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
@@ -159,12 +160,8 @@ export async function openPowerlineProject(context: GimRuntimeOpenContext): Prom
                   (globalThis as { __GIM_DEV_LINE_SEMANTIC_FAST_PATH__?: boolean }).__GIM_DEV_LINE_SEMANTIC_FAST_PATH__ = true;
                 }
               } catch (error) {
-                const kind = (error as { kind?: unknown } | null)?.kind;
-                const message = error instanceof Error ? error.message : String(error);
-                const integrityFailure = kind === 'PACK_INVALID'
-                  || kind === 'INDEX_INVALID'
-                  || kind === 'PACK_TRUNCATED'
-                  || /^(PACK_INVALID|INDEX_INVALID|PACK_TRUNCATED)\s*:/i.test(message);
+                const integrityFailure = hasErrorCode(error,'PACK_INVALID','INDEX_INVALID','PACK_TRUNCATED',
+                  'PROTOCOL_INVALID','SOURCE_CHANGED','SESSION_SUPERSEDED','CANCELLED','RESOURCE_LIMIT','INVALID_PATH','UNAUTHORIZED');
                 if (integrityFailure) {
                   // validation 后 pack 仍可能被外部删除/截断；整体失效，
                   // 交给外层回退完整解压重建，禁止 SQLite partial Runtime。

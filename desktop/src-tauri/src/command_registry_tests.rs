@@ -67,7 +67,7 @@ impl<'ast> Visit<'ast> for ThreadBoundary<'_> {
             }
             return;
         }
-        let pure = matches!(name.as_str(), "Ok" | "Err" | "drop" | "tauri::ipc::Response::new" | "ImportLease" | "Instant::now");
+        let pure = matches!(name.as_str(), "Ok" | "Err" | "drop" | "tauri::ipc::Response::new" | "ImportLease" | "Instant::now" | "NativeError::new");
         let binary_handoff = name == "decode_binary_cache_write_request" && matches!(self.command,
             "write_cache_file_binary" | "write_glb_file_binary" | "write_device_lod_artifact");
         let envelope_value = self.command == "decode_binary_cache_write_request"
@@ -85,7 +85,7 @@ impl<'ast> Visit<'ast> for ThreadBoundary<'_> {
         // Clone/inner hand owned Store data to mobile workers; swap/store preserve import control ordering.
         let method=node.method.to_string();
         let control_method = match self.command {
-            "cancel_job" => matches!(method.as_str(), "lock" | "remove" | "ok_or" | "store"),
+            "cancel_job" => matches!(method.as_str(), "lock" | "remove" | "ok_or" | "ok_or_else" | "store"),
             "reserve_start" | "has_running_job" | "reserve_line_begin" => matches!(method.as_str(), "load" | "fetch_add"),
             "registry" => method == "get_or_init",
             "cancel_all" => matches!(method.as_str(), "store" | "lock" | "values"),
@@ -142,6 +142,33 @@ fn check_registry(sources: &[(&str, &str)]) {
 }
 #[test]
 fn desktop_command_registry_thread_boundaries() { check_registry(DESKTOP); }
+#[test]
+fn registered_command_failures_use_the_generated_error_contract() {
+    let mut registry=Registry::default();
+    for (_,source) in DESKTOP {registry.visit_file(&syn::parse_file(source).unwrap());}
+    registry.visit_file(&syn::parse_file(include_str!("../../../app/src-tauri/src/lib.rs")).unwrap());
+    registry.visit_file(&syn::parse_file(include_str!("../../../crates/tauri-plugin-gim-import/src/lib.rs")).unwrap());
+    for (name,function) in registry.commands {
+        if name=="cancel_import" {continue;}
+        let syn::ReturnType::Type(_,ty)=&function.sig.output else {panic!("{name}: error contract missing")};
+        let syn::Type::Path(ty)=ty.as_ref() else {panic!("{name}: result type missing")};
+        let segment=ty.path.segments.last().unwrap();assert_eq!(segment.ident,"Result","{name}");
+        let syn::PathArguments::AngleBracketed(args)=&segment.arguments else {panic!("{name}: result arguments missing")};
+        let Some(syn::GenericArgument::Type(syn::Type::Path(error)))=args.args.last() else {panic!("{name}: error type missing")};
+        assert_eq!(error.path.segments.last().unwrap().ident,"NativeError","{name}: IPC error must be generated NativeError");
+    }
+}
+#[test]
+fn fam_dev_dtos_are_imported_from_the_generated_shared_contract() {
+    let contract:serde_json::Value=serde_json::from_str(include_str!("../../../contracts/native-v1.json")).unwrap();
+    let names:std::collections::BTreeSet<_>=contract["types"].as_object().unwrap().keys().cloned().collect();
+    for (file,source) in DESKTOP {
+        if !file.starts_with("db/") {continue;}
+        for item in syn::parse_file(source).unwrap().items {
+            if let syn::Item::Struct(value)=item {assert!(!names.contains(&value.ident.to_string()),"{file} redeclares {}",value.ident);}
+        }
+    }
+}
 #[test]
 fn mobile_command_registry_thread_boundaries() { check_registry(&[("mobile/lib.rs", include_str!("../../../app/src-tauri/src/lib.rs"))]); }
 #[test]

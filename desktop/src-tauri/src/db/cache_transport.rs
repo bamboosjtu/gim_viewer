@@ -1,5 +1,6 @@
 //! Raw binary IPC envelopes and authorized cached-source reads.
 
+use gim_native_core::NativeError;
 use std::fs as stdfs;
 use std::time::Instant;
 use tauri::Manager;
@@ -30,7 +31,7 @@ use super::semantic_pack::{
 pub async fn write_cache_file_binary(
     app_handle: tauri::AppHandle,
     request: tauri::ipc::Request<'_>,
-) -> Result<String, String> {
+) -> Result<String, NativeError> {
     let (meta, bytes) = decode_binary_cache_write_request(&request)?;
     drop(request);
     crate::native_command::blocking("write_cache_file_binary", move || {
@@ -62,7 +63,7 @@ pub async fn read_cached_ifc(
     app_handle: tauri::AppHandle,
     project_id: i64,
     entry_path: String,
-) -> Result<tauri::ipc::Response, String> {
+) -> Result<tauri::ipc::Response, NativeError> {
     crate::native_command::blocking("read_cached_ifc", move || {
         {
             let conn = app_handle.state::<DbState>();
@@ -87,7 +88,7 @@ pub async fn read_cached_entry(
     app_handle: tauri::AppHandle,
     project_id: i64,
     entry_path: String,
-) -> Result<tauri::ipc::Response, String> {
+) -> Result<tauri::ipc::Response, NativeError> {
     crate::native_command::blocking("read_cached_entry", move || {
         {
             let conn = app_handle.state::<DbState>();
@@ -112,10 +113,10 @@ pub async fn read_cached_entry(
                     // 只有 IFC 保留独立文件；这里按 offset 懒读同样的条目。
                     bytes
                 } else {
-                    return Err(format!("读取缓存条目失败: {}", error));
+                    return Err(format!("读取缓存条目失败: {}", error).into());
                 }
             }
-            Err(error) => return Err(format!("读取缓存条目失败: {}", error)),
+            Err(error) => return Err(format!("读取缓存条目失败: {}", error).into()),
         };
         Ok(tauri::ipc::Response::new(bytes))
     }).await
@@ -130,7 +131,7 @@ pub async fn batch_read_cached_files(
     app_handle: tauri::AppHandle,
     project_id: i64,
     entry_paths: Vec<String>,
-) -> Result<tauri::ipc::Response, String> {
+) -> Result<tauri::ipc::Response, NativeError> {
     let total_started = Instant::now();
     crate::native_command::blocking("batch_read_cached_files", move || {
 
@@ -143,7 +144,7 @@ pub async fn batch_read_cached_files(
             ensure_project_exists(&guard, project_id)?;
         }
         if entry_paths.len() > gim_native_core::extraction_limits().max_entries {
-            return Err("批量读取缓存文件数量超过安全上限".to_string());
+            return Err("批量读取缓存文件数量超过安全上限".to_string().into());
         }
         // 同一批次共享 project 根目录；逐条只做相对路径和 reparse-point
         // 检查，避免重复 app_data_dir/canonicalize 带来的秒级开销。
@@ -182,7 +183,7 @@ pub async fn batch_read_cached_files(
                     .checked_add(bytes.len() as u64)
                     .ok_or_else(|| "批量读取缓存文件总量溢出".to_string())?;
                 if total_bytes > gim_native_core::extraction_limits().max_total_uncompressed_bytes {
-                    return Err("批量读取缓存文件总量超过安全上限".to_string());
+                    return Err("批量读取缓存文件总量超过安全上限".to_string().into());
                 }
                 results.push(BatchCacheFileResult {
                     entry_path: entry_path.clone(),
@@ -214,7 +215,7 @@ pub async fn batch_read_cached_files(
                     .checked_add(data.len() as u64)
                     .ok_or_else(|| "批量读取缓存文件总量溢出".to_string())?;
                 if total_bytes > gim_native_core::extraction_limits().max_total_uncompressed_bytes {
-                    return Err("批量读取缓存文件总量超过安全上限".to_string());
+                    return Err("批量读取缓存文件总量超过安全上限".to_string().into());
                 }
             }
             results.push(BatchCacheFileResult {

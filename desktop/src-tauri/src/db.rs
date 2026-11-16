@@ -1,5 +1,6 @@
 //! Database facade: shared versions/state and stable command exports. Domain implementations live in db/.
 
+use gim_native_core::NativeError;
 use rusqlite::{params, Connection};
 use std::fs as stdfs;
 use std::path::PathBuf;
@@ -73,7 +74,7 @@ pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v1-source-bound-stl";
 pub struct DbState(pub Mutex<Connection>);
 
 /// 获取数据库文件路径：app_data_dir/gim_cache_schema_v1.db
-fn db_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+fn db_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, NativeError> {
     let dir = crate::application_data_dir(&app_handle)
         .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
     stdfs::create_dir_all(&dir).map_err(|e| format!("创建应用数据目录失败: {}", e))?;
@@ -81,7 +82,7 @@ fn db_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 /// 初始化数据库（建表 + 索引）
-pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, String> {
+pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, NativeError> {
     let path = db_path(app_handle)?;
     let conn = Connection::open(&path).map_err(|e| format!("打开数据库失败: {}", e))?;
     conn.busy_timeout(std::time::Duration::from_secs(5))
@@ -121,11 +122,11 @@ fn cache_miss_reason(reasons: Vec<String>) -> Option<String> {
     }
 }
 
-fn count_rows(conn: &Connection, table: &str, project_id: i64) -> Result<i64, String> {
+fn count_rows(conn: &Connection, table: &str, project_id: i64) -> Result<i64, NativeError> {
     let _timing = ValidationSpan::new("sqlite_counts");
     let sql = format!("SELECT COUNT(*) FROM {} WHERE project_id = ?1", table);
     conn.query_row(&sql, params![project_id], |row| row.get(0))
-        .map_err(|e| format!("统计 {} 失败: {}", table, e))
+        .map_err(|e| format!("统计 {} 失败: {}", table, e)).map_err(NativeError::from)
 }
 
 const MAX_LINE_TEXT_BYTES: usize = 4 * 1024 * 1024;

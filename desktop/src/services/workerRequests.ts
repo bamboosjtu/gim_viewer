@@ -1,3 +1,4 @@
+import {GimError} from '../../../packages/powerline-core/src/errors.js';
 /** One settlement path for worker requests, regardless of transport/protocol. */
 export class WorkerRequests<T> {
   get size():number{return this.pending.size;}
@@ -5,7 +6,7 @@ export class WorkerRequests<T> {
   constructor(private timeoutMs = 120_000, private onTimeout: (error:Error)=>void = () => {}) {}
   private expire(id:number):void {
     if(!this.pending.has(id))return;
-    const error=new Error(`Worker 请求超时（${this.pending.get(id)!.timeoutMs} ms），请重试`);
+    const error=new GimError('WORKER_TIMEOUT',`Worker 请求超时（${this.pending.get(id)!.timeoutMs} ms），请重试`);
     this.rejectAll(error);this.onTimeout(error);
   }
   request(id:number, send:()=>void, timeoutMs=this.timeoutMs):Promise<T> {

@@ -1,5 +1,6 @@
 //! Shared binary cache request/response envelopes and transfer quotas.
 
+use gim_native_core::NativeError;
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
@@ -30,32 +31,32 @@ pub(super) struct BinaryCacheWriteMeta {
 
 pub(super) fn decode_binary_cache_write_request(
     request: &tauri::ipc::Request<'_>,
-) -> Result<(BinaryCacheWriteMeta, Vec<u8>), String> {
+) -> Result<(BinaryCacheWriteMeta, Vec<u8>), NativeError> {
     let body = match request.body() {
         tauri::ipc::InvokeBody::Raw(bytes) => bytes.as_slice(),
-        tauri::ipc::InvokeBody::Json(_) => return Err("缓存写入必须使用二进制 IPC".to_string()),
+        tauri::ipc::InvokeBody::Json(_) => return Err("缓存写入必须使用二进制 IPC".to_string().into()),
     };
     if body.len() < BINARY_CACHE_REQUEST_HEADER
         || &body[..4] != BINARY_CACHE_REQUEST_MAGIC
         || body[4] != BINARY_CACHE_REQUEST_VERSION
     {
-        return Err("缓存写入二进制 envelope 无效".to_string());
+        return Err("缓存写入二进制 envelope 无效".to_string().into());
     }
     let metadata_len = u32::from_le_bytes([body[5], body[6], body[7], body[8]]) as usize;
     if metadata_len > MAX_BINARY_CACHE_METADATA_BYTES {
-        return Err("缓存写入 metadata 过大".to_string());
+        return Err("缓存写入 metadata 过大".to_string().into());
     }
     let metadata_start = BINARY_CACHE_REQUEST_HEADER;
     let metadata_end = metadata_start
         .checked_add(metadata_len)
         .ok_or_else(|| "缓存写入 metadata 长度溢出".to_string())?;
     if metadata_end > body.len() {
-        return Err("缓存写入 metadata 越界".to_string());
+        return Err("缓存写入 metadata 越界".to_string().into());
     }
     let meta: BinaryCacheWriteMeta = serde_json::from_slice(&body[metadata_start..metadata_end])
         .map_err(|e| format!("解析缓存写入 metadata 失败: {}", e))?;
     if meta.entry_path.trim().is_empty() {
-        return Err("缓存写入 entry_path 不能为空".to_string());
+        return Err("缓存写入 entry_path 不能为空".to_string().into());
     }
     Ok((meta, body[metadata_end..].to_vec()))
 }
@@ -77,7 +78,7 @@ pub(super) fn encode_batch_cache_response(
     read_ms: f64,
     resolve_ms: f64,
     total_started: Instant,
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, NativeError> {
     const HEADER_SIZE: usize = 57;
     let encode_started = Instant::now();
     let mut out = Vec::new();

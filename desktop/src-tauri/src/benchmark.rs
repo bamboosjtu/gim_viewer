@@ -1,4 +1,5 @@
 //! Opt-in native measurement harness. Normal release has no path authorization.
+use gim_native_core::NativeError;
 use tauri::Manager;
 use std::path::Path;
 #[cfg(feature = "benchmark")]
@@ -24,14 +25,14 @@ pub(crate) struct RunManifest {
 }
 
 #[cfg(feature = "benchmark")]
-fn inside(root: &Path, path: &Path) -> Result<PathBuf, String> {
+fn inside(root: &Path, path: &Path) -> Result<PathBuf, NativeError> {
     let root=root.canonicalize().map_err(|_|"benchmark-root-unavailable")?;
     let path=path.canonicalize().map_err(|_|"benchmark-path-unavailable")?;
     if path == root || !path.starts_with(root) {return Err("benchmark-path-outside-workspace".into())}
     Ok(path)
 }
 
-pub(crate) fn manifest() -> Result<RunManifest,String> {
+pub(crate) fn manifest() -> Result<RunManifest, NativeError> {
     #[cfg(feature = "benchmark")]
     {
         let root=option_env!("GIM_BENCHMARK_WORKSPACE").ok_or("benchmark-build-root-unavailable")?;
@@ -58,10 +59,10 @@ pub(crate) fn manifest() -> Result<RunManifest,String> {
 }
 
 #[cfg(feature = "benchmark")]
-pub(crate) fn data_root() -> Result<PathBuf,String> { Ok(PathBuf::from(manifest()?.data_root)) }
+pub(crate) fn data_root() -> Result<PathBuf, NativeError> { Ok(PathBuf::from(manifest()?.data_root)) }
 
 #[tauri::command]
-pub(crate) async fn benchmark_authorize_sample(app_handle: tauri::AppHandle,sample_id:String,nonce:String)->Result<String,String>{
+pub(crate) async fn benchmark_authorize_sample(app_handle: tauri::AppHandle,sample_id:String,nonce:String)->Result<String, NativeError>{
     crate::native_command::blocking("benchmark_authorize_sample", move || {
         let access = app_handle.state::<super::AuthorizedFilePaths>();
         let manifest=manifest()?;
@@ -87,7 +88,7 @@ mod tests {
     #[cfg(not(feature = "benchmark"))]
     #[test]
     fn ordinary_build_rejects_benchmark_manifest() {
-        assert_eq!(super::manifest().err().as_deref(),Some("benchmark-build-required"));
+        assert_eq!(super::manifest().err().unwrap().message,"benchmark-build-required");
     }
     #[cfg(feature = "benchmark")]
     #[test]

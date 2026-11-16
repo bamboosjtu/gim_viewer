@@ -126,7 +126,7 @@ describe('lineParserInput', () => {
     expect(new TextDecoder().decode(result.files[0].bytes)).toBe('ENTITYNAME=F1System');
   });
 
-  it('semantic pack 单条 ENTRY_MISS 只回退缺失文件，其余命中仍可复用', async () => {
+  it('semantic pack null 条目只回退缺失文件，其余命中仍可复用', async () => {
     const packed = (text: string): File => Object.assign(new File([text], 'packed'), { __semantic: true });
     semanticPackReadMock.mockResolvedValue(new Map([
       ['CBM/a.cbm', new TextEncoder().encode('A=1')],

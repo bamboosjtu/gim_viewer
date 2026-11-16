@@ -1,0 +1,188 @@
+{
+  "version": "gim-native-contract-v1",
+  "errors": {
+    "INVALID_INPUT": "请求内容无效",
+    "INVALID_PATH": "来源或缓存路径无效",
+    "UNAUTHORIZED": "路径未经授权",
+    "SOURCE_CHANGED": "源身份已变化",
+    "SESSION_SUPERSEDED": "旧会话或发布请求已被替代",
+    "CANCELLED": "任务已取消",
+    "RESOURCE_LIMIT": "资源配额拒绝，禁止换解码器绕过",
+    "INPUT_CORRUPT": "输入归档损坏，禁止换解码器绕过",
+    "UNSUPPORTED_FORMAT": "当前原生后端不支持此格式",
+    "BACKEND_UNAVAILABLE": "原生能力不可用",
+    "IO": "文件操作失败",
+    "PACK_INVALID": "来源 pack 不可用",
+    "INDEX_INVALID": "来源 index 不可用",
+    "PACK_TRUNCATED": "来源 pack 被截断",
+    "SOURCE_MATERIALIZING": "来源条目仍在生成",
+    "WORKER_TIMEOUT": "Worker 请求超时",
+    "PROTOCOL_INVALID": "IPC 契约或响应无效",
+    "OPERATION_FAILED": "未分类的操作失败",
+    "INTERNAL": "原生任务异常或实现错误",
+    "RESPONSE_INVALID": "已返回的原生响应无法解码，只允许复用有效来源清单"
+  },
+  "types": {
+    "FamPropertyPayload": {
+      "source_line": {
+        "type": "i64",
+        "optional": true,
+        "nullable": true
+      },
+      "raw_property_json": {
+        "type": "string",
+        "optional": true,
+        "nullable": true
+      },
+      "source_path": {
+        "type": "string"
+      },
+      "section_name": {
+        "type": "string"
+      },
+      "prop_key": {
+        "type": "string"
+      },
+      "prop_value": {
+        "type": "string",
+        "nullable": true
+      },
+      "sort_order": {
+        "type": "i64"
+      }
+    },
+    "DevPropertyPayload": {
+      "dev_path": {
+        "type": "string"
+      },
+      "prop_key": {
+        "type": "string"
+      },
+      "prop_value": {
+        "type": "string",
+        "nullable": true
+      }
+    },
+    "FamPropertyRecord": {
+      "$base": "FamPropertyPayload",
+      "source_line": {
+        "type": "i64"
+      },
+      "raw_property_json": {
+        "type": "string",
+        "nullable": true
+      },
+      "id": {
+        "type": "i64"
+      },
+      "project_id": {
+        "type": "i64"
+      },
+      "created_at_ms": {
+        "type": "u64"
+      }
+    },
+    "DevPropertyRecord": {
+      "$base": "DevPropertyPayload",
+      "id": {
+        "type": "i64"
+      },
+      "project_id": {
+        "type": "i64"
+      },
+      "created_at_ms": {
+        "type": "u64"
+      }
+    },
+    "LineFamPropertyPayload": {
+      "source_path": {
+        "type": "string"
+      },
+      "normalized_path": {
+        "type": "string"
+      },
+      "file_name_lower": {
+        "type": "string"
+      },
+      "display_key": {
+        "type": "string",
+        "nullable": true
+      },
+      "prop_key": {
+        "type": "string"
+      },
+      "prop_value": {
+        "type": "string",
+        "nullable": true
+      },
+      "raw_line": {
+        "type": "string",
+        "nullable": true
+      },
+      "sort_order": {
+        "type": "i64"
+      }
+    },
+    "LineDevPropertyPayload": {
+      "source_path": {
+        "type": "string"
+      },
+      "normalized_path": {
+        "type": "string"
+      },
+      "file_name_lower": {
+        "type": "string"
+      },
+      "prop_key": {
+        "type": "string"
+      },
+      "prop_value": {
+        "type": "string",
+        "nullable": true
+      },
+      "raw_line": {
+        "type": "string",
+        "nullable": true
+      },
+      "sort_order": {
+        "type": "i64"
+      }
+    },
+    "LineFamPropertyRecord": {
+      "$alias": "LineFamPropertyPayload"
+    },
+    "LineDevPropertyRecord": {
+      "$alias": "LineDevPropertyPayload"
+    },
+    "NativeErrorContext": {
+      "operation": {
+        "type": "string",
+        "optional": true,
+        "nullable": true
+      },
+      "project_id": {
+        "type": "i64",
+        "optional": true,
+        "nullable": true
+      },
+      "entry_path": {
+        "type": "string",
+        "optional": true,
+        "nullable": true
+      }
+    },
+    "NativeError": {
+      "code": {
+        "type": "NativeErrorCode"
+      },
+      "message": {
+        "type": "string"
+      },
+      "context": {
+        "type": "NativeErrorContext",
+        "optional": true,
+        "nullable": true
+      }
+    }
+  }
+}

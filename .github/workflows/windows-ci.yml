@@ -69,6 +69,9 @@ jobs:
       - name: Check desktop release versions
         run: npm run test:version
 
+      - name: Check generated native v1 contracts
+        run: npm run test:native-contracts
+
       # Cheap, sample-free contracts fail before native compilation and coverage.
       # docs/performance/gates.md: real-sample performance decisions remain manual/local.
       - name: Check measurement value and protocol contracts (no model samples)

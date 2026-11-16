@@ -14,6 +14,8 @@ const webIfcPkgVersion = JSON.parse(
 ).version as string;
 
 export default defineConfig({
+  // Shared package tests and contract fixtures are workspace sources outside desktop/.
+  server: {fs: {allow: [resolve(__dirname, '..')]}},
   define: {
     __FRAGMENTS_PKG_VERSION__: JSON.stringify(fragmentsPkgVersion),
     __WEB_IFC_PKG_VERSION__: JSON.stringify(webIfcPkgVersion),

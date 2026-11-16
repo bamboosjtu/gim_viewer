@@ -1,5 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { AppState } from '../../app/state.js';
+import {GimError} from '@desktop/contracts.js';
 import { startSubstationExtractionJob, cancelSubstationExtraction, isSubstationSourceMaterializing, withEarlySemanticCapability, type EarlySemanticEligibility } from '../substationExtractionJob.js';
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), decode: vi.fn(), mark: vi.fn() }));
 vi.mock('@desktop/database.js', () => ({ batchReadCachedFiles: async (_id: number, paths: string[]) => new Map(paths.map(p => [p, new TextEncoder().encode('exact')])) }));
@@ -39,6 +40,22 @@ describe('production early extraction orchestration', () => {
     expect(isSubstationSourceMaterializing(f.state)).toBe(false);
     cancelSubstationExtraction(f.state);
   });
+  it('retries materializing source bytes by code while preserving session cancellation',async()=>{
+    const f=setup(), original=mocks.invoke.getMockImplementation()!;let reads=0;
+    mocks.invoke.mockImplementation((name:string,args:any)=>{
+      if(name==='read_substation_extraction_source'&&args?.entryPath==='CBM/a.ifc'){
+        if(++reads===1)return Promise.reject(new GimError('SOURCE_MATERIALIZING','任意语言，无状态关键字'));
+        return Promise.resolve(new TextEncoder().encode('IFC!').buffer);
+      }
+      return original(name,args);
+    });
+    const opening=startSubstationExtractionJob(f.state,f.session,'C:/a.gim',1);
+    await vi.advanceTimersByTimeAsync(0);f.first.resolve(ready);const source=await opening;
+    const reading=source.files.get('CBM/a.ifc')!.text();
+    await vi.advanceTimersByTimeAsync(200);expect(await reading).toBe('IFC!');expect(reads).toBe(2);
+    f.next.resolve(complete);await vi.advanceTimersByTimeAsync(200);await source.sourceMaterialization;
+    cancelSubstationExtraction(f.state);
+  });
   it('optional copy failure waits for full materialization and keeps the existing batch fallback', async () => {
     const f = setup(), opening = startSubstationExtractionJob(f.state, f.session, 'C:/a.gim', 1);
     await vi.advanceTimersByTimeAsync(0);
@@ -55,7 +72,7 @@ describe('production early extraction orchestration', () => {
     const f = setup(), opening = startSubstationExtractionJob(f.state, f.session, 'C:/a.gim', 1);
     await vi.advanceTimersByTimeAsync(0); f.first.resolve(ready); const source = await opening;
     const failure = expect(source.sourceMaterialization).rejects.toThrow('CRC failure');
-    f.next.resolve({ ...ready, status: 'failed', error: 'CRC failure' }); await vi.advanceTimersByTimeAsync(200); await failure;
+    f.next.resolve({ ...ready, status: 'failed', error: {code:'INPUT_CORRUPT',message:'CRC failure'} }); await vi.advanceTimersByTimeAsync(200); await failure;
     expect(source.cachePaths!.size).toBe(0);
     expect(mocks.mark.mock.calls.some(([name]) => name === 'sourceMaterializationComplete')).toBe(false);
     cancelSubstationExtraction(f.state);

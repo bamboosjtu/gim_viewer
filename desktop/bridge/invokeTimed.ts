@@ -7,6 +7,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import {nativeError} from './contracts.js';
 import { perfCurrentSession, perfRecordInvoke } from '../src/utils/perfTimings.js';
 
 interface ByteMeasurement {
@@ -88,6 +89,6 @@ export async function invokeTimed<T>(
       true,
       requestMeasurement.measured,
     );
-    throw error;
+    throw nativeError(error);
   }
 }

@@ -1,5 +1,6 @@
 import {sourceGeometryCacheEntry,decodeSourceGeometryCache} from './sourceGeometryCache.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
+import {hasErrorCode} from '@desktop/contracts.js';
 import {readEngineeringSourceInput} from './engineeringSourceInput.js';
 import {ENGINEERING_SOURCE_BATCH_BYTES,ENGINEERING_SOURCE_BATCH_FILES} from './engineeringWorkerProtocol.js';
 import type { SubstationSpatialIndex } from '../gim/ifcSpatialParser.js';
@@ -216,7 +217,7 @@ function fail(state: AppState, job: EngineeringJob, error: unknown): void {
   state.engineeringTreeStatus=state.engineeringNavigation?'ready':'error';
   if(state.engineeringNavigation)state.engineeringNavigation={...state.engineeringNavigation,compositionCoverage:'partial'};
   state.engineeringError = String(error);
-  state.engineeringFailureCode=/Worker 请求超时/.test(String(error))?'engineering-progress-stalled':'engineering-build-failed';
+  state.engineeringFailureCode=hasErrorCode(error,'WORKER_TIMEOUT')?'engineering-progress-stalled':'engineering-build-failed';
   state.engineeringStatus = state.engineeringSnapshot ? 'partial' : 'error';
   job.update();
 }

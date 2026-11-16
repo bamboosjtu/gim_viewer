@@ -34,10 +34,10 @@
 |---|---|---|---|
 | AR-01 | P1 / 会话试点已接入，迁移未完成 | 独立设备打开已有 opaque token、SessionScope 与同步 withSession；其他运行面仍逐个维护 await 后的守卫。选择、相机和部分展开状态仍由 AppState 暴露。 | 沿一个完整打开/恢复流程逐步迁移所有权；将交互状态与工程来源分开，覆盖取消、迟到结果和重复释放，不一次性搬迁全部字段。 |
 | AR-02 | P1 / 展示边界迁移未完成 | 设备身份、导航和设备状态栏已有显式端口与实例释放器；通用遮罩、变电/线路及清理路径仍使用旧展示适配器、模块 loader 或 DOM。 | 按树、属性、状态栏逐条迁回 UI；端口只接受数据/回调并返回资源句柄，扩展边界检查；不新增通用动态 loader 掩盖反向调用。 |
-| AR-04 | P1 / IPC 契约仍有多份来源 | DTO 与命令名手工对应，跨 IPC 的 String 错误仍有文本分类。 | 从 contracts 的错误码与 FAM/DEV DTO 开始生成 TS/Rust 类型与命令清单，保留 code/message/source context，移除对应中文正则分支；两端契约测试后再扩到 parser 版本。协议保持 v1，不加开发格式迁移。 |
+| AR-04 | P1 / FAM/DEV 与错误已收敛，其他契约待生成 | FAM/DEV payload、record、NativeError 与错误码已由 contracts/native-v1.json 生成 TS/Rust；原生命令返回结构化错误，前端按 code 选择回退/重试。其余图/几何 DTO、命令名与 parser 版本仍手工维护。 | 沿当前 v1 生成器继续收敛其他 DTO 与命令清单；保留领域间独立失效，不加旧开发格式兼容或迁移。 |
 | AR-05 | P1 / 打开热点验证仍不均衡 | 设备试点已有真实生产路径的打开、取消、失败恢复与迟到回调测试；变电暖恢复和打开入口的部分竞态仍需定向覆盖。 | 先补恢复/取消/失败集成分支，再按实际覆盖率设置逐文件门禁；不以快照或减少工作量达标。 |
 | AR-06 | P2 / 旧 DEV 入口可达性待运行确认 | substationDevRuntime 的 Worker 分支早返回，旧 progressive/mod auto-load 路径主要留给无 Worker 等回退；静态分析不能替代产品可达性证据。 | 核对动态导入、平台入口与故障回退，按开发者选择的 Release 路径取得调用证据后删除或显式隔离；不因测试仍在而保留入口，也不提前删除回退。 |
-| AR-07 | P2 / 格式、日志与错误模型未统一 | 现有代码仍有多种格式和 console/String 错误风格。 | 错误码先随 AR-04 收敛，新增 logger facade 与 Prettier 按模块引入；避免全仓格式化淹没功能 diff。 |
+| AR-07 | P2 / 格式与日志风格未统一 | 原生错误已有生成错误码；其余 Worker 传输、console 日志和代码格式仍有多种风格。 | 按模块引入 logger facade 与 Prettier，继续收敛 Worker 错误；避免全仓格式化淹没功能 diff。 |
 | AR-08 | P1 / Viewer 初始化失败重试风险 | viewerRuntime 与 viewerUIBinding 缓存初始化 Promise；首次失败后的清空与监听释放仍需治理。 | 失败时清空所属 Promise，补首次失败后重试与重复装配的资源测试，核对 selection dispose。 |
 | AR-09 | P2 / 打开按钮归属竞态待修复 | openGimService 在清理前后依赖 generation 判定 ownsOpen；清理提前退出且 openedSession 尚空时可能不恢复按钮。 | 使用独立打开请求 token 管理按钮 finally，补“清理被新操作取代”和连续打开测试，旧请求不能启用新请求正在使用的按钮。 |
 

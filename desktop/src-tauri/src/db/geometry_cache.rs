@@ -1,5 +1,6 @@
 //! DEV GLB/LOD cache validation, manifests and publication markers.
 
+use gim_native_core::{NativeError, NativeErrorCode};
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use std::collections::{HashMap, HashSet};
@@ -65,7 +66,7 @@ fn glb_cache_file_path(
     app_handle: &tauri::AppHandle,
     project_id: i64,
     entry_path: &str,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, NativeError> {
     ensure_cache_project_id(project_id)?;
     let base = crate::application_data_dir(&app_handle)
         .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
@@ -98,7 +99,7 @@ fn glb_cache_file_path(
     let full = canonical_parent.join(file_name);
 
     if !full.starts_with(&canonical_root) {
-        return Err("路径越界".to_string());
+        return Err("路径越界".to_string().into());
     }
 
     reject_link(&full, " GLB 文件")?;
@@ -111,7 +112,7 @@ fn glb_cache_file_path(
 pub async fn write_glb_file_binary(
     app_handle: tauri::AppHandle,
     request: tauri::ipc::Request<'_>,
-) -> Result<String, String> {
+) -> Result<String, NativeError> {
     let (meta, bytes) = decode_binary_cache_write_request(&request)?;
     drop(request);
     crate::native_command::blocking("write_glb_file_binary", move || {
@@ -144,7 +145,7 @@ pub async fn read_glb_file(
     app_handle: tauri::AppHandle,
     project_id: i64,
     entry_path: String,
-) -> Result<tauri::ipc::Response, String> {
+) -> Result<tauri::ipc::Response, NativeError> {
     crate::native_command::blocking("read_glb_file", move || {
         {
             let conn = app_handle.state::<DbState>();
@@ -161,7 +162,7 @@ pub async fn read_glb_file(
 }
 
 /// Per-template derived domain; publication is independent of whole-project geometry.
-fn validate_device_lod_entry<'a>(entry: &'a str, source_sha: &str) -> Result<(&'a str, String), String> {
+fn validate_device_lod_entry<'a>(entry: &'a str, source_sha: &str) -> Result<(&'a str, String), NativeError> {
     let (store, key) = entry.split_once('/').ok_or("设备缓存键缺少域")?;
     let parts: Vec<&str> = key.split('|').collect();
     let bound_sha = match store {
@@ -193,7 +194,7 @@ mod device_lod_key_tests {
 
 fn device_lod_artifact_path(
     app: &tauri::AppHandle, project_id: i64, entry: &str, source_sha: &str,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, NativeError> {
     let (store, digest) = validate_device_lod_entry(entry, source_sha)?;
     let conn = app.state::<DbState>();
     let guard = conn.0.lock().map_err(|e| e.to_string())?;
@@ -212,7 +213,7 @@ fn device_lod_artifact_path(
 
 /// Bounded read batch: validate project identity and parent directories once per batch.
 #[tauri::command]
-pub async fn read_device_lod_artifacts(app_handle: tauri::AppHandle, project_id: i64, entry_paths: Vec<String>, source_gim_sha256: String, max_bytes: Option<u64>) -> Result<tauri::ipc::Response, String> {
+pub async fn read_device_lod_artifacts(app_handle: tauri::AppHandle, project_id: i64, entry_paths: Vec<String>, source_gim_sha256: String, max_bytes: Option<u64>) -> Result<tauri::ipc::Response, NativeError> {
     tauri::async_runtime::spawn_blocking(move || {
         use std::io::Read;
         if entry_paths.is_empty() || entry_paths.len() > 64 { return Err("设备缓存批量条目数无效".into()); }
@@ -258,13 +259,13 @@ pub async fn read_device_lod_artifacts(app_handle: tauri::AppHandle, project_id:
                     hits+=1;Some(bytes)
                 },
                 Err(e) if e.kind()==std::io::ErrorKind::NotFound => None,
-                Err(e) => return Err(e.to_string()),
+                Err(e) => return Err(e.to_string().into()),
             };
             read_ms+=read_started.elapsed().as_secs_f64()*1000.0;
             results.push(BatchCacheFileResult{entry_path:entry.clone(),bytes});
         }
         Ok(tauri::ipc::Response::new(encode_batch_cache_response(results,total,hits,read_ms,resolve_ms,started)?))
-    }).await.map_err(|e|format!("设备缓存批量读取失败: {}",e))?
+    }).await.map_err(|e| NativeError::new(NativeErrorCode::Internal,format!("设备缓存批量读取失败: {}",e)))?
 }
 
 #[derive(Debug, Serialize)]
@@ -272,14 +273,14 @@ pub async fn read_device_lod_artifacts(app_handle: tauri::AppHandle, project_id:
 pub struct DeviceLodWriteTiming { resolve_ms: f64, write_ms: f64 }
 
 #[tauri::command]
-pub async fn write_device_lod_artifact(app_handle: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Result<DeviceLodWriteTiming, String> {
+pub async fn write_device_lod_artifact(app_handle: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Result<DeviceLodWriteTiming, NativeError> {
     let (meta, bytes) = decode_binary_cache_write_request(&request)?;
     drop(request);
     tauri::async_runtime::spawn_blocking(move || write_device_lod_artifact_blocking(app_handle, meta, bytes))
-        .await.map_err(|e| format!("设备缓存后台写入失败: {}", e))?
+        .await.map_err(|e| NativeError::new(NativeErrorCode::Internal,format!("设备缓存后台写入失败: {}", e)))?
 }
 
-fn write_device_lod_artifact_blocking(app_handle: tauri::AppHandle, meta: BinaryCacheWriteMeta, bytes: Vec<u8>) -> Result<DeviceLodWriteTiming, String> {
+fn write_device_lod_artifact_blocking(app_handle: tauri::AppHandle, meta: BinaryCacheWriteMeta, bytes: Vec<u8>) -> Result<DeviceLodWriteTiming, NativeError> {
     if bytes.len() > 128 * 1024 * 1024 { return Err("设备派生缓存超过单条配额".into()); }
     let source = meta.source_gim_sha256.as_deref().ok_or("设备缓存缺少源 SHA")?;
     let resolve_started=Instant::now();
@@ -291,10 +292,10 @@ fn write_device_lod_artifact_blocking(app_handle: tauri::AppHandle, meta: Binary
 }
 
 #[tauri::command]
-pub async fn delete_device_lod_artifact(app_handle: tauri::AppHandle, project_id: i64, entry_path: String, source_gim_sha256: String) -> Result<(), String> {
+pub async fn delete_device_lod_artifact(app_handle: tauri::AppHandle, project_id: i64, entry_path: String, source_gim_sha256: String) -> Result<(), NativeError> {
     crate::native_command::blocking("delete_device_lod_artifact", move || {
         let path = device_lod_artifact_path(&app_handle, project_id, &entry_path, &source_gim_sha256)?;
-        match stdfs::remove_file(path) { Ok(()) => Ok(()), Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()), Err(e) => Err(e.to_string()) }
+        match stdfs::remove_file(path) { Ok(()) => Ok(()), Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()), Err(e) => Err(e.to_string().into()) }
     }).await
 }
 
@@ -309,7 +310,7 @@ pub async fn batch_read_glb_files(
     app_handle: tauri::AppHandle,
     project_id: i64,
     entry_paths: Vec<String>,
-) -> Result<tauri::ipc::Response, String> {
+) -> Result<tauri::ipc::Response, NativeError> {
     let total_started = Instant::now();
     crate::native_command::blocking("batch_read_glb_files", move || {
 
@@ -322,7 +323,7 @@ pub async fn batch_read_glb_files(
             ensure_project_exists(&guard, project_id)?;
         }
         if entry_paths.len() > MAX_GLB_BATCH_FILES {
-            return Err("批量读取 GLB 文件数量超过安全上限".to_string());
+            return Err("批量读取 GLB 文件数量超过安全上限".to_string().into());
         }
 
         let mut results = Vec::with_capacity(entry_paths.len());
@@ -364,7 +365,7 @@ pub async fn batch_read_glb_files(
                     return Err(format!(
                         "批量读取 GLB 总量超过安全上限（>{} bytes）",
                         MAX_GLB_BATCH_BYTES
-                    ));
+                    ).into());
                 }
             }
             results.push(BatchCacheFileResult {
@@ -483,13 +484,13 @@ fn validate_glb_file_header(path: &Path, expected_size: u64) -> bool {
 fn geometry_manifest_path(
     app_handle: &tauri::AppHandle,
     project_id: i64,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, NativeError> {
     ensure_cache_project_id(project_id)?;
     let base = crate::application_data_dir(&app_handle)
         .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
     let root = base.join("glbcache").join(project_id.to_string());
     if !root.exists() {
-        return Err("GLB 缓存目录不存在".to_string());
+        return Err("GLB 缓存目录不存在".to_string().into());
     }
     reject_link(&root, " GLB")?;
     let canonical_root = root
@@ -506,25 +507,25 @@ fn geometry_manifest_path(
 pub(super) fn validate_geometry_manifest_entry_shape(
     entry: &GeometryCacheManifestEntry,
     seen: &mut HashSet<String>,
-) -> Result<(), String> {
+) -> Result<(), NativeError> {
     let normalized_path = normalize_cache_lookup_path(&entry.entry_path);
     validate_entry_path(&entry.entry_path)
         .map_err(|e| format!("GLB manifest entry_path 无效: {} ({})", entry.entry_path, e))?;
     if !normalized_path.ends_with(".dev") {
-        return Err(format!("GLB manifest 只允许 DEV 条目: {}", entry.entry_path));
+        return Err(format!("GLB manifest 只允许 DEV 条目: {}", entry.entry_path).into());
     }
     if !seen.insert(normalized_path) {
-        return Err(format!("GLB manifest 条目重复: {}", entry.entry_path));
+        return Err(format!("GLB manifest 条目重复: {}", entry.entry_path).into());
     }
     match entry.status.as_str() {
         "source-invalid" if entry.size == 0 && entry.diagnostic.as_deref().map(|s| !s.trim().is_empty() && s.len() <= 16384).unwrap_or(false) => Ok(()),
         "empty" if entry.size == 0 => Ok(()),
         "unsupported" if entry.size == 0 => Ok(()),
         "glb" | "partial" if entry.size > 0 => Ok(()),
-        "empty" => Err(format!("empty GLB manifest 条目大小必须为 0: {}", entry.entry_path)),
-        "unsupported" => Err(format!("unsupported GLB manifest 条目大小必须为 0: {}", entry.entry_path)),
-        "glb" | "partial" => Err(format!("{} GLB manifest 条目大小必须大于 0: {}", entry.status, entry.entry_path)),
-        _ => Err(format!("GLB manifest 状态无效: {}", entry.entry_path)),
+        "empty" => Err(format!("empty GLB manifest 条目大小必须为 0: {}", entry.entry_path).into()),
+        "unsupported" => Err(format!("unsupported GLB manifest 条目大小必须为 0: {}", entry.entry_path).into()),
+        "glb" | "partial" => Err(format!("{} GLB manifest 条目大小必须大于 0: {}", entry.status, entry.entry_path).into()),
+        _ => Err(format!("GLB manifest 状态无效: {}", entry.entry_path).into()),
     }
 }
 
@@ -534,7 +535,7 @@ pub(super) fn validate_geometry_manifest_entry_shape(
 pub async fn read_geometry_cache_manifest(
     app_handle: tauri::AppHandle,
     project_id: i64,
-) -> Result<GeometryCacheManifest, String> {
+) -> Result<GeometryCacheManifest, NativeError> {
     crate::native_command::blocking("read_geometry_cache_manifest", move || {
         {
             let conn = app_handle.state::<DbState>();
@@ -547,7 +548,7 @@ pub async fn read_geometry_cache_manifest(
         let path = geometry_manifest_path(&app_handle, project_id)?;
         let bytes = stdfs::read(&path).map_err(|e| format!("读取 GLB manifest 失败: {}", e))?;
         serde_json::from_slice::<GeometryCacheManifest>(&bytes)
-            .map_err(|e| format!("解析 GLB manifest 失败: {}", e))
+            .map_err(|e| format!("解析 GLB manifest 失败: {}", e)).map_err(NativeError::from)
     }).await
 }
 
@@ -599,13 +600,13 @@ pub async fn write_geometry_cache_manifest(
     project_id: i64,
     source_sha256: String,
     entries: Vec<GeometryCacheManifestEntry>,
-) -> Result<String, String> {
+) -> Result<String, NativeError> {
     crate::native_command::blocking("write_geometry_cache_manifest", move || {
         if source_sha256.trim().is_empty() || source_sha256.len() > 128 {
-            return Err("source_sha256 无效".to_string());
+            return Err("source_sha256 无效".to_string().into());
         }
         if entries.len() > 200_000 {
-            return Err("GLB manifest 条目数超限".to_string());
+            return Err("GLB manifest 条目数超限".to_string().into());
         }
         {
             let state = app_handle.state::<DbState>();
@@ -630,14 +631,14 @@ pub async fn write_geometry_cache_manifest(
             let meta =
                 stdfs::metadata(&path).map_err(|e| format!("读取 GLB manifest 条目失败: {}", e))?;
             if meta.len() != entry.size {
-                return Err(format!("GLB 大小与 manifest 不一致: {}", entry.entry_path));
+                return Err(format!("GLB 大小与 manifest 不一致: {}", entry.entry_path).into());
             }
             let glb = stdfs::read(&path).map_err(|e| format!("读取 GLB 失败: {}", e))?;
             if !validate_glb_bytes(&glb) {
                 return Err(format!(
                     "GLB magic/version/length 校验失败: {}",
                     entry.entry_path
-                ));
+                ).into());
             }
         }
         let path = geometry_manifest_path(&app_handle, project_id).or_else(|_| {
@@ -646,7 +647,7 @@ pub async fn write_geometry_cache_manifest(
             let root = base.join("glbcache").join(project_id.to_string());
             stdfs::create_dir_all(&root).map_err(|e| format!("创建 GLB 目录失败: {}", e))?;
             reject_link(&root, " GLB")?;
-            Ok::<PathBuf, String>(root.join("_manifest.json"))
+            Ok::<PathBuf, NativeError>(root.join("_manifest.json"))
         })?;
         let bytes = serde_json::to_vec(&GeometryCacheManifest {
             source_sha256,
@@ -669,12 +670,12 @@ pub async fn invalidate_glb_cache_entry(
     project_id: i64,
     entry_path: String,
     source_sha256: Option<String>,
-) -> Result<(), String> {
+) -> Result<(), NativeError> {
     crate::native_command::blocking("invalidate_glb_cache_entry", move || {
         ensure_cache_project_id(project_id)?;
         let normalized = normalize_cache_lookup_path(&entry_path);
         if !normalized.ends_with(".dev") {
-            return Err("GLB 单项失效只允许 DEV 条目".to_string());
+            return Err("GLB 单项失效只允许 DEV 条目".to_string().into());
         }
         validate_entry_path(&entry_path)?;
         {
@@ -695,7 +696,7 @@ pub async fn invalidate_glb_cache_entry(
                     .map_err(|e| format!("解析 GLB manifest 失败: {}", e))?;
                 if let Some(expected) = source_sha256.as_deref() {
                     if manifest.source_sha256 != expected {
-                        return Err("GLB manifest source SHA 与当前工程不一致".to_string());
+                        return Err(NativeError::new(NativeErrorCode::SourceChanged,"GLB manifest source SHA 与当前工程不一致"));
                     }
                 }
                 let mut seen = HashSet::new();
@@ -715,7 +716,7 @@ pub async fn invalidate_glb_cache_entry(
         match stdfs::remove_file(&glb_path) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(format!("删除 DEV GLB 缓存失败: {}", error)),
+            Err(error) => return Err(format!("删除 DEV GLB 缓存失败: {}", error).into()),
         }
         Ok(())
     }).await
@@ -732,7 +733,7 @@ pub async fn write_geometry_cache_version(
     app_handle: tauri::AppHandle,
     project_id: i64,
     source_sha256: Option<String>,
-) -> Result<String, String> {
+) -> Result<String, NativeError> {
     crate::native_command::blocking("write_geometry_cache_version", move || {
         ensure_cache_project_id(project_id)?;
         {

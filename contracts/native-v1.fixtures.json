@@ -1,0 +1,258 @@
+{
+  "types": {
+    "FamPropertyPayload": {
+      "source_line": 7,
+      "raw_property_json": "{\"segments\":[\"设备名称\",\"NAME\",\"A=B\"],\"sourceLine\":7}",
+      "source_path": "CBM/a.fam",
+      "section_name": "设计属性",
+      "prop_key": "NAME",
+      "prop_value": null,
+      "sort_order": 7
+    },
+    "DevPropertyPayload": {
+      "dev_path": "DEV/a.dev",
+      "prop_key": "NAME",
+      "prop_value": null
+    },
+    "FamPropertyRecord": {
+      "source_line": 7,
+      "raw_property_json": "{\"segments\":[\"设备名称\",\"NAME\",\"A=B\"],\"sourceLine\":7}",
+      "id": 1,
+      "project_id": 1,
+      "source_path": "CBM/a.fam",
+      "section_name": "设计属性",
+      "prop_key": "NAME",
+      "prop_value": null,
+      "sort_order": 7,
+      "created_at_ms": 1700000000000
+    },
+    "DevPropertyRecord": {
+      "id": 1,
+      "project_id": 1,
+      "dev_path": "DEV/a.dev",
+      "prop_key": "NAME",
+      "prop_value": null,
+      "created_at_ms": 1700000000000
+    },
+    "LineFamPropertyPayload": {
+      "source_path": "CBM/a.fam",
+      "normalized_path": "CBM/a.fam",
+      "file_name_lower": "a.fam",
+      "display_key": "设备名称",
+      "prop_key": "NAME",
+      "prop_value": null,
+      "raw_line": "设备名称=NAME=A=B",
+      "sort_order": 7
+    },
+    "LineDevPropertyPayload": {
+      "source_path": "DEV/a.dev",
+      "normalized_path": "DEV/a.dev",
+      "file_name_lower": "a.dev",
+      "prop_key": "NAME",
+      "prop_value": null,
+      "raw_line": "设备名称=NAME=A=B",
+      "sort_order": 7
+    },
+    "LineFamPropertyRecord": {
+      "source_path": "CBM/a.fam",
+      "normalized_path": "CBM/a.fam",
+      "file_name_lower": "a.fam",
+      "display_key": "设备名称",
+      "prop_key": "NAME",
+      "prop_value": null,
+      "raw_line": "设备名称=NAME=A=B",
+      "sort_order": 7
+    },
+    "LineDevPropertyRecord": {
+      "source_path": "DEV/a.dev",
+      "normalized_path": "DEV/a.dev",
+      "file_name_lower": "a.dev",
+      "prop_key": "NAME",
+      "prop_value": null,
+      "raw_line": "设备名称=NAME=A=B",
+      "sort_order": 7
+    }
+  },
+  "errors": [
+    {
+      "code": "INVALID_INPUT",
+      "message": "同一展示文本，与错误分类无关",
+      "context": {
+        "operation": "contract-test",
+        "project_id": 1,
+        "entry_path": "CBM/a.fam"
+      }
+    },
+    {
+      "code": "INVALID_PATH",
+      "message": "同一展示文本，与错误分类无关",
+      "context": {
+        "operation": "contract-test",
+        "project_id": 1,
+        "entry_path": "CBM/a.fam"
+      }
+    },
+    {
+      "code": "UNAUTHORIZED",
+      "message": "同一展示文本，与错误分类无关",
+      "context": {
+        "operation": "contract-test",
+        "project_id": 1,
+        "entry_path": "CBM/a.fam"
+      }
+    },
+    {
+      "code": "SOURCE_CHANGED",
+      "message": "同一展示文本，与错误分类无关",
+      "context": {
+        "operation": "contract-test",
+        "project_id": 1,
+        "entry_path": "CBM/a.fam"
+      }
+    },
+    {
+      "code": "SESSION_SUPERSEDED",
+      "message": "同一展示文本，与错误分类无关",
+      "context": {
+        "operation": "contract-test",
+        "project_id": 1,
+        "entry_path": "CBM/a.fam"
+      }
+    },
+    {
+      "code": "CANCELLED",
+      "message": "同一展示文本，与错误分类无关",
+      "context": {
+        "operation": "contract-test",
+        "project_id": 1,
+        "entry_path": "CBM/a.fam"
+      }
+    },
+    {
+      "code": "RESOURCE_LIMIT",
+      "message": "同一展示文本，与错误分类无关",
+      "context": {
+        "operation": "contract-test",
+        "project_id": 1,
+        "entry_path": "CBM/a.fam"
+      }
+    },
+    {
+      "code": "INPUT_CORRUPT",
+      "message": "同一展示文本，与错误分类无关",
+      "context": {
+        "operation": "contract-test",
+        "project_id": 1,
+        "entry_path": "CBM/a.fam"
+      }
+    },
+    {
+      "code": "UNSUPPORTED_FORMAT",
+      "message": "同一展示文本，与错误分类无关",
+      "context": {
+        "operation": "contract-test",
+        "project_id": 1,
+        "entry_path": "CBM/a.fam"
+      }
+    },
+    {
+      "code": "BACKEND_UNAVAILABLE",
+      "message": "同一展示文本，与错误分类无关",
+      "context": {
+        "operation": "contract-test",
+        "project_id": 1,
+        "entry_path": "CBM/a.fam"
+      }
+    },
+    {
+      "code": "IO",
+      "message": "同一展示文本，与错误分类无关",
+      "context": {
+        "operation": "contract-test",
+        "project_id": 1,
+        "entry_path": "CBM/a.fam"
+      }
+    },
+    {
+      "code": "PACK_INVALID",
+      "message": "同一展示文本，与错误分类无关",
+      "context": {
+        "operation": "contract-test",
+        "project_id": 1,
+        "entry_path": "CBM/a.fam"
+      }
+    },
+    {
+      "code": "INDEX_INVALID",
+      "message": "同一展示文本，与错误分类无关",
+      "context": {
+        "operation": "contract-test",
+        "project_id": 1,
+        "entry_path": "CBM/a.fam"
+      }
+    },
+    {
+      "code": "PACK_TRUNCATED",
+      "message": "同一展示文本，与错误分类无关",
+      "context": {
+        "operation": "contract-test",
+        "project_id": 1,
+        "entry_path": "CBM/a.fam"
+      }
+    },
+    {
+      "code": "SOURCE_MATERIALIZING",
+      "message": "同一展示文本，与错误分类无关",
+      "context": {
+        "operation": "contract-test",
+        "project_id": 1,
+        "entry_path": "CBM/a.fam"
+      }
+    },
+    {
+      "code": "WORKER_TIMEOUT",
+      "message": "同一展示文本，与错误分类无关",
+      "context": {
+        "operation": "contract-test",
+        "project_id": 1,
+        "entry_path": "CBM/a.fam"
+      }
+    },
+    {
+      "code": "PROTOCOL_INVALID",
+      "message": "同一展示文本，与错误分类无关",
+      "context": {
+        "operation": "contract-test",
+        "project_id": 1,
+        "entry_path": "CBM/a.fam"
+      }
+    },
+    {
+      "code": "OPERATION_FAILED",
+      "message": "同一展示文本，与错误分类无关",
+      "context": {
+        "operation": "contract-test",
+        "project_id": 1,
+        "entry_path": "CBM/a.fam"
+      }
+    },
+    {
+      "code": "INTERNAL",
+      "message": "同一展示文本，与错误分类无关",
+      "context": {
+        "operation": "contract-test",
+        "project_id": 1,
+        "entry_path": "CBM/a.fam"
+      }
+    },
+    {
+      "code": "RESPONSE_INVALID",
+      "message": "同一展示文本，与错误分类无关",
+      "context": {
+        "operation": "contract-test",
+        "project_id": 1,
+        "entry_path": "CBM/a.fam"
+      }
+    }
+  ]
+}

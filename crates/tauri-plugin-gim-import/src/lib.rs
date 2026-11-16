@@ -1,55 +1,66 @@
+#[path = "../../../contracts/generated/native.rs"]
+pub mod native_contracts;
+use native_contracts::{NativeError,NativeErrorCode};
+
+#[cfg(target_os = "android")]
+fn platform_error(error: impl std::fmt::Display) -> NativeError {
+    NativeError {code:NativeErrorCode::OperationFailed,message:error.to_string(),context:None}
+}
+fn unavailable(message:&str) -> NativeError {
+    NativeError {code:NativeErrorCode::BackendUnavailable,message:message.into(),context:None}
+}
 use tauri::{plugin::{Builder, TauriPlugin}, Runtime};
 #[cfg(target_os = "android")]
 struct ImportHandle<R: Runtime>(tauri::plugin::PluginHandle<R>);
 #[tauri::command]
-async fn pick<R: Runtime>(app: tauri::AppHandle<R>, progress: tauri::ipc::Channel<serde_json::Value>) -> Result<serde_json::Value, String> {
+async fn pick<R: Runtime>(app: tauri::AppHandle<R>, progress: tauri::ipc::Channel<serde_json::Value>) -> Result<serde_json::Value, NativeError> {
     #[cfg(target_os = "android")]
-    { use tauri::Manager; app.state::<ImportHandle<R>>().0.run_mobile_plugin("pick", serde_json::json!({"progress": progress})).map_err(|e| e.to_string()) }
+    { use tauri::Manager; app.state::<ImportHandle<R>>().0.run_mobile_plugin("pick", serde_json::json!({"progress": progress})).map_err(platform_error) }
     #[cfg(not(target_os = "android"))]
-    { let _ = (app, progress); Err("SAF 文件选择仅在 Android 应用中可用".into()) }
+    { let _ = (app, progress); Err(unavailable("SAF 文件选择仅在 Android 应用中可用")) }
 }
 #[tauri::command]
-async fn cancel<R: Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+async fn cancel<R: Runtime>(app: tauri::AppHandle<R>) -> Result<(), NativeError> {
     #[cfg(target_os = "android")]
-    { use tauri::Manager; let _: serde_json::Value = app.state::<ImportHandle<R>>().0.run_mobile_plugin("cancel", serde_json::json!({})).map_err(|e| e.to_string())?; }
+    { use tauri::Manager; let _: serde_json::Value = app.state::<ImportHandle<R>>().0.run_mobile_plugin("cancel", serde_json::json!({})).map_err(platform_error)?; }
     #[cfg(not(target_os = "android"))]
     { let _ = app; }
     Ok(())
 }
 #[tauri::command]
-async fn check_location_permissions<R: Runtime>(app: tauri::AppHandle<R>) -> Result<serde_json::Value, String> {
+async fn check_location_permissions<R: Runtime>(app: tauri::AppHandle<R>) -> Result<serde_json::Value, NativeError> {
     #[cfg(target_os = "android")]
-    { use tauri::Manager; app.state::<ImportHandle<R>>().0.run_mobile_plugin("checkLocationPermissions", serde_json::json!({})).map_err(|e| e.to_string()) }
+    { use tauri::Manager; app.state::<ImportHandle<R>>().0.run_mobile_plugin("checkLocationPermissions", serde_json::json!({})).map_err(platform_error) }
     #[cfg(not(target_os = "android"))]
-    { let _ = app; Err("定位仅在 Android 应用中可用".into()) }
+    { let _ = app; Err(unavailable("定位仅在 Android 应用中可用")) }
 }
 #[tauri::command]
-async fn request_location_permissions<R: Runtime>(app: tauri::AppHandle<R>) -> Result<serde_json::Value, String> {
+async fn request_location_permissions<R: Runtime>(app: tauri::AppHandle<R>) -> Result<serde_json::Value, NativeError> {
     #[cfg(target_os = "android")]
-    { use tauri::Manager; app.state::<ImportHandle<R>>().0.run_mobile_plugin("requestLocationPermissions", serde_json::json!({})).map_err(|e| e.to_string()) }
+    { use tauri::Manager; app.state::<ImportHandle<R>>().0.run_mobile_plugin("requestLocationPermissions", serde_json::json!({})).map_err(platform_error) }
     #[cfg(not(target_os = "android"))]
-    { let _ = app; Err("定位仅在 Android 应用中可用".into()) }
+    { let _ = app; Err(unavailable("定位仅在 Android 应用中可用")) }
 }
 #[tauri::command]
-async fn get_position<R: Runtime>(app: tauri::AppHandle<R>) -> Result<serde_json::Value, String> {
+async fn get_position<R: Runtime>(app: tauri::AppHandle<R>) -> Result<serde_json::Value, NativeError> {
     #[cfg(target_os = "android")]
-    { use tauri::Manager; app.state::<ImportHandle<R>>().0.run_mobile_plugin("getPosition", serde_json::json!({})).map_err(|e| e.to_string()) }
+    { use tauri::Manager; app.state::<ImportHandle<R>>().0.run_mobile_plugin("getPosition", serde_json::json!({})).map_err(platform_error) }
     #[cfg(not(target_os = "android"))]
-    { let _ = app; Err("定位仅在 Android 应用中可用".into()) }
+    { let _ = app; Err(unavailable("定位仅在 Android 应用中可用")) }
 }
 #[tauri::command]
-async fn get_window_state<R: Runtime>(app: tauri::AppHandle<R>) -> Result<serde_json::Value, String> {
+async fn get_window_state<R: Runtime>(app: tauri::AppHandle<R>) -> Result<serde_json::Value, NativeError> {
     #[cfg(target_os = "android")]
-    { use tauri::Manager; app.state::<ImportHandle<R>>().0.run_mobile_plugin("getWindowState", serde_json::json!({})).map_err(|e| e.to_string()) }
+    { use tauri::Manager; app.state::<ImportHandle<R>>().0.run_mobile_plugin("getWindowState", serde_json::json!({})).map_err(platform_error) }
     #[cfg(not(target_os = "android"))]
-    { let _ = app; Err("窗口控制仅在 Android 应用中可用".into()) }
+    { let _ = app; Err(unavailable("窗口控制仅在 Android 应用中可用")) }
 }
 #[tauri::command]
-async fn set_immersive<R: Runtime>(app: tauri::AppHandle<R>, enabled: bool) -> Result<serde_json::Value, String> {
+async fn set_immersive<R: Runtime>(app: tauri::AppHandle<R>, enabled: bool) -> Result<serde_json::Value, NativeError> {
     #[cfg(target_os = "android")]
-    { use tauri::Manager; app.state::<ImportHandle<R>>().0.run_mobile_plugin("setImmersive", serde_json::json!({"enabled":enabled})).map_err(|e| e.to_string()) }
+    { use tauri::Manager; app.state::<ImportHandle<R>>().0.run_mobile_plugin("setImmersive", serde_json::json!({"enabled":enabled})).map_err(platform_error) }
     #[cfg(not(target_os = "android"))]
-    { let _ = (app, enabled); Err("窗口控制仅在 Android 应用中可用".into()) }
+    { let _ = (app, enabled); Err(unavailable("窗口控制仅在 Android 应用中可用")) }
 }
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("gim-import")

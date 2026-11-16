@@ -1,5 +1,6 @@
 //! Bounded line/substation source packs and their binary indexes.
 
+use gim_native_core::{NativeError, NativeErrorCode};
 use std::collections::{HashMap, HashSet};
 use std::fs as stdfs;
 use std::path::{Path, PathBuf};
@@ -76,7 +77,7 @@ pub(crate) struct LineSemanticPackWriter {
 }
 
 impl LineSemanticPackWriter {
-    pub(crate) fn new(staging_root: &Path) -> Result<Self, String> {
+    pub(crate) fn new(staging_root: &Path) -> Result<Self, NativeError> {
         Self::new_named(
             staging_root,
             LINE_SEMANTIC_PACK_FILE,
@@ -86,7 +87,7 @@ impl LineSemanticPackWriter {
     }
 
     /// 变电原生解压：CBM/DEV/FAM/PHM/MOD 等源条目写入同一个连续 pack。
-    pub(crate) fn new_substation(staging_root: &Path) -> Result<Self, String> {
+    pub(crate) fn new_substation(staging_root: &Path) -> Result<Self, NativeError> {
         Self::new_named(
             staging_root,
             SUBSTATION_PACK_FILE,
@@ -100,7 +101,7 @@ impl LineSemanticPackWriter {
         data_name: &str,
         index_name: &str,
         label: &'static str,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, NativeError> {
         reject_link(staging_root, " staging")?;
         let data_path = staging_root.join(data_name);
         let data_file = stdfs::OpenOptions::new()
@@ -122,10 +123,10 @@ impl LineSemanticPackWriter {
         &mut self,
         path: &str,
         bytes: &[u8],
-    ) -> Result<CacheWriteTiming, String> {
+    ) -> Result<CacheWriteTiming, NativeError> {
         let normalized_path = normalize_cache_lookup_path(path);
         if !self.seen_paths.insert(normalized_path) {
-            return Err(format!("{} pack 条目重复: {}", self.label, path));
+            return Err(format!("{} pack 条目重复: {}", self.label, path).into());
         }
         let offset = self.total_bytes;
         let size = u64::try_from(bytes.len())
@@ -155,10 +156,10 @@ impl LineSemanticPackWriter {
     /// 只记录不进入连续 pack 的大 MOD/STL（或其它）条目元数据。
     /// warm full-read 会据此重建完整 filesByType/currentFiles，而不把几何
     /// 字节复制到 semantic pack 或 Worker。
-    pub(crate) fn record_metadata(&mut self, path: &str, size: u64) -> Result<(), String> {
+    pub(crate) fn record_metadata(&mut self, path: &str, size: u64) -> Result<(), NativeError> {
         let normalized_path = normalize_cache_lookup_path(path);
         if !self.seen_paths.insert(normalized_path) {
-            return Err(format!("{} pack 条目重复: {}", self.label, path));
+            return Err(format!("{} pack 条目重复: {}", self.label, path).into());
         }
         self.entries.push(LineSemanticPackEntry {
             path: path.to_string(),
@@ -173,7 +174,7 @@ impl LineSemanticPackWriter {
         self.entries.last()
     }
 
-    pub(crate) fn finish(mut self) -> Result<Vec<LineSemanticPackEntry>, String> {
+    pub(crate) fn finish(mut self) -> Result<Vec<LineSemanticPackEntry>, NativeError> {
         self.data_file
             .flush()
             .map_err(|e| format!("刷新{} pack 失败: {}", self.label, e))?;
@@ -231,7 +232,7 @@ pub(super) fn read_pack_index(
     root: &Path,
     index_file: &str,
     label: &str,
-) -> Result<HashMap<String, LineSemanticPackEntry>, String> {
+) -> Result<HashMap<String, LineSemanticPackEntry>, NativeError> {
     let index_path = root.join(index_file);
     reject_link(&index_path, label)?;
     let bytes = stdfs::read(&index_path)
@@ -240,11 +241,11 @@ pub(super) fn read_pack_index(
         || &bytes[..4] != LINE_SEMANTIC_INDEX_MAGIC
         || bytes[4] != LINE_SEMANTIC_INDEX_VERSION
     {
-        return Err(format!("{label}索引头无效"));
+        return Err(format!("{label}索引头无效").into());
     }
     let count = u32::from_le_bytes(bytes[5..9].try_into().unwrap()) as usize;
     if count > gim_native_core::extraction_limits().max_entries {
-        return Err(format!("{label}索引条目数超过安全上限"));
+        return Err(format!("{label}索引条目数超过安全上限").into());
     }
     let mut offset = LINE_SEMANTIC_INDEX_HEADER;
     let mut result = HashMap::with_capacity(count);
@@ -253,7 +254,7 @@ pub(super) fn read_pack_index(
             .checked_add(4)
             .ok_or_else(|| "pack 索引偏移溢出".to_string())?;
         if path_len_end > bytes.len() {
-            return Err("pack 索引路径长度越界".to_string());
+            return Err("pack 索引路径长度越界".to_string().into());
         }
         let path_len = u32::from_le_bytes(bytes[offset..path_len_end].try_into().unwrap()) as usize;
         offset = path_len_end;
@@ -263,7 +264,7 @@ pub(super) fn read_pack_index(
             .and_then(|v| v.checked_add(1))
             .ok_or_else(|| "pack 索引条目偏移溢出".to_string())?;
         if path_len == 0 || path_len > 4096 || entry_end > bytes.len() {
-            return Err("pack 索引路径或长度无效".to_string());
+            return Err("pack 索引路径或长度无效".to_string().into());
         }
         let path_end = offset + path_len;
         let path = String::from_utf8(bytes[offset..path_end].to_vec())
@@ -278,7 +279,7 @@ pub(super) fn read_pack_index(
         offset = entry_size_end;
         let flags = bytes[offset];
         offset += 1;
-        if flags & !LINE_SEMANTIC_INDEX_FLAG_PACKED != 0 { return Err("pack index flags invalid".to_string()); }
+        if flags & !LINE_SEMANTIC_INDEX_FLAG_PACKED != 0 { return Err("pack index flags invalid".to_string().into()); }
         let packed = flags & LINE_SEMANTIC_INDEX_FLAG_PACKED != 0;
         let entry = LineSemanticPackEntry {
             path: path.clone(),
@@ -288,17 +289,17 @@ pub(super) fn read_pack_index(
         };
         let key = normalize_cache_lookup_path(&path);
         if result.insert(key, entry).is_some() {
-            return Err("pack 索引包含重复路径".to_string());
+            return Err("pack 索引包含重复路径".to_string().into());
         }
     }
     if offset != bytes.len() {
-        return Err("pack 索引存在尾随数据".to_string());
+        return Err("pack 索引存在尾随数据".to_string().into());
     }
     Ok(result)
 }
 
-pub(super) fn semantic_error(kind: &str, message: impl AsRef<str>) -> String {
-    format!("{}: {}", kind, message.as_ref())
+pub(super) fn semantic_error(code: NativeErrorCode, message: impl std::fmt::Display) -> NativeError {
+    NativeError::new(code, message.to_string())
 }
 
 /// 校验 index 中 packed 区间的算术、边界与重叠关系。
@@ -308,10 +309,10 @@ pub(super) fn semantic_error(kind: &str, message: impl AsRef<str>) -> String {
 fn validate_line_semantic_pack_ranges(
     index: &HashMap<String, LineSemanticPackEntry>,
     pack_len: u64,
-) -> Result<(), String> {
+) -> Result<(), NativeError> {
     if pack_len > MAX_LINE_SEMANTIC_PACK_BYTES {
         return Err(semantic_error(
-            "PACK_INVALID",
+            NativeErrorCode::PackInvalid,
             format!(
                 "线路语义 pack 大小超过安全上限（>{} bytes）",
                 MAX_LINE_SEMANTIC_PACK_BYTES
@@ -325,13 +326,13 @@ fn validate_line_semantic_pack_ranges(
         }
         let end = entry.offset.checked_add(entry.size).ok_or_else(|| {
             semantic_error(
-                "PACK_TRUNCATED",
+                NativeErrorCode::PackTruncated,
                 format!("线路语义 pack 条目偏移溢出: {}", entry.path),
             )
         })?;
         if end > pack_len {
             return Err(semantic_error(
-                "PACK_TRUNCATED",
+                NativeErrorCode::PackTruncated,
                 format!("线路语义 pack 条目越界: {}", entry.path),
             ));
         }
@@ -343,20 +344,20 @@ fn validate_line_semantic_pack_ranges(
     if ranges.is_empty() {
         if pack_len != 0 {
             return Err(semantic_error(
-                "PACK_INVALID",
+                NativeErrorCode::PackInvalid,
                 "线路语义 pack 无 packed 条目但数据文件非空",
             ));
         }
     } else {
         if ranges[0].0 != 0 {
             return Err(semantic_error(
-                "INDEX_INVALID",
+                NativeErrorCode::IndexInvalid,
                 "线路语义 pack packed 区间未从 0 开始",
             ));
         }
         if ranges.last().map(|(_, end, _)| *end) != Some(pack_len) {
             return Err(semantic_error(
-                "PACK_INVALID",
+                NativeErrorCode::PackInvalid,
                 "线路语义 pack 存在未被 index 覆盖的尾部数据",
             ));
         }
@@ -364,7 +365,7 @@ fn validate_line_semantic_pack_ranges(
     for pair in ranges.windows(2) {
         if pair[1].0 < pair[0].1 {
             return Err(semantic_error(
-                "INDEX_INVALID",
+                NativeErrorCode::IndexInvalid,
                 format!(
                     "线路语义 pack 条目区间重叠: {} / {}",
                     pair[0].2, pair[1].2
@@ -373,7 +374,7 @@ fn validate_line_semantic_pack_ranges(
         }
         if pair[1].0 > pair[0].1 {
             return Err(semantic_error(
-                "INDEX_INVALID",
+                NativeErrorCode::IndexInvalid,
                 format!(
                     "线路语义 pack packed 区间存在空洞: {} / {}",
                     pair[0].2, pair[1].2
@@ -389,7 +390,7 @@ fn validate_line_semantic_pack_ranges(
 fn validate_line_semantic_metadata_files(
     root: &Path,
     index: &HashMap<String, LineSemanticPackEntry>,
-) -> Result<(), String> {
+) -> Result<(), NativeError> {
     for entry in index.values() {
         if entry.packed {
             continue;
@@ -397,13 +398,13 @@ fn validate_line_semantic_metadata_files(
         let path = cache_file_path_from_root(root, &entry.path)?;
         let metadata = stdfs::metadata(&path).map_err(|e| {
             semantic_error(
-                "PACK_INVALID",
+                NativeErrorCode::PackInvalid,
                 format!("线路语义 pack metadata 文件缺失: {} — {}", entry.path, e),
             )
         })?;
         if metadata.len() != entry.size {
             return Err(semantic_error(
-                "PACK_INVALID",
+                NativeErrorCode::PackInvalid,
                 format!(
                     "线路语义 pack metadata 文件大小不匹配: {}（期望 {}, 实际 {}）",
                     entry.path,
@@ -417,15 +418,15 @@ fn validate_line_semantic_metadata_files(
 }
 
 /// 在已经 canonicalize 的缓存根目录下安全拼出相对 entry 路径；不创建目录。
-fn cache_file_path_from_root(root: &Path, entry_path: &str) -> Result<PathBuf, String> {
+fn cache_file_path_from_root(root: &Path, entry_path: &str) -> Result<PathBuf, NativeError> {
     let relative = validate_entry_path(entry_path)
-        .map_err(|e| semantic_error("PACK_INVALID", e))?;
+        .map_err(|e| semantic_error(NativeErrorCode::PackInvalid, e))?;
     let full = root.join(relative);
     if !full.starts_with(root) {
-        return Err(semantic_error("PACK_INVALID", "线路语义 pack metadata 路径越界"));
+        return Err(semantic_error(NativeErrorCode::PackInvalid, "线路语义 pack metadata 路径越界"));
     }
     reject_link(&full, "线路语义 pack metadata 文件")
-        .map_err(|e| semantic_error("PACK_INVALID", e))?;
+        .map_err(|e| semantic_error(NativeErrorCode::PackInvalid, e))?;
     Ok(full)
 }
 
@@ -434,9 +435,9 @@ fn cache_file_path_from_root(root: &Path, entry_path: &str) -> Result<PathBuf, S
 pub(super) fn read_line_semantic_pack_files(
     root: &Path,
     validate_metadata: bool,
-) -> Result<(HashMap<String, LineSemanticPackEntry>, u64), String> {
+) -> Result<(HashMap<String, LineSemanticPackEntry>, u64), NativeError> {
     let index = read_pack_index(root, LINE_SEMANTIC_INDEX_FILE, "线路语义 pack ")
-        .map_err(|e| semantic_error("INDEX_INVALID", e))?;
+        .map_err(|e| semantic_error(NativeErrorCode::IndexInvalid, e))?;
     // A syntactically valid but empty index can be produced by truncating both
     // sidecars to their headers.  It is not a usable line semantic source:
     // accepting it would let the warm path build an empty/partial Runtime and
@@ -450,17 +451,17 @@ pub(super) fn read_line_semantic_pack_files(
     });
     if !has_packed_cbm {
         return Err(semantic_error(
-            "INDEX_INVALID",
+            NativeErrorCode::IndexInvalid,
             "线路语义 pack index 不包含 packed CBM 入口",
         ));
     }
     let pack_path = root.join(LINE_SEMANTIC_PACK_FILE);
     reject_link(&pack_path, "线路语义 pack")
-        .map_err(|e| semantic_error("PACK_INVALID", e))?;
+        .map_err(|e| semantic_error(NativeErrorCode::PackInvalid, e))?;
     let pack_len = stdfs::metadata(&pack_path)
         .map_err(|e| {
             semantic_error(
-                "PACK_INVALID",
+                NativeErrorCode::PackInvalid,
                 format!("读取线路语义 pack 元信息失败: {}", e),
             )
         })?
@@ -473,14 +474,14 @@ pub(super) fn read_line_semantic_pack_files(
 }
 
 #[cfg(test)]
-pub(super) fn validate_line_semantic_pack_files(root: &Path, validate_metadata: bool) -> Result<(), String> {
+pub(super) fn validate_line_semantic_pack_files(root: &Path, validate_metadata: bool) -> Result<(), NativeError> {
     let _ = read_line_semantic_pack_files(root, validate_metadata)?;
     Ok(())
 }
 
 /// 从线路语义 pack 读取单个条目；供 DiskBackedFile 的普通 source/geometry
 /// 读取路径使用。按需只读取指定区间，不把整个 pack 复制到 JS。
-pub(super) fn read_line_semantic_pack_entry(root: &Path, entry_path: &str) -> Result<Option<Vec<u8>>, String> {
+pub(super) fn read_line_semantic_pack_entry(root: &Path, entry_path: &str) -> Result<Option<Vec<u8>>, NativeError> {
     let (index, _pack_len) = read_line_semantic_pack_files(root, false)?;
     let key = normalize_cache_lookup_path(entry_path);
     let Some(entry) = index.get(&key) else { return Ok(None); };
@@ -491,11 +492,11 @@ pub(super) fn read_line_semantic_pack_entry(root: &Path, entry_path: &str) -> Re
     }
     let pack_path = root.join(LINE_SEMANTIC_PACK_FILE);
     reject_link(&pack_path, "线路语义 pack")
-        .map_err(|e| semantic_error("PACK_INVALID", e))?;
+        .map_err(|e| semantic_error(NativeErrorCode::PackInvalid, e))?;
     let pack_len = stdfs::metadata(&pack_path)
         .map_err(|e| {
             semantic_error(
-                "PACK_INVALID",
+                NativeErrorCode::PackInvalid,
                 format!("读取线路语义 pack 元信息失败: {}", e),
             )
         })?
@@ -503,25 +504,25 @@ pub(super) fn read_line_semantic_pack_entry(root: &Path, entry_path: &str) -> Re
     let end = entry
         .offset
         .checked_add(entry.size)
-        .ok_or_else(|| semantic_error("PACK_TRUNCATED", "线路语义 pack 条目偏移溢出"))?;
+        .ok_or_else(|| semantic_error(NativeErrorCode::PackTruncated, "线路语义 pack 条目偏移溢出"))?;
     if end > pack_len {
         return Err(semantic_error(
-            "PACK_TRUNCATED",
+            NativeErrorCode::PackTruncated,
             format!("线路语义 pack 条目越界: {}", entry.path),
         ));
     }
     let mut file = stdfs::File::open(&pack_path)
-        .map_err(|e| semantic_error("PACK_INVALID", format!("打开线路语义 pack 失败: {}", e)))?;
+        .map_err(|e| semantic_error(NativeErrorCode::PackInvalid, format!("打开线路语义 pack 失败: {}", e)))?;
     use std::io::{Read, Seek, SeekFrom};
     file.seek(SeekFrom::Start(entry.offset))
-        .map_err(|e| semantic_error("PACK_INVALID", format!("定位线路语义 pack 失败: {}", e)))?;
+        .map_err(|e| semantic_error(NativeErrorCode::PackInvalid, format!("定位线路语义 pack 失败: {}", e)))?;
     let size = usize::try_from(entry.size)
-        .map_err(|_| semantic_error("PACK_TRUNCATED", "线路语义 pack 条目大小超过平台限制"))?;
+        .map_err(|_| semantic_error(NativeErrorCode::PackTruncated, "线路语义 pack 条目大小超过平台限制"))?;
     let mut data = vec![0u8; size];
     file.read_exact(&mut data)
         .map_err(|e| {
             semantic_error(
-                "PACK_TRUNCATED",
+                NativeErrorCode::PackTruncated,
                 format!("读取线路语义 pack 条目失败: {}", e),
             )
         })?;
@@ -544,7 +545,7 @@ static SUBSTATION_PACK_INDEX_CACHE: std::sync::OnceLock<
 
 pub(super) fn substation_pack_index(
     root: &Path,
-) -> Result<std::sync::Arc<HashMap<String, LineSemanticPackEntry>>, String> {
+) -> Result<std::sync::Arc<HashMap<String, LineSemanticPackEntry>>, NativeError> {
     let index_path = root.join(SUBSTATION_PACK_INDEX_FILE);
     let meta = stdfs::metadata(&index_path)
         .map_err(|e| format!("读取变电源 pack 索引失败: {e}"))?;
@@ -637,7 +638,7 @@ pub async fn read_line_semantic_pack(
     app_handle: tauri::AppHandle,
     project_id: i64,
     entry_paths: Vec<String>,
-) -> Result<tauri::ipc::Response, String> {
+) -> Result<tauri::ipc::Response, NativeError> {
     let total_started = Instant::now();
     crate::native_command::blocking("read_line_semantic_pack", move || {
 
@@ -650,7 +651,7 @@ pub async fn read_line_semantic_pack(
             ensure_project_exists(&guard, project_id)?;
         }
         if entry_paths.len() > gim_native_core::extraction_limits().max_entries {
-            return Err("线路语义 pack 读取条目数超过安全上限".to_string());
+            return Err("线路语义 pack 读取条目数超过安全上限".to_string().into());
         }
         let root = cache_project_root_for_batch(&app_handle, project_id)?;
         let (index, pack_len) = read_line_semantic_pack_files(&root, false)?;
@@ -678,36 +679,36 @@ pub async fn read_line_semantic_pack(
                     .checked_add(entry.size)
                     .ok_or_else(|| {
                         semantic_error(
-                            "PACK_TRUNCATED",
+                            NativeErrorCode::PackTruncated,
                             format!("线路语义 pack 条目偏移溢出: {}", requested_path),
                         )
                     })?;
                 if end > pack_len {
                     return Err(semantic_error(
-                        "PACK_TRUNCATED",
+                        NativeErrorCode::PackTruncated,
                         format!("线路语义 pack 条目越界: {}", requested_path),
                     ));
                 }
                 let start = usize::try_from(entry.offset)
-                    .map_err(|_| semantic_error("PACK_TRUNCATED", "线路语义 pack 条目偏移超过平台限制"))?;
+                    .map_err(|_| semantic_error(NativeErrorCode::PackTruncated, "线路语义 pack 条目偏移超过平台限制"))?;
                 let end = usize::try_from(end)
-                    .map_err(|_| semantic_error("PACK_TRUNCATED", "线路语义 pack 条目末端超过平台限制"))?;
+                    .map_err(|_| semantic_error(NativeErrorCode::PackTruncated, "线路语义 pack 条目末端超过平台限制"))?;
                 let mut data = vec![0u8; end - start];
                 use std::io::{Read, Seek, SeekFrom};
                 let read_started = Instant::now();
                 pack_file
                     .seek(SeekFrom::Start(entry.offset))
-                    .map_err(|e| semantic_error("PACK_INVALID", format!("定位线路语义 pack 失败: {} — {}", requested_path, e)))?;
+                    .map_err(|e| semantic_error(NativeErrorCode::PackInvalid, format!("定位线路语义 pack 失败: {} — {}", requested_path, e)))?;
                 pack_file
                     .read_exact(&mut data)
-                    .map_err(|e| semantic_error("PACK_TRUNCATED", format!("读取线路语义 pack 条目失败: {} — {}", requested_path, e)))?;
+                    .map_err(|e| semantic_error(NativeErrorCode::PackTruncated, format!("读取线路语义 pack 条目失败: {} — {}", requested_path, e)))?;
                 read_ms += read_started.elapsed().as_secs_f64() * 1000.0;
                 hit_count = hit_count.saturating_add(1);
                 total_bytes = total_bytes
                     .checked_add(data.len() as u64)
                     .ok_or_else(|| "线路语义 pack 读取总量溢出".to_string())?;
                 if total_bytes > gim_native_core::extraction_limits().max_total_uncompressed_bytes {
-                    return Err("线路语义 pack 读取总量超过安全上限".to_string());
+                    return Err("线路语义 pack 读取总量超过安全上限".to_string().into());
                 }
                 Some(data)
             } else {
@@ -781,7 +782,7 @@ fn encode_line_semantic_pack_full_header(
 pub async fn read_line_semantic_pack_all(
     app_handle: tauri::AppHandle,
     project_id: i64,
-) -> Result<tauri::ipc::Response, String> {
+) -> Result<tauri::ipc::Response, NativeError> {
     let total_started = Instant::now();
     crate::native_command::blocking("read_line_semantic_pack_all", move || {
 
@@ -808,34 +809,34 @@ pub async fn read_line_semantic_pack_all(
         // Rust 进程的随机 hash seed 改变 Worker 输入/导航顺序。
         entries.sort_by(|a, b| normalize_cache_lookup_path(&a.path).cmp(&normalize_cache_lookup_path(&b.path)));
         let count = u32::try_from(entries.len())
-            .map_err(|_| semantic_error("INDEX_INVALID", "线路语义 pack 条目数溢出"))?;
+            .map_err(|_| semantic_error(NativeErrorCode::IndexInvalid, "线路语义 pack 条目数溢出"))?;
         let packed_count = entries.iter().filter(|entry| entry.packed).count();
         let packed_count = u32::try_from(packed_count)
-            .map_err(|_| semantic_error("INDEX_INVALID", "线路语义 pack packed 条目数溢出"))?;
+            .map_err(|_| semantic_error(NativeErrorCode::IndexInvalid, "线路语义 pack packed 条目数溢出"))?;
         let packed_bytes = entries
             .iter()
             .filter(|entry| entry.packed)
             .try_fold(0u64, |sum, entry| sum.checked_add(entry.size))
-            .ok_or_else(|| semantic_error("PACK_TRUNCATED", "线路语义 pack 总大小溢出"))?;
+            .ok_or_else(|| semantic_error(NativeErrorCode::PackTruncated, "线路语义 pack 总大小溢出"))?;
         let response_overhead = entries.iter().try_fold(0u64, |sum, entry| {
             let path_len = u64::try_from(entry.path.as_bytes().len()).ok()?;
             sum.checked_add(4 + path_len + 1 + 8 + 8)
-        }).ok_or_else(|| semantic_error("INDEX_INVALID", "线路语义 pack 响应大小溢出"))?;
+        }).ok_or_else(|| semantic_error(NativeErrorCode::IndexInvalid, "线路语义 pack 响应大小溢出"))?;
         let expected_response = u64::try_from(LINE_SEMANTIC_FULL_HEADER)
             .ok()
             .and_then(|v| v.checked_add(response_overhead))
             .and_then(|v| v.checked_add(packed_bytes))
-            .ok_or_else(|| semantic_error("PACK_INVALID", "线路语义 pack 响应大小溢出"))?;
+            .ok_or_else(|| semantic_error(NativeErrorCode::PackInvalid, "线路语义 pack 响应大小溢出"))?;
         if expected_response > MAX_LINE_SEMANTIC_FULL_RESPONSE_BYTES {
             return Err(semantic_error(
-                "PACK_INVALID",
+                NativeErrorCode::PackInvalid,
                 format!("线路语义 pack full response 超过安全上限（>{} bytes）", MAX_LINE_SEMANTIC_FULL_RESPONSE_BYTES),
             ));
         }
         let resolve_ms = resolve_started.elapsed().as_secs_f64() * 1000.0;
         let pack_path = root.join(LINE_SEMANTIC_PACK_FILE);
         let mut pack_file = stdfs::File::open(&pack_path)
-            .map_err(|e| semantic_error("PACK_INVALID", format!("打开线路语义 pack 失败: {}", e)))?;
+            .map_err(|e| semantic_error(NativeErrorCode::PackInvalid, format!("打开线路语义 pack 失败: {}", e)))?;
         use std::io::{Read, Seek, SeekFrom};
         let mut out = encode_line_semantic_pack_full_header(
             count,
@@ -850,18 +851,18 @@ pub async fn read_line_semantic_pack_all(
         for entry in entries {
             let path = entry.path.as_bytes();
             let path_len = u32::try_from(path.len())
-                .map_err(|_| semantic_error("INDEX_INVALID", format!("线路语义 pack 路径过长: {}", entry.path)))?;
+                .map_err(|_| semantic_error(NativeErrorCode::IndexInvalid, format!("线路语义 pack 路径过长: {}", entry.path)))?;
             let data = if entry.packed {
                 let size = usize::try_from(entry.size)
-                    .map_err(|_| semantic_error("PACK_TRUNCATED", format!("线路语义 pack 条目大小超过平台限制: {}", entry.path)))?;
+                    .map_err(|_| semantic_error(NativeErrorCode::PackTruncated, format!("线路语义 pack 条目大小超过平台限制: {}", entry.path)))?;
                 let mut data = vec![0u8; size];
                 let read_started = Instant::now();
                 pack_file
                     .seek(SeekFrom::Start(entry.offset))
-                    .map_err(|e| semantic_error("PACK_INVALID", format!("定位线路语义 pack 失败: {} — {}", entry.path, e)))?;
+                    .map_err(|e| semantic_error(NativeErrorCode::PackInvalid, format!("定位线路语义 pack 失败: {} — {}", entry.path, e)))?;
                 pack_file
                     .read_exact(&mut data)
-                    .map_err(|e| semantic_error("PACK_TRUNCATED", format!("读取线路语义 pack 条目失败: {} — {}", entry.path, e)))?;
+                    .map_err(|e| semantic_error(NativeErrorCode::PackTruncated, format!("读取线路语义 pack 条目失败: {} — {}", entry.path, e)))?;
                 read_ms += read_started.elapsed().as_secs_f64() * 1000.0;
                 Some(data)
             } else {
@@ -883,7 +884,7 @@ pub async fn read_line_semantic_pack_all(
             encode_ms += encode_item_started.elapsed().as_secs_f64() * 1000.0;
             let response_bytes = u64::try_from(out.len()).unwrap_or(u64::MAX);
             if response_bytes > MAX_LINE_SEMANTIC_FULL_RESPONSE_BYTES {
-                return Err(semantic_error("PACK_INVALID", "线路语义 pack full response 超过安全上限"));
+                return Err(semantic_error(NativeErrorCode::PackInvalid, "线路语义 pack full response 超过安全上限"));
             }
         }
         let total_ms = total_started.elapsed().as_secs_f64() * 1000.0;

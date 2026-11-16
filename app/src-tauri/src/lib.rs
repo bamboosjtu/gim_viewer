@@ -1,3 +1,4 @@
+use gim_native_core::{NativeError, NativeErrorCode};
 mod storage;
 mod settings;
 use settings::Settings;
@@ -21,19 +22,19 @@ mod threading_tests {
     }
 }
 #[tauri::command]
-async fn list_projects(store: tauri::State<'_, Store>) -> Result<Vec<storage::ProjectMeta>, String> {
+async fn list_projects(store: tauri::State<'_, Store>) -> Result<Vec<storage::ProjectMeta>, NativeError> {
     let root = store.root.clone();
     tauri::async_runtime::spawn_blocking(move || Ok(storage::list(&root).into_iter().filter(|m| !m.parser_version.is_empty()).collect()))
-        .await.map_err(|error| error.to_string())?
+        .await.map_err(|error| NativeError::new(NativeErrorCode::Internal,error.to_string()))?
 }
 #[tauri::command]
-async fn prepare_project(app: tauri::AppHandle, store: tauri::State<'_, Store>, input: storage::ImportFile) -> Result<storage::Prepared, String> {
+async fn prepare_project(app: tauri::AppHandle, store: tauri::State<'_, Store>, input: storage::ImportFile) -> Result<storage::Prepared, NativeError> {
     let s = store.inner().clone();
     if s.busy.swap(true, Ordering::AcqRel) {
         return tauri::async_runtime::spawn_blocking(move || {
             storage::discard(&s.root, &input.path)?;
             Err("已有导入正在进行，请稍后重试".into())
-        }).await.map_err(|error| error.to_string())?;
+        }).await.map_err(|error| NativeError::new(NativeErrorCode::Internal,error.to_string()))?;
     }
     s.cancelled.store(false, Ordering::Relaxed);
     let lease = ImportLease(s.busy.clone());
@@ -42,41 +43,41 @@ async fn prepare_project(app: tauri::AppHandle, store: tauri::State<'_, Store>, 
         storage::prepare(&s.root, input, &s.cancelled, |stage, done, total| {
             let _ = app.emit("import-progress", serde_json::json!({"stage":stage,"done":done,"total":total}));
         })
-    }).await.map_err(|e| e.to_string())?
+    }).await.map_err(|e| NativeError::new(NativeErrorCode::Internal,e.to_string()))?
 }
 #[tauri::command]
-async fn discard_import(store: tauri::State<'_, Store>, path: String) -> Result<(), String> {
+async fn discard_import(store: tauri::State<'_, Store>, path: String) -> Result<(), NativeError> {
     let root = store.root.clone();
-    tauri::async_runtime::spawn_blocking(move || storage::discard(&root, &path)).await.map_err(|error| error.to_string())?
+    tauri::async_runtime::spawn_blocking(move || storage::discard(&root, &path)).await.map_err(|error| NativeError::new(NativeErrorCode::Internal,error.to_string()))?
 }
 #[tauri::command]
 fn cancel_import(store: tauri::State<Store>) { store.cancelled.store(true, Ordering::Relaxed); }
 #[tauri::command]
-async fn get_project_cache(store: tauri::State<'_, Store>, id: String) -> Result<tauri::ipc::Response, String> { let s = store.inner().clone(); tauri::async_runtime::spawn_blocking(move || { storage::touch(&s.root, &id)?; Ok(tauri::ipc::Response::new(storage::cached_json(&s.root, &id).unwrap_or(None).unwrap_or_else(|| "null".into()))) }).await.map_err(|e| e.to_string())? }
+async fn get_project_cache(store: tauri::State<'_, Store>, id: String) -> Result<tauri::ipc::Response, NativeError> { let s = store.inner().clone(); tauri::async_runtime::spawn_blocking(move || { storage::touch(&s.root, &id)?; Ok(tauri::ipc::Response::new(storage::cached_json(&s.root, &id).unwrap_or(None).unwrap_or_else(|| "null".into()))) }).await.map_err(|e| NativeError::new(NativeErrorCode::Internal,e.to_string()))? }
 #[tauri::command]
-async fn read_text_entries(store: tauri::State<'_, Store>, id: String) -> Result<Vec<storage::TextEntry>, String> { let root = store.root.clone(); tauri::async_runtime::spawn_blocking(move || storage::text_entries(&root, &id)).await.map_err(|e| e.to_string())? }
+async fn read_text_entries(store: tauri::State<'_, Store>, id: String) -> Result<Vec<storage::TextEntry>, NativeError> { let root = store.root.clone(); tauri::async_runtime::spawn_blocking(move || storage::text_entries(&root, &id)).await.map_err(|e| NativeError::new(NativeErrorCode::Internal,e.to_string()))? }
 #[tauri::command]
-async fn commit_project(store: tauri::State<'_, Store>, id: String, payload_json: String) -> Result<(), String> { let root = store.root.clone(); tauri::async_runtime::spawn_blocking(move || storage::commit_json(&root, &id, payload_json)).await.map_err(|e| e.to_string())? }
+async fn commit_project(store: tauri::State<'_, Store>, id: String, payload_json: String) -> Result<(), NativeError> { let root = store.root.clone(); tauri::async_runtime::spawn_blocking(move || storage::commit_json(&root, &id, payload_json)).await.map_err(|e| NativeError::new(NativeErrorCode::Internal,e.to_string()))? }
 #[tauri::command]
-async fn read_source(store: tauri::State<'_, Store>, id: String, path: String) -> Result<String, String> { let root = store.root.clone(); tauri::async_runtime::spawn_blocking(move || storage::source(&root, &id, &path)).await.map_err(|e| e.to_string())? }
+async fn read_source(store: tauri::State<'_, Store>, id: String, path: String) -> Result<String, NativeError> { let root = store.root.clone(); tauri::async_runtime::spawn_blocking(move || storage::source(&root, &id, &path)).await.map_err(|e| NativeError::new(NativeErrorCode::Internal,e.to_string()))? }
 #[tauri::command]
-async fn read_project_header(store: tauri::State<'_, Store>, id: String) -> Result<Vec<u8>, String> { let root = store.root.clone(); tauri::async_runtime::spawn_blocking(move || storage::header(&root, &id)).await.map_err(|e| e.to_string())? }
+async fn read_project_header(store: tauri::State<'_, Store>, id: String) -> Result<Vec<u8>, NativeError> { let root = store.root.clone(); tauri::async_runtime::spawn_blocking(move || storage::header(&root, &id)).await.map_err(|e| NativeError::new(NativeErrorCode::Internal,e.to_string()))? }
 #[tauri::command]
-async fn delete_project(store: tauri::State<'_, Store>, id: String) -> Result<(), String> {
+async fn delete_project(store: tauri::State<'_, Store>, id: String) -> Result<(), NativeError> {
     let root = store.root.clone();
-    tauri::async_runtime::spawn_blocking(move || storage::delete(&root, &id)).await.map_err(|error| error.to_string())?
+    tauri::async_runtime::spawn_blocking(move || storage::delete(&root, &id)).await.map_err(|error| NativeError::new(NativeErrorCode::Internal,error.to_string()))?
 }
 #[tauri::command]
-async fn preview_cache(store: tauri::State<'_, Store>, id: String, key: String, data: Option<serde_json::Value>) -> Result<Option<serde_json::Value>, String> { let root = store.root.clone(); tauri::async_runtime::spawn_blocking(move || storage::preview(&root, &id, &key, data)).await.map_err(|e| e.to_string())? }
+async fn preview_cache(store: tauri::State<'_, Store>, id: String, key: String, data: Option<serde_json::Value>) -> Result<Option<serde_json::Value>, NativeError> { let root = store.root.clone(); tauri::async_runtime::spawn_blocking(move || storage::preview(&root, &id, &key, data)).await.map_err(|e| NativeError::new(NativeErrorCode::Internal,e.to_string()))? }
 #[tauri::command]
-async fn get_settings(store: tauri::State<'_, Store>) -> Result<Settings, String> {
+async fn get_settings(store: tauri::State<'_, Store>) -> Result<Settings, NativeError> {
     let root = store.root.clone();
-    tauri::async_runtime::spawn_blocking(move || Ok(settings::load(&root))).await.map_err(|error| error.to_string())?
+    tauri::async_runtime::spawn_blocking(move || Ok(settings::load(&root))).await.map_err(|error| NativeError::new(NativeErrorCode::Internal,error.to_string()))?
 }
 #[tauri::command]
-async fn save_settings(store: tauri::State<'_, Store>, settings: Settings) -> Result<(), String> {
+async fn save_settings(store: tauri::State<'_, Store>, settings: Settings) -> Result<(), NativeError> {
     let root = store.root.clone();
-    tauri::async_runtime::spawn_blocking(move || settings::save(&root, settings)).await.map_err(|error| error.to_string())?
+    tauri::async_runtime::spawn_blocking(move || settings::save(&root, settings)).await.map_err(|error| NativeError::new(NativeErrorCode::Internal,error.to_string()))?
 }
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

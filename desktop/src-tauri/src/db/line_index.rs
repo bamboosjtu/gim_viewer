@@ -1,5 +1,8 @@
 //! Chunked line graph/attribute transactions and queries.
 
+use gim_native_core::{NativeError, NativeErrorCode};
+pub use gim_native_core::{LineFamPropertyPayload, LineDevPropertyPayload, LineFamPropertyRecord, LineDevPropertyRecord};
+
 use tauri::Manager;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
@@ -18,10 +21,10 @@ pub(super) fn reserve_line_begin() -> u64 { NEXT_LINE_BEGIN.fetch_add(1, Orderin
 
 // Called only after source validation while holding this database's connection lock.
 // The process-local ticket is not a persisted protocol or an input supplied by JS.
-fn claim_line_begin(state: &DbState, project_id: i64, ticket: u64) -> Result<(), String> {
+fn claim_line_begin(state: &DbState, project_id: i64, ticket: u64) -> Result<(), NativeError> {
     let mut accepted=ACCEPTED_LINE_BEGINS.get_or_init(Default::default).lock().map_err(|error|error.to_string())?;
     let latest=accepted.entry((state as *const DbState as usize, project_id)).or_default();
-    if *latest > ticket { return Err("线路缓存 begin 已被更新的会话取代".into()); }
+    if *latest > ticket { return Err(NativeError::new(NativeErrorCode::SessionSuperseded,"线路缓存 begin 已被更新的会话取代")); }
     *latest=ticket;
     Ok(())
 }
@@ -81,29 +84,8 @@ pub struct LineGraphPayload {
 
 /// powerline_fam_property 写入 payload
 /// FAM 行格式：`中文展示键=ENGLISH_KEY=值`（值可能含 =，前端已 rejoin）
-#[derive(Debug, Deserialize)]
-pub struct LineFamPropertyPayload {
-    pub source_path: String,
-    pub normalized_path: String,
-    pub file_name_lower: String,
-    pub display_key: Option<String>,
-    pub prop_key: String,
-    pub prop_value: Option<String>,
-    pub raw_line: Option<String>,
-    pub sort_order: i64,
-}
 
 /// powerline_dev_property 写入 payload（普通 KEY=VALUE）
-#[derive(Debug, Deserialize)]
-pub struct LineDevPropertyPayload {
-    pub source_path: String,
-    pub normalized_path: String,
-    pub file_name_lower: String,
-    pub prop_key: String,
-    pub prop_value: Option<String>,
-    pub raw_line: Option<String>,
-    pub sort_order: i64,
-}
 
 const MAX_LINE_NODES: usize = 500_000;
 
@@ -117,9 +99,9 @@ const MAX_LINE_ATTR_ROWS: usize = 2_000_000;
 
 const MAX_LINE_CHUNK_ROWS: usize = 10_000;
 
-fn validate_line_path_field(value: &str, field: &str) -> Result<(), String> {
+fn validate_line_path_field(value: &str, field: &str) -> Result<(), NativeError> {
     if value.trim().is_empty() || value.len() > 4096 {
-        return Err(format!("线路 {} 无效或过长", field));
+        return Err(format!("线路 {} 无效或过长", field).into());
     }
     validate_entry_path(value).map(|_| ())
 }
@@ -132,7 +114,7 @@ fn validate_line_attr_common(
     prop_value: Option<&str>,
     raw_line: Option<&str>,
     expected_ext: &str,
-) -> Result<(), String> {
+) -> Result<(), NativeError> {
     validate_line_path_field(source_path, "source_path")?;
     validate_line_path_field(normalized_path, "normalized_path")?;
     let source_normalized = source_path.replace('\\', "/");
@@ -143,7 +125,7 @@ fn validate_line_attr_common(
             .split('/')
             .any(|part| part.is_empty() || part == "." || part == "..")
     {
-        return Err("线路 normalized_path 必须使用 / 分隔".to_string());
+        return Err("线路 normalized_path 必须使用 / 分隔".to_string().into());
     }
     let expected_name = Path::new(normalized_path)
         .file_name()
@@ -151,10 +133,10 @@ fn validate_line_attr_common(
         .unwrap_or_default()
         .to_ascii_lowercase();
     if file_name_lower != expected_name || !file_name_lower.ends_with(expected_ext) {
-        return Err(format!("线路 file_name_lower 与 {} 不一致", expected_ext));
+        return Err(format!("线路 file_name_lower 与 {} 不一致", expected_ext).into());
     }
     if prop_key.trim().is_empty() || prop_key.len() > 4096 {
-        return Err("线路属性 prop_key 无效或过长".to_string());
+        return Err("线路属性 prop_key 无效或过长".to_string().into());
     }
     if prop_value
         .map(|v| v.len() > MAX_LINE_TEXT_BYTES)
@@ -163,12 +145,12 @@ fn validate_line_attr_common(
             .map(|v| v.len() > MAX_LINE_TEXT_BYTES)
             .unwrap_or(false)
     {
-        return Err("线路属性文本过长".to_string());
+        return Err("线路属性文本过长".to_string().into());
     }
     Ok(())
 }
 
-fn validate_line_fam_property_payload(p: &LineFamPropertyPayload) -> Result<(), String> {
+fn validate_line_fam_property_payload(p: &LineFamPropertyPayload) -> Result<(), NativeError> {
     validate_line_attr_common(
         &p.source_path,
         &p.normalized_path,
@@ -183,15 +165,15 @@ fn validate_line_fam_property_payload(p: &LineFamPropertyPayload) -> Result<(), 
         .map(|v| v.len() > 4096)
         .unwrap_or(false)
     {
-        return Err("线路 FAM display_key 过长".to_string());
+        return Err("线路 FAM display_key 过长".to_string().into());
     }
     if p.sort_order < 0 || p.sort_order > MAX_LINE_ATTR_ROWS as i64 {
-        return Err("线路 FAM sort_order 无效".to_string());
+        return Err("线路 FAM sort_order 无效".to_string().into());
     }
     Ok(())
 }
 
-fn validate_line_dev_property_payload(p: &LineDevPropertyPayload) -> Result<(), String> {
+fn validate_line_dev_property_payload(p: &LineDevPropertyPayload) -> Result<(), NativeError> {
     validate_line_attr_common(
         &p.source_path,
         &p.normalized_path,
@@ -202,7 +184,7 @@ fn validate_line_dev_property_payload(p: &LineDevPropertyPayload) -> Result<(), 
         ".dev",
     )?;
     if p.sort_order < 0 || p.sort_order > MAX_LINE_ATTR_ROWS as i64 {
-        return Err("线路 DEV sort_order 无效".to_string());
+        return Err("线路 DEV sort_order 无效".to_string().into());
     }
     Ok(())
 }
@@ -215,7 +197,7 @@ fn validate_line_dev_property_payload(p: &LineDevPropertyPayload) -> Result<(), 
 //
 // 分块收益：避免数十 MB payload 一次性 JSON 序列化过 IPC 的开销。
 
-pub(super) fn clear_powerline_tables(tx: &rusqlite::Transaction, pid: i64) -> Result<(), String> {
+pub(super) fn clear_powerline_tables(tx: &rusqlite::Transaction, pid: i64) -> Result<(), NativeError> {
     for table in [
         "powerline_cbm_node",
         "powerline_cbm_child",
@@ -231,13 +213,13 @@ pub(super) fn clear_powerline_tables(tx: &rusqlite::Transaction, pid: i64) -> Re
     Ok(())
 }
 
-fn validate_line_graph_payload(payload: &LineGraphPayload) -> Result<(), String> {
+fn validate_line_graph_payload(payload: &LineGraphPayload) -> Result<(), NativeError> {
     ensure_cache_project_id(payload.project_id)?;
     if payload.project_type != "transmission_line" {
         return Err(format!(
             "线路缓存 project_type 无效: {}",
             payload.project_type
-        ));
+        ).into());
     }
     if payload
         .source_sha256
@@ -245,19 +227,19 @@ fn validate_line_graph_payload(payload: &LineGraphPayload) -> Result<(), String>
         .map(|s| s.trim().is_empty() || s.len() > 128)
         .unwrap_or(false)
     {
-        return Err("线路 source_sha256 无效".to_string());
+        return Err("线路 source_sha256 无效".to_string().into());
     }
     if payload.nodes.len() > MAX_LINE_NODES
         || payload.children.len() > MAX_LINE_CHILDREN
         || payload.refs.len() > MAX_LINE_REFS
         || payload.file_stats.len() > MAX_LINE_FILE_STATS
     {
-        return Err("线路图 payload 数量超过安全上限".to_string());
+        return Err("线路图 payload 数量超过安全上限".to_string().into());
     }
     let nodes: std::collections::HashSet<&str> =
         payload.nodes.iter().map(|n| n.path.as_str()).collect();
     if nodes.is_empty() {
-        return Err("线路图节点不能为空".to_string());
+        return Err("线路图节点不能为空".to_string().into());
     }
     for n in &payload.nodes {
         validate_line_path_field(&n.path, "node.path")?;
@@ -271,10 +253,10 @@ fn validate_line_graph_payload(payload: &LineGraphPayload) -> Result<(), String>
                 .map(|v| v.len() > 4096)
                 .unwrap_or(false)
         {
-            return Err("线路图节点文本过长".to_string());
+            return Err("线路图节点文本过长".to_string().into());
         }
         if n.raw_props_json.len() > 8 * 1024 * 1024 {
-            return Err("线路图节点 raw_props_json 过大".to_string());
+            return Err("线路图节点 raw_props_json 过大".to_string().into());
         }
     }
     for c in &payload.children {
@@ -284,7 +266,7 @@ fn validate_line_graph_payload(payload: &LineGraphPayload) -> Result<(), String>
             return Err(format!(
                 "线路 child 引用不存在节点: {} -> {}",
                 c.parent_path, c.child_path
-            ));
+            ).into());
         }
         if c.ref_type.trim().is_empty()
             || c.ref_type.len() > 128
@@ -293,26 +275,26 @@ fn validate_line_graph_payload(payload: &LineGraphPayload) -> Result<(), String>
                 .map(|v| v.len() > MAX_LINE_TEXT_BYTES)
                 .unwrap_or(false)
         {
-            return Err("线路 child 字段无效或过长".to_string());
+            return Err("线路 child 字段无效或过长".to_string().into());
         }
         if c.sort_order
             .map(|v| v < 0 || v > MAX_LINE_NODES as i64)
             .unwrap_or(false)
         {
-            return Err("线路 child sort_order 无效".to_string());
+            return Err("线路 child sort_order 无效".to_string().into());
         }
     }
     for r in &payload.refs {
         validate_line_path_field(&r.node_path, "ref.node_path")?;
         if !nodes.contains(r.node_path.as_str()) {
-            return Err(format!("线路 ref 引用不存在节点: {}", r.node_path));
+            return Err(format!("线路 ref 引用不存在节点: {}", r.node_path).into());
         }
         if r.ref_kind.trim().is_empty()
             || r.ref_kind.len() > 128
             || r.ref_value.trim().is_empty()
             || r.ref_value.len() > 4096
         {
-            return Err("线路 ref 字段无效或过长".to_string());
+            return Err("线路 ref 字段无效或过长".to_string().into());
         }
         if r.ref_key.as_ref().map(|v| v.len() > 4096).unwrap_or(false)
             || r.normalized_ref_value
@@ -324,13 +306,13 @@ fn validate_line_graph_payload(payload: &LineGraphPayload) -> Result<(), String>
                 .map(|v| v.len() > 4096)
                 .unwrap_or(false)
         {
-            return Err("线路 ref 辅助字段过长".to_string());
+            return Err("线路 ref 辅助字段过长".to_string().into());
         }
         if r.sort_order
             .map(|v| v < 0 || v > MAX_LINE_REFS as i64)
             .unwrap_or(false)
         {
-            return Err("线路 ref sort_order 无效".to_string());
+            return Err("线路 ref sort_order 无效".to_string().into());
         }
     }
     for f in &payload.file_stats {
@@ -339,7 +321,7 @@ fn validate_line_graph_payload(payload: &LineGraphPayload) -> Result<(), String>
             || f.count < 0
             || f.count > MAX_LINE_NODES as i64
         {
-            return Err("线路 file_stat 无效".to_string());
+            return Err("线路 file_stat 无效".to_string().into());
         }
     }
     Ok(())
@@ -350,7 +332,7 @@ fn insert_line_graph(
     pid: i64,
     payload: &LineGraphPayload,
     now: u64,
-) -> Result<(), String> {
+) -> Result<(), NativeError> {
     // powerline_cbm_node
     {
         let mut stmt = tx.prepare(
@@ -430,7 +412,7 @@ fn insert_line_graph(
 /// 阶段 1/3：清空旧索引 + 写入线路图（graph 4 张表）
 /// 清空项目 parser_version（P1 评审：入库开始时立即失效缓存，
 /// 半成品数据在 finish 提交前不可能被 validate_gim_cache 命中）
-pub(super) fn invalidate_line_parser_version(tx: &rusqlite::Transaction, pid: i64) -> Result<(), String> {
+pub(super) fn invalidate_line_parser_version(tx: &rusqlite::Transaction, pid: i64) -> Result<(), NativeError> {
     tx.execute(
         "UPDATE gim_project SET parser_version = NULL, line_parser_version = NULL WHERE id = ?1",
         params![pid],
@@ -448,7 +430,7 @@ pub async fn save_line_graph_begin(
     source_sha256: Option<String>,
     expected_fam_properties: i64,
     expected_dev_properties: i64,
-) -> Result<(), String> {
+) -> Result<(), NativeError> {
     let ticket = reserve_line_begin();
     crate::native_command::blocking("save_line_graph_begin", move || {
         save_line_graph_begin_blocking(&app_handle.state::<DbState>(), ticket, project_id, session_id,
@@ -463,7 +445,7 @@ pub(super) fn insert_line_attr_chunk(
     fam_props: &[LineFamPropertyPayload],
     dev_props: &[LineDevPropertyPayload],
     now: u64,
-) -> Result<(), String> {
+) -> Result<(), NativeError> {
     if !fam_props.is_empty() {
         let mut stmt = tx.prepare(
             "INSERT INTO powerline_fam_property (project_id, source_path, normalized_path, file_name_lower, display_key, prop_key, prop_value, raw_line, sort_order, created_at_ms)
@@ -516,7 +498,7 @@ pub async fn save_line_attrs_chunk(
     session_id: String,
     fam_props: Vec<LineFamPropertyPayload>,
     dev_props: Vec<LineDevPropertyPayload>,
-) -> Result<(), String> {
+) -> Result<(), NativeError> {
     crate::native_command::blocking("save_line_attrs_chunk", move || {
         save_line_attrs_chunk_blocking(&app_handle.state::<DbState>(), project_id, session_id, fam_props, dev_props)
     }).await
@@ -528,7 +510,7 @@ pub async fn save_line_project_finish(
     app_handle: tauri::AppHandle,
     project_id: i64,
     session_id: String,
-) -> Result<(), String> {
+) -> Result<(), NativeError> {
     crate::native_command::blocking("save_line_project_finish", move || {
         save_line_project_finish_blocking(&app_handle.state::<DbState>(), project_id, session_id)
     }).await
@@ -588,7 +570,7 @@ pub struct LineGraphResult {
 pub async fn get_line_gim_graph(
     app_handle: tauri::AppHandle,
     project_id: i64,
-) -> Result<LineGraphResult, String> {
+) -> Result<LineGraphResult, NativeError> {
     crate::native_command::blocking("get_line_gim_graph", move || {
         let state = app_handle.state::<DbState>();
         let conn = state
@@ -700,29 +682,8 @@ pub async fn get_line_gim_graph(
 // ===== v5: 线路工程 FAM/DEV 属性读取 =====
 
 /// powerline_fam_property 读取记录
-#[derive(Debug, Serialize)]
-pub struct LineFamPropertyRecord {
-    pub source_path: String,
-    pub normalized_path: String,
-    pub file_name_lower: String,
-    pub display_key: Option<String>,
-    pub prop_key: String,
-    pub prop_value: Option<String>,
-    pub raw_line: Option<String>,
-    pub sort_order: i64,
-}
 
 /// powerline_dev_property 读取记录
-#[derive(Debug, Serialize)]
-pub struct LineDevPropertyRecord {
-    pub source_path: String,
-    pub normalized_path: String,
-    pub file_name_lower: String,
-    pub prop_key: String,
-    pub prop_value: Option<String>,
-    pub raw_line: Option<String>,
-    pub sort_order: i64,
-}
 
 /// 线路工程 FAM/DEV 属性读取结果
 #[derive(Debug, Serialize)]
@@ -738,7 +699,7 @@ pub struct LineAttributeResult {
 pub async fn get_line_attributes(
     app_handle: tauri::AppHandle,
     project_id: i64,
-) -> Result<LineAttributeResult, String> {
+) -> Result<LineAttributeResult, NativeError> {
     crate::native_command::blocking("get_line_attributes", move || {
         let state = app_handle.state::<DbState>();
         let conn = state
@@ -799,13 +760,13 @@ pub async fn get_line_attributes(
     }).await
 }
 
-pub(super) fn save_line_attrs_chunk_blocking(state: &DbState, project_id: i64, session_id: String, fam_props: Vec<LineFamPropertyPayload>, dev_props: Vec<LineDevPropertyPayload>) -> Result<(), String> {
+pub(super) fn save_line_attrs_chunk_blocking(state: &DbState, project_id: i64, session_id: String, fam_props: Vec<LineFamPropertyPayload>, dev_props: Vec<LineDevPropertyPayload>) -> Result<(), NativeError> {
 
     if session_id.trim().is_empty() || session_id.len() > 128 {
-        return Err("线路缓存 session_id 无效".to_string());
+        return Err("线路缓存 session_id 无效".to_string().into());
     }
     if fam_props.len().saturating_add(dev_props.len()) > MAX_LINE_CHUNK_ROWS {
-        return Err("线路属性 chunk 超过单批安全上限".to_string());
+        return Err("线路属性 chunk 超过单批安全上限".to_string().into());
     }
     for p in &fam_props {
         validate_line_fam_property_payload(p)?;
@@ -825,9 +786,9 @@ pub(super) fn save_line_attrs_chunk_blocking(state: &DbState, project_id: i64, s
     let (stored_session, expected_fam, expected_dev, received_fam, received_dev): (String, i64, i64, i64, i64) = tx.query_row(
         "SELECT session_id, expected_fam_properties, expected_dev_properties, received_fam_properties, received_dev_properties FROM powerline_cache_session WHERE project_id = ?1",
         params![project_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
-    ).map_err(|_| "线路缓存 session 不存在或已结束".to_string())?;
+    ).map_err(|_| NativeError::new(NativeErrorCode::SessionSuperseded,"线路缓存 session 不存在或已结束"))?;
     if stored_session != session_id {
-        return Err("线路缓存 session_id 不匹配".to_string());
+        return Err(NativeError::new(NativeErrorCode::SessionSuperseded,"线路缓存 session_id 不匹配"));
     }
     let next_fam = received_fam
         .checked_add(fam_props.len() as i64)
@@ -836,7 +797,7 @@ pub(super) fn save_line_attrs_chunk_blocking(state: &DbState, project_id: i64, s
         .checked_add(dev_props.len() as i64)
         .ok_or("线路 DEV 数量溢出")?;
     if next_fam > expected_fam || next_dev > expected_dev {
-        return Err("线路属性 chunk 超过 begin 声明数量".to_string());
+        return Err("线路属性 chunk 超过 begin 声明数量".to_string().into());
     }
     insert_line_attr_chunk(&tx, project_id, &fam_props, &dev_props, now)?;
     tx.execute("UPDATE powerline_cache_session SET received_fam_properties = ?1, received_dev_properties = ?2 WHERE project_id = ?3", params![next_fam, next_dev, project_id])
@@ -846,7 +807,7 @@ pub(super) fn save_line_attrs_chunk_blocking(state: &DbState, project_id: i64, s
 
 }
 
-pub(super) fn save_line_project_finish_blocking(state: &DbState, project_id: i64, session_id: String) -> Result<(), String> {
+pub(super) fn save_line_project_finish_blocking(state: &DbState, project_id: i64, session_id: String) -> Result<(), NativeError> {
 
     let mut conn = state
         .0
@@ -859,9 +820,9 @@ pub(super) fn save_line_project_finish_blocking(state: &DbState, project_id: i64
     let session: (String, i64, i64, i64, i64, i64, i64, i64) = tx.query_row(
         "SELECT session_id, expected_nodes, expected_children, expected_refs, expected_file_stats, expected_fam_properties, expected_dev_properties, received_fam_properties + received_dev_properties FROM powerline_cache_session WHERE project_id = ?1",
         params![project_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?)),
-    ).map_err(|_| "线路缓存 session 不存在或已结束".to_string())?;
+    ).map_err(|_| NativeError::new(NativeErrorCode::SessionSuperseded,"线路缓存 session 不存在或已结束"))?;
     if session.0 != session_id {
-        return Err("线路缓存 session_id 不匹配".to_string());
+        return Err(NativeError::new(NativeErrorCode::SessionSuperseded,"线路缓存 session_id 不匹配"));
     }
     let counts: [(&str, i64); 6] = [
         ("powerline_cbm_node", session.1),
@@ -883,7 +844,7 @@ pub(super) fn save_line_project_finish_blocking(state: &DbState, project_id: i64
             return Err(format!(
                 "线路缓存 {} 数量不完整（期望 {}, 实际 {}）",
                 table, expected, actual
-            ));
+            ).into());
         }
     }
     let now = now_ms();
@@ -905,13 +866,13 @@ pub(super) fn save_line_project_finish_blocking(state: &DbState, project_id: i64
 
 pub(super) fn save_line_graph_begin_blocking(state: &DbState, ticket: u64, project_id: i64,
     session_id: String, graph_payload: LineGraphPayload, source_sha256: Option<String>,
-    expected_fam_properties: i64, expected_dev_properties: i64) -> Result<(), String> {
+    expected_fam_properties: i64, expected_dev_properties: i64) -> Result<(), NativeError> {
 
     if session_id.trim().is_empty() || session_id.len() > 128 {
-        return Err("线路缓存 session_id 无效".to_string());
+        return Err("线路缓存 session_id 无效".to_string().into());
     }
     if graph_payload.project_id != project_id {
-        return Err("project_id 与 graph_payload 不一致".to_string());
+        return Err("project_id 与 graph_payload 不一致".to_string().into());
     }
     validate_line_graph_payload(&graph_payload)?;
     if expected_fam_properties < 0
@@ -919,14 +880,14 @@ pub(super) fn save_line_graph_begin_blocking(state: &DbState, ticket: u64, proje
         || expected_fam_properties > MAX_LINE_ATTR_ROWS as i64
         || expected_dev_properties > MAX_LINE_ATTR_ROWS as i64
     {
-        return Err("线路属性期望数量无效或超过安全上限".to_string());
+        return Err("线路属性期望数量无效或超过安全上限".to_string().into());
     }
     if let (Some(external), Some(in_payload)) = (
         source_sha256.as_deref(),
         graph_payload.source_sha256.as_deref(),
     ) {
         if external != in_payload {
-            return Err("source_sha256 与 graph_payload.source_sha256 不一致".to_string());
+            return Err("source_sha256 与 graph_payload.source_sha256 不一致".to_string().into());
         }
     }
     let mut conn = state

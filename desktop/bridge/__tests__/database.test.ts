@@ -1,10 +1,10 @@
+import {GimError} from '../contracts.js';
 import { describe, expect, it, vi } from 'vitest';
 
 const invokeMock = vi.hoisted(() => vi.fn());
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 
 import {
-  LineSemanticPackError,
   parseBatchCachePayload,
   parseLineSemanticPackFullPayload,
 } from '../database.js';
@@ -136,33 +136,33 @@ describe('read_line_semantic_pack_all GIMF v1 envelope', () => {
     ['data length mismatch', () => fullEnvelope([{ path: 'CBM/a.cbm', packed: true, size: 3, data: new Uint8Array([1, 2]) }], { packedBytes: 2n }), 'PACK_INVALID'],
     ['packed count mismatch', () => fullEnvelope([{ path: 'CBM/a.cbm', packed: true, size: 1, data: new Uint8Array([1]) }], { packedCount: 0, packedBytes: 1n }), 'PACK_INVALID'],
   ])('%s 被识别为整体损坏而不是逐条 fallback', (_name, makePayload, kind) => {
-    expect(() => parseLineSemanticPackFullPayload(makePayload())).toThrow(LineSemanticPackError);
+    expect(() => parseLineSemanticPackFullPayload(makePayload())).toThrow(GimError);
     try { parseLineSemanticPackFullPayload(makePayload()); } catch (error) {
-      expect((error as LineSemanticPackError).kind).toBe(kind);
+      expect((error as GimError).code).toBe(kind);
     }
   });
 
   it('拒绝非法 flags、重复大小写路径和路径穿越', () => {
     const flagsPayload = fullEnvelope([{ path: 'CBM/a.cbm', packed: true, size: 1, data: new Uint8Array([1]) }]);
     flagsPayload[61 + 4 + 'CBM/a.cbm'.length] = 2;
-    expect(() => parseLineSemanticPackFullPayload(flagsPayload)).toThrow(LineSemanticPackError);
+    expect(() => parseLineSemanticPackFullPayload(flagsPayload)).toThrow(GimError);
     try { parseLineSemanticPackFullPayload(flagsPayload); } catch (error) {
-      expect((error as LineSemanticPackError).kind).toBe('INDEX_INVALID');
+      expect((error as GimError).code).toBe('INDEX_INVALID');
     }
 
     const duplicatePayload = fullEnvelope([
       { path: 'CBM/a.cbm', packed: true, size: 1, data: new Uint8Array([1]) },
       { path: String.raw`cbm\A.CBM`, packed: true, size: 1, data: new Uint8Array([2]) },
     ]);
-    expect(() => parseLineSemanticPackFullPayload(duplicatePayload)).toThrow(LineSemanticPackError);
+    expect(() => parseLineSemanticPackFullPayload(duplicatePayload)).toThrow(GimError);
     try { parseLineSemanticPackFullPayload(duplicatePayload); } catch (error) {
-      expect((error as LineSemanticPackError).kind).toBe('INDEX_INVALID');
+      expect((error as GimError).code).toBe('INDEX_INVALID');
     }
 
     const traversalPayload = fullEnvelope([{ path: 'CBM/../a.cbm', packed: true, size: 1, data: new Uint8Array([1]) }]);
-    expect(() => parseLineSemanticPackFullPayload(traversalPayload)).toThrow(LineSemanticPackError);
+    expect(() => parseLineSemanticPackFullPayload(traversalPayload)).toThrow(GimError);
     try { parseLineSemanticPackFullPayload(traversalPayload); } catch (error) {
-      expect((error as LineSemanticPackError).kind).toBe('INDEX_INVALID');
+      expect((error as GimError).code).toBe('INDEX_INVALID');
     }
   });
 });
