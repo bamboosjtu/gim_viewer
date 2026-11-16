@@ -208,7 +208,8 @@ function renderSvgDiagram(_state: AppState, sld: SldDocument | null): HTMLElemen
   wrap.className = 'sld-svg-wrap';
 
   if (!sld || !sld.safeSvgOuterHTML) {
-    wrap.innerHTML = '<div class="sld-empty">此工程无 SLD 单线图</div>';
+    const message=sld?.status==='failed'?'SLD 单线图解析失败':sld?.status==='unsupported'?'当前 SLD 格式暂不支持':sld?.status==='empty'?'SLD 文档为空':'此工程无 SLD 单线图';
+    const empty=document.createElement('div');empty.className='sld-empty';empty.textContent=message;wrap.appendChild(empty);
     return wrap;
   }
 
@@ -274,7 +275,8 @@ function renderTopologyList(state: AppState, std: StdDocument | null): HTMLEleme
   wrap.className = 'sld-topo-list';
 
   if (!std || !std.substation) {
-    wrap.innerHTML = '<div class="sld-empty">此工程无 STD 拓扑定义</div>';
+    const message=std?.status==='failed'?'STD 拓扑解析失败':std?.status==='unsupported'?'此文档没有受支持的独立 STD 拓扑':std?.status==='empty'?'STD 文档为空':'此工程无 STD 拓扑定义';
+    const empty=document.createElement('div');empty.className='sld-empty';empty.textContent=message;wrap.appendChild(empty);
     return wrap;
   }
 

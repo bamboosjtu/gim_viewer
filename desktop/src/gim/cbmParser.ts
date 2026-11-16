@@ -14,7 +14,8 @@ import {
   resolveBaseFamilyReferences,
 } from './gimValueSemantics.js';
 import { parseFamSections } from './famParser.js';
-import {readCbmDocument}from'./cbmDocument.js';
+import {readCbmSourceDocument}from'./cbmDocument.js';
+import {sourceScalarProperties, sourceScalar, sourceReferenceFields, sourceDiagnostic, parseSourceDocument, type SourceDiagnostic} from './sourceDocument.js';
 
 export { parseKeyValue } from './kvParser.js';
 
@@ -201,8 +202,22 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
     if (nodeBudget.count > PARSER_LIMITS.maxCbmNodes) {
       throw new Error(`CBM 节点数超过安全上限 ${PARSER_LIMITS.maxCbmNodes}`);
     }
-    const kv = await readCbmDocument(f,true);
+    const sourceDiagnostics: SourceDiagnostic[] = [];
+    let document;
+    try { document = await readCbmSourceDocument(f,p,true); }
+    catch {
+      document = parseSourceDocument(p, '');
+      sourceDiagnostics.push({kind:'read-failed',path:p,field:'',lines:[],values:[]});
+    }
+    const kv = sourceScalarProperties(document);
     const devEntry = p === equipmentEntry && /\.dev$/i.test(p);
+    // Report every conflicting scalar once, preserving the rows for inspection.
+    for (const key of new Set(document.fields.map(field => field.keys[0].toUpperCase()))) {
+      if (key === 'SUBSYSTEM') continue;
+      if (devEntry && /^TRANSFORMMATRIX\d+$/.test(key)) continue;
+      const scalar = sourceScalar(document,key);
+      if (scalar.status === 'ambiguous') sourceDiagnostics.push(sourceDiagnostic(document,key,scalar.fields));
+    }
     const en = devEntry ? 'Device' : normalizeEntityName(getFirstNonEmptyKv(kv, ['ENTITYNAME']));
     let { name, systemNames } = extractDisplayName(kv, p);
     const cn = getFirstNonEmptyKv(kv, ['SYSCLASSIFYNAME', 'PARTNAME']);
@@ -213,6 +228,8 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
     let devType = '';
     if (devPath) {
       const info = await readDevDocument(reference(devPath,p) || normalizeDevReference(devPath));
+      if (!info) sourceDiagnostics.push({kind:'read-failed',path:devPath,field:'OBJECTMODELPOINTER',lines:[],values:[devPath]});
+      if (info?.sourceDiagnostics) sourceDiagnostics.push(...info.sourceDiagnostics);
       if (info) {
         devSymbolName = info.symbolName;
         devType = info.type;
@@ -262,41 +279,12 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
       return results.filter((node): node is CbmNode => node != null);
     };
 
-    // 1. SUBSYSTEM 单值引用
-    const sg = getFirstNonEmptyKv(kv, ['SUBSYSTEM']);
-    if (sg) {
-      const c = await build(reference(sg, p), depth + 1);
-      if (c) children.push(c);
-    }
-
-    // 2. SUBSYSTEMS.NUM + SUBSYSTEMi 数组引用
-    const sn = parseBoundedCount(getFirstNonEmptyKv(kv, ['SUBSYSTEMS.NUM']), 'SUBSYSTEMS.NUM');
-    if (sn > 1) {
-      const refs: string[] = [];
-      for (let i = 0; i < sn; i++) {
-        const s = getFirstNonEmptyKv(kv, [`SUBSYSTEM${i}`]);
-        if (s) refs.push(s);
-      }
-      children.push(...await buildSiblings(refs));
-    } else {
-      for (let i = 0; i < sn; i++) {
-        const s = getFirstNonEmptyKv(kv, [`SUBSYSTEM${i}`]);
-        if (s) {
-          const c = await build(reference(s, p), depth + 1);
-          if (c) children.push(c);
-        }
-      }
-    }
-
-    // 3. SUBDEVICES.NUM + SUBDEVICEi 数组引用（F4System 内部子设备分组）
-    const dn2 = devEntry ? 0 : parseBoundedCount(getFirstNonEmptyKv(kv, ['SUBDEVICES.NUM']), 'SUBDEVICES.NUM');
-    for (let i = 0; i < dn2; i++) {
-      const s = getFirstNonEmptyKv(kv, [`SUBDEVICE${i}`]);
-      if (s) {
-        const c = await build(reference(s, p), depth + 1);
-        if (c) children.push(c);
-      }
-    }
+    // Counts still enforce quotas; actual source rows define the edges in all consumers.
+    parseBoundedCount(getFirstNonEmptyKv(kv, ['SUBSYSTEMS.NUM']), 'SUBSYSTEMS.NUM');
+    if (!devEntry) parseBoundedCount(getFirstNonEmptyKv(kv, ['SUBDEVICES.NUM']), 'SUBDEVICES.NUM');
+    const refs = sourceReferenceFields(document, devEntry ? /^SUBSYSTEM\d*$/i : /^(?:SUBSYSTEM\d*|SUBDEVICE\d+)$/i)
+      .filter(field => /\.cbm$/i.test(field.value)).map(field => field.value);
+    children.push(...await buildSiblings(refs));
 
     // 4. 方向 B：若此节点有 devPath，展开 DEV SUBDEVICES 块为虚拟子节点
     let devExpanded = false;
@@ -315,6 +303,8 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
     }
 
     return {
+      ...(sourceDiagnostics.length || document.fields.filter(field=>/^SUBSYSTEM$/i.test(field.keys[0])).length>1 ? {sourceFields:document.fields} : {}),
+      ...(sourceDiagnostics.length ? {sourceDiagnostics} : {}),
       rawProperties: kv,
       path: p,
       name,
@@ -415,6 +405,7 @@ async function expandDevSubDevices(
       : '';
 
     children.push({
+      ...(devDoc.sourceDiagnostics?.length ? {sourceDiagnostics: devDoc.sourceDiagnostics} : {}),
       path: virtualPath,
       name: childName,
       entityName: 'DEV_SUBDEVICE',

@@ -19,10 +19,12 @@ CBM 根的 SCH 指向入口，SCHn 按实际条目引用 STD/SLD。
 | 实际 root | 内容 | 当前行为 |
 |---|---|---|
 | STD | 电气逻辑 XML | 解析层级和非空 gridId 索引 |
-| svg | 图纸内容 | 返回无 Substation 的空逻辑结构，不虚构电气层级 |
-| 非法 XML/其他 root | 不符合当前结构 | 按 parser 错误/空结果边界反馈 |
+| svg | 图纸内容 | 返回无 Substation 的 unsupported 逻辑结构，保留版本与诊断，不虚构电气层级 |
+| 非法 XML | 无法解析 | failed，保留文件路径与 invalid-xml 诊断 |
+| 其他 root | 不支持的结构 | unsupported，保留根类型与诊断 |
 
 扩展名 `.std` 不证明 root 为 STD；分型依据实际内容，不按厂商分支。
+STD/SLD 文档携带 `ok / empty / unsupported / failed` 状态与诊断。空输入、合法但无内容的文档和 XML 解析失败分别表达；服务保留解析失败文档，UI 显示具体终态，不将其替换为“此工程无文档”。
 台账保存各包实际能力。SVG STD 与 SLD 是否同内容是文件事实，不能据此假定全标准都合并两者。
 
 ### STD 电气层级

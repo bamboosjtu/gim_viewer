@@ -34,6 +34,7 @@ export interface GeometryRootFailure {
 }
 
 export interface GeometryDiagnostic {
+  sourceDiagnostics?: import('../sourceDocument.js').SourceDiagnostic[];
   devPath: string;
   status: GeometryDiagnosticStatus;
   source: GeometryDiagnosticSource;
@@ -65,6 +66,7 @@ export interface GeometryDiagnosticStore {
 }
 
 export interface SerializationDiagnosticInput {
+  sourceDiagnostics?: import('../sourceDocument.js').SourceDiagnostic[];
   status: 'complete' | 'partial' | 'empty' | 'unsupported';
   discoveredModCount?: number;
   discoveredStlCount?: number;
@@ -141,6 +143,7 @@ export function diagnosticFromSerialization(
 ): GeometryDiagnostic {
   const status = statusFromSerialization(input.status);
   return {
+    ...(input.sourceDiagnostics?.length ? {sourceDiagnostics:input.sourceDiagnostics} : {}),
     devPath: normalizeGeometryDiagnosticPath(devPath),
     status,
     source,
@@ -160,7 +163,8 @@ export function diagnosticFromSerialization(
     approximatedBooleans: input.approximatedBooleans ? { ...input.approximatedBooleans } : undefined,
     omittedSmallParts: input.omittedSmallParts,
     omittedMaxExtentMm: input.omittedMaxExtentMm,
-    ...(defaultDetail(status) ? { detail: defaultDetail(status) } : {}),
+    ...(input.sourceDiagnostics?.length ? {detail:'来源字段有歧义或矩阵无效；已降级浏览，位置待确认。'}
+      : defaultDetail(status) ? { detail: defaultDetail(status) } : {}),
   };
 }
 

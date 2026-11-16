@@ -51,6 +51,7 @@ export const DEV_SPLIT_MAX_PARTS = 4;
 export type DevGlbSerializationStatus = 'complete' | 'partial' | 'empty' | 'unsupported';
 
 export interface DevGlbSerializationDiagnostics {
+  sourceDiagnostics?: import('../gim/sourceDocument.js').SourceDiagnostic[];
   status: DevGlbSerializationStatus;
   discoveredModCount: number;
   discoveredStlCount: number;
@@ -375,9 +376,11 @@ export async function serializeDevToGlbDetailed(
     mods: analyzed.mods.filter(edge => allowed.has(edgeReference(edge))),
     stls: analyzed.stls.filter(edge => allowed.has(edgeReference(edge))),
     ...(analyzed.reason ? { reason: analyzed.reason } : {}),
+    ...(analyzed.sourceDiagnostics ? {sourceDiagnostics:analyzed.sourceDiagnostics} : {}),
   } : analyzed;
 
   const diagnostics: DevGlbSerializationDiagnostics = {
+    ...(discovered.sourceDiagnostics?.length ? {sourceDiagnostics:discovered.sourceDiagnostics,reason:'source-invalid'} : {}),
     status: 'empty',
     discoveredModCount: discovered.mods.length,
     discoveredStlCount: discovered.stls.length,
@@ -390,7 +393,8 @@ export async function serializeDevToGlbDetailed(
 
   if (discovered.mods.length === 0 && discovered.stls.length === 0) {
     diagnostics.reason = discovered.reason ?? 'dev-no-solidmodel';
-    return { status: 'empty', bytes: null, diagnostics };
+    if(discovered.sourceDiagnostics?.length)throw new InvalidDevGeometryError(canonicalDevPath,'source-fields-invalid',JSON.stringify(discovered.sourceDiagnostics));
+    return { status: diagnostics.status, bytes: null, diagnostics };
   }
   let sawEmptyDeviceXml = false;
 
@@ -624,6 +628,7 @@ export async function serializeDevToGlbDetailed(
     }
 
     diagnostics.status = diagnostics.unsupportedSourceCount > 0
+      || !!diagnostics.sourceDiagnostics?.length
       || diagnostics.partialSourceCount > 0
       || diagnostics.emptySourceCount > 0
       ? 'partial'

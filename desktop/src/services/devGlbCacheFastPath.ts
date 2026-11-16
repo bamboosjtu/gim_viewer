@@ -340,17 +340,12 @@ export async function tryDevGlbFastPath(
   const capturedProjectId = context?.session?.projectId ?? context?.projectId ?? state.currentProjectId;
   const capturedGeneration = context?.session?.generation ?? context?.generation ?? state.projectGeneration;
   const capturedSourceSha256 = context?.session?.sourceSha256 ?? context?.sourceSha256 ?? state.currentSourceSha256;
-  const session: ProjectLoadSession = context?.session ?? {
-    generation: capturedGeneration,
-    projectId: capturedProjectId,
-    sourceSha256: capturedSourceSha256,
-    geometryToken: token ?? state.geometryLoadToken,
-  };
+  const session: ProjectLoadSession = context?.session ?? state.captureProjectSession();
   const isCurrent = () => {
     const stateSessionCheck = typeof state.isCurrentSession === 'function'
       ? state.isCurrentSession(session)
       : isGeometryContextValid(state, token, capturedGeneration, capturedProjectId, capturedSourceSha256);
-    return stateSessionCheck && (token === undefined || state.geometryLoadToken === token);
+    return stateSessionCheck && isGeometryContextValid(state,token,capturedGeneration,capturedProjectId,capturedSourceSha256);
   };
 
   if (capturedProjectId == null || deviceNodes.length === 0 || uniqueKeys.size === 0) return fail('no-project-or-dev');

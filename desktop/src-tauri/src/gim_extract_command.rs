@@ -14,6 +14,7 @@
 //! manifest；不会构造完整解压 Vec，也不会通过 IPC 回传条目字节。
 
 use serde::{Deserialize, Serialize};
+use tauri::Manager;
 use std::path::Path;
 
 use crate::db::{
@@ -69,18 +70,20 @@ pub(crate) struct ExtractionManifestEntry {
 
 /// 清单元数据命令：只读 small JSON，不触发解压。
 #[tauri::command]
-pub fn read_extraction_manifest(
+pub async fn read_extraction_manifest(
     app_handle: tauri::AppHandle,
     project_id: i64,
 ) -> Result<Option<ExtractionManifest>, String> {
-    let path = crate::db::cache_file_path(&app_handle, project_id, EXTRACTION_MANIFEST_FILE)?;
-    match std::fs::read(&path) {
-        Ok(bytes) => serde_json::from_slice(&bytes)
-            .map(Some)
-            .map_err(|e| format!("解压清单解析失败: {}", e)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(format!("读取解压清单失败: {}", error)),
-    }
+    crate::native_command::blocking("read_extraction_manifest", move || {
+        let path = crate::db::cache_file_path(&app_handle, project_id, EXTRACTION_MANIFEST_FILE)?;
+        match std::fs::read(&path) {
+            Ok(bytes) => serde_json::from_slice(&bytes)
+                .map(Some)
+                .map_err(|e| format!("解压清单解析失败: {}", e)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(format!("读取解压清单失败: {}", error)),
+        }
+    }).await
 }
 
 #[derive(Serialize)]
@@ -134,60 +137,60 @@ fn is_line_semantic_entry(path: &str, size: usize) -> bool {
 #[tauri::command]
 pub async fn extract_gim_archive(
     app_handle: tauri::AppHandle,
-    access: tauri::State<'_, AuthorizedFilePaths>,
-    db_state: tauri::State<'_, DbState>,
     file_path: String,
     project_id: Option<i64>,
     trace_entries: Option<bool>,
     substation_parse_copy: Option<bool>,
     expected_source_sha256: Option<String>,
 ) -> Result<tauri::ipc::Response, String> {
-    let authorized_path = require_authorized_path(&access, &file_path, Some("gim"))?;
-    let metadata = std::fs::metadata(&authorized_path)
-        .map_err(|e| format!("读取 GIM 文件元信息失败: {}", e))?;
-    let quota = ExtractionQuota::default();
-    if metadata.len() > quota.max_archive_bytes {
-        return Err(format!(
-            "解压终止（超出资源配额）: GIM 文件大小 {} 超限（>{})",
-            metadata.len(),
-            quota.max_archive_bytes
-        ));
-    }
-    if let Some(pid) = project_id {
-        let conn = db_state
-            .0
-            .lock()
-            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
-        ensure_project_exists(&conn, pid)?;
-        if let Some(expected) = expected_source_sha256.as_ref() {
-            let (record_path,record_sha):(String,String)=conn.query_row("SELECT path,sha256 FROM gim_project WHERE id=?1",[pid],|r|Ok((r.get(0)?,r.get(1)?))).map_err(|e|e.to_string())?;
-            if &record_sha != expected || crate::canonical_identity(std::path::Path::new(&record_path))?.1 != crate::canonical_identity(&authorized_path)?.1 {
-                return Err("extraction project/source identity mismatch".into());
+    let payload = tauri::async_runtime::spawn_blocking(move || -> Result<Vec<u8>, String> {
+        let access = app_handle.state::<AuthorizedFilePaths>();
+        let db_state = app_handle.state::<DbState>();
+        let authorized_path = require_authorized_path(&access, &file_path, Some("gim"))?;
+        let metadata = std::fs::metadata(&authorized_path)
+            .map_err(|e| format!("读取 GIM 文件元信息失败: {}", e))?;
+        let quota = ExtractionQuota::default();
+        if metadata.len() > quota.max_archive_bytes {
+            return Err(format!(
+                "解压终止（超出资源配额）: GIM 文件大小 {} 超限（>{})",
+                metadata.len(),
+                quota.max_archive_bytes
+            ));
+        }
+        if let Some(pid) = project_id {
+            let conn = db_state
+                .0
+                .lock()
+                .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+            ensure_project_exists(&conn, pid)?;
+            if let Some(expected) = expected_source_sha256.as_ref() {
+                let (record_path,record_sha):(String,String)=conn.query_row("SELECT path,sha256 FROM gim_project WHERE id=?1",[pid],|r|Ok((r.get(0)?,r.get(1)?))).map_err(|e|e.to_string())?;
+                if &record_sha != expected || crate::canonical_identity(std::path::Path::new(&record_path))?.1 != crate::canonical_identity(&authorized_path)?.1 {
+                    return Err("extraction project/source identity mismatch".into());
+                }
             }
         }
-    }
-    // 解压是 CPU 密集型同步操作（7z LZMA 可达数秒），放入阻塞线程池。
-    // 带 project_id 的生产路径使用磁盘优先实现：只读头部窗口，逐条解压并
-    // 原子写入 extracted/{project_id}，IPC 只返回 manifest。无 project_id
-    // 的兼容调用保留旧的 inline payload 行为。
-    // 头部决定线路 pack；裸 7z 与 GIMPKGS 使用相同的通用来源 pack。
-    // pack 只改变物理存储，工程/设备语义仍由前端内容验证。
-    let (line_pack_enabled, substation_sources, bare_sevenz) = if project_id.is_some() {
-        let mut magic = [0u8; 7];
-        match std::fs::File::open(&authorized_path).and_then(|mut file| {
-            use std::io::Read as _;
-            file.read_exact(&mut magic)
-        }) {
-            Ok(()) => (magic == *b"GIMPKGT", magic == *b"GIMPKGS", magic[..6] == [0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C]),
-            Err(_) => (false, false, false),
+        // 解压是 CPU 密集型同步操作（7z LZMA 可达数秒），放入阻塞线程池。
+        // 带 project_id 的生产路径使用磁盘优先实现：只读头部窗口，逐条解压并
+        // 原子写入 extracted/{project_id}，IPC 只返回 manifest。无 project_id
+        // 的兼容调用保留旧的 inline payload 行为。
+        // 头部决定线路 pack；裸 7z 与 GIMPKGS 使用相同的通用来源 pack。
+        // pack 只改变物理存储，工程/设备语义仍由前端内容验证。
+        let (line_pack_enabled, substation_sources, bare_sevenz) = if project_id.is_some() {
+            let mut magic = [0u8; 7];
+            match std::fs::File::open(&authorized_path).and_then(|mut file| {
+                use std::io::Read as _;
+                file.read_exact(&mut magic)
+            }) {
+                Ok(()) => (magic == *b"GIMPKGT", magic == *b"GIMPKGS", magic[..6] == [0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C]),
+                Err(_) => (false, false, false),
+            }
+        } else {
+            (false, false, false)
+        };
+        if expected_source_sha256.is_some() && project_id.is_none() {
+            return Err("source-bound extraction requires project identity".into());
         }
-    } else {
-        (false, false, false)
-    };
-    if expected_source_sha256.is_some() && project_id.is_none() {
-        return Err("source-bound extraction requires project identity".into());
-    }
-    let payload = tauri::async_runtime::spawn_blocking(move || -> Result<Vec<u8>, String> {
         if let Some(expected) = expected_source_sha256.as_ref() {
             if crate::substation_extraction_job::source_sha(&authorized_path)? != *expected {
                 return Err("extraction source SHA mismatch".into());
@@ -416,7 +419,7 @@ pub async fn extract_gim_archive(
             let data =
                 std::fs::read(&authorized_path).map_err(|e| format!("读取 GIM 文件失败: {}", e))?;
             let extracted = extract_from_bytes_with_quota(&data, &quota)?;
-            build_payload(app_handle, extracted, None)
+            build_payload(app_handle.clone(), extracted, None)
         }
     })
     .await

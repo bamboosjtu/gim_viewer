@@ -2,6 +2,19 @@ import { describe, it, expect } from 'vitest';
 import { parseDev } from '../devParser.js';
 
 describe('parseDev', () => {
+  it.each(['1,0,0','1oops,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1','1,0,0,0,0,1,0,0,0,0,1,0,0,0,Infinity,1'])('retains invalid matrix spelling and line when browsing with identity: %s',raw=>{
+    const doc=parseDev(`SOLIDMODELS.NUM=1\nSOLIDMODEL0=a.phm\nTRANSFORMMATRIX0=${raw}`,'a.dev');
+    expect(doc.solidModels[0].transformMatrix).toEqual([1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]);
+    expect(doc.sourceDiagnostics).toContainEqual({kind:'invalid-source-matrix',path:'a.dev',field:'TRANSFORMMATRIX0',lines:[3],values:[raw]});
+  });
+  it('does not overwrite a conflicting DEV slot and does not confuse matrices across blocks',()=>{
+    const matrix=(x:number)=>`1,0,0,0,0,1,0,0,0,0,1,0,${x},0,0,1`;
+    const doc=parseDev(`SOLIDMODELS.NUM=1\nSOLIDMODEL0=a.phm\nTRANSFORMMATRIX0=${matrix(1)}\nSUBDEVICES.NUM=1\nSUBDEVICE0=a.dev\nTRANSFORMMATRIX0=${matrix(2)}`,'root.dev');
+    expect(doc.solidModels[0].transformMatrix[12]).toBe(1);expect(doc.subDevices[0].transformMatrix[12]).toBe(2);
+    expect(doc.sourceDiagnostics).toBeUndefined();
+    const conflict=parseDev('SUBDEVICES.NUM=1\nSUBDEVICE0=a.dev\nSUBDEVICE0=b.dev','root.dev');
+    expect(conflict.subDevices).toEqual([]);expect(conflict.sourceDiagnostics?.[0]).toMatchObject({kind:'ambiguous-field',lines:[2,3],values:['a.dev','b.dev']});
+  });
   describe('基础字段解析', () => {
     it('解析 BASEFAMILY / SYMBOLNAME / TYPE（变电工程）', () => {
       const text = `BASEFAMILY=4058963c-f997-4209-a3d5-beda62a70479.fam

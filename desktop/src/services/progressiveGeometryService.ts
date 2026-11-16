@@ -252,13 +252,10 @@ export async function runProgressiveDevGlbPipeline(
 
   const capturedGeneration = options.generation ?? options.session?.generation ?? state.projectGeneration;
   const capturedProjectId = options.projectId ?? options.session?.projectId ?? state.currentProjectId;
-  const session: ProjectLoadSession = options.session ?? {
-    generation: capturedGeneration,
-    projectId: capturedProjectId,
-    sourceSha256: options.sourceSha256 ?? state.currentSourceSha256,
-    geometryToken: token ?? state.geometryLoadToken,
-  };
+  const session: ProjectLoadSession = options.session ?? state.captureProjectSession();
   const isSessionValid = () => state.isCurrentSession(session)
+    && state.projectGeneration===capturedGeneration && state.currentProjectId===capturedProjectId
+    && (options.sourceSha256===undefined || state.currentSourceSha256===options.sourceSha256)
     && (token === undefined || state.geometryLoadToken === token);
 
   // P1 评审：固定捕获当前 projectId——后续异步操作一律使用此快照，
@@ -271,6 +268,7 @@ export async function runProgressiveDevGlbPipeline(
   }
 
   // ── 1. 收集 CBM 设备实例并按唯一 DEV 分组（保持树遍历顺序）──
+  if(!isSessionValid())return interrupted;
   const seeds = await getSourceGeometryOccurrences(state, session);
   if (!isSessionValid()) return interrupted;
   if (seeds.length === 0) {

@@ -32,6 +32,8 @@ CBM 物理根
 - `PARTINDEX` 与 `DEV_SUBDEVICE` 是语义投影，不产生第二个几何 seed；身份通过 `OBJECTMODELPOINTER` 在真实子树内关联。
 - 源矩阵无效时保留原文和“位置待确认”诊断，不自动居中或拟合。
 
+DEV parser 对错误长度、空值、非有限数、非仿射/退化矩阵和同块冲突值保留路径、行号与原值；缺失矩阵仍按约定使用单位阵。可显示来源按单位阵降级时，GLB 诊断与缓存模板 metadata 保留问题，状态为 partial，并显示“位置待确认”。引用槽位有歧义时不选择任意目标；因此没有可用几何的来源按 source-invalid 失败，不能保存为正常 empty。该检查仅针对读取中已有的 16 项矩阵和字段，不增加顶点审计或全文件 hash。
+
 ## 模板与放置
 
 模板由 Entity、DEV/SUBDEVICE、PHM 逐边 TransformMatrix 和 primitive 组成，尺寸/平移原始单位为 mm。场景统一 `0.001` 缩放到米。

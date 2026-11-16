@@ -71,6 +71,8 @@ bootstrap
 
 `app/presentationBindings` 将 DOM 句柄、展示回调和惰性视图加载器注入 services；services 不直接值导入 ui。Viewer 使用 `shared/viewerState`、会话和选择契约，不引用 AppState。
 
+独立设备打开使用显式 `EquipmentPresentationPort`：服务提交工程身份、导航树、选择回调与会话 signal，UI 的 `equipmentProjectView` 负责工程栏、导航 DOM、搜索、空态及设备状态栏；端口返回仅属于该视图实例的释放器。旧释放器不能移除新导航。设备运行时不访问 DOM 或 `loadPresentation`，边界脚本单独禁止其退回通用 UI 模块加载器和旧 DOM 适配器。通用加载遮罩仍使用既有 `gimOpenCore` 入口；其他运行面的展示迁移见开放问题。
+
 `AppState` 只持有会话、请求和已发布结果；工程实体、导航、几何目录的构建由服务层启动，UI 通过订阅/回调刷新。工程切换后，旧 Worker、旧请求和旧投影必须释放或拒绝提交。
 
 ## 边界检查

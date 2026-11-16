@@ -1,10 +1,10 @@
 import type {EntryIndex} from '../entryResolver.js';
 import type {SourceDocument} from './sourceDocuments.js';
+import {sourceScalar, sourceReferenceFields, type SourceField} from '../sourceDocument.js';
 import type {SourceGeometryOccurrenceCatalog} from './geometryOccurrences.js';
 import {isUsableAffineMatrix} from '../geometry/affineMatrix.js';
 
 const identity=()=>[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1];
-const scalarKeys=new Set(['TRANSFORMMATRIX','OBJECTMODELPOINTER','ENTITYNAME','SYMBOLNAME','NAME']);
 interface DevTree {path:string;children:DevTree[]}
 interface Scope {roots:DevTree[];matches:Map<string,DevTree[]>;indexed?:boolean}
 /** Physical references only. Does not create SourceRecords, aliases, attributes,
@@ -18,11 +18,15 @@ export async function extractPhysicalOccurrences(input:{entryIndex:EntryIndex;re
       const target=input.entryIndex.resolve(field.value,owner);return target?[target]:[];
     }));
   };
-  const scalarFields=new WeakMap<SourceDocument,Map<string,string>>();
+  const ambiguous=(doc:SourceDocument,key:string,fields:readonly SourceField[],context=doc.path)=>{
+    catalog.diagnostics.push({sourceContextId:context,documentPath:doc.path,reason:'ambiguous-source-reference',field:key,
+      lines:fields.flatMap(field=>field.line==null?[]:[field.line]),values:fields.map(field=>field.value),
+      candidates:[...new Set(fields.flatMap(field=>[...input.entryIndex.candidates(field.value,doc.path)]))]});
+  };
   const scalar=(doc:SourceDocument,key:string)=>{
-    let fields=scalarFields.get(doc);
-    if(!fields){fields=new Map();for(const field of doc.fields){const key=field.keys[0].toUpperCase();if(scalarKeys.has(key)&&!fields.has(key))fields.set(key,field.value);}scalarFields.set(doc,fields);}
-    return fields.get(key)??'';
+    const result=sourceScalar(doc,key);
+    if(result.status==='ambiguous')ambiguous(doc,key,result.fields);
+    return result.value;
   };
   let count=0,lastYield=performance.now();
   const max=options.maxOccurrences??500_000,maxDepth=options.maxDepth??128;
@@ -48,7 +52,7 @@ export async function extractPhysicalOccurrences(input:{entryIndex:EntryIndex;re
     if(check(depth))await new Promise<void>(resolve=>setTimeout(resolve,0));
     if(ancestors.has(path)){catalog.diagnostics.push({sourceContextId:path,documentPath:path,reason:'source-cycle'});return null;}
     const doc=await read(path,path);if(!doc)return null;
-    const edges=doc.fields.filter(p=>/^SUBDEVICE\d+$/i.test(p.keys[0])&&/\.dev$/i.test(p.value));
+    const edges=sourceReferenceFields(doc,/^SUBDEVICE\d+$/i,(key,fields)=>ambiguous(doc,key,fields)).filter(p=>/\.dev$/i.test(p.value));
     const next=new Set(ancestors);next.add(path);
     const node:DevTree={path,children:[]};
     for(let i=0;i<edges.length;i++){
@@ -73,7 +77,8 @@ export async function extractPhysicalOccurrences(input:{entryIndex:EntryIndex;re
     return scope.matches.get(path)??[];
   };
   const placement=(doc:SourceDocument,parent:number[],context:string)=>{
-    const raw=scalar(doc,'TRANSFORMMATRIX');let local=identity();
+    const matrixField=sourceScalar(doc,'TRANSFORMMATRIX'),raw=matrixField.value;let local=identity();
+    if(matrixField.status==='ambiguous')catalog.diagnostics.push({sourceContextId:context,documentPath:doc.path,reason:'invalid-source-matrix',field:'TRANSFORMMATRIX',values:matrixField.fields.map(field=>field.value),lines:matrixField.fields.flatMap(field=>field.line==null?[]:[field.line])});
     if(raw.trim()){
       const parts=raw.split(','),values=parts.map(part=>Number(part.trim()));
       if(parts.every(part=>part.trim())&&isUsableAffineMatrix(values))local=values;
@@ -88,7 +93,7 @@ export async function extractPhysicalOccurrences(input:{entryIndex:EntryIndex;re
     if(check(depth))await new Promise<void>(resolve=>setTimeout(resolve,0));
     if(ancestors.has(path)){catalog.diagnostics.push({sourceContextId:id,documentPath:path,reason:'source-cycle'});return;}
     const doc=await read(path,id);if(!doc){if(depth===0)throw Error('Physical project source unavailable');return;}
-    const edges=doc.fields.filter(p=>/^(?:SUBSYSTEM\d*|SUBDEVICE\d+)$/i.test(p.keys[0])&&/\.cbm$/i.test(p.value));
+    const edges=sourceReferenceFields(doc,/^(?:SUBSYSTEM\d*|SUBDEVICE\d+)$/i,(key,fields)=>ambiguous(doc,key,fields,id)).filter(p=>/\.cbm$/i.test(p.value));
     prefetch(path,edges);
     let matrix:number[]|undefined;
     const placed=()=>matrix??=placement(doc,parent,id);

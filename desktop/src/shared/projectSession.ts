@@ -1,20 +1,23 @@
 /** 工程异步任务携带的不可变身份快照。 */
-export interface ProjectLoadSession {
-  generation: number;
-  projectId: number | null;
-  sourceSha256: string | null;
+export interface ProjectSessionIdentity {
+  readonly generation: number;
+  readonly projectId: number | null;
+  readonly sourceSha256: string | null;
   /** 创建快照时的几何批次 token；可在同一工程内递增。 */
-  geometryToken: number;
+  readonly geometryToken: number;
 }
+declare const projectLoadSession: unique symbol;
+/** Only AppState mints this commit capability; Worker DTOs carry identity only. */
+export interface ProjectLoadSession extends ProjectSessionIdentity { readonly [projectLoadSession]: true }
 
 export interface SessionOwner {
   projectGeneration: number; currentProjectId: number | null; currentSourceSha256: string | null; geometryLoadToken: number;
 }
-export function isCurrentProject(owner: Pick<SessionOwner, 'projectGeneration' | 'currentProjectId' | 'currentSourceSha256'>, session: ProjectLoadSession): boolean {
+export function isCurrentProject(owner: Pick<SessionOwner, 'projectGeneration' | 'currentProjectId' | 'currentSourceSha256'>, session: ProjectSessionIdentity): boolean {
   return owner.projectGeneration === session.generation && owner.currentProjectId === session.projectId
     && owner.currentSourceSha256 === session.sourceSha256;
 }
-export function isCurrentGeometry(owner: SessionOwner, session: ProjectLoadSession): boolean {
+export function isCurrentGeometry(owner: SessionOwner, session: ProjectSessionIdentity): boolean {
   return isCurrentProject(owner, session) && owner.geometryLoadToken === session.geometryToken;
 }
 

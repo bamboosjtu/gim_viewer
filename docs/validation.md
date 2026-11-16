@@ -73,6 +73,8 @@
 
 ## 自动验证
 
+原生命令线程门禁随桌面 `cargo test --lib` 执行，亦可用 `cargo test --manifest-path desktop/src-tauri/Cargo.toml --lib command_registry --locked` 定向运行。它对照桌面/Android 注册表检查 async 工作入口、spawn_blocking 范围和内存取消例外；回归另外覆盖排队后的源替换/线路 session 替换、旧解压预检、读锁期间取消、文件授权与 SHA、任务 panic 后恢复。这些检查证明线程与提交契约，不证明真实磁盘吞吐、WebView 响应或性能收益。Android 主机侧库测试不替代真机验收。
+
 远程 CI 仅运行不依赖工程样本的单元测试、静态检查和构建；真实与合成工程样本、九工程对照和性能矩阵均不纳入 CI。命令语法、环境和工作区约定见[开发指南](development.md)。
 
 ### 测试组织

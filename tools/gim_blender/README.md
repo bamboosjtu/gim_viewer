@@ -65,6 +65,8 @@ GUI、转换器和 HTTP 服务分别独立。服务读取程序旁 `demo/` 的�
 
 漫游保留全量当前策略下的模型、碰撞和门交互。静态矩阵缓存、解码完成后释放 Draco 线程及低帧率物理分步只处理运行时开销；不通过删模型或降低覆盖率制造性能收益。
 
+楼梯、台阶和踏步的源踏面在转换时写入楼面导航，人物随实际踏面升降。除了 IFC 楼梯类型，也识别“双跑U型楼梯”等代理对象名称；楼梯栏杆、扶手继续作为身体碰撞物。名称只解释当前来源对象，不用于跨对象绑定或猜测放置位置。
+
 ## 开发与打包
 
 Windows x64、Python 3.12、Node 22+。构建入口：
@@ -88,6 +90,7 @@ node tools/gim_blender/server/server.cjs --data <数据目录> --runtime tools/g
 # 先将 TEMP/TMP/TMPDIR 指向已创建的工作区临时目录
 .\tools\gim_blender\.venv\Scripts\python.exe -m unittest discover -s tools/gim_blender/tests/unit -v
 node tools/gim_blender/tests/unit/test_runtime.cjs
+node tools/gim_blender/assets/scripts/ifc_navigation_roles.test.cjs
 node tools/gim_blender/server/server.test.cjs <工作区暂存目录>
 ```
 

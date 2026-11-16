@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - 'desktop/**'
+      - 'app/src-tauri/**'
       - 'tools/gim_element/**'
       - 'packages/**'
       - 'crates/**'
@@ -14,6 +15,7 @@ on:
   pull_request:
     paths:
       - 'desktop/**'
+      - 'app/src-tauri/**'
       - 'tools/gim_element/**'
       - 'packages/**'
       - 'crates/**'
@@ -99,6 +101,8 @@ jobs:
           cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --manifest-path ../crates/gim-native-core/Cargo.toml --locked
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --manifest-path ../app/src-tauri/Cargo.toml --lib --locked
 
       - name: Run frontend unit tests with pure-layer coverage gates
         run: npm run test:coverage

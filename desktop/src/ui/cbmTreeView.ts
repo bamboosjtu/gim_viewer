@@ -24,6 +24,7 @@ export function renderCbmTreeUI(
   node: CbmNode,
   parentEl: HTMLElement,
   onNodeClick: (node: CbmNode) => void,
+  signal?: AbortSignal,
 ): void {
   const nodeEl = document.createElement('div');
   nodeEl.className = 'tree-node';
@@ -45,6 +46,7 @@ export function renderCbmTreeUI(
   label.textContent = getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries);
   // title 提供详细路径信息（CBM 真实节点显示 CBM 路径，DEV 虚拟节点显示 DEV 路径）
   const tooltipParts: string[] = [node.path];
+  if(node.sourceDiagnostics?.length)tooltipParts.push(`来源待确认：${node.sourceDiagnostics.map(issue=>issue.kind==='read-failed'?'读取失败':issue.kind==='invalid-source-matrix'?'矩阵无效':`字段 ${issue.field} 有歧义`).join('；')}`);
   if (node.devSymbolName) tooltipParts.push(`设备名: ${node.devSymbolName}`);
   if (node.devType) tooltipParts.push(`类型: ${node.devType}`);
   if (node.devPath) tooltipParts.push(`DEV: ${node.devPath}`);
@@ -65,7 +67,7 @@ export function renderCbmTreeUI(
     toggle.classList.toggle('expanded', expanded);
     childrenEl.classList.toggle('expanded', expanded);
     if (expanded && !childrenRendered) {
-      for (const child of node.children) renderCbmTreeUI(state, child, childrenEl, onNodeClick);
+      for (const child of node.children) renderCbmTreeUI(state, child, childrenEl, onNodeClick, signal);
       childrenRendered = true;
     }
   };
@@ -73,19 +75,19 @@ export function renderCbmTreeUI(
     // Expanding the tree must not select/load the node.
     event.stopPropagation();
     setExpanded(!expanded);
-  });
+  }, {signal});
   row.addEventListener('click', () => {
     document.querySelectorAll('.tree-row.selected').forEach(r => r.classList.remove('selected'));
     row.classList.add('selected');
     onNodeClick(node);
     if (node.children.length > 0) setExpanded(!expanded);
-  });
+  }, {signal});
   row.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       row.click();
     }
-  });
+  }, {signal});
   parentEl.appendChild(nodeEl);
 }
 
@@ -142,7 +144,7 @@ function findByPath(root: CbmNode | null, path: string): CbmNode | null {
 }
 
 /** 选中指定 path 的树行（未渲染的懒加载节点静默跳过） */
-function selectCbmTreeRow(path: string): void {
+export function selectCbmTreeRow(path: string): void {
   const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(path) : path.replace(/"/g, '\\"');
   const row = document.querySelector<HTMLElement>(`.tree-row[data-node-path="${escaped}"]`);
   if (!row) return;

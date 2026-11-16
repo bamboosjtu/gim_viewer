@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SubstationBackgroundCoordinator } from '../substationBackgroundRuntime.js';
 import * as THREE from 'three';
-import type { AppState } from '../../app/state.js';
+import { AppState } from '../../app/state.js';
 import type { SourceGeometryOccurrence } from '../../gim/engineering/geometryOccurrences.js';
 import type { GeometryCacheManifestStatus } from '@desktop/database.js';
 import {
@@ -41,16 +41,7 @@ function validGlb(size = 12): Uint8Array {
 }
 
 function makeState(projectId = 1): AppState {
-  return {
-    currentProjectId: projectId,
-    currentSourceSha256: 'sha-test',
-    projectGeneration: 1,
-    geometryLoadToken: 1,
-    modRootGroup: null,
-    stlRootGroup: null,
-    loadedXmlModGroups: new Map<string, THREE.Group>(),
-    projectSourceToViewerMatrix: null,
-  } as unknown as AppState;
+  const state=new AppState();state.activateProject(projectId,'sha-test');return state;
 }
 
 function manifest(entries: Array<{ entry_path: string; status: GeometryCacheManifestStatus; size: number }>) {
@@ -472,12 +463,7 @@ describe('DEV GLB fast path v3', () => {
         generation: 1,
         projectId: 1,
         sourceSha256: 'sha-test',
-        session: {
-          generation: 1,
-          projectId: 1,
-          sourceSha256: 'sha-test',
-          geometryToken: 1,
-        },
+        session: state.captureProjectSession(),
       },
       deps,
     );
@@ -529,12 +515,7 @@ describe('DEV GLB fast path v3', () => {
         generation: 1,
         projectId: 1,
         sourceSha256: 'sha-test',
-        session: {
-          generation: 1,
-          projectId: 1,
-          sourceSha256: 'sha-test',
-          geometryToken: 1,
-        },
+        session: state.captureProjectSession(),
       },
       {
         readGeometryCacheManifest: vi.fn(async () => manifest([
@@ -583,12 +564,7 @@ describe('DEV GLB fast path v3', () => {
       ['pHm/Main.PHM', phmFile],
       ['mOd/Main.MOD', modFile],
     ]);
-    const session = {
-      generation: 1,
-      projectId: 1,
-      sourceSha256: 'sha-test',
-      geometryToken: 1,
-    };
+    const session = state.captureProjectSession();
     const nodes = [
       seedWithTranslation('CBM/p1.cbm', 'DEV/parent.dev', 0),
       seedWithTranslation('CBM/p2.cbm', 'dev/PARENT.DEV', 1000),
@@ -663,12 +639,7 @@ describe('DEV GLB fast path v3', () => {
     state.modRootGroup = new THREE.Group();
     state.modRootGroup.add(childGlb);
     state.loadedXmlModGroups.set('dev:DEV/child.dev#CBM/child.cbm', childGlb);
-    const session = {
-      generation: 1,
-      projectId: 1,
-      sourceSha256: 'sha-test',
-      geometryToken: 1,
-    };
+    const session = state.captureProjectSession();
     const profile = emptyProfileForTest();
     const result = await loadScopedRawFallbackGeometry(
       state,

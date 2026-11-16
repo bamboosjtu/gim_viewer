@@ -5,17 +5,50 @@ use std::{path::PathBuf, sync::{Arc, atomic::{AtomicBool, Ordering}}};
 use tauri::{Emitter, Manager};
 #[derive(Clone)]
 struct Store { root: PathBuf, cancelled: Arc<AtomicBool>, busy: Arc<AtomicBool> }
+struct ImportLease(Arc<AtomicBool>);
+impl Drop for ImportLease {
+    fn drop(&mut self) { self.0.store(false, Ordering::Release); }
+}
+#[cfg(test)]
+mod threading_tests {
+    use super::*;
+    #[test]
+    fn import_busy_lease_releases_on_failure_without_resetting_cancellation() {
+        let busy=Arc::new(AtomicBool::new(true));let cancelled=Arc::new(AtomicBool::new(true));
+        let held=busy.clone();
+        let _=std::panic::catch_unwind(move || {let _lease=ImportLease(held);panic!("import failed");});
+        assert!(!busy.load(Ordering::Acquire));assert!(cancelled.load(Ordering::Acquire));
+    }
+}
 #[tauri::command]
-fn list_projects(store: tauri::State<Store>) -> Vec<storage::ProjectMeta> { storage::list(&store.root).into_iter().filter(|m| !m.parser_version.is_empty()).collect() }
+async fn list_projects(store: tauri::State<'_, Store>) -> Result<Vec<storage::ProjectMeta>, String> {
+    let root = store.root.clone();
+    tauri::async_runtime::spawn_blocking(move || Ok(storage::list(&root).into_iter().filter(|m| !m.parser_version.is_empty()).collect()))
+        .await.map_err(|error| error.to_string())?
+}
 #[tauri::command]
 async fn prepare_project(app: tauri::AppHandle, store: tauri::State<'_, Store>, input: storage::ImportFile) -> Result<storage::Prepared, String> {
     let s = store.inner().clone();
-    if s.busy.swap(true, Ordering::AcqRel) { storage::discard(&s.root, &input.path)?; return Err("已有导入正在进行，请稍后重试".into()); }
+    if s.busy.swap(true, Ordering::AcqRel) {
+        return tauri::async_runtime::spawn_blocking(move || {
+            storage::discard(&s.root, &input.path)?;
+            Err("已有导入正在进行，请稍后重试".into())
+        }).await.map_err(|error| error.to_string())?;
+    }
     s.cancelled.store(false, Ordering::Relaxed);
-    tauri::async_runtime::spawn_blocking(move || { let result = storage::prepare(&s.root, input, &s.cancelled, |stage, done, total| { let _ = app.emit("import-progress", serde_json::json!({"stage":stage,"done":done,"total":total})); }); s.busy.store(false, Ordering::Release); result }).await.map_err(|e| e.to_string())?
+    let lease = ImportLease(s.busy.clone());
+    tauri::async_runtime::spawn_blocking(move || {
+        let _lease = lease;
+        storage::prepare(&s.root, input, &s.cancelled, |stage, done, total| {
+            let _ = app.emit("import-progress", serde_json::json!({"stage":stage,"done":done,"total":total}));
+        })
+    }).await.map_err(|e| e.to_string())?
 }
 #[tauri::command]
-fn discard_import(store: tauri::State<Store>, path: String) -> Result<(), String> { storage::discard(&store.root, &path) }
+async fn discard_import(store: tauri::State<'_, Store>, path: String) -> Result<(), String> {
+    let root = store.root.clone();
+    tauri::async_runtime::spawn_blocking(move || storage::discard(&root, &path)).await.map_err(|error| error.to_string())?
+}
 #[tauri::command]
 fn cancel_import(store: tauri::State<Store>) { store.cancelled.store(true, Ordering::Relaxed); }
 #[tauri::command]
@@ -29,16 +62,21 @@ async fn read_source(store: tauri::State<'_, Store>, id: String, path: String) -
 #[tauri::command]
 async fn read_project_header(store: tauri::State<'_, Store>, id: String) -> Result<Vec<u8>, String> { let root = store.root.clone(); tauri::async_runtime::spawn_blocking(move || storage::header(&root, &id)).await.map_err(|e| e.to_string())? }
 #[tauri::command]
-fn delete_project(store: tauri::State<Store>, id: String) -> Result<(), String> { storage::delete(&store.root, &id) }
+async fn delete_project(store: tauri::State<'_, Store>, id: String) -> Result<(), String> {
+    let root = store.root.clone();
+    tauri::async_runtime::spawn_blocking(move || storage::delete(&root, &id)).await.map_err(|error| error.to_string())?
+}
 #[tauri::command]
 async fn preview_cache(store: tauri::State<'_, Store>, id: String, key: String, data: Option<serde_json::Value>) -> Result<Option<serde_json::Value>, String> { let root = store.root.clone(); tauri::async_runtime::spawn_blocking(move || storage::preview(&root, &id, &key, data)).await.map_err(|e| e.to_string())? }
 #[tauri::command]
-fn get_settings(store: tauri::State<Store>) -> Settings {
-    settings::load(&store.root)
+async fn get_settings(store: tauri::State<'_, Store>) -> Result<Settings, String> {
+    let root = store.root.clone();
+    tauri::async_runtime::spawn_blocking(move || Ok(settings::load(&root))).await.map_err(|error| error.to_string())?
 }
 #[tauri::command]
-fn save_settings(store: tauri::State<Store>, settings: Settings) -> Result<(), String> {
-    settings::save(&store.root, settings)
+async fn save_settings(store: tauri::State<'_, Store>, settings: Settings) -> Result<(), String> {
+    let root = store.root.clone();
+    tauri::async_runtime::spawn_blocking(move || settings::save(&root, settings)).await.map_err(|error| error.to_string())?
 }
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -56,6 +94,6 @@ pub fn run() {
 
 #[cfg(test)]
 fn workspace_test_temp() -> std::path::PathBuf {
-    let root=std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.tmp/tests/native");
+    let root=std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tmp/tests/mobile-native");
     std::fs::create_dir_all(&root).expect("workspace test directory must be writable");root
 }

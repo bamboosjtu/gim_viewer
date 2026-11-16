@@ -38,6 +38,7 @@ function flattenCbmTree(
   sortOrder: number,
   out: CbmNodePayload[],
 ): void {
+  if (node.sourceDiagnostics?.length) throw new Error(`CBM/DEV 来源不完整或有歧义，拒绝发布完整索引: ${node.path}`);
   out.push({
     raw_properties_json: node.rawProperties ? JSON.stringify(node.rawProperties) : null,
     node_key: node.path,

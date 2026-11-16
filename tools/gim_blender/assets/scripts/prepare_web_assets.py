@@ -119,7 +119,7 @@ map_data = {
 
 scene = {
     'version': 4,
-    'buildVersion': '2026.11.15-composite-nav-v6',
+    'buildVersion': '2026.11.16-stairs-v1',
     'coordinateSystem': 'source-z-up-metres-v2',
     'title': title,
     'projectInfo': identity,

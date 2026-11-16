@@ -17,13 +17,15 @@ function navigationRole(type, name = '', objectType = '', box = null) {
   const patterns=[
     ['roof',/建筑屋面|建筑屋顶|PBStructRoof|\broof\b/i],
     ['floor',/建筑楼板|建筑地板|建筑地坪|PBStructSlab|\bfloor(?:ing)?\b|\bslab\b/i],
-    ['stairs',/建筑楼梯|建筑台阶|PBStructStair|\bstair/i],
+    // Exporters also use names such as 双跑U型楼梯 and 混凝土台阶.
+    // Keep railings separate, and avoid treating 楼梯间墙 as a stair surface.
+    ['railing',/建筑栏杆|楼梯栏杆|楼梯扶手|PBStructRailing|\brailing\b/i],
+    ['stairs',/建筑楼梯|建筑台阶|(?:楼梯|台阶|踏步)(?=\s|$|[（(#_\-]|\d)|PBStructStair|\bstair/i],
     ['ramp',/建筑坡道|斜坡道|\bramp\b/i],
     ['wall',/建筑墙|防爆墙|防火墙|百叶墙|围护墙|幕墙|PBStructWall|\bwall\b/i],
     ['column',/建筑柱|PBStructColumn|\bcolumn\b/i],
     ['beam',/PBStructBeam|建筑梁|\bbeam\b/i],
     ['window',/建筑窗定位|建筑窗|PBArchWindow|\bwindow\b/i],
-    ['railing',/建筑栏杆|PBStructRailing|\brailing\b/i],
     ['ground',/^(?:广场|道路|场坪|站区地面|地面)(?:\s|$)|\b(?:pavement|site ground)\b/i],
   ];
   for(const [role,re] of patterns)if(re.test(text))return {role,evidence:'proxy-object-label'};

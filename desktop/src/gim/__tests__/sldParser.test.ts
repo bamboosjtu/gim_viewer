@@ -29,6 +29,12 @@ const SAMPLE_SLD = `<?xml version="1.0" encoding="utf-8"?>
 </svg>`;
 
 describe('parseSld', () => {
+  it('distinguishes malformed, empty and unsupported documents',()=>{
+    expect(parseSld('<svg>','bad.sld')).toMatchObject({status:'failed',diagnostics:[{code:'invalid-xml',path:'bad.sld'}]});
+    expect(parseSld('')).toMatchObject({status:'empty',diagnostics:[]});
+    expect(parseSld('<OTHER/>')).toMatchObject({status:'unsupported'});
+    expect(parseSld('<svg/>')).toMatchObject({status:'empty'});
+  });
   it('解析 demo 样本：DLT1/2023 版本', () => {
     const doc = parseSld(SAMPLE_SLD);
     expect(doc.version).toBe('DLT1');

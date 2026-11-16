@@ -10,7 +10,8 @@
 
 import * as THREE from 'three';
 import {invalidGeometryBounds} from '../viewer/geometryBounds.js';
-import type { AppState, ProjectLoadSession } from '../app/state.js';
+import type { AppState } from '../app/state.js';
+import type { ProjectSessionIdentity } from '../shared/projectSession.js';
 
 export interface DevGlbParsedAsset {
   scene: THREE.Group;
@@ -233,7 +234,7 @@ export class DevGlbTemplate {
   constructor(
     readonly devPath: string,
     readonly scene: THREE.Group,
-    readonly session?: ProjectLoadSession,
+    readonly session?: ProjectSessionIdentity,
   ) {
     if(!preparedInspections.has(scene))validateDevGlbTemplate({scene});
     const inspection=preparedInspections.get(scene)!;preparedInspections.delete(scene);
@@ -259,7 +260,7 @@ export class DevGlbTemplate {
 }
 
 export interface DevGlbTemplatePoolOptions {
-  session?: ProjectLoadSession;
+  session?: ProjectSessionIdentity;
   isCurrent?: () => boolean;
   parse: (devPath: string, bytes: Uint8Array) => Promise<DevGlbParsedAsset | null>;
 }
@@ -282,7 +283,7 @@ export class DevGlbTemplatePool {
 
   constructor(private readonly options: DevGlbTemplatePoolOptions) {}
 
-  matchesSession(session: ProjectLoadSession): boolean {
+  matchesSession(session: ProjectSessionIdentity): boolean {
     const own = this.options.session;
     if (!own) return true;
     return own.generation === session.generation
@@ -419,7 +420,7 @@ export function attachDevGlbTemplatePool(root: THREE.Group, pool: DevGlbTemplate
 
 export function getDevGlbTemplatePool(
   root: THREE.Group | null | undefined,
-  session?: ProjectLoadSession,
+  session?: ProjectSessionIdentity,
 ): DevGlbTemplatePool | null {
   const value = root?.userData?.[DEV_GLB_TEMPLATE_POOL_USER_DATA_KEY];
   if (!(value instanceof DevGlbTemplatePool)) return null;
@@ -428,7 +429,7 @@ export function getDevGlbTemplatePool(
 
 export function disposeDevGlbTemplatePool(
   root: THREE.Group | null | undefined,
-  session?: ProjectLoadSession,
+  session?: ProjectSessionIdentity,
 ): void {
   const pool = getDevGlbTemplatePool(root, session);
   if (!pool) return;

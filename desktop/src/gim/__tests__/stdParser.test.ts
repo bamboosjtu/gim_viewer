@@ -22,6 +22,12 @@ const SAMPLE_STD = `<?xml version="1.0"?>
 </STD>`;
 
 describe('parseStd', () => {
+  it('distinguishes malformed, empty and unsupported documents',()=>{
+    expect(parseStd('<STD>','bad.std')).toMatchObject({status:'failed',diagnostics:[{code:'invalid-xml',path:'bad.std'}]});
+    expect(parseStd('')).toMatchObject({status:'empty',diagnostics:[]});
+    expect(parseStd('<OTHER/>')).toMatchObject({status:'unsupported'});
+    expect(parseStd('<STD/>')).toMatchObject({status:'empty'});
+  });
   it('解析 demo 样本：DLT1/2023 版本', () => {
     const doc = parseStd(SAMPLE_STD);
     expect(doc.version).toBe('DLT1');

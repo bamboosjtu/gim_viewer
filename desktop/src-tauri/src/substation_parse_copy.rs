@@ -1,4 +1,5 @@
 //! Optional cold-parse acceleration copy. Independent extracted files remain authoritative.
+use tauri::Manager;
 use crate::db::{cache_file_path, ensure_project_exists, DbState};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -74,30 +75,32 @@ impl ParseCopy {
 }
 
 #[tauri::command]
-pub fn read_substation_parse_copy(
+pub async fn read_substation_parse_copy(
     app: tauri::AppHandle,
-    db: tauri::State<'_, DbState>,
     project_id: i64,
 ) -> Result<tauri::ipc::Response, String> {
-    {
-        let conn = db.0.lock().map_err(|e| e.to_string())?;
-        ensure_project_exists(&conn, project_id)?;
-    }
-    // Reuse the production path/reparse checks; the caller cannot supply a pack path.
-    let path = cache_file_path(&app, project_id, COPY_PATH)?;
-    let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
-    let size = file.metadata().map_err(|e| e.to_string())?.len();
-    if size > (2 * MAX_COPY_BYTES + 4) as u64 {
-        return Err("parse copy exceeds limit".into());
-    }
-    use std::io::Read;
-    let mut bytes = Vec::with_capacity(size as usize);
-    std::io::Read::by_ref(&mut file)
-        .take((2 * MAX_COPY_BYTES + 5) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|e| e.to_string())?;
-    if bytes.len() as u64 != size {
-        return Err("parse copy changed while reading".into());
-    }
-    Ok(tauri::ipc::Response::new(bytes))
+    crate::native_command::blocking("read_substation_parse_copy", move || {
+        let db = app.state::<DbState>();
+        {
+            let conn = db.0.lock().map_err(|e| e.to_string())?;
+            ensure_project_exists(&conn, project_id)?;
+        }
+        // Reuse the production path/reparse checks; the caller cannot supply a pack path.
+        let path = cache_file_path(&app, project_id, COPY_PATH)?;
+        let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+        let size = file.metadata().map_err(|e| e.to_string())?.len();
+        if size > (2 * MAX_COPY_BYTES + 4) as u64 {
+            return Err("parse copy exceeds limit".into());
+        }
+        use std::io::Read;
+        let mut bytes = Vec::with_capacity(size as usize);
+        std::io::Read::by_ref(&mut file)
+            .take((2 * MAX_COPY_BYTES + 5) as u64)
+            .read_to_end(&mut bytes)
+            .map_err(|e| e.to_string())?;
+        if bytes.len() as u64 != size {
+            return Err("parse copy changed while reading".into());
+        }
+        Ok(tauri::ipc::Response::new(bytes))
+    }).await
 }

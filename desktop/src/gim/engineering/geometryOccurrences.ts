@@ -1,5 +1,6 @@
 import type { EngineeringSourceGraph } from './sourceGraph.js';
 import { isUsableAffineMatrix } from '../geometry/affineMatrix.js';
+import {sourceScalar} from '../sourceDocument.js';
 
 /** Physical placement input. Neither an engineering entity nor a UI node. */
 export interface SourceGeometryOccurrence {
@@ -14,7 +15,7 @@ export interface SourceGeometryOccurrence {
 }
 export interface SourceGeometryOccurrenceCatalog {
   occurrences: SourceGeometryOccurrence[];
-  diagnostics: Array<{ sourceContextId: string; documentPath: string; reason: 'invalid-source-matrix' | 'invalid-cumulative-matrix' | 'source-read-failed' | 'source-cycle' | 'missing-source-reference' | 'ambiguous-source-reference' }>;
+  diagnostics: Array<{ sourceContextId: string; documentPath: string; field?:string; lines?:number[]; values?:string[]; candidates?:string[]; reason: 'invalid-source-matrix' | 'invalid-cumulative-matrix' | 'source-read-failed' | 'source-cycle' | 'missing-source-reference' | 'ambiguous-source-reference' }>;
 }
 const identity = () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 function multiply(a: readonly number[], b: readonly number[]): number[] {
@@ -37,8 +38,9 @@ export function collectSourceGeometryOccurrences(graph: EngineeringSourceGraph):
     if (!node || active.has(key)) throw Error('Invalid source occurrence graph for geometry placement');
     active.add(key);
     const parent = node.parentId ? placement(node.parentId) : identity();
-    const field = docs.get(node.documentPath)?.fields.find(field => field.keys[0].toUpperCase() === 'TRANSFORMMATRIX');
+    const doc=docs.get(node.documentPath), field=doc?sourceScalar(doc,'TRANSFORMMATRIX'):undefined;
     let local = identity();
+    if(field?.status==='ambiguous')diagnostics.push({sourceContextId:key,documentPath:node.documentPath,reason:'invalid-source-matrix',field:'TRANSFORMMATRIX',values:field.fields.map(row=>row.value),lines:field.fields.flatMap(row=>row.line==null?[]:[row.line])});
     if (field?.value.trim()) {
       const parts = field.value.split(','), values = parts.map(part => Number(part.trim()));
       if (parts.every(part => part.trim()) && isUsableAffineMatrix(values)) local = values;

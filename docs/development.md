@@ -41,6 +41,7 @@ npm run tauri:dev     # Tauri 开发窗口
 | `npm run check:version` | npm/Cargo 版本一致性；构建前自动执行 |
 | `npm run check:types` | TypeScript 检查（含测试替身的接口完整性） |
 | `npm run check:engineering-boundaries` | 纯领域、来源与 Viewer 边界检查 |
+| `cargo test --manifest-path src-tauri/Cargo.toml --lib command_registry --locked` | 桌面与 Android 命令注册表 AST 线程边界检查，无工程样本 |
 | `npm run sync:engineering-catalog` | 同步独立 JSON 词汇、工具配置副本和目录文档，不读取 XLSX |
 | `npm run check:engineering-catalog` | JSON 目录、词汇命名空间、独立工具数据副本及目录文档一致性 |
 
@@ -78,6 +79,7 @@ Windows CI 保持一个串行任务：版本、测量协议、验收工具、本
 ```powershell
 cargo check --manifest-path desktop/src-tauri/Cargo.toml
 cargo test --lib --manifest-path desktop/src-tauri/Cargo.toml
+cargo test --lib --manifest-path app/src-tauri/Cargo.toml
 cargo test --manifest-path crates/gim-native-core/Cargo.toml
 ```
 

@@ -7,6 +7,8 @@ export interface IfcEntry {
 
 /** CBM 层级树节点 */
 export interface CbmNode {
+  sourceDiagnostics?: import('./sourceDocument.js').SourceDiagnostic[];
+  sourceFields?: import('./sourceDocument.js').SourceField[];
   /** Original CBM fields; optional for virtual nodes. Source paths/values are not rewritten. */
   rawProperties?: Record<string, string>;
   path: string;

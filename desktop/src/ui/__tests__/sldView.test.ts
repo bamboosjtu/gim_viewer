@@ -4,6 +4,7 @@ import { AppState } from '../../app/state.js';
 
 function makeSld(): SldDocument {
   return {
+    status: 'ok', diagnostics: [],
     version: 'DLT1',
     soft: 'test',
     revision: '1',

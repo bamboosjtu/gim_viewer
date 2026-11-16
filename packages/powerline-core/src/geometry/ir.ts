@@ -544,7 +544,16 @@ export interface DevSubDeviceEntry {
  *
  * 详见 docs/schema/geometry-model.md。
  */
+export interface SourceDiagnostic {
+  kind: 'ambiguous-field' | 'read-failed' | 'invalid-source-matrix';
+  path: string;
+  field: string;
+  lines: number[];
+  values: string[];
+}
+
 export interface DevDocument {
+  sourceDiagnostics?: SourceDiagnostic[];
   /** DEV 文件路径（如 "DEV/abc.dev"） */
   devPath: string;
   /** BASEFAMILY 字段（.fam 文件名） */

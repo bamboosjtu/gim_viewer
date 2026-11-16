@@ -20,6 +20,26 @@ function triangleStl(points: number[][]): ArrayBuffer {
   return bytes;
 }
 
+it('carries invalid DEV placement evidence through cold compilation and warm diagnostic metadata',async()=>{
+  const {diagnosticFromSerialization}=await import('../../gim/geometry/geometryDiagnostics.js');
+  const {packDevArtifact,unpackDevArtifact}=await import('@desktop/devLodCache.js');
+  const files=new Map([
+    ['device.dev',file('SOLIDMODELS.NUM=1\nSOLIDMODEL0=body.phm\nTRANSFORMMATRIX0=bad','device.dev')],
+    ['body.phm',file('SOLIDMODELS.NUM=1\nSOLIDMODEL0=piece.stl','body.phm')],
+    ['piece.stl',new File([triangleStl([[0,0,0],[1000,0,0],[0,1000,0]])],'piece.stl')],
+  ]);
+  const result=await serializeDevToGlbDetailed('device.dev',files);
+  expect(result.status).toBe('partial');expect(result.bytes?.length).toBeGreaterThan(0);
+  expect(result.diagnostics.sourceDiagnostics?.[0]).toMatchObject({field:'TRANSFORMMATRIX0',lines:[3],values:['bad']});
+  const cached=unpackDevArtifact<{result:typeof result}>('template',packDevArtifact('template',{result}));
+  expect(cached).not.toBeNull();
+  const restored=diagnosticFromSerialization('device.dev',cached!.result.diagnostics,'warm');
+  expect(restored.status).toBe('partial');expect(restored.detail).toContain('位置待确认');
+  expect(restored.sourceDiagnostics).toEqual(result.diagnostics.sourceDiagnostics);
+  files.set('device.dev',file('SOLIDMODELS.NUM=1\nSOLIDMODEL0=body.phm\nSOLIDMODEL0=other.phm','device.dev'));
+  await expect(serializeDevToGlbDetailed('device.dev',files)).rejects.toBeInstanceOf(InvalidDevGeometryError);
+});
+
 it('shares repeated STL buffers while retaining occurrence identity, colors and exact affine node matrices', async () => {
   const matrices = [new THREE.Matrix4().set(1,.25,0,1200,0,1,.2,0,0,0,1,0,0,0,0,1),
     new THREE.Matrix4().makeScale(-1,2,1).setPosition(0,2000,0)];

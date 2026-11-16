@@ -4,7 +4,7 @@ import { WorkerRequests } from './workerRequests.js';
 import { decodeGimText } from '../shared/textDecode.js';
 /** Line Parser Worker v1 客户端与同步兼容回退。 */
 
-import type { ProjectLoadSession } from '../shared/projectSession.js';
+import type { ProjectSessionIdentity } from '../shared/projectSession.js';
 import { createLineParserCache } from '../gim/lineAttrParserCore.js';
 import { buildLineGimGraphFromTexts } from '../gim/lineCbmParserCore.js';
 import { parseLineAttributesFromCache, type LineAttributePayloadsCore } from '../gim/lineAttrParserCore.js';
@@ -28,7 +28,7 @@ const requestSessions = new Map<number,string>();
 const requests = new WorkerRequests<LineParserWorkerResult>(120_000, () => terminateLineParserWorker());
 let activeSessionKey: string | null = null;
 
-function toWorkerSession(session: ProjectLoadSession): LineParserWorkerSession {
+function toWorkerSession(session: ProjectSessionIdentity): LineParserWorkerSession {
   return {
     generation: session.generation,
     projectId: session.projectId,
@@ -119,7 +119,7 @@ function parseOnMainThread(files: LineParserWorkerFile[]): LineParserWorkerResul
  */
 export function parseLineInWorker(
   files: LineParserWorkerFile[],
-  session: ProjectLoadSession,
+  session: ProjectSessionIdentity,
 ): Promise<LineParserWorkerResult> {
   const workerInstance = ensureWorker();
   if (!workerInstance) return Promise.resolve(parseOnMainThread(files));

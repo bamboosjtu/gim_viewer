@@ -633,98 +633,101 @@ pub(super) fn substation_pack_contains(root: &Path, entry_path: &str, size: u64)
 /// 对两万多个 CBM/FAM/DEV 文件逐个 open。索引先在 Rust 侧解析，数据文件只
 /// 打开/读取一次；返回格式仍是 GIMR v1，因此 WebView 的 bytes/阶段埋点可复用。
 #[tauri::command]
-pub fn read_line_semantic_pack(
+pub async fn read_line_semantic_pack(
     app_handle: tauri::AppHandle,
     project_id: i64,
     entry_paths: Vec<String>,
 ) -> Result<tauri::ipc::Response, String> {
     let total_started = Instant::now();
-    {
-        let conn = app_handle.state::<DbState>();
-        let guard = conn
-            .0
-            .lock()
-            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
-        ensure_project_exists(&guard, project_id)?;
-    }
-    if entry_paths.len() > gim_native_core::extraction_limits().max_entries {
-        return Err("线路语义 pack 读取条目数超过安全上限".to_string());
-    }
-    let root = cache_project_root_for_batch(&app_handle, project_id)?;
-    let (index, pack_len) = read_line_semantic_pack_files(&root, false)?;
-    let pack_path = root.join(LINE_SEMANTIC_PACK_FILE);
-    // 只打开一次 pack，并按索引区间读取请求项；不要把整个 pack 复制到
-    // Rust 堆再切片。正常请求按 manifest 顺序到达，读取仍接近顺序 IO；
-    // 即使请求顺序被调用方改变，也只产生 seek，不会增加 IPC 次数或峰值内存。
-    let mut pack_file = stdfs::File::open(&pack_path)
-        .map_err(|e| format!("打开线路语义 pack 失败: {}", e))?;
+    crate::native_command::blocking("read_line_semantic_pack", move || {
 
-    let mut results = Vec::with_capacity(entry_paths.len());
-    let mut total_bytes: u64 = 0;
-    let mut hit_count: u32 = 0;
-    let mut resolve_ms = 0.0_f64;
-    let mut read_ms = 0.0_f64;
-    for requested_path in &entry_paths {
-        let resolve_started = Instant::now();
-        let resolved = validate_entry_path(requested_path)
-            .ok()
-            .and_then(|_| index.get(&normalize_cache_lookup_path(requested_path)));
-        resolve_ms += resolve_started.elapsed().as_secs_f64() * 1000.0;
-        let bytes = if let Some(entry) = resolved.filter(|entry| entry.packed) {
-            let end = entry
-                .offset
-                .checked_add(entry.size)
-                .ok_or_else(|| {
-                    semantic_error(
+        {
+            let conn = app_handle.state::<DbState>();
+            let guard = conn
+                .0
+                .lock()
+                .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+            ensure_project_exists(&guard, project_id)?;
+        }
+        if entry_paths.len() > gim_native_core::extraction_limits().max_entries {
+            return Err("线路语义 pack 读取条目数超过安全上限".to_string());
+        }
+        let root = cache_project_root_for_batch(&app_handle, project_id)?;
+        let (index, pack_len) = read_line_semantic_pack_files(&root, false)?;
+        let pack_path = root.join(LINE_SEMANTIC_PACK_FILE);
+        // 只打开一次 pack，并按索引区间读取请求项；不要把整个 pack 复制到
+        // Rust 堆再切片。正常请求按 manifest 顺序到达，读取仍接近顺序 IO；
+        // 即使请求顺序被调用方改变，也只产生 seek，不会增加 IPC 次数或峰值内存。
+        let mut pack_file = stdfs::File::open(&pack_path)
+            .map_err(|e| format!("打开线路语义 pack 失败: {}", e))?;
+
+        let mut results = Vec::with_capacity(entry_paths.len());
+        let mut total_bytes: u64 = 0;
+        let mut hit_count: u32 = 0;
+        let mut resolve_ms = 0.0_f64;
+        let mut read_ms = 0.0_f64;
+        for requested_path in &entry_paths {
+            let resolve_started = Instant::now();
+            let resolved = validate_entry_path(requested_path)
+                .ok()
+                .and_then(|_| index.get(&normalize_cache_lookup_path(requested_path)));
+            resolve_ms += resolve_started.elapsed().as_secs_f64() * 1000.0;
+            let bytes = if let Some(entry) = resolved.filter(|entry| entry.packed) {
+                let end = entry
+                    .offset
+                    .checked_add(entry.size)
+                    .ok_or_else(|| {
+                        semantic_error(
+                            "PACK_TRUNCATED",
+                            format!("线路语义 pack 条目偏移溢出: {}", requested_path),
+                        )
+                    })?;
+                if end > pack_len {
+                    return Err(semantic_error(
                         "PACK_TRUNCATED",
-                        format!("线路语义 pack 条目偏移溢出: {}", requested_path),
-                    )
-                })?;
-            if end > pack_len {
-                return Err(semantic_error(
-                    "PACK_TRUNCATED",
-                    format!("线路语义 pack 条目越界: {}", requested_path),
-                ));
-            }
-            let start = usize::try_from(entry.offset)
-                .map_err(|_| semantic_error("PACK_TRUNCATED", "线路语义 pack 条目偏移超过平台限制"))?;
-            let end = usize::try_from(end)
-                .map_err(|_| semantic_error("PACK_TRUNCATED", "线路语义 pack 条目末端超过平台限制"))?;
-            let mut data = vec![0u8; end - start];
-            use std::io::{Read, Seek, SeekFrom};
-            let read_started = Instant::now();
-            pack_file
-                .seek(SeekFrom::Start(entry.offset))
-                .map_err(|e| semantic_error("PACK_INVALID", format!("定位线路语义 pack 失败: {} — {}", requested_path, e)))?;
-            pack_file
-                .read_exact(&mut data)
-                .map_err(|e| semantic_error("PACK_TRUNCATED", format!("读取线路语义 pack 条目失败: {} — {}", requested_path, e)))?;
-            read_ms += read_started.elapsed().as_secs_f64() * 1000.0;
-            hit_count = hit_count.saturating_add(1);
-            total_bytes = total_bytes
-                .checked_add(data.len() as u64)
-                .ok_or_else(|| "线路语义 pack 读取总量溢出".to_string())?;
-            if total_bytes > gim_native_core::extraction_limits().max_total_uncompressed_bytes {
-                return Err("线路语义 pack 读取总量超过安全上限".to_string());
-            }
-            Some(data)
-        } else {
-            None
-        };
-        results.push(BatchCacheFileResult {
-            entry_path: requested_path.clone(),
-            bytes,
-        });
-    }
-    let out = encode_batch_cache_response(
-        results,
-        total_bytes,
-        hit_count,
-        read_ms,
-        resolve_ms,
-        total_started,
-    )?;
-    Ok(tauri::ipc::Response::new(out))
+                        format!("线路语义 pack 条目越界: {}", requested_path),
+                    ));
+                }
+                let start = usize::try_from(entry.offset)
+                    .map_err(|_| semantic_error("PACK_TRUNCATED", "线路语义 pack 条目偏移超过平台限制"))?;
+                let end = usize::try_from(end)
+                    .map_err(|_| semantic_error("PACK_TRUNCATED", "线路语义 pack 条目末端超过平台限制"))?;
+                let mut data = vec![0u8; end - start];
+                use std::io::{Read, Seek, SeekFrom};
+                let read_started = Instant::now();
+                pack_file
+                    .seek(SeekFrom::Start(entry.offset))
+                    .map_err(|e| semantic_error("PACK_INVALID", format!("定位线路语义 pack 失败: {} — {}", requested_path, e)))?;
+                pack_file
+                    .read_exact(&mut data)
+                    .map_err(|e| semantic_error("PACK_TRUNCATED", format!("读取线路语义 pack 条目失败: {} — {}", requested_path, e)))?;
+                read_ms += read_started.elapsed().as_secs_f64() * 1000.0;
+                hit_count = hit_count.saturating_add(1);
+                total_bytes = total_bytes
+                    .checked_add(data.len() as u64)
+                    .ok_or_else(|| "线路语义 pack 读取总量溢出".to_string())?;
+                if total_bytes > gim_native_core::extraction_limits().max_total_uncompressed_bytes {
+                    return Err("线路语义 pack 读取总量超过安全上限".to_string());
+                }
+                Some(data)
+            } else {
+                None
+            };
+            results.push(BatchCacheFileResult {
+                entry_path: requested_path.clone(),
+                bytes,
+            });
+        }
+        let out = encode_batch_cache_response(
+            results,
+            total_bytes,
+            hit_count,
+            read_ms,
+            resolve_ms,
+            total_started,
+        )?;
+        Ok(tauri::ipc::Response::new(out))
+    }).await
 }
 
 /// semantic pack full-read 的二进制 envelope。
@@ -775,116 +778,119 @@ fn encode_line_semantic_pack_full_header(
 /// 损坏会返回带前缀的错误，调用方必须让 semantic source cache 失效并重建，
 /// 不得退化成逐条读取后提交 partial Runtime。
 #[tauri::command]
-pub fn read_line_semantic_pack_all(
+pub async fn read_line_semantic_pack_all(
     app_handle: tauri::AppHandle,
     project_id: i64,
 ) -> Result<tauri::ipc::Response, String> {
     let total_started = Instant::now();
-    {
-        let conn = app_handle.state::<DbState>();
-        let guard = conn
-            .0
-            .lock()
-            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
-        ensure_project_exists(&guard, project_id)?;
-    }
-    let root = cache_project_root_for_batch(&app_handle, project_id)?;
-    let index_started = Instant::now();
-    let (index, pack_len) = read_line_semantic_pack_files(&root, true)?;
-    let index_ms = index_started.elapsed().as_secs_f64() * 1000.0;
-    // `resolveMs` covers all work after the index bytes have been validated and
-    // before any semantic payload is read: collecting entries from the lookup
-    // map, deterministic ordering, count/size arithmetic and response-size
-    // validation. Keep it separate from `readMs` so the latter represents only
-    // file seek/read operations.
-    let resolve_started = Instant::now();
-    let mut entries: Vec<LineSemanticPackEntry> = index.into_values().collect();
-    // HashMap 只用于大小写不敏感查找；full-read 使用稳定排序，避免不同
-    // Rust 进程的随机 hash seed 改变 Worker 输入/导航顺序。
-    entries.sort_by(|a, b| normalize_cache_lookup_path(&a.path).cmp(&normalize_cache_lookup_path(&b.path)));
-    let count = u32::try_from(entries.len())
-        .map_err(|_| semantic_error("INDEX_INVALID", "线路语义 pack 条目数溢出"))?;
-    let packed_count = entries.iter().filter(|entry| entry.packed).count();
-    let packed_count = u32::try_from(packed_count)
-        .map_err(|_| semantic_error("INDEX_INVALID", "线路语义 pack packed 条目数溢出"))?;
-    let packed_bytes = entries
-        .iter()
-        .filter(|entry| entry.packed)
-        .try_fold(0u64, |sum, entry| sum.checked_add(entry.size))
-        .ok_or_else(|| semantic_error("PACK_TRUNCATED", "线路语义 pack 总大小溢出"))?;
-    let response_overhead = entries.iter().try_fold(0u64, |sum, entry| {
-        let path_len = u64::try_from(entry.path.as_bytes().len()).ok()?;
-        sum.checked_add(4 + path_len + 1 + 8 + 8)
-    }).ok_or_else(|| semantic_error("INDEX_INVALID", "线路语义 pack 响应大小溢出"))?;
-    let expected_response = u64::try_from(LINE_SEMANTIC_FULL_HEADER)
-        .ok()
-        .and_then(|v| v.checked_add(response_overhead))
-        .and_then(|v| v.checked_add(packed_bytes))
-        .ok_or_else(|| semantic_error("PACK_INVALID", "线路语义 pack 响应大小溢出"))?;
-    if expected_response > MAX_LINE_SEMANTIC_FULL_RESPONSE_BYTES {
-        return Err(semantic_error(
-            "PACK_INVALID",
-            format!("线路语义 pack full response 超过安全上限（>{} bytes）", MAX_LINE_SEMANTIC_FULL_RESPONSE_BYTES),
-        ));
-    }
-    let resolve_ms = resolve_started.elapsed().as_secs_f64() * 1000.0;
-    let pack_path = root.join(LINE_SEMANTIC_PACK_FILE);
-    let mut pack_file = stdfs::File::open(&pack_path)
-        .map_err(|e| semantic_error("PACK_INVALID", format!("打开线路语义 pack 失败: {}", e)))?;
-    use std::io::{Read, Seek, SeekFrom};
-    let mut out = encode_line_semantic_pack_full_header(
-        count,
-        index_ms,
-        resolve_ms,
-        0.0,
-        packed_bytes,
-        packed_count,
-    );
-    let mut read_ms = 0.0_f64;
-    let mut encode_ms = 0.0_f64;
-    for entry in entries {
-        let path = entry.path.as_bytes();
-        let path_len = u32::try_from(path.len())
-            .map_err(|_| semantic_error("INDEX_INVALID", format!("线路语义 pack 路径过长: {}", entry.path)))?;
-        let data = if entry.packed {
-            let size = usize::try_from(entry.size)
-                .map_err(|_| semantic_error("PACK_TRUNCATED", format!("线路语义 pack 条目大小超过平台限制: {}", entry.path)))?;
-            let mut data = vec![0u8; size];
-            let read_started = Instant::now();
-            pack_file
-                .seek(SeekFrom::Start(entry.offset))
-                .map_err(|e| semantic_error("PACK_INVALID", format!("定位线路语义 pack 失败: {} — {}", entry.path, e)))?;
-            pack_file
-                .read_exact(&mut data)
-                .map_err(|e| semantic_error("PACK_TRUNCATED", format!("读取线路语义 pack 条目失败: {} — {}", entry.path, e)))?;
-            read_ms += read_started.elapsed().as_secs_f64() * 1000.0;
-            Some(data)
-        } else {
-            None
-        };
-        // 只把 envelope 拼装计入 encodeMs；entry 的 seek/read 已在 readMs
-        // 单独计时，避免阶段互相重叠导致性能报告误判瓶颈。
-        let encode_item_started = Instant::now();
-        out.extend_from_slice(&path_len.to_le_bytes());
-        out.extend_from_slice(path);
-        out.push(if entry.packed { LINE_SEMANTIC_FULL_FLAG_PACKED } else { 0 });
-        out.extend_from_slice(&entry.size.to_le_bytes());
-        if let Some(data) = data {
-            out.extend_from_slice(&(data.len() as u64).to_le_bytes());
-            out.extend_from_slice(&data);
-        } else {
-            out.extend_from_slice(&0u64.to_le_bytes());
+    crate::native_command::blocking("read_line_semantic_pack_all", move || {
+
+        {
+            let conn = app_handle.state::<DbState>();
+            let guard = conn
+                .0
+                .lock()
+                .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+            ensure_project_exists(&guard, project_id)?;
         }
-        encode_ms += encode_item_started.elapsed().as_secs_f64() * 1000.0;
-        let response_bytes = u64::try_from(out.len()).unwrap_or(u64::MAX);
-        if response_bytes > MAX_LINE_SEMANTIC_FULL_RESPONSE_BYTES {
-            return Err(semantic_error("PACK_INVALID", "线路语义 pack full response 超过安全上限"));
+        let root = cache_project_root_for_batch(&app_handle, project_id)?;
+        let index_started = Instant::now();
+        let (index, pack_len) = read_line_semantic_pack_files(&root, true)?;
+        let index_ms = index_started.elapsed().as_secs_f64() * 1000.0;
+        // `resolveMs` covers all work after the index bytes have been validated and
+        // before any semantic payload is read: collecting entries from the lookup
+        // map, deterministic ordering, count/size arithmetic and response-size
+        // validation. Keep it separate from `readMs` so the latter represents only
+        // file seek/read operations.
+        let resolve_started = Instant::now();
+        let mut entries: Vec<LineSemanticPackEntry> = index.into_values().collect();
+        // HashMap 只用于大小写不敏感查找；full-read 使用稳定排序，避免不同
+        // Rust 进程的随机 hash seed 改变 Worker 输入/导航顺序。
+        entries.sort_by(|a, b| normalize_cache_lookup_path(&a.path).cmp(&normalize_cache_lookup_path(&b.path)));
+        let count = u32::try_from(entries.len())
+            .map_err(|_| semantic_error("INDEX_INVALID", "线路语义 pack 条目数溢出"))?;
+        let packed_count = entries.iter().filter(|entry| entry.packed).count();
+        let packed_count = u32::try_from(packed_count)
+            .map_err(|_| semantic_error("INDEX_INVALID", "线路语义 pack packed 条目数溢出"))?;
+        let packed_bytes = entries
+            .iter()
+            .filter(|entry| entry.packed)
+            .try_fold(0u64, |sum, entry| sum.checked_add(entry.size))
+            .ok_or_else(|| semantic_error("PACK_TRUNCATED", "线路语义 pack 总大小溢出"))?;
+        let response_overhead = entries.iter().try_fold(0u64, |sum, entry| {
+            let path_len = u64::try_from(entry.path.as_bytes().len()).ok()?;
+            sum.checked_add(4 + path_len + 1 + 8 + 8)
+        }).ok_or_else(|| semantic_error("INDEX_INVALID", "线路语义 pack 响应大小溢出"))?;
+        let expected_response = u64::try_from(LINE_SEMANTIC_FULL_HEADER)
+            .ok()
+            .and_then(|v| v.checked_add(response_overhead))
+            .and_then(|v| v.checked_add(packed_bytes))
+            .ok_or_else(|| semantic_error("PACK_INVALID", "线路语义 pack 响应大小溢出"))?;
+        if expected_response > MAX_LINE_SEMANTIC_FULL_RESPONSE_BYTES {
+            return Err(semantic_error(
+                "PACK_INVALID",
+                format!("线路语义 pack full response 超过安全上限（>{} bytes）", MAX_LINE_SEMANTIC_FULL_RESPONSE_BYTES),
+            ));
         }
-    }
-    let total_ms = total_started.elapsed().as_secs_f64() * 1000.0;
-    out[25..33].copy_from_slice(&read_ms.to_le_bytes());
-    out[33..41].copy_from_slice(&encode_ms.to_le_bytes());
-    out[41..49].copy_from_slice(&total_ms.to_le_bytes());
-    let _ = pack_len;
-    Ok(tauri::ipc::Response::new(out))
+        let resolve_ms = resolve_started.elapsed().as_secs_f64() * 1000.0;
+        let pack_path = root.join(LINE_SEMANTIC_PACK_FILE);
+        let mut pack_file = stdfs::File::open(&pack_path)
+            .map_err(|e| semantic_error("PACK_INVALID", format!("打开线路语义 pack 失败: {}", e)))?;
+        use std::io::{Read, Seek, SeekFrom};
+        let mut out = encode_line_semantic_pack_full_header(
+            count,
+            index_ms,
+            resolve_ms,
+            0.0,
+            packed_bytes,
+            packed_count,
+        );
+        let mut read_ms = 0.0_f64;
+        let mut encode_ms = 0.0_f64;
+        for entry in entries {
+            let path = entry.path.as_bytes();
+            let path_len = u32::try_from(path.len())
+                .map_err(|_| semantic_error("INDEX_INVALID", format!("线路语义 pack 路径过长: {}", entry.path)))?;
+            let data = if entry.packed {
+                let size = usize::try_from(entry.size)
+                    .map_err(|_| semantic_error("PACK_TRUNCATED", format!("线路语义 pack 条目大小超过平台限制: {}", entry.path)))?;
+                let mut data = vec![0u8; size];
+                let read_started = Instant::now();
+                pack_file
+                    .seek(SeekFrom::Start(entry.offset))
+                    .map_err(|e| semantic_error("PACK_INVALID", format!("定位线路语义 pack 失败: {} — {}", entry.path, e)))?;
+                pack_file
+                    .read_exact(&mut data)
+                    .map_err(|e| semantic_error("PACK_TRUNCATED", format!("读取线路语义 pack 条目失败: {} — {}", entry.path, e)))?;
+                read_ms += read_started.elapsed().as_secs_f64() * 1000.0;
+                Some(data)
+            } else {
+                None
+            };
+            // 只把 envelope 拼装计入 encodeMs；entry 的 seek/read 已在 readMs
+            // 单独计时，避免阶段互相重叠导致性能报告误判瓶颈。
+            let encode_item_started = Instant::now();
+            out.extend_from_slice(&path_len.to_le_bytes());
+            out.extend_from_slice(path);
+            out.push(if entry.packed { LINE_SEMANTIC_FULL_FLAG_PACKED } else { 0 });
+            out.extend_from_slice(&entry.size.to_le_bytes());
+            if let Some(data) = data {
+                out.extend_from_slice(&(data.len() as u64).to_le_bytes());
+                out.extend_from_slice(&data);
+            } else {
+                out.extend_from_slice(&0u64.to_le_bytes());
+            }
+            encode_ms += encode_item_started.elapsed().as_secs_f64() * 1000.0;
+            let response_bytes = u64::try_from(out.len()).unwrap_or(u64::MAX);
+            if response_bytes > MAX_LINE_SEMANTIC_FULL_RESPONSE_BYTES {
+                return Err(semantic_error("PACK_INVALID", "线路语义 pack full response 超过安全上限"));
+            }
+        }
+        let total_ms = total_started.elapsed().as_secs_f64() * 1000.0;
+        out[25..33].copy_from_slice(&read_ms.to_le_bytes());
+        out[33..41].copy_from_slice(&encode_ms.to_le_bytes());
+        out[41..49].copy_from_slice(&total_ms.to_le_bytes());
+        let _ = pack_len;
+        Ok(tauri::ipc::Response::new(out))
+    }).await
 }

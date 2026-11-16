@@ -1,4 +1,9 @@
 mod db;
+mod native_command;
+#[cfg(test)]
+mod command_registry_tests;
+#[cfg(test)]
+mod native_io_tests;
 mod benchmark;
 mod tree_export;
 mod gim_extract;
@@ -189,114 +194,83 @@ mod file_dialog_commands {
     /// 模态窗口，但仍复用同一 canonicalize/扩展名/文件大小校验。发布版
     /// 保留命令签名但始终拒绝，避免页面注入路径扩大生产信任边界。
     #[tauri::command]
-    pub fn authorize_gim_file_path_for_dev(
-        access: tauri::State<'_, AuthorizedFilePaths>,
+    pub async fn authorize_gim_file_path_for_dev(
+        app_handle: tauri::AppHandle,
         path: String,
     ) -> Result<String, String> {
-        #[cfg(debug_assertions)]
-        {
-            return authorize_selected_path(&access, Path::new(&path), Some("gim"));
-        }
-        #[cfg(not(debug_assertions))]
-        {
-            let _ = (access, path);
-            Err("开发性能采集命令仅在 debug 构建可用".to_string())
-        }
+        crate::native_command::blocking("authorize_gim_file_path_for_dev", move || {
+            let access = app_handle.state::<AuthorizedFilePaths>();
+            #[cfg(debug_assertions)]
+            {
+                return authorize_selected_path(&access, Path::new(&path), Some("gim"));
+            }
+            #[cfg(not(debug_assertions))]
+            {
+                let _ = (access, path);
+                Err("开发性能采集命令仅在 debug 构建可用".to_string())
+            }
+
+        }).await
     }
 
     /// 后端 GIM 文件选择器，同时登记 canonical path 授权。
     #[tauri::command]
     pub async fn pick_gim_file_path(
         app_handle: tauri::AppHandle,
-        access: tauri::State<'_, AuthorizedFilePaths>,
     ) -> Result<Option<String>, String> {
-        let selected = tauri::async_runtime::spawn_blocking(move || {
-            app_handle
+        crate::native_command::blocking("pick_gim_file_path", move || {
+            let access=app_handle.state::<AuthorizedFilePaths>();
+            let selected = app_handle
                 .dialog()
                 .file()
                 .add_filter("GIM 文件", &["gim"])
-                .blocking_pick_file()
-        })
-        .await
-        .map_err(|e| format!("打开 GIM 文件对话框失败: {}", e))?;
-        let Some(selected) = selected else {
-            return Ok(None);
-        };
-        let path = selected
-            .into_path()
-            .map_err(|e| format!("获取 GIM 文件路径失败: {}", e))?;
-        Ok(Some(authorize_selected_path(&access, &path, Some("gim"))?))
+                .blocking_pick_file();
+            let Some(selected) = selected else {
+                return Ok(None);
+            };
+            let path = selected
+                .into_path()
+                .map_err(|e| format!("获取 GIM 文件路径失败: {}", e))?;
+            Ok(Some(authorize_selected_path(&access, &path, Some("gim"))?))
+        }).await
     }
 
     /// 后端 IFC 多选文件选择器，同时登记 canonical path 授权。
     #[tauri::command]
     pub async fn pick_ifc_file_paths(
         app_handle: tauri::AppHandle,
-        access: tauri::State<'_, AuthorizedFilePaths>,
     ) -> Result<Option<Vec<String>>, String> {
-        let selected = tauri::async_runtime::spawn_blocking(move || {
-            app_handle
+        crate::native_command::blocking("pick_ifc_file_paths", move || {
+            let access=app_handle.state::<AuthorizedFilePaths>();
+            let selected = app_handle
                 .dialog()
                 .file()
                 .add_filter("IFC 文件", &["ifc"])
-                .blocking_pick_files()
-        })
-        .await
-        .map_err(|e| format!("打开 IFC 文件对话框失败: {}", e))?;
-        let Some(selected) = selected else {
-            return Ok(None);
-        };
-        let mut paths = Vec::with_capacity(selected.len());
-        for file_path in selected {
-            let path = file_path
-                .into_path()
-                .map_err(|e| format!("获取 IFC 文件路径失败: {}", e))?;
-            paths.push(authorize_selected_path(&access, &path, Some("ifc"))?);
-        }
-        Ok(Some(paths))
+                .blocking_pick_files();
+            let Some(selected) = selected else {
+                return Ok(None);
+            };
+            let mut paths = Vec::with_capacity(selected.len());
+            for file_path in selected {
+                let path = file_path
+                    .into_path()
+                    .map_err(|e| format!("获取 IFC 文件路径失败: {}", e))?;
+                paths.push(authorize_selected_path(&access, &path, Some("ifc"))?);
+            }
+            Ok(Some(paths))
+        }).await
     }
 }
 
 #[tauri::command]
-fn get_file_info(
-    access: tauri::State<'_, AuthorizedFilePaths>,
+async fn get_file_info(
+    app_handle: tauri::AppHandle,
     path: String,
 ) -> Result<FileInfo, String> {
-    let p = require_authorized_path(&access, &path, None)?;
-    let meta = fs::metadata(&p).map_err(|e| e.to_string())?;
-    let name = p
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_default();
-
-    let modified = meta.modified().map_err(|e| e.to_string())?;
-    let modified_ms = modified
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
-
-    // 分块读取计算 sha256，避免一次性加载大文件到内存
-    let file = fs::File::open(&p).map_err(|e| e.to_string())?;
-    let mut reader = BufReader::with_capacity(8 * 1024 * 1024, file); // 8MB buffer
-    let mut hasher = Sha256::new();
-    let mut buf = vec![0u8; 8 * 1024 * 1024]; // 堆分配，避免栈溢出
-    loop {
-        let n = reader.read(&mut buf).map_err(|e| e.to_string())?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-    let hash = hasher.finalize();
-    let sha256 = format!("{:x}", hash);
-
-    Ok(FileInfo {
-        path: p.to_string_lossy().to_string(),
-        name,
-        size: meta.len(),
-        modified_ms,
-        sha256,
-    })
+    crate::native_command::blocking("get_file_info", move || {
+        let access=app_handle.state::<AuthorizedFilePaths>();
+        inspect_authorized_file(&access, &path)
+    }).await
 }
 
 /// 当前 Tauri 后端进程的驻留集大小（RSS）。
@@ -463,8 +437,9 @@ fn current_process_rss_bytes() -> Option<u64> {
 }
 
 #[tauri::command]
-fn get_process_memory() -> ProcessMemorySnapshot {
-    #[cfg(windows)]
+async fn get_process_memory() -> Result<ProcessMemorySnapshot, String> {
+    crate::native_command::blocking("get_process_memory", move || {
+#[cfg(windows)]
     let pid = current_process_id();
     #[cfg(not(windows))]
     let pid = std::process::id();
@@ -476,7 +451,7 @@ fn get_process_memory() -> ProcessMemorySnapshot {
         "tauri-process-unavailable".to_string()
     };
     let tree = process_tree_snapshot(pid);
-    ProcessMemorySnapshot {
+    Ok(ProcessMemorySnapshot {
         pid,
         rss_bytes: current_process_rss_bytes(),
         rss_source: source.clone(),
@@ -489,36 +464,43 @@ fn get_process_memory() -> ProcessMemorySnapshot {
         process_tree_available: tree.available,
         process_tree_source: tree.source,
         process_tree_reason: tree.reason,
-    }
+    })
+    }).await
 }
 
 /// 读取任意路径文件的原始字节。路径信任边界见上方 `get_file_info` 注释。
 #[tauri::command]
-fn read_file_bytes(
-    access: tauri::State<'_, AuthorizedFilePaths>,
+async fn read_file_bytes(
+    app_handle: tauri::AppHandle,
     path: String,
 ) -> Result<tauri::ipc::Response, String> {
-    let p = require_authorized_path(&access, &path, None)?;
-    let bytes = fs::read(p).map_err(|e| e.to_string())?;
-    Ok(tauri::ipc::Response::new(bytes))
+    crate::native_command::blocking("read_file_bytes", move || {
+        let access = app_handle.state::<AuthorizedFilePaths>();
+        let p = require_authorized_path(&access, &path, None)?;
+        let bytes = fs::read(p).map_err(|e| e.to_string())?;
+        Ok(tauri::ipc::Response::new(bytes))
+    }).await
 }
 
 /// Read a bounded prefix for source inspection without loading the archive.
 #[tauri::command]
-fn read_file_head(
-    access: tauri::State<'_, AuthorizedFilePaths>,
+async fn read_file_head(
+    app_handle: tauri::AppHandle,
     path: String,
     max_bytes: Option<u64>,
 ) -> Result<tauri::ipc::Response, String> {
-    let p = require_authorized_path(&access, &path, Some("gim"))?;
-    let requested = max_bytes.unwrap_or(MAX_SOURCE_HEAD_BYTES);
-    let limit = requested.min(MAX_SOURCE_HEAD_BYTES) as usize;
-    let file = fs::File::open(p).map_err(|e| e.to_string())?;
-    let mut bytes = Vec::with_capacity(limit);
-    file.take(limit as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|e| e.to_string())?;
-    Ok(tauri::ipc::Response::new(bytes))
+    crate::native_command::blocking("read_file_head", move || {
+        let access = app_handle.state::<AuthorizedFilePaths>();
+        let p = require_authorized_path(&access, &path, Some("gim"))?;
+        let requested = max_bytes.unwrap_or(MAX_SOURCE_HEAD_BYTES);
+        let limit = requested.min(MAX_SOURCE_HEAD_BYTES) as usize;
+        let file = fs::File::open(p).map_err(|e| e.to_string())?;
+        let mut bytes = Vec::with_capacity(limit);
+        file.take(limit as u64)
+            .read_to_end(&mut bytes)
+            .map_err(|e| e.to_string())?;
+        Ok(tauri::ipc::Response::new(bytes))
+    }).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -622,4 +604,43 @@ pub(crate) fn application_data_dir(app:&tauri::AppHandle)->Result<PathBuf,String
         if let Some(root)=option_env!("GIM_ACCEPTANCE_DATA_ROOT") {return Ok(PathBuf::from(root));}
         app.path().app_data_dir().map_err(|error|error.to_string())
     }
+}
+
+fn inspect_authorized_file(access: &AuthorizedFilePaths, path: &str) -> Result<FileInfo, String> {
+    let p = require_authorized_path(access, path, None)?;
+    let meta = fs::metadata(&p).map_err(|e| e.to_string())?;
+    let name = p
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    let modified = meta.modified().map_err(|e| e.to_string())?;
+    let modified_ms = modified
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+
+    // 分块读取计算 sha256，避免一次性加载大文件到内存
+    let file = fs::File::open(&p).map_err(|e| e.to_string())?;
+    let mut reader = BufReader::with_capacity(8 * 1024 * 1024, file); // 8MB buffer
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 8 * 1024 * 1024]; // 堆分配，避免栈溢出
+    loop {
+        let n = reader.read(&mut buf).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    let hash = hasher.finalize();
+    let sha256 = format!("{:x}", hash);
+
+    Ok(FileInfo {
+        path: p.to_string_lossy().to_string(),
+        name,
+        size: meta.len(),
+        modified_ms,
+        sha256,
+    })
+
 }

@@ -1,4 +1,71 @@
 use std::collections::HashSet;
+#[test]
+fn queued_old_line_begin_cannot_clear_a_newer_session() {
+    use std::sync::{Arc,Mutex,mpsc};
+    use super::*;
+    use super::line_index::{reserve_line_begin,save_line_graph_begin_blocking,LineGraphPayload};
+    fn graph(name:&str)->LineGraphPayload {
+        serde_json::from_value(serde_json::json!({"project_id":1,"project_type":"transmission_line","source_sha256":"same-source",
+            "nodes":[{"path":"project.cbm","name":name,"raw_props_json":"{}","sort_order":0}],
+            "children":[],"refs":[],"file_stats":[]})).unwrap()
+    }
+    let conn=Connection::open_in_memory().unwrap();initialize_schema(&conn).unwrap();
+    conn.execute("INSERT INTO gim_project(id,path,name,size,modified_ms,sha256,created_at_ms,updated_at_ms,last_opened_at_ms) VALUES(1,'fixture','fixture',0,0,'same-source',0,0,0)",[]).unwrap();
+    let state=Arc::new(DbState(Mutex::new(conn)));let old_ticket=reserve_line_begin();
+    let (started_tx,started_rx)=mpsc::channel();let (resume_tx,resume_rx)=mpsc::channel();
+    let worker=tauri::async_runtime::spawn({let state=state.clone();async move {
+        crate::native_command::blocking("queued-line-begin",move || {
+            started_tx.send(()).unwrap();resume_rx.recv().unwrap();
+            save_line_graph_begin_blocking(&state,old_ticket,1,"old".into(),graph("old"),Some("same-source".into()),0,0)
+        }).await
+    }});
+    started_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    save_line_graph_begin_blocking(&state,reserve_line_begin(),1,"new".into(),graph("new"),Some("same-source".into()),0,0).unwrap();
+    resume_tx.send(()).unwrap();
+    let error=tauri::async_runtime::block_on(worker).unwrap().unwrap_err();assert!(error.contains("已被更新的会话取代"),"{error}");
+    let conn=state.0.lock().unwrap();
+    let session:String=conn.query_row("SELECT session_id FROM powerline_cache_session WHERE project_id=1",[],|r|r.get(0)).unwrap();
+    assert_eq!(session,"new");
+    let name:String=conn.query_row("SELECT name FROM powerline_cbm_node WHERE project_id=1",[],|r|r.get(0)).unwrap();assert_eq!(name,"new");
+}
+#[test]
+fn queued_native_publications_reject_replaced_sources_and_line_sessions() {
+    use std::sync::{Arc,Mutex,mpsc};
+    use super::*;
+    let conn=Connection::open_in_memory().unwrap();initialize_schema(&conn).unwrap();
+    conn.execute("INSERT INTO gim_project(id,path,name,size,modified_ms,sha256,created_at_ms,updated_at_ms,last_opened_at_ms,parser_version) VALUES(1,'fixture','fixture',0,0,'old',0,0,0,'new-marker')",[]).unwrap();
+    let state=Arc::new(DbState(Mutex::new(conn)));
+    let (started_tx,started_rx)=mpsc::channel();let (resume_tx,resume_rx)=mpsc::channel();
+    let worker=tauri::async_runtime::spawn({let state=state.clone();async move {
+        crate::native_command::blocking("queued-publish-test",move || {
+            started_tx.send(()).unwrap();resume_rx.recv().unwrap();
+            let payload=serde_json::from_value(serde_json::json!({"project_id":1,"source_sha256":"old",
+                "entries":[{"entry_path":"project.cbm","file_name":"project.cbm","entry_type":"CBM","file_size":0}],
+                "cbm_nodes":[{"node_key":"project.cbm","path":"project.cbm","name":"old","sort_order":0}],
+                "ifc_models":[],"file_dev_entries":[],"fam_properties":[],"dev_properties":[]})).unwrap();
+            let error=super::substation_index::save_gim_index_connection(&mut state.0.lock().unwrap(),payload).unwrap_err();
+            assert!(error.contains("源 GIM 已变化"),"{error}");
+            let error=super::line_index::save_line_attrs_chunk_blocking(&state,1,"old-session".into(),vec![],vec![]).unwrap_err();
+            assert!(error.contains("session_id 不匹配"),"{error}");
+            let error=super::line_index::save_line_project_finish_blocking(&state,1,"old-session".into()).unwrap_err();
+            assert!(error.contains("session_id 不匹配"),"{error}");
+            Ok(())
+        }).await
+    }});
+    started_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    {
+        let conn=state.0.lock().unwrap();
+        conn.execute("UPDATE gim_project SET sha256='new' WHERE id=1",[]).unwrap();
+        conn.execute("INSERT INTO powerline_cache_session VALUES(1,'new-session',0,0,0,0,0,0,0,0,0)",[]).unwrap();
+    }
+    resume_tx.send(()).unwrap();tauri::async_runtime::block_on(worker).unwrap().unwrap();
+    let conn=state.0.lock().unwrap();
+    assert_eq!(count_rows(&conn,"substation_cbm_node",1).unwrap(),0);
+    let marker:String=conn.query_row("SELECT parser_version FROM gim_project WHERE id=1",[],|r|r.get(0)).unwrap();
+    assert_eq!(marker,"new-marker");
+    let session:String=conn.query_row("SELECT session_id FROM powerline_cache_session WHERE project_id=1",[],|r|r.get(0)).unwrap();
+    assert_eq!(session,"new-session");
+}
 #[cfg(windows)]
 use std::os::windows::fs::MetadataExt;
 #[test]

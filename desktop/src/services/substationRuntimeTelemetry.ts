@@ -1,6 +1,7 @@
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
 /** Session-guarded substation memory and Spatial parser observations. */
 import type { AppState } from '../app/state.js';
+import {isCurrentProject} from '../shared/projectSession.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 import { type SubstationSpatialIndexObserver } from '../gim/ifcSpatialParser.js';
 import { perfRecordSubstationIfcRead, perfRecordSubstationIfcProfile, perfRecordSubstationFinalizeProfile, type PerfSession } from '../utils/perfTimings.js';
@@ -14,7 +15,7 @@ export async function sampleSubstationMemory(
   ctx?: ViewerContext | null,
 ): Promise<void> {
   await sampleSubstationRuntimeResources(state, label, session, ctx, meta, {
-    isCurrent: () => state.isCurrentSession({
+    isCurrent: () => isCurrentProject(state,{
       generation: session.generation ?? -1,
       projectId: session.projectId ?? null,
       sourceSha256: session.sourceSha256 ?? null,

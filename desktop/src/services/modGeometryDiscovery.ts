@@ -90,6 +90,7 @@ export interface DiscoveredStlGeometry {
 
 /** 几何发现结果 */
 export interface DiscoveredGeometries {
+  sourceDiagnostics?: import('../gim/sourceDocument.js').SourceDiagnostic[];
   mods: DiscoveredModGeometry[];
   stls: DiscoveredStlGeometry[];
   /** 无任何可渲染几何时的来源原因（用于 DEV 诊断）。 */
@@ -176,7 +177,8 @@ export async function discoverGeometriesFromDevPath(
   const devText = await devFile.text();
   const devDoc = (options.parseDev ?? parseDev)(devText, normalizedDevPath);
 
-  if (devDoc.isEmpty) return { mods: [], stls: [], reason: 'dev-no-solidmodel' };
+  const sourceDiagnostics = [...devDoc.sourceDiagnostics ?? []];
+  if (devDoc.isEmpty) return { mods: [], stls: [], reason: sourceDiagnostics.length?'source-invalid':'dev-no-solidmodel', ...(sourceDiagnostics.length?{sourceDiagnostics}:{}) };
 
   const mods: DiscoveredModGeometry[] = [];
   const stls: DiscoveredStlGeometry[] = [];
@@ -328,12 +330,14 @@ export async function discoverGeometriesFromDevPath(
     );
     mods.push(...child.mods);
     stls.push(...child.stls);
+    sourceDiagnostics.push(...child.sourceDiagnostics ?? []);
     if (child.reason) emptyReason ??= child.reason;
   }
 
   return {
     mods,
     stls,
+    ...(sourceDiagnostics.length ? {sourceDiagnostics} : {}),
     ...(mods.length === 0 && stls.length === 0
       ? { reason: emptyReason ?? 'assembly-node-without-own-geometry' }
       : {}),

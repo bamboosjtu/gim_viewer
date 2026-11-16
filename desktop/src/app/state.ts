@@ -35,6 +35,7 @@ export interface SubstationConnectionPreview {
 }
 
 import type { ProjectLoadSession } from '../shared/projectSession.js';
+import {SessionScope} from '../shared/sessionScope.js';
 export type { ProjectLoadSession } from '../shared/projectSession.js';
 import type { SelectionRequest, EngineeringSelectionScope, SelectionCommitGuard, SelectionGeometryState } from '../shared/selectionContracts.js';
 export type { SelectionRequest, EngineeringSelectionScope, SelectionCommitGuard, SelectionGeometryState } from '../shared/selectionContracts.js';
@@ -43,6 +44,7 @@ export type { SelectionRequest, EngineeringSelectionScope, SelectionCommitGuard,
 export class AppState {
   readonly properties = new ProjectPropertyCache();
   readonly sessionDisposables = new Set<() => void>();
+  private projectScope: SessionScope | null = null;
   deviceUnknownBounds = new Set<string>();
   /** Session-owned priority lane for explicit IFC precision requests. */
   substationFineQueue: SubstationFineQueue | null = null;
@@ -302,12 +304,23 @@ export class AppState {
 
   /** 取得当前工程的不可变身份快照，供异步任务在 await 前后校验。 */
   captureProjectSession(): ProjectLoadSession {
-    return {
+    return Object.freeze({
       generation: this.projectGeneration,
       projectId: this.currentProjectId,
       sourceSha256: this.currentSourceSha256,
       geometryToken: this.geometryLoadToken,
-    };
+    }) as ProjectLoadSession;
+  }
+
+  sessionScope(session: ProjectLoadSession): SessionScope {
+    if (this.projectScope && this.isCurrentSession(this.projectScope.session) && this.isCurrentSession(session)) return this.projectScope;
+    const scope = new SessionScope(session, () => this.isCurrentSession(session), error => console.error('[Session] 资源释放失败', error));
+    if (this.isCurrentSession(session)) this.projectScope = scope; else scope.dispose();
+    return scope;
+  }
+
+  withSession(session: ProjectLoadSession, commit: () => undefined): boolean {
+    return this.sessionScope(session).withSession(commit);
   }
 
   private safelyRelease(run: () => void): void {
@@ -322,6 +335,8 @@ export class AppState {
   }
 
   private releaseSessionResources(): void {
+    const scope=this.projectScope;this.projectScope=null;
+    if(scope)this.safelyRelease(()=>scope.dispose());
     const disposables = [...this.sessionDisposables]; this.sessionDisposables.clear();
     for (const dispose of disposables) this.safelyRelease(dispose);
     for (const key of ['hoverCleanup', 'selectionDecorationCleanup', 'engineeringCleanup',

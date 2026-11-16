@@ -38,6 +38,11 @@ function makeFile(content: string, name: string): File {
   return new File([content], name, { type: 'text/plain' });
 }
 
+it('does not publish a complete core index for a locally failed or ambiguous source',async()=>{
+  const node=makeNode({path:'project.cbm',name:'partial',sourceDiagnostics:[{kind:'read-failed',path:'child.cbm',field:'',lines:[],values:[]}]});
+  await expect(buildGimIndexPayload(1,new Map(),[],node,[],undefined,'sha',()=>true,{coreOnly:true})).rejects.toThrow('拒绝发布完整索引');
+});
+
 // ===== 模拟 DB 往返：payload → record =====
 //
 // 真实流程：buildGimIndexPayload → saveGimIndex(invoke) → SQLite → getGimIndex(invoke) → GimIndexResult

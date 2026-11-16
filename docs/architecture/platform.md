@@ -2,6 +2,16 @@
 
 本页汇总跨工程的运行平台约束、安全边界、配置开关、诊断和发布边界。开发命令与工作区约定见[开发指南](../development.md)；具体算法、缓存和生命周期见各主题文档。
 
+## 原生命令线程边界
+
+桌面与 Android 注册的 Tauri 工作命令使用 async 入口。文件 I/O、路径 canonicalize/stat、SHA、解压、同步数据库锁/查询/事务和大 JSON 导出解析均在 `spawn_blocking` 内执行；桌面的 `native_command::blocking` 统一转发任务及 JoinError，已有直接 `spawn_blocking` 入口保留。工作闭包持有 AppHandle、路径、payload 等所有权，数据库锁和事务在闭包内取得并释放，不跨 await。
+
+同步例外只有桌面 `cancel_substation_extraction` 和 Android `cancel_import`。它们只撤销内存权限或写原子标志，不进入阻塞池排队；桌面取消不获取文件读/提交持有的 job mutex。早期解压在首次 await 前预留启动票据和关闭租约，验证成功后以注册表短锁认领单调票据并撤销旧任务；延迟的旧预检不能取消或覆盖新任务。关闭继续等待预检和解压实际结束，Android 导入的 busy 租约在成功、失败或 panic 后释放，取消标志不由迟到任务重置。
+
+借用的 Raw IPC Request 在进入池前只完成原有 metadata 解码与一次拥有字节的交接；磁盘写入、路径和源 SHA 检查留在工作闭包。本轮移入池的批读保留命令入口处既有 total 起点，新增线程池等待包含在 total 和外层 invoke wall 中；原本已在线程池内的内部阶段计时保持原口径。线路 begin 在首个 await 前取得内存票据，worker 在数据库锁内完成来源校验后认领，拒绝晚到的旧 begin 清表；chunk/finish 继续在事务内核对持久 session_id。缓存协议、配额与 staging 发布契约不变。
+
+注册表静态门禁位于 [command_registry_tests.rs](../../desktop/src-tauri/src/command_registry_tests.rs)，使用 Rust AST 对照 `generate_handler!` 与命令声明，检查异步入口、阻塞边界和内存控制例外；未知调用、数据库锁、宏或未执行的 async closure 不能绕过检查。新注册命令必须进入检查面。该门禁随桌面 Rust 单测执行，Windows CI 也运行 Android 主机侧原生单测；两者都不启动 WebView 或工程样本。
+
 ## 安全边界
 
 | 面 | 当前约束 |

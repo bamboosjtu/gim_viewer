@@ -1,4 +1,5 @@
 //! Opt-in native measurement harness. Normal release has no path authorization.
+use tauri::Manager;
 use std::path::Path;
 #[cfg(feature = "benchmark")]
 use std::path::PathBuf;
@@ -60,22 +61,25 @@ pub(crate) fn manifest() -> Result<RunManifest,String> {
 pub(crate) fn data_root() -> Result<PathBuf,String> { Ok(PathBuf::from(manifest()?.data_root)) }
 
 #[tauri::command]
-pub(crate) fn benchmark_authorize_sample(access:tauri::State<'_,super::AuthorizedFilePaths>,sample_id:String,nonce:String)->Result<String,String>{
-    let manifest=manifest()?;
-    if manifest.probe_only{return Err("benchmark-probe-authorizes-no-source".into())}
-    if manifest.nonce!=nonce{return Err("benchmark-authorization-mismatch".into())}
-    let(path,sha)=if manifest.sample_id==sample_id{(&manifest.source_path,&manifest.source_sha256)}else{
-        let sample=manifest.samples.iter().find(|row|row.sample_id==sample_id).ok_or("benchmark-authorization-mismatch")?;
-        (&sample.source_path,&sample.source_sha256)
-    };
-    let path=Path::new(path);
-    use std::io::Read;
-    use sha2::{Digest,Sha256};
-    let mut reader=std::io::BufReader::new(std::fs::File::open(path).map_err(|_|"benchmark-source-unavailable")?);
-    let mut hash=Sha256::new();let mut buffer=[0;65536];
-    loop{let count=reader.read(&mut buffer).map_err(|_|"benchmark-source-unreadable")?;if count==0{break}hash.update(&buffer[..count]);}
-    if &format!("{:x}",hash.finalize())!=sha{return Err("benchmark-source-sha-mismatch".into())}
-    super::authorize_selected_path(&access,path,Some("gim"))
+pub(crate) async fn benchmark_authorize_sample(app_handle: tauri::AppHandle,sample_id:String,nonce:String)->Result<String,String>{
+    crate::native_command::blocking("benchmark_authorize_sample", move || {
+        let access = app_handle.state::<super::AuthorizedFilePaths>();
+        let manifest=manifest()?;
+        if manifest.probe_only{return Err("benchmark-probe-authorizes-no-source".into())}
+        if manifest.nonce!=nonce{return Err("benchmark-authorization-mismatch".into())}
+        let(path,sha)=if manifest.sample_id==sample_id{(&manifest.source_path,&manifest.source_sha256)}else{
+            let sample=manifest.samples.iter().find(|row|row.sample_id==sample_id).ok_or("benchmark-authorization-mismatch")?;
+            (&sample.source_path,&sample.source_sha256)
+        };
+        let path=Path::new(path);
+        use std::io::Read;
+        use sha2::{Digest,Sha256};
+        let mut reader=std::io::BufReader::new(std::fs::File::open(path).map_err(|_|"benchmark-source-unavailable")?);
+        let mut hash=Sha256::new();let mut buffer=[0;65536];
+        loop{let count=reader.read(&mut buffer).map_err(|_|"benchmark-source-unreadable")?;if count==0{break}hash.update(&buffer[..count]);}
+        if &format!("{:x}",hash.finalize())!=sha{return Err("benchmark-source-sha-mismatch".into())}
+        super::authorize_selected_path(&access,path,Some("gim"))
+    }).await
 }
 
 #[cfg(test)]

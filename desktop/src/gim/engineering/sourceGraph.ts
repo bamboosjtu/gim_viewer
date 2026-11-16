@@ -1,4 +1,5 @@
 import {parseSourceDocument,type SourceDocument} from './sourceDocuments.js';
+import {sourceScalar, sourceReferenceFields, type SourceField} from '../sourceDocument.js';
 import {createEntryIndex,type EntryIndex} from '../entryResolver.js';
 export type {SourceDocument} from './sourceDocuments.js';
 import { parseFamSectionsWithDiagnostics } from '../famParser.js';
@@ -15,6 +16,8 @@ export interface SourceFileReader {
   readText(path: string): Promise<string>;
 }
 export interface SourceReference {
+  lines?: number[];
+  values?: string[];
   owner: string;
   field: string;
   value: string;
@@ -41,7 +44,7 @@ export interface EngineeringSourceGraph {
   references: SourceReference[];
   /** File discovery is independent of IFCGUID joins. */
   ifcPaths: string[];
-  diagnostics: Array<{ kind: 'cycle' | 'missing-object-model' | 'read-failed'; source: string }>;
+  diagnostics: Array<{ kind: 'cycle' | 'missing-object-model' | 'read-failed' | 'ambiguous-field'; source: string; field?: string; lines?: number[] }>;
 }
 
 const ordered = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
@@ -76,7 +79,21 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
     }
     return promise;
   }
-  const scalar = (doc: SourceDocument, key: string) => doc.fields.find(p => p.keys[0].toUpperCase() === key)?.value ?? '';
+  const ambiguousFields = new WeakMap<SourceDocument,Set<string>>();
+  const ambiguous = (doc:SourceDocument,key:string,fields:readonly SourceField[]) => {
+    const seen=ambiguousFields.get(doc)??new Set<string>();
+    if(seen.has(key))return;seen.add(key);ambiguousFields.set(doc,seen);
+    const lines=fields.flatMap(field=>field.line==null?[]:[field.line]);
+    result.diagnostics.push({kind:'ambiguous-field',source:doc.path,field:key,lines});
+    const candidates=[...new Set(fields.flatMap(field=>[...entryIndex.candidates(field.value,doc.path)]))];
+    result.references.push({owner:doc.path,field:key,value:'',values:fields.map(field=>field.value),lines,candidates,target:null,status:'ambiguous'});
+  };
+  const scalar = (doc: SourceDocument, key: string) => {
+    const result=sourceScalar(doc,key);
+    if(result.status==='ambiguous')ambiguous(doc,key,result.fields);
+    return result.value;
+  };
+  const edgesFor=(doc:SourceDocument,pattern:RegExp)=>sourceReferenceFields(doc,pattern,(key,fields)=>ambiguous(doc,key,fields));
   // Object fields are attached only to their actual OMP occurrence. Ancestor
   // organization labels never become evidence on every descendant.
   const objectFields = (doc: SourceDocument) => doc.fields.filter(p => /^(?:TYPE|SYSCLASSIFYNAME|PARTNAME|SYMBOLNAME|NAME|OBJECTNAME|PROJECTNAME|设备名称|工程中名称|设备编码|电网工程标识系统编码|GRIDIDENTIFICATIONSYSTEMCODE|材料子类|设备子类|MATERIALSUBTYPE|EQUIPMENTSUBTYPE|相数|相别|PHASE|PHASECOUNT|PHASELABEL|设备类型|设备类别|材料类型|构件类型|用途|设备用途|EQUIPMENTTYPE|MATERIALTYPE|PURPOSE|型号|MODEL|MODELSPEC|对象角色|组件角色|OBJECTROLE|COMPONENTROLE|所属设备编码|宿主设备编码|HOSTEQUIPMENTID|HOSTEQUIPMENTCODE|PARENTEQUIPMENTID|所属设备名称|所属设备工程中名称|宿主设备名称|HOSTEQUIPMENTNAME|PARENTEQUIPMENTNAME)$/i.test(p.keys[0]));
@@ -144,7 +161,7 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
     if (ancestry.has(path)) { result.diagnostics.push({ kind: 'cycle', source: id }); return []; }
     let doc:SourceDocument;
     try{doc=await document(path);}catch(error){if(options.signal?.aborted||/Engineering source unavailable/.test(String(error)))throw error;result.diagnostics.push({kind:'read-failed',source:path});return [];}
-    const edges=doc.fields.filter(p=>/^SUBDEVICE\d+$/i.test(p.keys[0])&&/\.dev$/i.test(p.value));
+    const edges=edgesFor(doc,/^SUBDEVICE\d+$/i).filter(p=>/\.dev$/i.test(p.value));
     prefetch(doc,edges);
     const cbmDoc = await document(cbm.documentPath);
     assignFamilies(doc,id);
@@ -189,7 +206,7 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
     if (ancestors.has(path)) { result.diagnostics.push({ kind: 'cycle', source: id }); return; }
     let doc:SourceDocument;
     try{doc=await document(path);}catch(error){if(parentId===null||options.signal?.aborted||/Engineering source unavailable/.test(String(error)))throw error;result.diagnostics.push({kind:'read-failed',source:path});return;}
-    const edges=doc.fields.filter(p=>/^(?:SUBSYSTEM\d*|SUBDEVICE\d+)$/i.test(p.keys[0])&&/\.cbm$/i.test(p.value));
+    const edges=edgesFor(doc,/^(?:SUBSYSTEM\d*|SUBDEVICE\d+)$/i).filter(p=>/\.cbm$/i.test(p.value));
     prefetch(doc,[...doc.fields.filter(p=>/^OBJECTMODELPOINTER$/i.test(p.keys[0])&&/\.dev$/i.test(p.value)),...edges]);
     const entityName = scalar(doc, 'ENTITYNAME')?.trim() || undefined;
     referencedFamilies(doc);

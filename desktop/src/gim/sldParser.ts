@@ -26,7 +26,8 @@
  */
 
 /** SLD 顶层文档 */
-export interface SldDocument {
+import type {DocumentParseInfo} from './documentParseInfo.js';
+export interface SldDocument extends DocumentParseInfo {
   /** SVG 版本（如 `DLT1`） */
   version: string;
   /** 软件（如 `GRevitTools`） */
@@ -102,10 +103,11 @@ export interface SldUse extends SldNode {
  *
  * @param text SLD SVG 文本
  * @param sourcePath 文件路径（用于错误消息）
- * @returns 解析后的 SldDocument；若 SVG 无效返回空文档
+ * @returns 文档及明确的解析状态；无效 XML 与空源分别记录
  */
 export function parseSld(text: string, sourcePath: string = ''): SldDocument {
   const emptyDoc: SldDocument = {
+    status:'empty',diagnostics:[],
     version: '',
     soft: '',
     revision: '',
@@ -125,14 +127,13 @@ export function parseSld(text: string, sourcePath: string = ''): SldDocument {
   const xml = parser.parseFromString(text, 'image/svg+xml');
   const parseError = xml.querySelector('parsererror');
   if (parseError) {
-    console.warn(`[SLD] SVG 解析失败: ${sourcePath}`, parseError.textContent);
-    return emptyDoc;
+    return {...emptyDoc,status:'failed',diagnostics:[{code:'invalid-xml',path:sourcePath,message:parseError.textContent??'SVG 解析失败'}]};
   }
 
   const svg = xml.documentElement;
   if (svg.tagName.toLowerCase() !== 'svg') {
     console.warn(`[SLD] 根元素非 svg: ${svg.tagName}, source=${sourcePath}`);
-    return emptyDoc;
+    return {...emptyDoc,status:'unsupported',diagnostics:[{code:'unsupported-root',path:sourcePath,message:`根元素非 svg: ${svg.tagName}`} ]};
   }
 
   const version = svg.getAttribute('version') || '';
@@ -187,6 +188,7 @@ export function parseSld(text: string, sourcePath: string = ''): SldDocument {
     groups,
     gridIdIndex,
     safeSvgOuterHTML: svg.outerHTML,
+    status:groups.length?'ok':'empty',diagnostics:[],
   };
 }
 

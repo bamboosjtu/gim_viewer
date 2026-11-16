@@ -200,22 +200,17 @@ export async function parseAndIndexStdSld(
   let sldDoc: SldDocument | null = null;
   for (const entry of schEntries) {
     const text = fileTextMap.get(entry.path);
-    if (!text) continue;
+    if (text === undefined) continue;
     try {
       if (entry.type === 'std') {
         stdDoc = parseStd(text, entry.path);
         // NBT1 is an SVG merge document intentionally carrying no standalone
         // electrical topology. Keep the parsed marker so cache restore can
         // distinguish this supported format from a missing/corrupt STD file.
-        if (!stdDoc.substation && stdDoc.version.toUpperCase() !== 'NBT1') {
-          console.warn(`[STD/SLD] STD 解析失败或无 Substation: ${entry.path}`);
-          stdDoc = null;
-        }
+        if (stdDoc.status === 'failed') console.warn(`[STD/SLD] STD 解析失败: ${entry.path}`, stdDoc.diagnostics);
       } else if (entry.type === 'sld') {
         sldDoc = parseSld(text, entry.path);
-        if (sldDoc.groups.length === 0) {
-          console.warn(`[SLD] SLD 解析失败或无图形: ${entry.path}`);
-        }
+        if (sldDoc.status === 'failed') console.warn(`[SLD] SLD 解析失败: ${entry.path}`, sldDoc.diagnostics);
       }
     } catch (err) {
       console.error(`[STD/SLD] 解析 ${entry.path} 失败:`, err);

@@ -1,5 +1,6 @@
 //! Read-only project/cache diagnostics for the frontend.
 
+use tauri::Manager;
 use rusqlite::params;
 use serde::Serialize;
 use std::fs as stdfs;
@@ -107,9 +108,11 @@ pub struct ProjectCacheDiagnostic {
 
 /// 返回当前 SQLite 文件路径
 #[tauri::command]
-pub fn get_db_path(app_handle: tauri::AppHandle) -> Result<String, String> {
-    let path = db_path(&app_handle)?;
-    Ok(path.to_string_lossy().to_string())
+pub async fn get_db_path(app_handle: tauri::AppHandle) -> Result<String, String> {
+    crate::native_command::blocking("get_db_path", move || {
+        let path = db_path(&app_handle)?;
+        Ok(path.to_string_lossy().to_string())
+    }).await
 }
 
 /// 获取指定项目的缓存诊断（内部函数，被 get_latest_project_cache_diagnostic 调用）
@@ -383,41 +386,45 @@ pub fn get_project_cache_diagnostic(
 
 /// 获取最近打开项目的缓存诊断
 #[tauri::command]
-pub fn get_latest_project_cache_diagnostic(
+pub async fn get_latest_project_cache_diagnostic(
     app_handle: tauri::AppHandle,
-    state: tauri::State<'_, DbState>,
 ) -> Result<Option<ProjectCacheDiagnostic>, String> {
-    let conn = state
-        .0
-        .lock()
-        .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+    crate::native_command::blocking("get_latest_project_cache_diagnostic", move || {
+        let state = app_handle.state::<DbState>();
+        let conn = state
+            .0
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
 
-    let latest_id: Option<i64> = conn
-        .query_row(
-            "SELECT id FROM gim_project ORDER BY last_opened_at_ms DESC LIMIT 1",
-            [],
-            |row| row.get::<_, i64>(0),
-        )
-        .ok();
+        let latest_id: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM gim_project ORDER BY last_opened_at_ms DESC LIMIT 1",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .ok();
 
-    match latest_id {
-        Some(id) => {
-            drop(conn);
-            // 重新获取锁调用 get_project_cache_diagnostic
-            get_project_cache_diagnostic(&app_handle, state, id).map(Some)
+        match latest_id {
+            Some(id) => {
+                drop(conn);
+                // 重新获取锁调用 get_project_cache_diagnostic
+                get_project_cache_diagnostic(&app_handle, state, id).map(Some)
+            }
+            None => Ok(None),
         }
-        None => Ok(None),
-    }
+    }).await
 }
 
 /// 获取指定项目的缓存诊断（供缓存管理 UI 使用）
 ///
 /// 薄包装：复用已有的 get_project_cache_diagnostic 内部函数。
 #[tauri::command]
-pub fn get_project_diagnostic(
+pub async fn get_project_diagnostic(
     app_handle: tauri::AppHandle,
-    state: tauri::State<'_, DbState>,
     project_id: i64,
 ) -> Result<ProjectCacheDiagnostic, String> {
-    get_project_cache_diagnostic(&app_handle, state, project_id)
+    crate::native_command::blocking("get_project_diagnostic", move || {
+        let state = app_handle.state::<DbState>();
+        get_project_cache_diagnostic(&app_handle, state, project_id)
+    }).await
 }

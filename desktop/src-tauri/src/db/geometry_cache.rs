@@ -108,28 +108,31 @@ fn glb_cache_file_path(
 
 /// Tauri command：以 Raw IPC 写入 GLB 缓存文件。
 #[tauri::command]
-pub fn write_glb_file_binary(
+pub async fn write_glb_file_binary(
     app_handle: tauri::AppHandle,
     request: tauri::ipc::Request<'_>,
 ) -> Result<String, String> {
     let (meta, bytes) = decode_binary_cache_write_request(&request)?;
-    let conn = app_handle.state::<DbState>();
-    let guard = conn
-        .0
-        .lock()
-        .map_err(|e| format!("获取数据库锁失败: {}", e))?;
-    ensure_project_exists(&guard, meta.project_id)?;
-    // GLB 编译运行在后台；在命令真正落盘前再次核对源 GIM SHA，避免
-    // 旧工程任务在同一 project_id 被源文件更新后覆盖新几何缓存。
-    ensure_project_source_sha(
-        &guard,
-        meta.project_id,
-        meta.source_gim_sha256.as_deref(),
-    )?;
-    drop(guard);
-    let path = glb_cache_file_path(&app_handle, meta.project_id, &meta.entry_path)?;
-    atomic_write(&path, &bytes, " GLB")?;
-    Ok(path.to_string_lossy().to_string())
+    drop(request);
+    crate::native_command::blocking("write_glb_file_binary", move || {
+        let conn = app_handle.state::<DbState>();
+        let guard = conn
+            .0
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+        ensure_project_exists(&guard, meta.project_id)?;
+        // GLB 编译运行在后台；在命令真正落盘前再次核对源 GIM SHA，避免
+        // 旧工程任务在同一 project_id 被源文件更新后覆盖新几何缓存。
+        ensure_project_source_sha(
+            &guard,
+            meta.project_id,
+            meta.source_gim_sha256.as_deref(),
+        )?;
+        drop(guard);
+        let path = glb_cache_file_path(&app_handle, meta.project_id, &meta.entry_path)?;
+        atomic_write(&path, &bytes, " GLB")?;
+        Ok(path.to_string_lossy().to_string())
+    }).await
 }
 
 /// Tauri command：读取 GLB 缓存文件
@@ -142,17 +145,19 @@ pub async fn read_glb_file(
     project_id: i64,
     entry_path: String,
 ) -> Result<tauri::ipc::Response, String> {
-    {
-        let conn = app_handle.state::<DbState>();
-        let guard = conn
-            .0
-            .lock()
-            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
-        ensure_project_exists(&guard, project_id)?;
-    }
-    let path = glb_cache_file_path(&app_handle, project_id, &entry_path)?;
-    let bytes = stdfs::read(&path).map_err(|e| format!("读取 glb 缓存文件失败: {}", e))?;
-    Ok(tauri::ipc::Response::new(bytes))
+    crate::native_command::blocking("read_glb_file", move || {
+        {
+            let conn = app_handle.state::<DbState>();
+            let guard = conn
+                .0
+                .lock()
+                .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+            ensure_project_exists(&guard, project_id)?;
+        }
+        let path = glb_cache_file_path(&app_handle, project_id, &entry_path)?;
+        let bytes = stdfs::read(&path).map_err(|e| format!("读取 glb 缓存文件失败: {}", e))?;
+        Ok(tauri::ipc::Response::new(bytes))
+    }).await
 }
 
 /// Per-template derived domain; publication is independent of whole-project geometry.
@@ -286,9 +291,11 @@ fn write_device_lod_artifact_blocking(app_handle: tauri::AppHandle, meta: Binary
 }
 
 #[tauri::command]
-pub fn delete_device_lod_artifact(app_handle: tauri::AppHandle, project_id: i64, entry_path: String, source_gim_sha256: String) -> Result<(), String> {
-    let path = device_lod_artifact_path(&app_handle, project_id, &entry_path, &source_gim_sha256)?;
-    match stdfs::remove_file(path) { Ok(()) => Ok(()), Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()), Err(e) => Err(e.to_string()) }
+pub async fn delete_device_lod_artifact(app_handle: tauri::AppHandle, project_id: i64, entry_path: String, source_gim_sha256: String) -> Result<(), String> {
+    crate::native_command::blocking("delete_device_lod_artifact", move || {
+        let path = device_lod_artifact_path(&app_handle, project_id, &entry_path, &source_gim_sha256)?;
+        match stdfs::remove_file(path) { Ok(()) => Ok(()), Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()), Err(e) => Err(e.to_string()) }
+    }).await
 }
 
 /// Tauri command：批量读取 DEV GLB 缓存文件。
@@ -304,74 +311,77 @@ pub async fn batch_read_glb_files(
     entry_paths: Vec<String>,
 ) -> Result<tauri::ipc::Response, String> {
     let total_started = Instant::now();
-    {
-        let conn = app_handle.state::<DbState>();
-        let guard = conn
-            .0
-            .lock()
-            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
-        ensure_project_exists(&guard, project_id)?;
-    }
-    if entry_paths.len() > MAX_GLB_BATCH_FILES {
-        return Err("批量读取 GLB 文件数量超过安全上限".to_string());
-    }
+    crate::native_command::blocking("batch_read_glb_files", move || {
 
-    let mut results = Vec::with_capacity(entry_paths.len());
-    let mut total_bytes: u64 = 0;
-    let mut hit_count: u32 = 0;
-    let mut resolve_ms = 0.0_f64;
-    let mut read_ms = 0.0_f64;
-    for entry_path in &entry_paths {
-        let resolve_started = Instant::now();
-        let path = match glb_cache_file_path(&app_handle, project_id, entry_path) {
-            Ok(path) => path,
-            Err(_) => {
-                resolve_ms += resolve_started.elapsed().as_secs_f64() * 1000.0;
-                results.push(BatchCacheFileResult {
-                    entry_path: entry_path.clone(),
-                    bytes: None,
-                });
-                continue;
-            }
-        };
-        resolve_ms += resolve_started.elapsed().as_secs_f64() * 1000.0;
-        let read_started = Instant::now();
-        let bytes = match stdfs::read(&path) {
-            Ok(bytes) => Some(bytes),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            // 对权限/IO 错误也返回单条 miss；调用方会放弃 fast path，
-            // 但不会把一个不可读的缓存当作完整几何继续提交。
-            Err(_) => None,
-        };
-        read_ms += read_started.elapsed().as_secs_f64() * 1000.0;
-        if let Some(ref data) = bytes {
-            hit_count = hit_count.saturating_add(1);
-            total_bytes = total_bytes
-                .checked_add(data.len() as u64)
-                .ok_or_else(|| "批量读取 GLB 总量溢出".to_string())?;
-            let oversized_single = entry_paths.len() == 1
-                && data.len() as u64 <= MAX_SINGLE_GLB_BYTES;
-            if total_bytes > MAX_GLB_BATCH_BYTES && !oversized_single {
-                return Err(format!(
-                    "批量读取 GLB 总量超过安全上限（>{} bytes）",
-                    MAX_GLB_BATCH_BYTES
-                ));
-            }
+        {
+            let conn = app_handle.state::<DbState>();
+            let guard = conn
+                .0
+                .lock()
+                .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+            ensure_project_exists(&guard, project_id)?;
         }
-        results.push(BatchCacheFileResult {
-            entry_path: entry_path.clone(),
-            bytes,
-        });
-    }
-    let out = encode_batch_cache_response(
-        results,
-        total_bytes,
-        hit_count,
-        read_ms,
-        resolve_ms,
-        total_started,
-    )?;
-    Ok(tauri::ipc::Response::new(out))
+        if entry_paths.len() > MAX_GLB_BATCH_FILES {
+            return Err("批量读取 GLB 文件数量超过安全上限".to_string());
+        }
+
+        let mut results = Vec::with_capacity(entry_paths.len());
+        let mut total_bytes: u64 = 0;
+        let mut hit_count: u32 = 0;
+        let mut resolve_ms = 0.0_f64;
+        let mut read_ms = 0.0_f64;
+        for entry_path in &entry_paths {
+            let resolve_started = Instant::now();
+            let path = match glb_cache_file_path(&app_handle, project_id, entry_path) {
+                Ok(path) => path,
+                Err(_) => {
+                    resolve_ms += resolve_started.elapsed().as_secs_f64() * 1000.0;
+                    results.push(BatchCacheFileResult {
+                        entry_path: entry_path.clone(),
+                        bytes: None,
+                    });
+                    continue;
+                }
+            };
+            resolve_ms += resolve_started.elapsed().as_secs_f64() * 1000.0;
+            let read_started = Instant::now();
+            let bytes = match stdfs::read(&path) {
+                Ok(bytes) => Some(bytes),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                // 对权限/IO 错误也返回单条 miss；调用方会放弃 fast path，
+                // 但不会把一个不可读的缓存当作完整几何继续提交。
+                Err(_) => None,
+            };
+            read_ms += read_started.elapsed().as_secs_f64() * 1000.0;
+            if let Some(ref data) = bytes {
+                hit_count = hit_count.saturating_add(1);
+                total_bytes = total_bytes
+                    .checked_add(data.len() as u64)
+                    .ok_or_else(|| "批量读取 GLB 总量溢出".to_string())?;
+                let oversized_single = entry_paths.len() == 1
+                    && data.len() as u64 <= MAX_SINGLE_GLB_BYTES;
+                if total_bytes > MAX_GLB_BATCH_BYTES && !oversized_single {
+                    return Err(format!(
+                        "批量读取 GLB 总量超过安全上限（>{} bytes）",
+                        MAX_GLB_BATCH_BYTES
+                    ));
+                }
+            }
+            results.push(BatchCacheFileResult {
+                entry_path: entry_path.clone(),
+                bytes,
+            });
+        }
+        let out = encode_batch_cache_response(
+            results,
+            total_bytes,
+            hit_count,
+            read_ms,
+            resolve_ms,
+            total_started,
+        )?;
+        Ok(tauri::ipc::Response::new(out))
+    }).await
 }
 
 /// 方案 C：检查 GLB 几何缓存版本是否匹配。
@@ -525,18 +535,20 @@ pub async fn read_geometry_cache_manifest(
     app_handle: tauri::AppHandle,
     project_id: i64,
 ) -> Result<GeometryCacheManifest, String> {
-    {
-        let conn = app_handle.state::<DbState>();
-        let guard = conn
-            .0
-            .lock()
-            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
-        ensure_project_exists(&guard, project_id)?;
-    }
-    let path = geometry_manifest_path(&app_handle, project_id)?;
-    let bytes = stdfs::read(&path).map_err(|e| format!("读取 GLB manifest 失败: {}", e))?;
-    serde_json::from_slice::<GeometryCacheManifest>(&bytes)
-        .map_err(|e| format!("解析 GLB manifest 失败: {}", e))
+    crate::native_command::blocking("read_geometry_cache_manifest", move || {
+        {
+            let conn = app_handle.state::<DbState>();
+            let guard = conn
+                .0
+                .lock()
+                .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+            ensure_project_exists(&guard, project_id)?;
+        }
+        let path = geometry_manifest_path(&app_handle, project_id)?;
+        let bytes = stdfs::read(&path).map_err(|e| format!("读取 GLB manifest 失败: {}", e))?;
+        serde_json::from_slice::<GeometryCacheManifest>(&bytes)
+            .map_err(|e| format!("解析 GLB manifest 失败: {}", e))
+    }).await
 }
 
 pub(super) fn check_geometry_cache_manifest(
@@ -582,66 +594,68 @@ pub(super) fn check_geometry_cache_manifest(
 
 /// 写入 GLB manifest（版本标记之前的最后一步）。
 #[tauri::command]
-pub fn write_geometry_cache_manifest(
+pub async fn write_geometry_cache_manifest(
     app_handle: tauri::AppHandle,
     project_id: i64,
     source_sha256: String,
     entries: Vec<GeometryCacheManifestEntry>,
 ) -> Result<String, String> {
-    if source_sha256.trim().is_empty() || source_sha256.len() > 128 {
-        return Err("source_sha256 无效".to_string());
-    }
-    if entries.len() > 200_000 {
-        return Err("GLB manifest 条目数超限".to_string());
-    }
-    {
-        let state = app_handle.state::<DbState>();
-        let guard = state
-            .0
-            .lock()
-            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
-        ensure_project_exists(&guard, project_id)?;
-        ensure_project_source_sha(&guard, project_id, Some(&source_sha256))?;
-    }
-    let mut seen = std::collections::HashSet::new();
-    for entry in &entries {
-        if let Err(error) = validate_geometry_manifest_entry_shape(entry, &mut seen) {
-            return Err(error);
+    crate::native_command::blocking("write_geometry_cache_manifest", move || {
+        if source_sha256.trim().is_empty() || source_sha256.len() > 128 {
+            return Err("source_sha256 无效".to_string());
         }
-        if entry.status == "empty" || entry.status == "unsupported" || entry.status == "source-invalid" {
-            // empty/unsupported 为确定性 tombstone：不要求磁盘上存在零
-            // 字节占位文件。
-            continue;
+        if entries.len() > 200_000 {
+            return Err("GLB manifest 条目数超限".to_string());
         }
-        let path = glb_cache_file_path(&app_handle, project_id, &entry.entry_path)?;
-        let meta =
-            stdfs::metadata(&path).map_err(|e| format!("读取 GLB manifest 条目失败: {}", e))?;
-        if meta.len() != entry.size {
-            return Err(format!("GLB 大小与 manifest 不一致: {}", entry.entry_path));
+        {
+            let state = app_handle.state::<DbState>();
+            let guard = state
+                .0
+                .lock()
+                .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+            ensure_project_exists(&guard, project_id)?;
+            ensure_project_source_sha(&guard, project_id, Some(&source_sha256))?;
         }
-        let glb = stdfs::read(&path).map_err(|e| format!("读取 GLB 失败: {}", e))?;
-        if !validate_glb_bytes(&glb) {
-            return Err(format!(
-                "GLB magic/version/length 校验失败: {}",
-                entry.entry_path
-            ));
+        let mut seen = std::collections::HashSet::new();
+        for entry in &entries {
+            if let Err(error) = validate_geometry_manifest_entry_shape(entry, &mut seen) {
+                return Err(error);
+            }
+            if entry.status == "empty" || entry.status == "unsupported" || entry.status == "source-invalid" {
+                // empty/unsupported 为确定性 tombstone：不要求磁盘上存在零
+                // 字节占位文件。
+                continue;
+            }
+            let path = glb_cache_file_path(&app_handle, project_id, &entry.entry_path)?;
+            let meta =
+                stdfs::metadata(&path).map_err(|e| format!("读取 GLB manifest 条目失败: {}", e))?;
+            if meta.len() != entry.size {
+                return Err(format!("GLB 大小与 manifest 不一致: {}", entry.entry_path));
+            }
+            let glb = stdfs::read(&path).map_err(|e| format!("读取 GLB 失败: {}", e))?;
+            if !validate_glb_bytes(&glb) {
+                return Err(format!(
+                    "GLB magic/version/length 校验失败: {}",
+                    entry.entry_path
+                ));
+            }
         }
-    }
-    let path = geometry_manifest_path(&app_handle, project_id).or_else(|_| {
-        let base = crate::application_data_dir(&app_handle)
-            .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
-        let root = base.join("glbcache").join(project_id.to_string());
-        stdfs::create_dir_all(&root).map_err(|e| format!("创建 GLB 目录失败: {}", e))?;
-        reject_link(&root, " GLB")?;
-        Ok::<PathBuf, String>(root.join("_manifest.json"))
-    })?;
-    let bytes = serde_json::to_vec(&GeometryCacheManifest {
-        source_sha256,
-        entries,
-    })
-    .map_err(|e| format!("序列化 GLB manifest 失败: {}", e))?;
-    atomic_write(&path, &bytes, " GLB manifest")?;
-    Ok(path.to_string_lossy().to_string())
+        let path = geometry_manifest_path(&app_handle, project_id).or_else(|_| {
+            let base = crate::application_data_dir(&app_handle)
+                .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
+            let root = base.join("glbcache").join(project_id.to_string());
+            stdfs::create_dir_all(&root).map_err(|e| format!("创建 GLB 目录失败: {}", e))?;
+            reject_link(&root, " GLB")?;
+            Ok::<PathBuf, String>(root.join("_manifest.json"))
+        })?;
+        let bytes = serde_json::to_vec(&GeometryCacheManifest {
+            source_sha256,
+            entries,
+        })
+        .map_err(|e| format!("序列化 GLB manifest 失败: {}", e))?;
+        atomic_write(&path, &bytes, " GLB manifest")?;
+        Ok(path.to_string_lossy().to_string())
+    }).await
 }
 
 /// Tauri command：只失效一个 DEV 的 GLB 与 manifest 条目。
@@ -650,59 +664,61 @@ pub fn write_geometry_cache_manifest(
 /// 替换方式移除条目，再删除对应文件；任何中间失败都不会把坏 GLB
 /// 重新宣传为有效缓存。其它 DEV 条目、SQLite 语义索引和 IFC 缓存不受影响。
 #[tauri::command]
-pub fn invalidate_glb_cache_entry(
+pub async fn invalidate_glb_cache_entry(
     app_handle: tauri::AppHandle,
     project_id: i64,
     entry_path: String,
     source_sha256: Option<String>,
 ) -> Result<(), String> {
-    ensure_cache_project_id(project_id)?;
-    let normalized = normalize_cache_lookup_path(&entry_path);
-    if !normalized.ends_with(".dev") {
-        return Err("GLB 单项失效只允许 DEV 条目".to_string());
-    }
-    validate_entry_path(&entry_path)?;
-    {
-        let state = app_handle.state::<DbState>();
-        let guard = state
-            .0
-            .lock()
-            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
-        ensure_project_exists(&guard, project_id)?;
-        ensure_project_source_sha(&guard, project_id, source_sha256.as_deref())?;
-    }
-
-    let manifest_path = geometry_manifest_path(&app_handle, project_id).ok();
-    if let Some(path) = manifest_path.as_ref() {
-        if path.exists() {
-            let bytes = stdfs::read(path).map_err(|e| format!("读取 GLB manifest 失败: {}", e))?;
-            let mut manifest = serde_json::from_slice::<GeometryCacheManifest>(&bytes)
-                .map_err(|e| format!("解析 GLB manifest 失败: {}", e))?;
-            if let Some(expected) = source_sha256.as_deref() {
-                if manifest.source_sha256 != expected {
-                    return Err("GLB manifest source SHA 与当前工程不一致".to_string());
-                }
-            }
-            let mut seen = HashSet::new();
-            for entry in &manifest.entries {
-                validate_geometry_manifest_entry_shape(entry, &mut seen)?;
-            }
-            manifest.entries.retain(|entry| {
-                normalize_cache_lookup_path(&entry.entry_path) != normalized
-            });
-            let updated = serde_json::to_vec(&manifest)
-                .map_err(|e| format!("序列化 GLB manifest 失败: {}", e))?;
-            atomic_write(path, &updated, " GLB manifest")?;
+    crate::native_command::blocking("invalidate_glb_cache_entry", move || {
+        ensure_cache_project_id(project_id)?;
+        let normalized = normalize_cache_lookup_path(&entry_path);
+        if !normalized.ends_with(".dev") {
+            return Err("GLB 单项失效只允许 DEV 条目".to_string());
         }
-    }
+        validate_entry_path(&entry_path)?;
+        {
+            let state = app_handle.state::<DbState>();
+            let guard = state
+                .0
+                .lock()
+                .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+            ensure_project_exists(&guard, project_id)?;
+            ensure_project_source_sha(&guard, project_id, source_sha256.as_deref())?;
+        }
 
-    let glb_path = glb_cache_file_path(&app_handle, project_id, &entry_path)?;
-    match stdfs::remove_file(&glb_path) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(format!("删除 DEV GLB 缓存失败: {}", error)),
-    }
-    Ok(())
+        let manifest_path = geometry_manifest_path(&app_handle, project_id).ok();
+        if let Some(path) = manifest_path.as_ref() {
+            if path.exists() {
+                let bytes = stdfs::read(path).map_err(|e| format!("读取 GLB manifest 失败: {}", e))?;
+                let mut manifest = serde_json::from_slice::<GeometryCacheManifest>(&bytes)
+                    .map_err(|e| format!("解析 GLB manifest 失败: {}", e))?;
+                if let Some(expected) = source_sha256.as_deref() {
+                    if manifest.source_sha256 != expected {
+                        return Err("GLB manifest source SHA 与当前工程不一致".to_string());
+                    }
+                }
+                let mut seen = HashSet::new();
+                for entry in &manifest.entries {
+                    validate_geometry_manifest_entry_shape(entry, &mut seen)?;
+                }
+                manifest.entries.retain(|entry| {
+                    normalize_cache_lookup_path(&entry.entry_path) != normalized
+                });
+                let updated = serde_json::to_vec(&manifest)
+                    .map_err(|e| format!("序列化 GLB manifest 失败: {}", e))?;
+                atomic_write(path, &updated, " GLB manifest")?;
+            }
+        }
+
+        let glb_path = glb_cache_file_path(&app_handle, project_id, &entry_path)?;
+        match stdfs::remove_file(&glb_path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("删除 DEV GLB 缓存失败: {}", error)),
+        }
+        Ok(())
+    }).await
 }
 
 /// Tauri command：写入 GLB 几何缓存版本标记文件。
@@ -712,33 +728,35 @@ pub fn invalidate_glb_cache_entry(
 /// 下次 `validate_gim_cache` 时读取此文件并比较，版本不匹配只使 geometry
 /// domain 失效，由前端重建 DEV GLB。
 #[tauri::command]
-pub fn write_geometry_cache_version(
+pub async fn write_geometry_cache_version(
     app_handle: tauri::AppHandle,
     project_id: i64,
     source_sha256: Option<String>,
 ) -> Result<String, String> {
-    ensure_cache_project_id(project_id)?;
-    {
-        let state = app_handle.state::<DbState>();
-        let guard = state
-            .0
-            .lock()
-            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
-        ensure_project_exists(&guard, project_id)?;
-        // The marker is the final geometry-cache commit. Re-check the source
-        // identity here as well as during manifest/GLB writes so a delayed
-        // task cannot publish a current-version marker for a different GIM.
-        ensure_project_source_sha(&guard, project_id, source_sha256.as_deref())?;
-    }
-    let base = crate::application_data_dir(&app_handle)
-        .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
-    let dir = base.join("glbcache").join(project_id.to_string());
-    if !dir.exists() {
-        stdfs::create_dir_all(&dir).map_err(|e| format!("创建 glbcache 目录失败: {}", e))?;
-    }
-    reject_link(&dir, " GLB")?;
-    let marker = dir.join("_version.txt");
-    reject_link(&marker, "版本标记")?;
-    atomic_write(&marker, GEOMETRY_CACHE_VERSION.as_bytes(), "版本标记")?;
-    Ok(marker.to_string_lossy().to_string())
+    crate::native_command::blocking("write_geometry_cache_version", move || {
+        ensure_cache_project_id(project_id)?;
+        {
+            let state = app_handle.state::<DbState>();
+            let guard = state
+                .0
+                .lock()
+                .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+            ensure_project_exists(&guard, project_id)?;
+            // The marker is the final geometry-cache commit. Re-check the source
+            // identity here as well as during manifest/GLB writes so a delayed
+            // task cannot publish a current-version marker for a different GIM.
+            ensure_project_source_sha(&guard, project_id, source_sha256.as_deref())?;
+        }
+        let base = crate::application_data_dir(&app_handle)
+            .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
+        let dir = base.join("glbcache").join(project_id.to_string());
+        if !dir.exists() {
+            stdfs::create_dir_all(&dir).map_err(|e| format!("创建 glbcache 目录失败: {}", e))?;
+        }
+        reject_link(&dir, " GLB")?;
+        let marker = dir.join("_version.txt");
+        reject_link(&marker, "版本标记")?;
+        atomic_write(&marker, GEOMETRY_CACHE_VERSION.as_bytes(), "版本标记")?;
+        Ok(marker.to_string_lossy().to_string())
+    }).await
 }

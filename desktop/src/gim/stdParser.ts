@@ -31,7 +31,8 @@
  * 包含 Substation → VoltageLevel → Bay → ConductingEquipment 层级，
  * 以及双向 gridId 索引（gridId → 节点 / 节点 → gridId）。
  */
-export interface StdDocument {
+import type {DocumentParseInfo} from './documentParseInfo.js';
+export interface StdDocument extends DocumentParseInfo {
   /** STD 版本（如 `DLT1`） */
   version: string;
   /** STD 修订号（如 `2023`） */
@@ -135,10 +136,11 @@ export interface StdParameter {
  *
  * @param text STD XML 文本
  * @param sourcePath 文件路径（用于错误消息）
- * @returns 解析后的 StdDocument；若 XML 无效返回空文档
+ * @returns 文档及明确的解析状态；无效 XML 与空源分别记录
  */
 export function parseStd(text: string, sourcePath: string = ''): StdDocument {
   const emptyDoc: StdDocument = {
+    status: 'empty', diagnostics: [],
     version: '',
     revision: '',
     substation: null,
@@ -152,8 +154,7 @@ export function parseStd(text: string, sourcePath: string = ''): StdDocument {
   const xml = parser.parseFromString(text, 'text/xml');
   const parseError = xml.querySelector('parsererror');
   if (parseError) {
-    console.warn(`[STD] XML 解析失败: ${sourcePath}`, parseError.textContent);
-    return emptyDoc;
+    return {...emptyDoc,status:'failed',diagnostics:[{code:'invalid-xml',path:sourcePath,message:parseError.textContent??'XML 解析失败'}]};
   }
 
   const root = xml.documentElement;
@@ -165,6 +166,7 @@ export function parseStd(text: string, sourcePath: string = ''): StdDocument {
         `[STD] NBT1 SVG 合并文档（SDDP 产出，无独立拓扑定义），降级为空文档: ${sourcePath}`,
       );
       return {
+        status:'unsupported',diagnostics:[{code:'unsupported-root',path:sourcePath,message:'SVG 合并文档没有独立 STD 拓扑'}],
         version: root.getAttribute('version') || '',
         revision: root.getAttribute('revision') || '',
         substation: null,
@@ -172,7 +174,7 @@ export function parseStd(text: string, sourcePath: string = ''): StdDocument {
       };
     }
     console.warn(`[STD] 根元素非 STD: ${root.tagName}, source=${sourcePath}`);
-    return emptyDoc;
+    return {...emptyDoc,status:'unsupported',diagnostics:[{code:'unsupported-root',path:sourcePath,message:`根元素非 STD: ${root.tagName}`} ]};
   }
 
   const version = root.getAttribute('version') || '';
@@ -182,7 +184,7 @@ export function parseStd(text: string, sourcePath: string = ''): StdDocument {
   const subEl = findChildElement(root, 'Substation');
   const substation = subEl ? parseSubstation(subEl, gridIdIndex) : null;
 
-  return { version, revision, substation, gridIdIndex };
+  return { status:substation?'ok':'empty', diagnostics:[], version, revision, substation, gridIdIndex };
 }
 
 /** 查找直接子元素（非递归） */

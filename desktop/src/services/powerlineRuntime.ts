@@ -391,6 +391,7 @@ export async function openPowerlineProject(context: GimRuntimeOpenContext): Prom
     if (!state.isCurrentSession(session)) return;
     const endRender = perfBegin('线路面板+地图渲染', undefined, perfSession);
     const { renderLineProjectPanels } = await loadPresentation('lineProjectView');
+    if (!state.isCurrentSession(session)) { endRender('（会话已失效）'); return; }
     renderLineProjectPanels(state, graph, showMessage, {
       perfSession,
       enableCatenary: getDevLineCatenaryMode(),

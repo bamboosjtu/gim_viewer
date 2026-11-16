@@ -651,12 +651,15 @@ fn row_to_dev_property(row: &rusqlite::Row<'_>) -> rusqlite::Result<DevPropertyR
 
 /// Tauri command：完整读取 GIM 索引（只读）
 #[tauri::command]
-pub fn get_gim_index(
-    state: tauri::State<'_, DbState>,
+pub async fn get_gim_index(
+    app_handle: tauri::AppHandle,
     project_id: i64,
 ) -> Result<GetGimIndexResult, String> {
-    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
-    get_gim_index_connection(&conn, project_id)
+    crate::native_command::blocking("get_gim_index", move || {
+        let state = app_handle.state::<DbState>();
+        let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
+        get_gim_index_connection(&conn, project_id)
+    }).await
 }
 
 pub(super) fn get_gim_index_connection(conn: &Connection, project_id: i64) -> Result<GetGimIndexResult, String> {

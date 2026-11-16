@@ -67,6 +67,11 @@ for (const layer of ['engineering','gim','viewer','ui','services','app']) for (c
     }
   }
   function visit(node) {
+    if(localPath==='services/equipmentRuntime.ts') {
+      if(ts.isIdentifier(node)&&['document','window','HTMLElement'].includes(node.text))failures.push(`${localPath}: equipment presentation belongs in its UI port`);
+      if(ts.isIdentifier(node)&&node.text==='loadPresentation')failures.push(`${localPath}: equipment runtime must use its explicit presentation port`);
+      if(ts.isImportDeclaration(node)&&ts.isStringLiteral(node.moduleSpecifier)&&node.moduleSpecifier.text.includes('/presentation/'))failures.push(`${localPath}: equipment runtime cannot access legacy DOM/module presentation adapters`);
+    }
     if (pureLineProjection && ts.isIdentifier(node) && ['document','window','localStorage','sessionStorage'].includes(node.text)) {
       failures.push(`${localPath}: pure line projection references browser global ${node.text}`);
     }

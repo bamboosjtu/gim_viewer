@@ -8,6 +8,8 @@ pub async fn save_engineering_tree_json(
     filename: String,
     content: String,
 ) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+
     if content.len() > 384 * 1024 * 1024 {
         return Err("模型树 JSON 超过 384 MiB 导出上限".into());
     }
@@ -23,7 +25,7 @@ pub async fn save_engineering_tree_json(
     } else {
         format!("{name}.json")
     };
-    tauri::async_runtime::spawn_blocking(move || {
+
         let selected = app
             .dialog()
             .file()
