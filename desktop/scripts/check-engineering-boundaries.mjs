@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import {checkPresentationSource} from './presentation-boundaries.mjs';
 import {packageBoundaryError} from './package-boundaries.mjs';
+import {coreBoundaryErrors} from './core-boundaries.mjs';
 import {nativeContractCallErrors} from './native-contract-boundaries.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../src');
@@ -76,6 +77,7 @@ const viewerSourceValues=new Map([
 for (const layer of ['engineering','gim','viewer','ui','services','app']) for (const path of files(resolve(root,layer))) {
   const ast = ts.createSourceFile(path, readFileSync(path,'utf8'), ts.ScriptTarget.Latest, true);
   const localPath = relative(root, path).replaceAll('\\', '/');
+  failures.push(...coreBoundaryErrors(readFileSync(path,'utf8'),localPath));
   const pureLineProjection = ['services/lineInspectorProjection.ts','services/lineMapGeometry.ts','services/lineMapHitTesting.ts','services/lineMapStages.ts','services/inspectorMarkup.ts','services/propertyPresentation.ts'].includes(localPath);
   const resolverFactories = new Set(['createEntryResolver','createEntryIndex']);
   for (const statement of ast.statements) {

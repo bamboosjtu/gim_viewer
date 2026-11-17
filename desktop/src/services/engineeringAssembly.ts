@@ -1,7 +1,8 @@
-import {engineeringSourceRecords} from '../gim/engineering/sourceGraph.js';
-import { collectEngineeringSources, normalizeEngineeringSources, type EngineeringSources } from '../gim/engineering/buildSources.js';
-import { projectEngineeringNavigation } from '../gim/engineering/navigation.js';
-import type { EngineeringSourceGraph } from '../gim/engineering/sourceGraph.js';
+import {normalizeEngineeringSources} from '../gim/engineering/semanticAdapter.js';
+import {engineeringSourceRecords} from '../gim/engineering/source.js';
+import { collectEngineeringSources, type EngineeringSources } from '../gim/engineering/buildSources.js';
+import { projectEngineeringNavigation } from '../gim/engineering/projection.js';
+import type { EngineeringSourceGraph } from '../gim/engineering/source.js';
 import type { IfcSpatialObject, IfcSpatialNode, SpatialModelSummary } from '../gim/ifcSpatialParser.js';
 import type { EngineeringSnapshot } from '../engineering/types.js';
 import { ENGINEERING_RECOGNITION_VERSION as ENGINEERING_RULES_VERSION } from '../gim/engineering/sourceEvidence.js';

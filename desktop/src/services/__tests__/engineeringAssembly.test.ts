@@ -1,3 +1,4 @@
+import {normalizeEngineeringSources} from '../../gim/engineering/semanticAdapter.js';
 // @vitest-environment node
 import {afterEach,expect,it,vi} from 'vitest';
 import {assembleEngineeringView,assembleStoredEngineeringView} from '../engineeringAssembly.js';
@@ -6,7 +7,7 @@ import * as composition from '../../engineering/composition.js';
 import * as sourceProjection from '../../gim/engineering/sourceProjection.js';
 import * as inventory from '../../gim/engineering/inventory.js';
 import {assertEngineeringNavigation} from '../engineeringNavigationCache.js';
-import {normalizeEngineeringSources} from '../../gim/engineering/buildSources.js';
+
 import {assertEngineeringPartition} from '../../engineering/validate.js';
 import {createEngineeringWorkerHandler} from '../engineeringWorker.js';
 import {ModelEvidenceProvider} from '../../gim/engineering/evidenceProvider.js';

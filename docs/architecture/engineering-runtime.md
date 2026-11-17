@@ -92,7 +92,7 @@ Worker 运行时解码只对带明确 projectionErrors 的失败投影允许覆�
 
 ### 实体归一化
 
-`collectEngineeringSources` 只收集来源记录、IFC 外露记录与来源关联。独立的 `normalizeEngineeringSources` 阶段将这些记录转成 `ObjectEvidence`，调用 `normalizeEngineeringModel`；生产代码不提供把两阶段绑在一起的组合入口：
+`collectEngineeringSources` 只收集来源记录、IFC 外露记录与来源关联。独立的 `semanticAdapter.normalizeEngineeringSources` 阶段将这些记录转成 `ObjectEvidence`，调用 `normalizeEngineeringModel`；生产代码不提供把两阶段绑在一起的组合入口：
 
 - 按来源 ID 稳定排序，校验唯一性和装配环。
 - 先判对象角色（source_only/container/detail/part/fragment/neutral/object），再判目录类别。

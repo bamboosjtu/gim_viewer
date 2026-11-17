@@ -79,6 +79,12 @@ bootstrap
 
 共享包通过 package.json 声明依赖和 package exports 访问。纯名称、KV、跨越、线路属性/图类型、资源限制及线路 MOD parser 直接引用包出口，测试属于共享实现。桌面仅保留有实际责任的入口：`lineCbmParserCore` / `lineMapData` 初始化桌面日志 sink，`geometry/ir` / `sourceDocument` 是当前来源与编译契约入口；`@gim/measurement-core/source` 是显式源码出口，SDK 默认入口仍为构建后的 dist。生产代码不允许用深相对路径绕过包边界。
 
+## 五组能力入口
+
+桌面应用在现有目录中以五个入口连接能力：`gim/engineering/source.ts` 提供来源收集，`engineering/semantic.ts` 提供归一化，`gim/engineering/geometry.ts` 提供独立物理目录，`engineering/fusion.ts` 提供实体/表示绑定，`gim/engineering/projection.ts` 提供现有三视图投影。宿主 Worker 和工程装配通过这些入口接线；格式适配仍在 gim，纯领域仍在 engineering。
+
+`core-boundaries.mjs` 补充职责检查：投影和绑定不得导入分类器/归一化运行值，几何入口和目录不得消费语义主归属。中立类型允许共享；负向用例纳入 `test:presentation-boundaries`。入口不意味着五个独立进程或串行执行，几何仍可先于实体完成。
+
 ## 边界检查
 
 改动后至少确认：

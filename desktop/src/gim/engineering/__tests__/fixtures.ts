@@ -1,4 +1,5 @@
-import {collectEngineeringSources,normalizeEngineeringSources} from '../buildSources.js';
+import {normalizeEngineeringSources} from '../semanticAdapter.js';
+import {collectEngineeringSources} from '../buildSources.js';
 
 /** Test composition only: production publishes source collection and recognition independently. */
 export function buildTestEngineeringSources(scope:string,...input:Parameters<typeof collectEngineeringSources>){

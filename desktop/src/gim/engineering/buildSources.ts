@@ -1,10 +1,7 @@
 import type { IfcSpatialObject, IfcSpatialNode, SpatialModelSummary } from '../ifcSpatialParser.js';
 import { collectEngineeringSourceModel, type IfcSourceMatch } from './engineeringModel.js';
-import { ENGINEERING_RECOGNITION_VERSION, type SourceRecord } from './sourceEvidence.js';
-import {engineeringSourceRecords,type EngineeringSourceGraph} from './sourceGraph.js';
-import { normalizeEngineeringModel } from '../../engineering/normalize.js';
-import { engineeringObjectEvidence } from './objectEvidence.js';
-import type { EngineeringSnapshot } from '../../engineering/types.js';
+import { type SourceRecord } from './sourceEvidence.js';
+import {type EngineeringSourceGraph} from './sourceGraph.js';
 import { collectSourceGeometryOccurrences } from './geometryOccurrences.js';
 
 export const ENGINEERING_SOURCE_VERSION = 'engineering-source-v1';
@@ -43,9 +40,4 @@ export function collectEngineeringSources(graph: EngineeringSourceGraph, objects
     locations:collectSourceGeometryOccurrences(graph).occurrences.filter(o=>!o.placementMatrix.slice(12,15).every(n=>n===0)).map(o=>({sourceId:o.sourceId,position:o.placementMatrix.slice(12,15).map(n=>n/1000)})),
     complete: reasons.length === 0, incompleteReasons: reasons,
   };
-}
-
-/** Rules can change without reparsing source formats or touching geometry. */
-export function normalizeEngineeringSources(scope: string, sources: EngineeringSources): EngineeringSnapshot {
-  return {...normalizeEngineeringModel(scope, engineeringObjectEvidence(sources.graph,engineeringSourceRecords(sources.graph,sources.ifcRecords)), sources.graph.aliases),rulesVersion:ENGINEERING_RECOGNITION_VERSION,evidenceBinding:{scope,sourceRevision:sources.graph.revision??0}};
 }
