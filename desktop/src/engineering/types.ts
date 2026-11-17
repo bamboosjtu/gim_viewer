@@ -12,6 +12,8 @@ export interface ObjectNameEvidence extends EvidenceValue {
 }
 
 export interface ObjectEvidence {
+  /** Typed source edges, independent of physical placement and organization. */
+  composition?: readonly CompositionEvidence[];
   /** Same source facts interpreted when a proven physical/declared host is equipment. */
   equipmentMemberVariant?:ObjectEvidence;
   vocabularyAmbiguities?:readonly string[];
@@ -49,6 +51,13 @@ export interface ObjectEvidence {
   /** Audit/context only. Cannot establish identity, grouping or attachment hosts. */
   inheritedContextDesignations?: readonly EvidenceValue[];
   phases: readonly EvidenceValue[];
+}
+
+export interface CompositionEvidence {
+  kind: 'semantic_composition' | 'physical_assembly' | 'object_decomposition';
+  parentSourceIds: readonly string[];
+  evidence: readonly string[];
+  status: 'confirmed' | 'ambiguous' | 'unresolved';
 }
 
 export type SourceMeaning = 'object' | 'part' | 'neutral_set' | 'container' | 'detail' | 'source_only';

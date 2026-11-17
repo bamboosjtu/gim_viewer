@@ -7,6 +7,7 @@ import { resolveBaseFamilyReferences } from '../gimValueSemantics.js';
 import {ENGINEERING_EVIDENCE_FIELDS} from './recognitionFieldPolicy.js';
 import type { ObjectNameEvidence, SourceAlias } from '../../engineering/types.js';
 import type { SourceProperty, SourceRecord } from './sourceEvidence.js';
+import {cbmRelationKind} from './sourceComposition.js';
 
 export interface SourceFileReader {
   /** Actual archive paths, including files not reached by CBM GUID references. */
@@ -31,6 +32,7 @@ export interface CbmOccurrence {
   documentPath: string;
   parentId: string | null;
   viaField: string;
+  relationKind?: 'organization' | 'composition';
   /** Original GIM entity level, used only for the source view. */
   entityName?: string;
 }
@@ -212,7 +214,7 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
     prefetch(doc,[...doc.fields.filter(p=>/^OBJECTMODELPOINTER$/i.test(p.keys[0])&&/\.dev$/i.test(p.value)),...edges]);
     const entityName = scalar(doc, 'ENTITYNAME')?.trim() || undefined;
     referencedFamilies(doc);
-    const node = { id, documentPath: path, parentId, viaField, ...(entityName ? { entityName } : {}) };
+    const node = { id, documentPath: path, parentId, viaField, relationKind:cbmRelationKind(viaField), ...(entityName ? { entityName } : {}) };
     result.cbmOccurrences.push(node);
     let scopes = physicalScopes;
     const omp = scalar(doc, 'OBJECTMODELPOINTER');
@@ -251,7 +253,7 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
           try{targetDoc=await document(target);}catch(error){if(options.signal?.aborted)throw error;result.diagnostics.push({kind:'read-failed',source:target});targetDoc={path:target,rawLines:[],fields:[]};}
           const row:SourceRecord={id:attributeId,track:'dev',source:target,source_type:scalar(targetDoc,'TYPE')||scalar(targetDoc,'DEVICETYPE'),name:'',parent:'',
             properties:[...await family(doc),...await family(targetDoc),...objectFields(targetDoc),...objectFields(doc)],sources:[path,target],context:[id],guid:'',attributeOnly:true,attributeContextId:id,
-            relations:nearest?[...nearest.rootIds].map(targetSourceId=>({kind:'host' as const,targetSourceId,evidence:JSON.stringify([path,'ENTITYNAME','PARTINDEX',targetSourceId])})):[]};
+            relations:nearest&&cbmRelationKind(viaField)==='composition'?[...nearest.rootIds].map(targetSourceId=>({kind:'host' as const,targetSourceId,evidence:JSON.stringify([path,viaField,targetSourceId])})):[]};
           updateNames(row);(result.attributeRecords??=[]).push(row);assignFamilies(doc,attributeId);assignFamilies(targetDoc,attributeId);
         } else {
           const subtree = await expandDev(target, `dev:${id}:${target}`, '', node, new Set(), 0);

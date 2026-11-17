@@ -1,6 +1,7 @@
 import type { ObjectEvidence, EvidenceValue } from '../../engineering/types.js';
 import type { EngineeringSourceGraph } from './sourceGraph.js';
 import { toObjectEvidence, type SourceRecord } from './sourceEvidence.js';
+import {collectSourceComposition} from './sourceComposition.js';
 
 /** Organizational labels are retained for audit, separately from object-owned
  * designations. The domain must never use them to establish identity or hosts. */
@@ -13,5 +14,6 @@ export function engineeringObjectEvidence(graph: EngineeringSourceGraph, records
       .filter(field=>/^(?:SYSTEMNAME\d+|NAME|PARTNAME)$/i.test(field.keys[0])&&/主变|变压器系统/.test(field.value))
       .map(field=>({value:field.value,evidenceId:`${node.documentPath}:${field.line}`}))];cached.set(key,values);return values;
   }
-  return records.map(record=>({...toObjectEvidence(record),inheritedContextDesignations:record.context.flatMap(units)}));
+  const composition=collectSourceComposition(graph,records);
+  return records.map(record=>({...toObjectEvidence(record),composition:composition.get(record.id),inheritedContextDesignations:record.context.flatMap(units)}));
 }

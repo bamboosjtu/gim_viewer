@@ -62,6 +62,8 @@ project → F1System → F2System → F3System → F4System
 可读名称从 SYSTEMNAMEn、FAM 和原始名称等来源建立；分类代码不强行翻译成统一专业。
 保留父子源引用，分支防环；同一文件多条合法引用与意外循环区分。
 
+来源 occurrence 保留经由字段及 `relationKind`：`SUBSYSTEM` 为 organization，`SUBDEVICE` 为 composition。`sourceComposition` 将 CBM 语义组成、DEV 物理装配和 IFC 对象分解转成中立关系证据，组织边不会生成设备宿主。语义组成可指向仅属性的父部件，物理 `parent` 与 devOccurrence 地址仍独立。关系按 occurrence 建索引，不按模板路径合并。
+
 PARTINDEX 的 `OBJECTMODELPOINTER` 是身份线索。
 当父节点同时有 CBM SUBDEVICEn 清单与 DEV SUBDEVICEn 清单时，不能按同下标 join。
 先在所属物理装配子树检索同 DEV 身份候选，支持嵌套路径；无候选或多候选保留状态。

@@ -5,3 +5,4 @@ export {SourceDocuments} from './sourceDocuments.js';
 export type {SourceDocument} from './sourceDocuments.js';
 export {collectEngineeringSources} from './buildSources.js';
 export type {EngineeringSources} from './buildSources.js';
+export {collectSourceComposition, cbmRelationKind} from './sourceComposition.js';
