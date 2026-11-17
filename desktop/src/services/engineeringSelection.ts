@@ -10,6 +10,7 @@ import { devRepresentationHint } from '../viewer/devRepresentationIdentity.js';
 import type { SourceRecord } from '../gim/engineering/sourceEvidence.js';
 import { engineeringSourceRecord } from './engineeringViewService.js';
 import { representationEvidenceState } from '../engineering/representations.js';
+import {engineeringQuery} from '../gim/engineering/projection.js';
 
 function propertyText(value:unknown):string {
   if(value==null)return '—';
@@ -206,7 +207,8 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
   const snapshot = state.engineering.snapshot, sources = state.engineering.sources;
   const representations = getEngineeringRepresentations(state);
   if (!snapshot || !sources || !representations) return false;
-  const entity = snapshot.entities.find(entity => entity.id === target.key), pending = snapshot.pending.find(p => p.id === target.key);
+  const query=engineeringQuery(snapshot);
+  const entity = query.entities.get(target.key), pending = query.pending.get(target.key);
   const single = engineeringSourceRecord(state, target.key);
   const groupNodes=state.engineering.navigation?.inventory?.nodes.has(target.key)?state.engineering.navigation.inventory.nodes:state.engineering.navigation?.composition.nodes;
   const groupNode = target.kind === 'engineering-group' ? groupNodes?.get(target.key) : undefined;
@@ -243,11 +245,18 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
   if(!guard.isCurrent())return true;
   state.deviceLodRuntime?.setOnlySelected?.(state.selection.onlySelected); applyGeometryFilter(state);
   const selectedSources: SourceRecord[] = [...sourceIds].flatMap(id => { const source = engineeringSourceRecord(state, id); return source ? [source] : []; });
+  const selectedById=new Map(selectedSources.map(source=>[source.id,source]));
+  const memberTree=entity?query.tree(entity.id):undefined;
   const declaredContexts = groupNode && 'declaredContextIds' in groupNode ? groupNode.declaredContextIds : undefined;
 
   if (!guard.isCurrent()) return true;
   await selectionPresentation().engineeringInspector({ title: groupNode?.title || entity?.name || single?.name || (pending?'待归属对象':'未命名对象'), entity, pending, sources: selectedSources,
-    parts:entity?[...new Set(snapshot.memberships.filter(m=>m.ownerId===entity.id&&['part','neutral_set'].includes(m.interpretation.meaning)).map(m=>componentDefinition(m.interpretation)?.label??m.interpretation.standardClass?.label??(selectedSources.find(s=>s.id===m.sourceId)?.name||'未命名部件')))]:undefined,
+    parts:entity?[...new Set(query.members(entity.id).filter(m=>['part','neutral_set'].includes(m.interpretation.meaning)).map(m=>{
+      const label=componentDefinition(m.interpretation)?.label??m.interpretation.standardClass?.label??(selectedById.get(m.sourceId)?.name||'未命名部件');
+      const parentId=memberTree?.nodes.get(m.sourceId)?.parentSourceId;
+      const parent=parentId?query.memberships.get(parentId):undefined;
+      return parent?.interpretation.meaning==='part'?`${selectedById.get(parentId!)?.name||'上级部件'} → ${label}`:label;
+    }))]:undefined,
     group: groupNode ? { entityCount: groupNode.entityCount, pendingCount: ownerIds.size - groupNode.entityCount,
       declarations: [...new Set((declaredContexts ?? []).flatMap((id:string) => {
         const document = representations.contextDocuments.get(id); return document ? [document] : [];

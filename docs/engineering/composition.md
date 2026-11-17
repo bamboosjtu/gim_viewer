@@ -118,3 +118,9 @@ CBM 节点显示级别和业务名称，IFC 文件显示可读名称；真实文
 - [建筑推断](building-inference.md)
 - [空间推断](spatial-inference.md)
 - [工程实体运行时](../architecture/engineering-runtime.md)
+
+## 只读成员查询与部件层级
+
+`engineering/query.ts` 按不可变快照身份缓存实体、待归集合和成员索引。`members(ownerId)` 返回同一主归属的来源，`tree(ownerId)` 从成员的 parentPartId 派生可遍历森林；不同整体的直接来源父边不进入同一棵成员树。该树不回写 SourceGraph 或 EngineeringSnapshot，也不作为第二份持久化事实。
+
+选择服务使用同一查询确定整体与部件摘要，嵌套部件可显示直接上级名称；清册/工程组成保持整体叶节点，来源视图保留原始结构。类别、成员角色和未知状态来自快照，查询与 UI 不调用识别算法。来源/快照替换后重建查询，旧选择仍由会话/请求和快照身份守卫拒绝。

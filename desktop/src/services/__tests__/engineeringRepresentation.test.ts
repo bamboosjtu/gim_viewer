@@ -41,6 +41,23 @@ async function fixture(shared = false, declaredBuilding = false) {
 }
 
 describe('source-to-physical representation adapter and filters', () => {
+  it('uses the same whole and direct part hierarchy for the inspector and all three projections',async()=>{
+    const raw:Record<string,string>={'project.cbm':'OBJECTMODELPOINTER=gis.dev',
+      'gis.dev':'TYPE=GIS\nSYMBOLNAME=组合电器\nSUBDEVICE0=breaker.dev',
+      'breaker.dev':'TYPE=CircuitBreaker\nSYMBOLNAME=内部断路器\nSUBDEVICE0=pt.dev',
+      'pt.dev':'TYPE=PotentialTransformer\nSYMBOLNAME=内部互感器'};
+    const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async p=>raw[p]});
+    const built=buildTestEngineeringSources('p',graph,[],[]),state=new AppState();
+    state.activateProject(1,'p');state.engineering.sources=built.sources;state.engineering.snapshot=built.snapshot;
+    state.engineering.navigation=projectEngineeringNavigation(built.sources,built.snapshot);
+    expect(built.snapshot.entities).toHaveLength(1);const whole=built.snapshot.entities[0];
+    await selectEngineeringTarget(state,{kind:'engineering',key:whole.id},undefined,{fit:false,load:false});
+    expect(document.getElementById('props-drawer-body')?.textContent).toContain('内部断路器 →');
+    expect([...state.selection.engineeringSelection!.sourceIds].sort()).toEqual([...whole.sourceIds].sort());
+    expect(state.engineering.navigation.inventory!.rowsByEntity.has(whole.id)).toBe(true);
+    expect(state.engineering.navigation.composition.rowsByEntity.has(whole.id)).toBe(true);
+    expect(whole.sourceIds.every(id=>state.engineering.navigation!.sourceRows.has(id))).toBe(true);
+  });
   it('rejects binding a semantic snapshot to a different source revision',async()=>{
     const f=await fixture();
     expect(getEngineeringRepresentations(f.state)).not.toBeNull();
