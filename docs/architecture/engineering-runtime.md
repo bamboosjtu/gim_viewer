@@ -52,7 +52,7 @@
 
 ### 来源抽取
 
-0.2.3 在缓存恢复/抽取前初始化证据端口，Inventory 不等待识别。冷建只先传入 Inventory；`extract-geometry` 按真实引用批量请求 CBM/DEV 并独立发布物理目录；随后 `extract` 延迟 FAM，仅返回识别需要的 familyPaths 和 IFC 路径，再物化这些 FAM。未参与识别的 FAM 在显式属性查询时读取。Worker 的 snapshot/query/ensure/read 命令分别承担元数据、已物化分页、显式解析和原文字节读取；详情页同时受记录数与字节预算限制。缓存版本、源身份和修订与查询结果一起校验。
+当前在缓存恢复/抽取前初始化证据端口，Inventory 不等待识别。冷建只先传入 Inventory；`extract-geometry` 按真实引用批量请求 CBM/DEV 并独立发布物理目录；随后 `extract` 延迟 FAM，仅返回识别需要的 familyPaths 和 IFC 路径，再物化这些 FAM。未参与识别的 FAM 在显式属性查询时读取。Worker 的 snapshot/query/ensure/read 命令分别承担元数据、已物化分页、显式解析和原文字节读取；详情页同时受记录数与字节预算限制。缓存版本、源身份和修订与查询结果一起校验。
 
 来源事实由 `collectEngineeringSources` 独立汇总。`assembleEngineeringView` 捕获识别错误，保留来源，已发布物理目录不受影响，工程快照标记未处理；来源、组成和清册投影分别隔离错误。投影错误不撤销已发布语义或几何，不写完整导航缓存。来源和有效实体域仍可独立保存。
 

@@ -108,7 +108,7 @@ DEV 模板额外保留每轮最慢 20 个槽位等待者和最久 20 个槽位�
 
 - **线路持久化。** 首屏后持久化有 `idle/saving/saved/failed` 会话状态；原生 Benchmark 等待 SQLite finish 提交，失败为明确的失败状态。`cachePublishMs` 取线路完成时刻而非首屏后的静默窗口。
 - **变电缓存发布。** 冷开变电等待 `cachePersistenceReady` 的成功或失败终态，再读取 SQLite 证据；工程 Worker 的 `cacheSettled` 只表示该域安静，不代表变电核心索引已发布。`cachePublishMs` 使用实际发布时刻，失败时留空。
-- **时间字段。** `firstResponseMs` 为导航就绪代理，`modelTreeReadyMs` 为工程树就绪。`geometryCommitMs` 记录首个几何提交；0.2.3 的 `firstGeometryMs` 记录有效视口内模型绘制已提交，排除仅网格、空模型和隐藏对象，不等待 GPU 完成。报告用 `geometryTimingPolicy` 区分新可见口径与旧提交口径，跨口径仅比较兼容的 `geometryCommitMs`。`allGeometryReadyMs` 为基础表示齐备，`automaticLoadMs` 是自动表示终态，`settledMs` 单列任务/缓存/后台和三秒静默完成，`writeDrainMs` 只记最后 DEV 产物写晚于自动表示的部分。DEV 写入另分原生路径解析与磁盘原子写阶段，避免把 IPC、文件系统和场景提交混为一项。
+- **时间字段。** `firstResponseMs` 为导航就绪代理，`modelTreeReadyMs` 为工程树就绪。`geometryCommitMs` 记录首个几何提交；当前的 `firstGeometryMs` 记录有效视口内模型绘制已提交，排除仅网格、空模型和隐藏对象，不等待 GPU 完成。报告用 `geometryTimingPolicy` 区分新可见口径与旧提交口径，跨口径仅比较兼容的 `geometryCommitMs`。`allGeometryReadyMs` 为基础表示齐备，`automaticLoadMs` 是自动表示终态，`settledMs` 单列任务/缓存/后台和三秒静默完成，`writeDrainMs` 只记最后 DEV 产物写晚于自动表示的部分。DEV 写入另分原生路径解析与磁盘原子写阶段，避免把 IPC、文件系统和场景提交混为一项。
 - **Worker 堆。** 短于两个采样周期且已关联的 Worker 若首次堆采样前终止，报告堆指标 unavailable 与原因，不填零，也不把整轮误判为产品失败。
 - **冷开不完整。** 缓存已发布但冷开仅因测量证据不足而 INCONCLUSIVE 时，暖开仍运行，正式基线继续保持 INCONCLUSIVE。
 - **暖开校验。** 依据来源缓存数量、缺失数和 parser 版本；没有请求远景 LOD 的 `open` 场景不要求 `ifcFarHits`。
