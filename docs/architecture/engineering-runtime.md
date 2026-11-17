@@ -94,7 +94,7 @@ Worker 运行时解码只对带明确 projectionErrors 的失败投影允许覆�
 
 `collectEngineeringSources` 只收集来源记录、IFC 外露记录与来源关联。独立的 `semanticAdapter.normalizeEngineeringSources` 阶段将这些记录转成 `ObjectEvidence`，调用 `normalizeEngineeringModel`；生产代码不提供把两阶段绑在一起的组合入口：
 
-- 按来源 ID 稳定排序，校验唯一性和装配环。
+- 按来源 ID 稳定排序，校验唯一性和组成环。格式适配的 sourceComposition 使用 occurrence 索引提供 CBM 语义组成与 DEV/IFC 物理/分解证据；不从组织祖先推断宿主。
 - 先判对象角色（source_only/container/detail/part/fragment/neutral/object），再判目录类别。
 - 建立整体、待归集合、成员关系、独立对象关系和别名。
 - 分区校验：每份来源恰有一个主归属，成员 disposition 与 owner 一致，独立对象不丢失整体。

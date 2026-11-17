@@ -19,12 +19,12 @@ it('finds a named lamp inside a generic IFC terminal, in the material directory'
   const result=interpretObject(toObjectEvidence(record('x','IFCFLOWTERMINAL','三防泛光灯-立杆式古典吊灯-2.2:2264570')));
   expect(result).toMatchObject({category:'M05',categoryStatus:'candidate',standardClass:{id:'material:lamps'}});
 });
-it('recovers protective devices under their secondary cabinet and keeps incompatible hosts unresolved',()=>{
+it('keeps conflicting physical and declared protective-device hosts unresolved',()=>{
   const rows=[record('cab','SecondaryCabinet','线路保护柜','',{HOSTEQUIPMENTID:'unused',GRIDIDENTIFICATIONSYSTEMCODE:'cab-1'}),record('gis','GIS'),record('part','ProtectionDevice','线路保护装置','gis',{HOSTEQUIPMENTCODE:'cab-1'})];
   const model=normalizeEngineeringModel('scope',rows.map(toObjectEvidence));
   const member=model.memberships.find(m=>m.sourceId==='part')!;
-  expect(member.interpretation).toMatchObject({meaning:'part',componentType:{id:'devices'},membershipStatus:'confirmed'});
-  expect(member.ownerId).toBe(model.memberships.find(m=>m.sourceId==='cab')!.ownerId);
+  expect(member.interpretation).toMatchObject({meaning:'part',componentType:{id:'devices'},membershipStatus:'unresolved'});
+  expect(model.pending.find(p=>p.id===member.ownerId)?.reason).toBe('composition_host_conflict');
   const unresolved=normalizeEngineeringModel('scope',rows.slice(1).map(toObjectEvidence));
   expect(unresolved.entities.some(e=>e.sourceIds.includes('part'))).toBe(false);
 });

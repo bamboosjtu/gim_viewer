@@ -20,8 +20,8 @@ export function recoverComponentMembership(rows:readonly ObjectEvidence[],meanin
     row.identityCodes.forEach(p=>index(codes,p.value,owner));row.designations.forEach(p=>index(names,p.value,owner));
     if(isNumberedDesignation(row.name))index(names,row.name,owner);
   }
-  const attach=(row:ObjectEvidence,to:string,proof:string[],status:'confirmed'|'candidate')=>{
-    const previous=owners.get(row.sourceId),m=meaning.get(row.sourceId)!;owners.set(row.sourceId,to);
+  const attach=(row:ObjectEvidence,to:string,proof:string[],status:'confirmed'|'candidate'|'unresolved',previous=owners.get(row.sourceId))=>{
+    const m=meaning.get(row.sourceId)!;owners.set(row.sourceId,to);
     m.meaning='part';m.independent=false;m.membershipEvidence=proof;m.membershipStatus=status;m.basis='declared_component_host';
     if(m.objectRole)m.objectRole={id:'part',status,evidence:proof};
     const visited=new Set<string>();
@@ -46,7 +46,16 @@ export function recoverComponentMembership(rows:readonly ObjectEvidence[],meanin
     candidates=new Set(matched.filter(id=>componentHostCompatibility(m,entities.get(id)!)==='compatible'||!m.componentType&&row.objectRoles?.some(p=>p.value==='part')));
     if(!explicit.length&&m.meaning==='object'&&candidates.size===1&&candidates.has(owners.get(row.sourceId)??''))continue;
     const proof=[...direct,...(row.hostCodes??[]),...designations].map(p=>p.evidenceId).concat(m.componentType?.evidence??[],`policy:${COMPOSITION_POLICY.version}:${m.componentType?.id??'declared-role'}`);
-    if(candidates.size===1){attach(row,[...candidates][0],proof,declared?'confirmed':'candidate');continue;}
+    if(candidates.size===1){
+      const target=[...candidates][0],previous=owners.get(row.sourceId);
+      if(previous&&entities.has(previous)&&previous!==target&&m.membershipStatus==='confirmed'&&row.composition?.length){
+        const reason='composition_host_conflict';
+        unresolved(row.sourceId,reason);
+        attach(row,owners.get(row.sourceId)!,[...(m.membershipEvidence??[]),...proof],'unresolved',previous);
+        m.conflict=reason;diagnostics.push({kind:reason,identity:row.sourceId,name:row.name});
+      }else attach(row,target,proof,declared?'confirmed':'candidate');
+      continue;
+    }
     const anyMatch=constraints.some(ids=>ids.size>0);
     const resolved=constraints.filter(ids=>ids.size>0);
     const conflicting=resolved.length>1&&resolved.reduce((common,ids)=>new Set([...common].filter(id=>ids.has(id))),new Set(resolved[0])).size===0;

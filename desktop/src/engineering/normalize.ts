@@ -20,7 +20,11 @@ function wholeName(row:ObjectEvidence,category:string):string {
 
 export function normalizeEngineeringModel(scope: string, input: readonly ObjectEvidence[], aliases: readonly SourceAlias[] = []): EngineeringSnapshot {
   if (!scope) throw new Error('Engineering scope is required');
-  const ordered = [...input].sort((a, b) => compare(a.sourceId, b.sourceId));
+  const ordered = input.map(row=>{
+    if(row.assemblyParentId)return row;
+    const parents=[...new Set(row.composition?.filter(edge=>edge.kind==='semantic_composition'&&edge.status==='confirmed').flatMap(edge=>edge.parentSourceIds)??[])];
+    return parents.length===1?{...row,assemblyParentId:parents[0]}:row;
+  }).sort((a, b) => compare(a.sourceId, b.sourceId));
   const raw = new Map(ordered.map(row => [row.sourceId, row]));
   if (raw.size !== input.length || raw.has('')) throw new Error('Source occurrence IDs must be unique and nonempty');
   // Validate the whole graph before grouping. Preassigned set members must not
@@ -74,7 +78,7 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
     const number = explicitMain(row);
     if (owners.has(row.sourceId) || explicitIndependent(row) || m.meaning !== 'object' || m.category !== 'E01' || !number || !row.phases.some(p => p.value === '单相')) continue;
     let parent=row.assemblyParentId,contained=false;
-    while(parent&&raw.has(parent)){const ancestor=meaning.get(parent)!;if(ancestor.meaning==='object'&&transformer(ancestor.category)){contained=true;break;}parent=raw.get(parent)?.assemblyParentId;}
+    while(parent&&raw.has(parent)){const ancestor=meaning.get(parent)!;if(ancestor.meaning==='object'&&(transformer(ancestor.category)||row.composition?.length&&isEquipmentHost(ancestor)&&!['object_name','standard_name_candidate','family_identity_candidate','unknown'].includes(ancestor.basis))){contained=true;break;}parent=raw.get(parent)?.assemblyParentId;}
     if(contained)continue;
     const unit=`${number}${reserve(row)?':reserve':''}`;
     const members = banks.get(unit) ?? [];
@@ -116,6 +120,21 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
     };
     if (m.basis === 'attribute_conflict') {
       bundle(sourceId,'object_attributes_conflict',[sourceId]);
+    } else if (row.assemblyParentId && !raw.has(row.assemblyParentId) && row.composition?.length && !explicitIndependent(row)) {
+      bundle(sourceId,'composition_parent_missing',[sourceId]);m.membershipStatus='unresolved';
+      diagnostics.push({kind:'composition_parent_missing',identity:sourceId,name:row.name});
+    } else if (!row.assemblyParentId && row.composition?.some(edge=>edge.kind==='semantic_composition'&&edge.status!=='confirmed') && !explicitIndependent(row)) {
+      bundle(sourceId,'composition_parent_unresolved',[sourceId]);m.membershipStatus='unresolved';
+      m.membershipEvidence=row.composition.flatMap(edge=>edge.evidence);
+      diagnostics.push({kind:'composition_parent_unresolved',identity:sourceId,name:row.name});
+    } else if (above && entities.has(above) && parentEquipment && !explicitIndependent(row) && !m.conflict
+      && m.componentType?.status!=='confirmed' && !unclassifiedAssemblyCandidate(row,m)
+      && row.composition?.some(edge=>edge.kind!=='object_decomposition'&&edge.status==='confirmed')
+      && !['source_only','container','detail','neutral_set'].includes(m.meaning)) {
+      // An equipment type/code/designation describes the member, not a new whole.
+      m.meaning='part';m.independent=false;m.membershipStatus='confirmed';m.basis='source_composition_member';
+      m.membershipEvidence=[...new Set(row.composition.flatMap(edge=>edge.evidence).concat(`policy:${COMPOSITION_POLICY.version}:whole-boundary`))];
+      owners.set(sourceId,above);
     } else if (m.meaning === 'neutral_set') {
       if (transformer(aboveCategory)&&!explicitIndependent(row)) owners.set(sourceId, above);
       else bundle(sourceId, 'neutral_set_main_unresolved', [sourceId]);
@@ -206,7 +225,7 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
       if (!target) throw new Error(`Dangling source owner: ${row.sourceId}`);
       target.sourceIds.push(row.sourceId);
     }
-    return { sourceId: row.sourceId, ownerId, interpretation,
+    return { sourceId: row.sourceId, ownerId, interpretation, ...(row.assemblyParentId&&raw.has(row.assemblyParentId)?{parentPartId:row.assemblyParentId}:{}),
       disposition: entity ? 'whole_member' as const : ownerId ? 'pending_whole_member' as const : 'source_only' as const };
   });
   const wholeAliases: EngineeringSnapshot['aliases'] = aliases.filter(a => a.status !== 'confirmed').map(alias => {

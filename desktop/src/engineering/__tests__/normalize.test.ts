@@ -28,8 +28,9 @@ it('retains unclassified real assembly members as candidate parts without using 
  expect(result.memberships[1].interpretation.componentType).toBeUndefined();
  expect(result.memberships[1].interpretation.membershipEvidence).toContain('assembly:host->part');
 });
-it.each<Record<string,string>>([{TYPE:'CircuitBreaker'},{OBJECTROLE:'independent'},{GRIDIDENTIFICATIONSYSTEMCODE:'own-code'},{PROJECTNAME:'own-designation'}])('preserves independent or declared child identities: %j',values=>{
- expect(build([source('host','GIS'),source('child','OTHERS',{parent:'host',properties:props(values)})]).entities).toHaveLength(2);
+it.each<Record<string,string>>([{TYPE:'CircuitBreaker'},{GRIDIDENTIFICATIONSYSTEMCODE:'own-code'},{PROJECTNAME:'own-designation'}])('retains type/code/designation on composition members without splitting the whole: %j',values=>{
+ const snapshot=build([source('host','GIS'),source('child','OTHERS',{parent:'host',properties:props(values)})]);
+ expect(snapshot.entities).toHaveLength(1);expect(snapshot.memberships.find(m=>m.sourceId==='child')?.interpretation.meaning).toBe('part');
 });
 it('keeps explicit independent boxes separate even in a compatible assembly',()=>{
  const result=build([source('host','GIS'),source('box','TerminalBox',{parent:'host',properties:props({OBJECTROLE:'independent'})})]);

@@ -35,6 +35,7 @@ export function assertEngineeringPartition(snapshot: EngineeringSnapshot, source
   const seen = new Set<string>();
   for (const member of snapshot.memberships) {
     requireShape(object(member) && typeof member.sourceId === 'string' && (member.ownerId === null || typeof member.ownerId === 'string') && object(member.interpretation), 'membership');
+    requireShape(member.parentPartId===undefined||typeof member.parentPartId==='string'&&member.parentPartId!==member.sourceId&&sources.has(member.parentPartId),'composition parent');
     const interpretation = member.interpretation;
     requireShape(interpretation.categoryStatus===undefined||['confirmed','candidate','unresolved'].includes(interpretation.categoryStatus),'category status');
     for(const term of [interpretation.equipmentType,interpretation.componentType,interpretation.purpose,interpretation.objectRole])if(term!==undefined)

@@ -253,7 +253,7 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
           try{targetDoc=await document(target);}catch(error){if(options.signal?.aborted)throw error;result.diagnostics.push({kind:'read-failed',source:target});targetDoc={path:target,rawLines:[],fields:[]};}
           const row:SourceRecord={id:attributeId,track:'dev',source:target,source_type:scalar(targetDoc,'TYPE')||scalar(targetDoc,'DEVICETYPE'),name:'',parent:'',
             properties:[...await family(doc),...await family(targetDoc),...objectFields(targetDoc),...objectFields(doc)],sources:[path,target],context:[id],guid:'',attributeOnly:true,attributeContextId:id,
-            relations:nearest&&cbmRelationKind(viaField)==='composition'?[...nearest.rootIds].map(targetSourceId=>({kind:'host' as const,targetSourceId,evidence:JSON.stringify([path,viaField,targetSourceId])})):[]};
+            relations:[]};
           updateNames(row);(result.attributeRecords??=[]).push(row);assignFamilies(doc,attributeId);assignFamilies(targetDoc,attributeId);
         } else {
           const subtree = await expandDev(target, `dev:${id}:${target}`, '', node, new Set(), 0);

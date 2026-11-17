@@ -25,3 +25,18 @@ it('isolates a failed attribute header read and still publishes the real physica
   const result=assembleEngineeringView('scope',graph,[],[]);expect(collectSourceGeometryOccurrences(graph).occurrences).toHaveLength(1);
   expect(result.sources.complete).toBe(false);expect(graph.diagnostics).toContainEqual({kind:'read-failed',source:'body.dev'});expect(graph.attributeRecords).toHaveLength(1);
 });
+it('keeps a nested independent attribute boundary in the same production binding and three views',async()=>{
+  const entries={...raw,'part.cbm':'ENTITYNAME=PARTINDEX\nOBJECTMODELPOINTER=body.dev\nBASEFAMILY=body.fam\nOBJECTROLE=independent\nSUBDEVICE0=leaf.cbm',
+    'body.dev':'TYPE=CircuitBreaker','body.fam':'[设备]\n模型分类名称=EQUIPMENTTYPE=断路器','leaf.cbm':'ENTITYNAME=PARTINDEX\nOBJECTMODELPOINTER=leaf.dev','leaf.dev':'TYPE=PotentialTransformer'};
+  const graph=await extractEngineeringSourceGraph({paths:Object.keys(entries),readText:async p=>entries[p as keyof typeof entries]});
+  const built=assembleEngineeringView('nested',graph,[],[]);
+  expect(built.stageErrors).toEqual({});expect(built.snapshot.entities).toHaveLength(2);
+  const [part,leaf]=graph.attributeRecords!;
+  const separate=built.snapshot.entities.find(e=>e.sourceIds.includes(part.id))!;
+  expect(separate.sourceIds).toContain(leaf.id);
+  expect(built.snapshot.memberships.find(m=>m.sourceId===leaf.id)).toMatchObject({ownerId:separate.id,parentPartId:part.id});
+  expect(built.navigation.inventory!.rowsBySource.get(leaf.id)).toBe(built.navigation.inventory!.rowsByEntity.get(separate.id)![0]);
+  expect(built.navigation.composition.rowsByEntity.has(separate.id)).toBe(true);
+  expect(built.navigation.sourceRows.has(leaf.id)).toBe(true);
+  expect(collectSourceGeometryOccurrences(graph).occurrences).toHaveLength(1);
+});

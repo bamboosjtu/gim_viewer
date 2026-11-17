@@ -1,6 +1,6 @@
 [
   {
-    "name": "declared_host_overrides_wrong_source_parent",
+    "name": "declared_host_conflicts_with_source_composition",
     "records": [
       {
         "id": "host",
@@ -32,14 +32,18 @@
     ],
     "groups": [
       [
-        "host",
-        "part"
+        "host"
       ],
       [
         "wrong"
       ]
     ],
-    "pending": 0
+    "pending": 1,
+    "expectedMember": {
+      "sourceId": "part",
+      "membershipStatus": "unresolved",
+      "pendingReason": "composition_host_conflict"
+    }
   },
   {
     "name": "numbered_name_and_component_type",
@@ -467,7 +471,7 @@
     }
   },
   {
-    "name": "protective_device_recovered_to_secondary_cabinet",
+    "name": "protective_device_conflicts_with_secondary_host",
     "records": [
       {
         "id": "cab",
@@ -491,17 +495,17 @@
     ],
     "groups": [
       [
-        "cab",
-        "part"
+        "cab"
       ],
       [
         "gis"
       ]
     ],
-    "pending": 0,
+    "pending": 1,
     "expectedMember": {
       "sourceId": "part",
-      "membershipStatus": "confirmed"
+      "membershipStatus": "unresolved",
+      "pendingReason": "composition_host_conflict"
     }
   },
   {
@@ -800,7 +804,7 @@
     }
   },
   {
-    "name": "blank_family_own_identity_remains_separate",
+    "name": "component_code_does_not_split_whole",
     "records": [
       {
         "id": "h",
@@ -817,9 +821,7 @@
     ],
     "groups": [
       [
-        "h"
-      ],
-      [
+        "h",
         "p"
       ]
     ],
@@ -961,5 +963,64 @@
       "category": "E17",
       "subtype": null
     }
+  },
+  {
+    "name": "nested_equipment_members_preserve_whole",
+    "records": [
+      {
+        "id": "h",
+        "type": "GIS"
+      },
+      {
+        "id": "p",
+        "type": "CircuitBreaker",
+        "parent": "h"
+      },
+      {
+        "id": "q",
+        "type": "PotentialTransformer",
+        "parent": "p"
+      }
+    ],
+    "groups": [
+      [
+        "h",
+        "p",
+        "q"
+      ]
+    ],
+    "pending": 0
+  },
+  {
+    "name": "nested_independent_boundary",
+    "records": [
+      {
+        "id": "h",
+        "type": "GIS"
+      },
+      {
+        "id": "p",
+        "type": "CircuitBreaker",
+        "parent": "h",
+        "props": {
+          "OBJECTROLE": "independent"
+        }
+      },
+      {
+        "id": "q",
+        "type": "PotentialTransformer",
+        "parent": "p"
+      }
+    ],
+    "groups": [
+      [
+        "h"
+      ],
+      [
+        "p",
+        "q"
+      ]
+    ],
+    "pending": 0
   }
 ]

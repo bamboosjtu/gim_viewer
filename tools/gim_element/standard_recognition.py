@@ -232,6 +232,11 @@ def normalize(rows,scope):
         if parent_equipment and not independent and any(p['value'].strip().casefold() in POLICY['contextualTerms'] for p in [{'value':r['source_type']},*values(r,'TYPE','类型','模型分类名称','装置名称','DEVICETYPE','EQUIPMENTTYPE','MATERIALTYPE','SYSCLASSIFYNAME','PARTNAME','设备类型','设备类别','材料类型','材料子类','MATERIALSUBTYPE','设备子类','EQUIPMENTSUBTYPE','COMPONENTTYPE','部件类型')]):
             m=interpret(r,id in parents,equipment_member=True);meanings[id]=m
         if m['basis']=='attribute_conflict':bundle(id,'object_attributes_conflict')
+        elif (above in entities and parent_equipment and not independent and not m.get('conflict')
+              and r.get('track')=='dev' and r['parent'] and m.get('componentType',{}).get('status')!='confirmed'
+              and not unclassified_assembly_candidate(r,m) and m['meaning'] not in ('source_only','container','detail','neutral_set')):
+            owners[id]=above;m['meaning']='part';m['independent']=False;m['membershipStatus']='confirmed';m['basis']='source_composition_member'
+            m['membershipEvidence']=['assembly:'+r['parent']+'->'+id,'policy:'+COMPOSITION['version']+':whole-boundary']
         elif m['meaning']=='neutral_set':
             if cat in ('E01','E-T','E03') and not independent:owners[id]=above
             else:bundle(id,'neutral_set_main_unresolved')
@@ -282,7 +287,12 @@ def normalize(rows,scope):
         if len(candidates)==1:
             target=next(iter(candidates))
             if not explicit and m['meaning']=='object' and target==owners.get(id):continue
-            previous=owners.get(id);owners[id]=target;m['membershipEvidence']=evidence;m['membershipStatus']='confirmed' if explicit or direct else 'candidate'
+            previous=owners.get(id)
+            composition_conflict=previous in entities and previous!=target and m.get('membershipStatus')=='confirmed' and bool(r['parent'])
+            if composition_conflict:
+                target=bundle(id,'composition_host_conflict','component-host:'+id);m['conflict']='composition_host_conflict'
+                diagnostics.append({'kind':'composition_host_conflict','identity':id,'name':r['name']})
+            owners[id]=target;m['membershipEvidence']=evidence;m['membershipStatus']='unresolved' if composition_conflict else 'confirmed' if explicit or direct else 'candidate'
             if m['meaning']!='neutral_set':m['meaning']='part';m['basis']='declared_component_host'
             queue=list(children[id])
             while queue:

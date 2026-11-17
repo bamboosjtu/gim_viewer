@@ -29,7 +29,7 @@ export interface ObjectEvidence {
   sourceId: string;
   name: string;
   names?: readonly ObjectNameEvidence[];
-  /** A real composition edge; a source navigation ancestor is not a composition edge. */
+  /** Domain composition parent, from physical assembly or confirmed semantic composition. */
   assemblyParentId?: string;
   typeCategory?: string;
   typeEvidenceId?: string;
@@ -131,6 +131,8 @@ export interface PendingWhole {
 }
 
 export interface SourceMembership {
+  /** Direct composition parent; distinct from the owning engineering whole. */
+  parentPartId?: string;
   sourceId: string;
   ownerId: string | null;
   disposition: 'whole_member' | 'pending_whole_member' | 'source_only';

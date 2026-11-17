@@ -57,5 +57,15 @@
       ],
       "authority": "Developer-confirmed functional grouping; requires confirmed component attributes and actual ownership, not a matching display name."
     }
-  ]
+  ],
+  "wholeBoundary": {
+    "inherit": "confirmed semantic composition or physical assembly under declared equipment",
+    "preserve": [
+      "explicit independent role",
+      "separate installation evidence",
+      "unknown host",
+      "conflicting evidence"
+    ],
+    "memberTypeDoesNotSplit": true
+  }
 }

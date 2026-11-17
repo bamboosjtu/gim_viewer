@@ -2,7 +2,6 @@ import {it,expect} from 'vitest';
 import {STANDARD_CATALOG,standardTerms} from '../standardCatalog.js';
 import {interpretObject} from '../classify.js';
 import {normalizeEngineeringModel} from '../normalize.js';
-import {projectEngineeringComposition} from '../composition.js';
 import {projectInventoryTemplate} from '../inventoryTemplate.js';
 import {toObjectEvidence,type SourceRecord} from '../../gim/engineering/sourceEvidence.js';
 const field=(key:string,value:string)=>({keys:[key],value,path:'attributes.fam'});
@@ -32,17 +31,16 @@ it('uses IFC predefined type without guessing porcelain, AC/DC or an internal IF
   const result=interpretObject(toObjectEvidence(source('x','IFCPROTECTIVEDEVICE',{track:'ifc',properties:[field('IFC.PredefinedType','CIRCUITBREAKER')]})));
   expect(result.category).toBe('E06');expect(result.equipmentType).toBeUndefined();expect(result.standardClass).toBeUndefined();
 });
-it('recovers a part under the declared equipment despite an incorrect source parent, preserving the physical source edge',()=>{
+it('retains conflicting declared and source hosts without editing the physical edge',()=>{
   const rows=[host(),host('wrong','2号主变','unit-2'),source('radiator','Radiator',{name:'散热器',parent:'wrong',properties:[field('HOSTEQUIPMENTCODE','unit-1')]})];
-  const result=build(rows),owner=result.entities.find(e=>e.sourceIds.includes('host'))!;
-  expect(owner.sourceIds).toEqual(['host','radiator']);expect(rows[2].parent).toBe('wrong');
+  const result=build(rows);
+  expect(rows[2].parent).toBe('wrong');
+  expect(result.entities.every(e=>!e.sourceIds.includes('radiator'))).toBe(true);
   const member=result.memberships.find(m=>m.sourceId==='radiator')!;
-  expect(member.interpretation).toMatchObject({meaning:'part',membershipStatus:'confirmed'});expect(member.interpretation.membershipEvidence?.[0]).toContain('HOSTEQUIPMENTCODE');
-  const view=projectEngineeringComposition(result,[],'project'),entity=view.nodes.get(view.rowsByEntity.get(owner.id)![0])!;
-  expect(entity.children).toEqual([]);expect(entity.entityCount).toBe(1);
-  const inventory=projectInventoryTemplate(result);
-  expect(inventory.rowsBySource.get('radiator')).toBe(inventory.rowsByEntity.get(owner.id)![0]);
-  expect(inventory.nodes.get(inventory.rowsBySource.get('radiator')!)?.children).toEqual([]);
+  expect(member).toMatchObject({parentPartId:'wrong',disposition:'pending_whole_member'});
+  expect(member.interpretation).toMatchObject({meaning:'part',membershipStatus:'unresolved',conflict:'composition_host_conflict'});
+  expect(result.pending[0]).toMatchObject({reason:'composition_host_conflict',sourceIds:['radiator']});
+  expect(projectInventoryTemplate(result).rowsBySource.has('radiator')).toBe(false);
   expect(build([...rows].reverse())).toEqual(result);
 });
 it('does not use numbered names or own designations as host declarations',()=>{
