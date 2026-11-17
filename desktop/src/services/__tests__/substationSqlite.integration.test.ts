@@ -2,7 +2,7 @@ import { it, expect } from 'vitest';
 import { buildGimIndexPayload } from '../gimIndexPersistenceService.js';
 import { buildGeometryRefsPayload } from './geometryRefsPayload.js';
 import { restoreGimIndexToState } from '../gimIndexRestoreService.js';
-import { parseFamSectionsWithDiagnostics } from '../../gim/famParser.js';
+import { parseFamSectionsWithDiagnostics } from '@gim/gim-sdk/gim/famParser.js';
 import { buildCbmTree } from '../../gim/cbmParser.js';
 import { AppState } from '../../app/state.js';
 import { sqliteRoundTrip } from './sqliteHarness.js';

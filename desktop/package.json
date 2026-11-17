@@ -36,9 +36,9 @@
     "acceptance:build": "node scripts/benchmarks/acceptance-build.mjs",
     "acceptance:stage": "node scripts/benchmarks/acceptance-stage.mjs",
     "test:acceptance-tools": "node scripts/with-workspace-temp.mjs --test scripts/benchmarks/acceptance-build.test.mjs scripts/benchmarks/acceptance-probe.test.mjs scripts/benchmarks/benchmark-build-attestation.test.mjs",
-    "test:coverage": "node scripts/with-workspace-temp.mjs node_modules/vitest/vitest.mjs run --coverage",
+    "test:coverage": "node scripts/check-coverage.mjs",
     "test:ifc-critical": "node scripts/with-workspace-temp.mjs node_modules/vitest/vitest.mjs run src/viewer/__tests__/ifcConversion.test.ts src/viewer/__tests__/ifcSessionRace.test.ts src/viewer/__tests__/ifcFragmentsCache.test.ts src/services/__tests__/ifcNameIndex.test.ts src/viewer/__tests__/ifcOpeningPolicy.test.ts src/viewer/__tests__/ifcRegionalData.test.ts src/viewer/__tests__/ifcBimLoader.test.ts src/viewer/__tests__/webIfcCompatibility.test.ts src/ui/__tests__/ifcDetailModeControl.test.ts bridge/__tests__/gimExtract.test.ts src/viewer/__tests__/ifcSharedImport.test.ts src/viewer/__tests__/ifcRegionalInstances.test.ts src/viewer/__tests__/ifcConnectionBatches.test.ts src/viewer/__tests__/ifcConnectionEndpoints.test.ts src/viewer/__tests__/ifcConnectionPreviewRuntime.test.ts",
-    "lint": "eslint src bridge",
+    "lint": "node scripts/lint.mjs",
     "sync:engineering-catalog": "python scripts/sync-engineering-catalog.py && node scripts/check-engineering-catalog.mjs --write",
     "test:recognition": "node scripts/with-workspace-temp.mjs node_modules/vitest/vitest.mjs run --config vitest.recognition.config.ts",
     "generate:native-contracts": "node ../contracts/generate-native.mjs",
@@ -46,7 +46,9 @@
     "test:native-contracts": "node scripts/with-workspace-temp.mjs --test ../contracts/generate-native.test.mjs",
     "format:architecture": "node scripts/with-workspace-temp.mjs scripts/format-architecture.mjs --write",
     "check:format": "node scripts/with-workspace-temp.mjs scripts/format-architecture.mjs --check",
-    "test:format-config": "node scripts/with-workspace-temp.mjs --test scripts/format-architecture.test.mjs"
+    "test:format-config": "node scripts/with-workspace-temp.mjs --test scripts/format-architecture.test.mjs",
+    "sdk:build": "npm --prefix ../packages/gim-sdk run build",
+    "test:sdk": "node scripts/with-workspace-temp.mjs ../packages/gim-sdk/test-consumer.mjs"
   },
   "author": "bamboosjtu",
   "license": "MIT",
@@ -62,7 +64,8 @@
     "maplibre-gl": "^5.24.0",
     "three": "^0.184.0",
     "three-bvh-csg": "^0.0.18",
-    "web-ifc": "0.0.78"
+    "web-ifc": "0.0.78",
+    "@gim/gim-sdk": "file:../packages/gim-sdk"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.3",
@@ -77,7 +80,8 @@
     "typescript": "^5.3.0",
     "typescript-eslint": "^8.72.1",
     "vite": "^5.0.0",
-    "vitest": "^2.0.0"
+    "vitest": "^2.0.0",
+    "istanbul-lib-coverage": "3.2.2"
   },
   "engines": {
     "node": ">=22.0.0"

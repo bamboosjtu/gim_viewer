@@ -6,5 +6,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./*": "./src/*"
-  }
+  },
+  "files": [
+    "src/**/*.ts",
+    "!src/**/__tests__/**"
+  ]
 }

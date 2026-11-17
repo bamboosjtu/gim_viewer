@@ -1,4 +1,4 @@
-import {existsSync,readdirSync,statSync} from 'node:fs';
+import {existsSync,readdirSync,statSync,readFileSync} from 'node:fs';
 import {resolve,join} from 'node:path';
 import {createRequire} from 'node:module';
 import {pathToFileURL} from 'node:url';
@@ -13,7 +13,20 @@ function collect(path){
       if(['node_modules','dist','target','__pycache__','.git','.venv','_build','tmp','output','demo'].includes(entry.name))continue;
       collect(join(path,entry.name));
     }
-  }else if(/\.(?:[cm]?[jt]sx?|json)$/.test(path))files.add(path);
+  }else if(/\.(?:[cm]?[jt]sx?|json)$/.test(path)){
+    if(files.has(path))return;files.add(path);
+    for(const [,specifier] of readFileSync(path,'utf8').matchAll(/from\s+['"](@gim\/gim-sdk[^'"]*)['"]/g)){
+      const sdk=resolve(root,'../packages/gim-sdk'),manifest=JSON.parse(readFileSync(join(sdk,'package.json'),'utf8'));
+      const suffix=specifier.slice('@gim/gim-sdk'.length),key=suffix?'.'+suffix:'.';
+      for(const [entry,targets] of Object.entries(manifest.exports)){
+        const prefix=entry.endsWith('*')?entry.slice(0,-1):entry;
+        if(entry===key||entry.endsWith('*')&&key.startsWith(prefix)){
+          const target=resolve(sdk,targets['gim-source'].replace('*',key.slice(prefix.length))).replace(/\.js$/,'.ts');
+          if(existsSync(target))collect(target);
+        }
+      }
+    }
+  }
 }
 for(const module of modules){
   const path=existsSync(resolve(root,module))?resolve(root,module):resolve(root,'src',module);

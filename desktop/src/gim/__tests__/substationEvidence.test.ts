@@ -5,7 +5,7 @@ import { discoverIfcFromCBM } from '../gimIndexer.js';
 import { buildSubstationAliasIndex, buildSubstationIfcEvidence, discoverSubstationGlSidecars, inspectSubstationCapabilities, findSubstationSourceDocuments } from '../substationEvidence.js';
 import { hydrateSubstationGeometryGraph } from '../geometry/substationSourceGraph.js';
 import { discoverGeometriesFromNode } from '../../services/modGeometryDiscovery.js';
-import { parseFamSectionsWithDiagnostics, resolveSubstationBusinessIdentity } from '../famParser.js';
+import { parseFamSectionsWithDiagnostics, resolveSubstationBusinessIdentity } from '@gim/gim-sdk/gim/famParser.js';
 import { buildGimIndexPayload } from '../../services/gimIndexPersistenceService.js';
 import { buildGeometryRefsPayload } from '../../services/__tests__/geometryRefsPayload.js';
 import { restoreGimIndexToState } from '../../services/gimIndexRestoreService.js';

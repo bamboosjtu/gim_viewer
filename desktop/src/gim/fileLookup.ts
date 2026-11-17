@@ -1,3 +1,5 @@
+import {normalizeFilePath} from '@gim/gim-sdk/gim/path.js';
+export {normalizeFilePath} from '@gim/gim-sdk/gim/path.js';
 /**
  * GIM 解压文件集合的路径查找工具。
  *
@@ -22,11 +24,6 @@ interface FilePathIndex {
 const indexCache = new WeakMap<Map<string, File>, FilePathIndex>();
 
 /** 统一分隔符并去掉引用值中常见的 `./` 前缀。 */
-export function normalizeFilePath(path: string): string {
-  let normalized = path.replace(/\\/g, '/');
-  while (normalized.startsWith('./')) normalized = normalized.slice(2);
-  return normalized;
-}
 
 function getIndex(files: Map<string, File>): Map<string, string> {
   const cached = indexCache.get(files);

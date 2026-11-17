@@ -1,0 +1,87 @@
+{
+  "name": "@gim/gim-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Portable GIM source, semantic, geometry-address, binding and projection core",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "gim-source": "./src/index.ts",
+      "import": "./dist/index.js"
+    },
+    "./source": {
+      "types": "./src/gim/engineering/source.ts",
+      "gim-source": "./src/gim/engineering/source.ts",
+      "import": "./dist/gim/engineering/source.js"
+    },
+    "./semantic": {
+      "types": "./src/engineering/semantic.ts",
+      "gim-source": "./src/engineering/semantic.ts",
+      "import": "./dist/engineering/semantic.js"
+    },
+    "./geometry": {
+      "types": "./src/gim/engineering/geometry.ts",
+      "gim-source": "./src/gim/engineering/geometry.ts",
+      "import": "./dist/gim/engineering/geometry.js"
+    },
+    "./engineering": {
+      "types": "./src/engineering/fusion.ts",
+      "gim-source": "./src/engineering/fusion.ts",
+      "import": "./dist/engineering/fusion.js"
+    },
+    "./projection": {
+      "types": "./src/gim/engineering/projection.ts",
+      "gim-source": "./src/gim/engineering/projection.ts",
+      "import": "./dist/gim/engineering/projection.js"
+    },
+    "./source-adapter": {
+      "types": "./src/gim/engineering/semanticAdapter.ts",
+      "gim-source": "./src/gim/engineering/semanticAdapter.ts",
+      "import": "./dist/gim/engineering/semanticAdapter.js"
+    },
+    "./engineering/*": {
+      "types": "./src/engineering/*",
+      "gim-source": "./src/engineering/*",
+      "import": "./dist/engineering/*"
+    },
+    "./gim/*": {
+      "types": "./src/gim/*",
+      "gim-source": "./src/gim/*",
+      "import": "./dist/gim/*"
+    },
+    "./shared/*": {
+      "types": "./src/shared/*",
+      "gim-source": "./src/shared/*",
+      "import": "./dist/shared/*"
+    }
+  },
+  "files": [
+    "dist",
+    "src/**/*.ts",
+    "src/**/*.json",
+    "!src/**/__tests__/**"
+  ],
+  "scripts": {
+    "check": "tsc -p tsconfig.json",
+    "build": "npm run check && node build.mjs",
+    "test": "node test-unit.mjs",
+    "test:consumer": "node test-consumer.mjs"
+  },
+  "dependencies": {
+    "@gim/powerline-core": "file:../powerline-core"
+  },
+  "devDependencies": {
+    "esbuild": "0.21.5",
+    "typescript": "5.9.3",
+    "vitest": "2.0.0",
+    "@vitest/coverage-v8": "2.0.0"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "bundledDependencies": [
+    "@gim/powerline-core"
+  ]
+}

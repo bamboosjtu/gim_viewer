@@ -45,6 +45,7 @@ export default defineConfig(({ mode }) => {
       'import.meta.env.VITE_TIANDITU_KEY': JSON.stringify(tiandituKey),
     },
     resolve: {
+      conditions: ['gim-source', 'module', 'browser', 'development|production'],
       alias: {
         '@desktop': resolve(__dirname, 'bridge'),
       },

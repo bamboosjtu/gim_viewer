@@ -1,9 +1,9 @@
 name: Entity Recognition Contracts
 on:
   push:
-    paths: ['desktop/src/engineering/**', 'desktop/src/gim/**', 'desktop/scripts/*engineering-catalog*', 'desktop/vitest.recognition.config.ts', 'desktop/package*.json', 'tools/gim_element/**', '.github/workflows/recognition-ci.yml']
+    paths: ['packages/gim-sdk/**', 'desktop/src/engineering/**', 'desktop/src/gim/**', 'desktop/scripts/*engineering-catalog*', 'desktop/vitest.recognition.config.ts', 'desktop/package*.json', 'tools/gim_element/**', '.github/workflows/recognition-ci.yml']
   pull_request:
-    paths: ['desktop/src/engineering/**', 'desktop/src/gim/**', 'desktop/scripts/*engineering-catalog*', 'desktop/vitest.recognition.config.ts', 'desktop/package*.json', 'tools/gim_element/**', '.github/workflows/recognition-ci.yml']
+    paths: ['packages/gim-sdk/**', 'desktop/src/engineering/**', 'desktop/src/gim/**', 'desktop/scripts/*engineering-catalog*', 'desktop/vitest.recognition.config.ts', 'desktop/package*.json', 'tools/gim_element/**', '.github/workflows/recognition-ci.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -33,6 +33,7 @@ jobs:
           "TMPDIR=$((Resolve-Path ../tmp/ci/recognition).Path)" >> $env:GITHUB_ENV
           "PYTHONDONTWRITEBYTECODE=1" >> $env:GITHUB_ENV
       - run: npm ci
+      - run: npm ci --prefix ../packages/gim-sdk
       - run: npm run check:engineering-catalog
       - run: npm run check:engineering-boundaries
       - name: Recognition DTOs and adapters without geometry or model samples

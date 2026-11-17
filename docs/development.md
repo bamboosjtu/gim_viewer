@@ -50,6 +50,10 @@ npm run tauri:dev     # Tauri 开发窗口
 | `npm run sync:engineering-catalog` | 同步独立 JSON 词汇、工具配置副本和目录文档，不读取 XLSX |
 | `npm run check:engineering-catalog` | JSON 目录、词汇命名空间、独立工具数据副本及目录文档一致性 |
 
+核心 SDK 的源码、目录配置和测试位于 `packages/gim-sdk/`。首次构建先在该目录执行 `npm ci`，再在 desktop 执行 `npm ci`；CI 同样安装两个运行面的声明依赖。`npm run sdk:build` 构建无运行时外部依赖的 ESM，`npm run test:sdk` 在工作区 tmp 的隔离 Node 消费目录中验证五个能力出口。SDK 自身 `npm test` 使用工作区临时目录运行所属单元测试。SDK 构建产物不包含 Viewer、DOM 或原生 IPC，独立 Python 工具仍使用自己的实现和资产。
+
+桌面 Vite / TypeScript / Vitest 用 gim-source 条件连接包源码，构建默认 ESM 的行为由 SDK 独立消费者验证。模块测试可选择 `../packages/gim-sdk/src/engineering` 或原转发模块；test:module 会扩展 SDK 转发目标，并选择所属与依赖消费者测试。lint 从工作区根配置同时检查桌面与 SDK，实现迁移不缩小覆盖率或规则范围。
+
 应用版本以 `desktop/package.json` 为准；Tauri 配置引用该文件。portable 组包还会读取 EXE 的 ProductVersion，拒绝把旧程序标成新版本。发布与资产细节见[平台、安全与发布](architecture/platform.md)。
 
 ## 测试与门禁命令

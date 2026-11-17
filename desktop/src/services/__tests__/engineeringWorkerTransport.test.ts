@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
-import { extractEngineeringSourceGraph } from '../../gim/engineering/sourceGraph.js';
-import {buildTestEngineeringSources} from '../../gim/engineering/__tests__/fixtures.js';
-import { projectEngineeringNavigation } from '../../gim/engineering/navigation.js';
+import { extractEngineeringSourceGraph } from '@gim/gim-sdk/gim/engineering/sourceGraph.js';
+import {buildTestEngineeringSources} from '../../../../packages/gim-sdk/src/gim/engineering/__tests__/fixtures.js';
+import { projectEngineeringNavigation } from '@gim/gim-sdk/gim/engineering/navigation.js';
 import { encodeEngineeringWorkerResultAsync, decodeEngineeringWorkerResult, engineeringWorkerResultTransfers } from '../engineeringWorkerTransport.js';
 
 async function fixture() {

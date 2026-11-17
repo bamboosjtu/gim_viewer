@@ -19,9 +19,10 @@
 | 目录 | 职责 | 允许依赖 | 不应依赖 |
 |---|---|---|---|
 | `desktop/src/app/` | 启动、`AppState`、工程会话、模块接线 | services、ui 入口 | 具体 parser 内部 |
-| `desktop/src/engineering/` | 工程整体、成员、关系、组成模板与目录；纯领域 | 仅类型和纯函数 | GIM parser、UI、Viewer、DB、平台 IO |
+| `packages/gim-sdk/` | 五组纯核心；来源、语义、物理目录、表示绑定与投影 | 包内纯模块、powerline-core | desktop/app 宿主、DOM、Tauri、Three/Viewer、DB |
+| `desktop/src/engineering/` | 现有消费者的 SDK 出口转发 | 声明的 SDK exports | 核心算法和配置副本 |
 | `desktop/src/standards/` | 首批标准要求/属性定义、字段级原文证据与只读上下文查询 | 本地数据资源、纯函数 | 工程识别算法、Viewer、DB、模型校核执行 |
-| `desktop/src/gim/engineering/` | 把 CBM/DEV/FAM/IFC 来源适配成中立证据和来源图 | gim 纯 parser、engineering 契约 | Viewer、UI、DB |
+| `desktop/src/gim/engineering/` | 现有来源消费者的 SDK 转发入口；来源适配实现与测试归 SDK | SDK exports | 规则副本、Viewer、UI、DB |
 | `desktop/src/gim/` | 容器、CBM/DEV/PHM/MOD/IFC 纯解析、索引和地图数据 | 共享纯库 | services、viewer、ui |
 | `desktop/src/viewer/` | Three.js、Fragments、web-ifc、MOD/STL 编译与渲染 | three、geometry 纯函数、类型 | services、ui、DB |
 | `desktop/src/ui/` | DOM shell、三视图、属性、搜索、地图、工具栏 | services 暴露的结果、纯类型、白名单展示选择器 | 数据库、原生 IPC |
@@ -81,7 +82,9 @@ bootstrap
 
 ## 五组能力入口
 
-桌面应用在现有目录中以五个入口连接能力：`gim/engineering/source.ts` 提供来源收集，`engineering/semantic.ts` 提供归一化，`gim/engineering/geometry.ts` 提供独立物理目录，`engineering/fusion.ts` 提供实体/表示绑定，`gim/engineering/projection.ts` 提供现有三视图投影。宿主 Worker 和工程装配通过这些入口接线；格式适配仍在 gim，纯领域仍在 engineering。
+桌面应用通过 `@gim/gim-sdk` 的 source / semantic / geometry / engineering / projection 五个出口连接能力。现有目录仅保留有生产消费者的转发入口：`gim/engineering/source.ts` 提供来源收集，`engineering/semantic.ts` 提供归一化，`gim/engineering/geometry.ts` 提供独立物理目录，`engineering/fusion.ts` 提供实体/表示绑定，`gim/engineering/projection.ts` 提供现有三视图投影。宿主 Worker 和工程装配通过这些入口接线；格式适配仍在 gim，纯领域仍在 engineering。
+
+SDK 的实现及模块测试归 `packages/gim-sdk/src/`，IFC 运行时解析器仍在桌面；其共享对象/空间类型由 SDK 的 ifcSpatialTypes 提供。桌面与 Vitest 使用 gim-source 条件读取当前源码，默认包 import 消费构建后的 ESM。
 
 `core-boundaries.mjs` 补充职责检查：投影和绑定不得导入分类器/归一化运行值，几何入口和目录不得消费语义主归属。中立类型允许共享；负向用例纳入 `test:presentation-boundaries`。入口不意味着五个独立进程或串行执行，几何仍可先于实体完成。
 

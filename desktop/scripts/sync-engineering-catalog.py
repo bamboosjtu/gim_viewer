@@ -10,7 +10,7 @@ def load(path):return json.loads((ROOT/path).read_text(encoding='utf-8'))
 def write(path,data):(ROOT/path).write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
 def snake(term):return re.sub('[^a-z0-9]+','_',re.sub(r'([a-z0-9])([A-Z])',r'\1_\2',term).lower()).strip('_')
 def main():
- catalog=load('desktop/src/engineering/catalog.json');standard=load('desktop/src/engineering/standardCatalog.json');policy=load('desktop/src/engineering/recognitionPolicy.json')
+ catalog=load('packages/gim-sdk/src/engineering/catalog.json');standard=load('packages/gim-sdk/src/engineering/standardCatalog.json');policy=load('packages/gim-sdk/src/engineering/recognitionPolicy.json')
  vocab={'version':'substation-vocabulary-1','source':standard['source'],'equipment':{},'equipmentAliases':policy['equipmentAliases'],'components':{},'objectRoles':{},
   'keywordDictionary':{'version':'source-keywords-1','fields':['SYSCLASSIFYNAME','PARTNAME','类型','模型分类名称','装置名称'],'namespace':'standard-model','entries':{}},
   'componentDictionary':{'version':'source-components-1','namespace':'standard-component','entries':{}}}
@@ -45,8 +45,8 @@ def main():
   item=next(i for i in standard['items'] if i['id']==category['items'][0]);e=item['evidence']
   for word in [category['label'],category['code']]:
    if word.lower() not in entries:insert(entries,word,'category:'+category['code'],{'sourceKind':'workbook','workbookSha256':e['workbookSha256'],'sheet':e['sheet'],'cell':e['categoryCell'],'cellRange':e['categoryCell'],'verification':'verified','sourceLocation':e['sheet']+'!'+e['categoryCell']},'catalogIds')
- for base in ['desktop/src/gim/engineering/','tools/gim_element/']:write(base+'sourceVocabulary.json',vocab)
- for name in ['catalog.json','standardCatalog.json','recognitionPolicy.json','compositionPolicy.json']:write('tools/gim_element/'+name,load('desktop/src/engineering/'+name))
- write('tools/gim_element/sourceCompatibilityPolicy.json',load('desktop/src/gim/engineering/sourceCompatibilityPolicy.json'))
+ for base in ['packages/gim-sdk/src/gim/engineering/','tools/gim_element/']:write(base+'sourceVocabulary.json',vocab)
+ for name in ['catalog.json','standardCatalog.json','recognitionPolicy.json','compositionPolicy.json']:write('tools/gim_element/'+name,load('packages/gim-sdk/src/engineering/'+name))
+ write('tools/gim_element/sourceCompatibilityPolicy.json',load('packages/gim-sdk/src/gim/engineering/sourceCompatibilityPolicy.json'))
  print('Synchronized JSON model/component vocabularies and standalone policy copies; no workbook input.')
 if __name__=='__main__':main()

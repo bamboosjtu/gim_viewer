@@ -6,7 +6,7 @@ import { buildSubstationSpatialIndexFromFiles, type SubstationSpatialIndex,
   type SubstationSpatialIndexObserver } from '../gim/ifcSpatialParser.js';
 import type { SpatialWorkerRequest, SpatialWorkerResponse } from './substationSpatialWorker.js';
 import type {SubstationSpatialSnapshotMetadata,EncodedSpatialCache} from './substationSpatialCodec.js';
-import recognitionFields from '../gim/engineering/recognitionFields.json';
+import recognitionFields from '@gim/gim-sdk/gim/engineering/recognitionFields.json';
 
 const active=new Set<()=>void>();
 export function cancelSubstationSpatialWorkers():void {

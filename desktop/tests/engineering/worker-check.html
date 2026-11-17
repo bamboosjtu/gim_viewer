@@ -11,9 +11,9 @@ globalThis.runEngineeringWorkerCheck = async () => {
   const check = (condition, message) => {if (!condition) throw Error(message);};
   const files = new Map([
     ['project.cbm',new File(['ENTITYNAME=F2System\nOBJECTMODELPOINTER=main.dev'],'project.cbm')],
-    ['main.dev',new File(['SYMBOLNAME=主变压器\nSUBDEVICE0=terminal.dev\nSUBDEVICE1=radiator.dev'],'main.dev')],
-    ['terminal.dev',new File(['SYMBOLNAME=本体端子箱'],'terminal.dev')],
-    ['radiator.dev',new File(['SYMBOLNAME=散热器'],'radiator.dev')],
+    ['main.dev',new File(['TYPE=OilImmersedTransformer\nSYMBOLNAME=主变压器\nSUBDEVICE0=terminal.dev\nSUBDEVICE1=radiator.dev'],'main.dev')],
+    ['terminal.dev',new File(['TYPE=TerminalBox\nSYMBOLNAME=本体端子箱'],'terminal.dev')],
+    ['radiator.dev',new File(['TYPE=Radiator\nSYMBOLNAME=散热器'],'radiator.dev')],
     ['unreferenced.fam',new File([new Uint8Array([0x81])],'unreferenced.fam')],
   ]);
   const scope='a'.repeat(64),identity={sourceSha256:scope,parserVersion:'browser-worker-check',entries:[...files.keys()]};
@@ -73,23 +73,23 @@ globalThis.runEngineeringWorkerCheck = async () => {
   controller.abort();check(await obsolete,'actual Worker cancellation');
   const state=new AppState();state.activateProject(7,scope);
   await beginEngineeringBuild(state,files);
-  check(state.engineeringStatus==='ready'&&state.engineeringSnapshot.entities.length===1,'production service with actual Worker');
+  check(state.engineering.status==='ready'&&state.engineering.snapshot.entities.length===1,'production service with actual Worker');
   const fixture=document.createElement('section');fixture.innerHTML='<div id="cbm-tree-panel" class="tab-panel"></div><aside id="props-drawer"><div id="props-drawer-body"></div></aside><button id="btn-close-props"></button><button id="btn-export-props"></button>';
-  document.body.append(fixture);state.currentProjectType='substation';state.engineeringNavMode='composition';
+  document.body.append(fixture);state.currentProjectType='substation';state.viewState.mode='composition';
   const {configurePresentation}=await import('../../src/app/presentationBindings.ts');configurePresentation();
   const {renderEngineeringTree}=await import('../../src/ui/engineeringTreeView.ts');renderEngineeringTree(state);
   check([...fixture.querySelectorAll('.substation-nav-mode-btn')].map(b=>b.textContent).join(',')==='清册,工程,来源','actual browser three views');
-  check(state.engineeringNavigation.inventory.rowsBySource.size===3,'inventory includes actual component sources');
+  check(state.engineering.navigation.inventory.rowsBySource.size===3,'inventory includes actual component sources');
   const input=fixture.querySelector('[role="combobox"]');input.value='散热器';input.dispatchEvent(new Event('input'));
-  fixture.querySelector('[role="option"]').click();check(state.selectionRequest.target.kind==='engineering','search claims whole selection before lazy imports');
+  fixture.querySelector('[role="option"]').click();check(state.selection.selectionRequest.target.kind==='engineering','search claims whole selection before lazy imports');
   const until=async(predicate,label)=>{const end=performance.now()+10000;while(!predicate()){if(performance.now()>end)throw Error(`browser navigation did not settle: ${label}`);await new Promise(resolve=>setTimeout(resolve,25));}};
   await until(()=>fixture.querySelector('.props-header')?.textContent==='主变压器','search whole');
   [...fixture.querySelectorAll('[data-engineering-source-index]')].find(b=>b.textContent==='散热器').click();
-  try { await until(()=>state.engineeringNavMode==='source'&&fixture.querySelector('.props-header')?.textContent==='散热器','source reveal'); }
-  catch(error){throw Error(`${error.message}; mode=${state.engineeringNavMode}; header=${fixture.querySelector('.props-header')?.textContent}; sourceButtons=${[...fixture.querySelectorAll('[data-engineering-source-index]')].map(b=>b.textContent).join('|')}`);}
+  try { await until(()=>state.viewState.mode==='source'&&fixture.querySelector('.props-header')?.textContent==='散热器','source reveal'); }
+  catch(error){throw Error(`${error.message}; mode=${state.viewState.mode}; header=${fixture.querySelector('.props-header')?.textContent}; sourceButtons=${[...fixture.querySelectorAll('[data-engineering-source-index]')].map(b=>b.textContent).join('|')}`);}
   check(fixture.querySelector('.tree-row.selected')?.textContent.includes('散热器'),'source reveal in virtual outline');
   fixture.querySelector('#engineering-owner').click();
-  await until(()=>state.engineeringNavMode==='composition'&&fixture.querySelector('.props-header')?.textContent==='主变压器','owner return');
+  await until(()=>state.viewState.mode==='composition'&&fixture.querySelector('.props-header')?.textContent==='主变压器','owner return');
   const {buildSubstationSpatialIndexInWorker}=await import('../../src/services/substationSpatialWorkerClient.ts');
   let spatialCache;
   const spatial=await buildSubstationSpatialIndexInWorker(new Map([['model.ifc',new File(["#1=IFCPROJECT('p',$,'工程',$,$,$,$,$,$);\n#2=IFCWALL('w',$,'墙',$,$,$,$,$);"],'model.ifc')]]),

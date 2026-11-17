@@ -1,5 +1,5 @@
 import {describe,it,expect,vi} from 'vitest';
-import {buildCbmTree} from '../cbmParser.js';
+import {buildCbmTree} from '../../../../../desktop/src/gim/cbmParser.js';
 import {extractEngineeringSourceGraph} from '../engineering/sourceGraph.js';
 import {SourceDocuments} from '../engineering/sourceDocuments.js';
 import {extractPhysicalOccurrences} from '../engineering/physicalOccurrences.js';

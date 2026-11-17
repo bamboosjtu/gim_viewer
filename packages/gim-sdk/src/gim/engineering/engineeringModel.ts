@@ -1,4 +1,4 @@
-import type { IfcSpatialObject } from '../ifcSpatialParser.js';
+import type { IfcSpatialObject } from '../ifcSpatialTypes.js';
 import { ifcSourceRecords } from './ifcSourceRecords.js';
 import type { SourceRecord } from './sourceEvidence.js';
 import {engineeringSourceRecords,type EngineeringSourceGraph} from './sourceGraph.js';

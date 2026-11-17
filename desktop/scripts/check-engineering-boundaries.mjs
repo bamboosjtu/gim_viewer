@@ -8,6 +8,7 @@ import {coreBoundaryErrors} from './core-boundaries.mjs';
 import {nativeContractCallErrors} from './native-contract-boundaries.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../src');
+const sdkRoot = resolve(root, '../../packages/gim-sdk/src');
 const measurementCoreRoot = resolve(root, '../../packages/measurement-core/src');
 const measurementFacade = resolve(root, 'measurement/core.ts');
 function* files(dir) {
@@ -74,9 +75,9 @@ const viewerSourceValues=new Map([
   ['gim/geometry/xmlModParser.ts',new Set(['parseXmlMod'])],
   ['gim/geometry/ir.ts',new Set(['DEFAULT_ANGULAR_SEGMENTS','DEFAULT_LINEAR_SEGMENTS'])],
 ]);
-for (const layer of ['engineering','gim','viewer','ui','services','app']) for (const path of files(resolve(root,layer))) {
+for (const [layer,sourceRoot] of [...['engineering','gim','viewer','ui','services','app'].map(layer=>[layer,root]),...['engineering','gim','shared'].map(layer=>[layer,sdkRoot])]) for (const path of files(resolve(sourceRoot,layer))) {
   const ast = ts.createSourceFile(path, readFileSync(path,'utf8'), ts.ScriptTarget.Latest, true);
-  const localPath = relative(root, path).replaceAll('\\', '/');
+  const localPath = relative(sourceRoot, path).replaceAll('\\', '/');
   failures.push(...coreBoundaryErrors(readFileSync(path,'utf8'),localPath));
   const pureLineProjection = ['services/lineInspectorProjection.ts','services/lineMapGeometry.ts','services/lineMapHitTesting.ts','services/lineMapStages.ts','services/inspectorMarkup.ts','services/propertyPresentation.ts'].includes(localPath);
   const resolverFactories = new Set(['createEntryResolver','createEntryIndex']);
@@ -113,14 +114,16 @@ for (const layer of ['engineering','gim','viewer','ui','services','app']) for (c
       : ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword ? node.arguments[0] : undefined;
     if (specifier && ts.isStringLiteral(specifier)) {
       const name = specifier.text;
-      const packageError=packageBoundaryError(name,sharedDependencies);if(packageError)failures.push(`${localPath}: ${packageError}: ${name}`);
+      if(sourceRoot===sdkRoot&&!name.startsWith('.')&&!name.startsWith('@gim/powerline-core/'))failures.push(`${localPath}: SDK runtime dependency is not declared portable core: ${name}`);
+      const packageError=packageBoundaryError(name,sourceRoot===sdkRoot?{'@gim/powerline-core':true}:sharedDependencies);if(packageError)failures.push(`${localPath}: ${packageError}: ${name}`);
       const resolved = name.startsWith('.') ? resolve(dirname(path), name.replace(/\.js$/, '.ts')) : null;
+      if(sourceRoot===sdkRoot && resolved && !resolved.startsWith(`${sdkRoot}${sep}`))failures.push(`${localPath}: SDK cannot import outside its source package: ${name}`);
       if (path !== measurementFacade && (resolved?.startsWith(`${measurementCoreRoot}${sep}`) || name.startsWith('@gim/measurement-core'))) {
         failures.push(`${localPath}: import measurement core through measurement/core.ts`);
       }
-      const target = name.startsWith('.') ? relative(root,resolve(dirname(path),name)).replaceAll('\\','/').split('/')[0] : name;
+      const target = name.startsWith('.') ? relative(sourceRoot,resolve(dirname(path),name)).replaceAll('\\','/').split('/')[0] : name;
       if(layer==='viewer'&&target==='gim') {
-        const module=relative(root,resolve(dirname(path),name.replace(/\.js$/,'.ts'))).replaceAll('\\','/');
+        const module=relative(sourceRoot,resolve(dirname(path),name.replace(/\.js$/,'.ts'))).replaceAll('\\','/');
         const clause=ts.isImportDeclaration(node)?node.importClause:undefined,bindings=clause?.namedBindings;
         const names=bindings&&ts.isNamedImports(bindings)?bindings.elements.filter(item=>!item.isTypeOnly).map(item=>(item.propertyName??item.name).text):null;
         if(!node.isTypeOnly&&!clause?.isTypeOnly&&(!names||names.some(value=>!viewerSourceValues.get(module)?.has(value))))failures.push(`${localPath}: Viewer cannot import source semantics ${name}`);
@@ -130,7 +133,7 @@ for (const layer of ['engineering','gim','viewer','ui','services','app']) for (c
         failures.push(`${localPath}: pure line projection imports runtime dependency ${name}`);
       }
       if(layer==='ui' && name.startsWith('.')) {
-        const module=relative(root,resolve(dirname(path),name.replace(/\.js$/,'.ts'))).replaceAll('\\','/');
+        const module=relative(sourceRoot,resolve(dirname(path),name.replace(/\.js$/,'.ts'))).replaceAll('\\','/');
         if(/^(?:engineering|gim|viewer)\//.test(module)||module==='shared/gimParsing.ts') {
           const clause=ts.isImportDeclaration(node)?node.importClause:undefined;
           const bindings=clause?.namedBindings;
@@ -205,7 +208,7 @@ for (const family of runtimeFamilies) {
 
 // Whole-source static value graph. Dynamic and type dependencies are counted,
 // but cannot create an eager module-initialization cycle by themselves.
-const all=[...files(root)], graph=new Map(all.map(path=>[path,new Set()]));
+const all=[...files(root),...files(sdkRoot)], graph=new Map(all.map(path=>[path,new Set()]));
 let typeEdges=0,dynamicEdges=0;
 for(const path of all){
  const ast=ts.createSourceFile(path,readFileSync(path,'utf8'),ts.ScriptTarget.Latest,true);

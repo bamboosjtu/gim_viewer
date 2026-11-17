@@ -66,6 +66,14 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Install SDK dependencies
+        run: npm ci --prefix ../packages/gim-sdk
+
+      - name: Build and consume the standalone SDK
+        run: |
+          npm run sdk:build
+          npm run test:sdk
+
       - name: Check desktop release versions
         run: npm run test:version
 

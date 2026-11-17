@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { projectSpatialComposition } from '../projections/compositionSpatial.js';
-import { projectEngineeringComposition, finalizeEngineeringComposition } from '../../engineering/composition.js';
+import { projectEngineeringComposition, finalizeEngineeringComposition } from '@gim/gim-sdk/engineering/composition.js';
 import type { ProjectionInput } from '../compositionProjectionWorker.js';
 import { AppState } from '../../app/state.js';
 import { buildSubstationSpatialIndexFromTexts } from '../../gim/ifcSpatialParser.js';

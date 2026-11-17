@@ -1,8 +1,8 @@
 import {it,expect} from 'vitest';
 import {buildSubstationSpatialIndexFromTexts} from '../ifcSpatialParser.js';
-import {ifcSourceRecords} from '../engineering/ifcSourceRecords.js';
-import {toObjectEvidence,ENGINEERING_EVIDENCE_FIELDS} from '../engineering/sourceEvidence.js';
-import {interpretObject} from '../../engineering/classify.js';
+import {ifcSourceRecords} from '@gim/gim-sdk/gim/engineering/ifcSourceRecords.js';
+import {toObjectEvidence,ENGINEERING_EVIDENCE_FIELDS} from '@gim/gim-sdk/gim/engineering/sourceEvidence.js';
+import {interpretObject} from '@gim/gim-sdk/engineering/classify.js';
 const entry={path:'model.ifc',name:'model.ifc',modelId:'ifc-test'};
 it('retains requested object-linked recognition fields while unrelated property values stay deferred',()=>{
   const text=`ISO-10303-21;HEADER;ENDSEC;DATA;

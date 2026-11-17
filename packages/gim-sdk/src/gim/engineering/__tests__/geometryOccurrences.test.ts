@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import * as THREE from 'three';
 import { extractEngineeringSourceGraph } from '../sourceGraph.js';
 import { collectSourceGeometryOccurrences } from '../geometryOccurrences.js';
-const matrix = (x: number, y: number, z = 0) => new THREE.Matrix4().makeTranslation(x, y, z).toArray().join(',');
+const matrix = (x: number, y: number, z = 0) => [1,0,0,0,0,1,0,0,0,0,1,0,x,y,z,1].join(',');
 async function graph(raw: Record<string, string>) { return extractEngineeringSourceGraph({ paths: Object.keys(raw), readText: async path => raw[path] }); }
 describe('physical occurrence placement independent of tree grain', () => {
   it('preserves two references to one CBM/template as separate instances and accumulates every source transform', async () => {
@@ -29,12 +28,12 @@ describe('physical occurrence placement independent of tree grain', () => {
     expect(collectSourceGeometryOccurrences(g).occurrences.map(o => o.devPath)).toEqual(['root.dev']);
   });
   it('multiplies a rotated ancestor and translated child in source column-major order', async () => {
-    const rotation = new THREE.Matrix4().makeRotationZ(Math.PI / 2).toArray().join(',');
+    const rotation = [0,1,0,0,-1,0,0,0,0,0,1,0,0,0,0,1].join(',');
     const g = await graph({ 'project.cbm': `SUBSYSTEM0=child.cbm\nTRANSFORMMATRIX=${rotation}`,
       'child.cbm': `OBJECTMODELPOINTER=unit.dev\nTRANSFORMMATRIX=${matrix(1000, 0)}`, 'unit.dev': 'SYMBOLNAME=设备' });
     const placed = collectSourceGeometryOccurrences(g).occurrences[0].placementMatrix;
     expect(placed[12]).toBeCloseTo(0); expect(placed[13]).toBeCloseTo(1000);
-    expect(placed).toEqual(new THREE.Matrix4().makeRotationZ(Math.PI / 2).multiply(new THREE.Matrix4().makeTranslation(1000, 0, 0)).toArray());
+    expect(placed).toEqual([0,1,0,0,-1,0,0,0,0,0,1,0,0,1000,0,1]);
   });
   it('does not discard independent children merely because an ancestor references the same template', async () => {
     const g = await graph({ 'project.cbm': 'OBJECTMODELPOINTER=same.dev\nSUBSYSTEM0=child.cbm', 'same.dev': 'SYMBOLNAME=设备',
@@ -45,7 +44,7 @@ describe('physical occurrence placement independent of tree grain', () => {
     const g = await graph({ 'project.cbm': 'OBJECTMODELPOINTER=unit.dev\nTRANSFORMMATRIX=invalid', 'unit.dev': 'SYMBOLNAME=设备' });
     const value = collectSourceGeometryOccurrences(g);
     expect(value.diagnostics[0].reason).toBe('invalid-source-matrix');
-    expect(value.occurrences[0].placementMatrix).toEqual(new THREE.Matrix4().toArray());
+    expect(value.occurrences[0].placementMatrix).toEqual([1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]);
     expect(g.documents[0].rawLines).toContain('TRANSFORMMATRIX=invalid');
   });
 });

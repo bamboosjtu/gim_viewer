@@ -1,2 +1,2 @@
-/** Current source-evidence contract entry; parsers/adapters share the lossless document model through this boundary. */
-export * from '@gim/powerline-core/sourceDocument.js';
+/** Desktop compatibility entry; implementation and tests belong to gim-sdk. */
+export * from '@gim/gim-sdk/gim/sourceDocument.js';

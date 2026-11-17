@@ -24,4 +24,4 @@ Parser/Adapter 提供来源证据，Core 判断类别、身份和成员，来源
 
 观察 `engineering.extract/normalize`、证据驻留、导航投影/编码、缓存命中和真实几何编译次数。领域正确性及人工归属真值与性能分别验收。
 
-代码：[纯领域](../../desktop/src/engineering/normalize.ts)、[证据 Provider](../../desktop/src/gim/engineering/evidenceProvider.ts)、[导航](../../desktop/src/gim/engineering/navigation.ts)。检查：[实体/来源边界](../../desktop/src/services/__tests__/engineeringService.test.ts)、[证据检查点](../../desktop/src/services/__tests__/engineeringEvidenceCheckpoint.test.ts)、[导航缓存](../../desktop/src/services/__tests__/engineeringNavigationCache.test.ts)、[表示](../../desktop/src/services/__tests__/sourceGeometryService.test.ts)。
+代码：[纯领域](../../packages/gim-sdk/src/engineering/normalize.ts)、[证据 Provider](../../packages/gim-sdk/src/gim/engineering/evidenceProvider.ts)、[导航](../../packages/gim-sdk/src/gim/engineering/navigation.ts)。检查：[实体/来源边界](../../desktop/src/services/__tests__/engineeringService.test.ts)、[证据检查点](../../desktop/src/services/__tests__/engineeringEvidenceCheckpoint.test.ts)、[导航缓存](../../desktop/src/services/__tests__/engineeringNavigationCache.test.ts)、[表示](../../desktop/src/services/__tests__/sourceGeometryService.test.ts)。

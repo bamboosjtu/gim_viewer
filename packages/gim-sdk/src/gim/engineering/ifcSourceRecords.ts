@@ -1,4 +1,4 @@
-import type { IfcSpatialObject } from '../ifcSpatialParser.js';
+import type { IfcSpatialObject } from '../ifcSpatialTypes.js';
 import type { SourceProperty, SourceRecord } from './sourceEvidence.js';
 import { isIfcFeatureSourceType } from './sourceEvidence.js';
 import { isIfcInternalDefinitionType } from '../ifcOutwardProduct.js';

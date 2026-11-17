@@ -3,7 +3,7 @@ import {architectureModules as adopted} from './scripts/format-architecture.mjs'
 export default tseslint.config({
   ignores: ['node_modules/**', 'dist/**', 'public/**', '.tmp/**', '**/__tests__/**', '**/*.test.ts'],
 }, {
-  files: ['src/**/*.ts', 'bridge/**/*.ts'],
+  files: ['src/**/*.ts', 'bridge/**/*.ts', '../packages/gim-sdk/src/**/*.ts'],
   languageOptions: { parser: tseslint.parser, parserOptions: { project: './tsconfig.json', tsconfigRootDir: import.meta.dirname } },
   plugins: { '@typescript-eslint': tseslint.plugin },
   rules: {

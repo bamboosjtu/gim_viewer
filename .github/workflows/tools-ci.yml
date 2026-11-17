@@ -4,13 +4,13 @@ on:
   push:
     paths:
       - 'tools/**'
-      - 'desktop/src/engineering/catalog.json'
+      - 'packages/gim-sdk/src/engineering/catalog.json'
       - '.github/workflows/tools-ci.yml'
       - '.gitignore'
   pull_request:
     paths:
       - 'tools/**'
-      - 'desktop/src/engineering/catalog.json'
+      - 'packages/gim-sdk/src/engineering/catalog.json'
       - '.github/workflows/tools-ci.yml'
       - '.gitignore'
   workflow_dispatch:

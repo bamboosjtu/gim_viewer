@@ -57,3 +57,18 @@ it('preserves contradictory semantic and physical parents rather than silently r
   expect(member.disposition).toBe('pending_whole_member');
   expect(physical.parent).toBe(graph.records.find(row=>row.source==='a.dev')!.id);
 });
+it('keeps a shared equipment type as whole/member roles and ignores F labels when composition evidence is unchanged',async()=>{
+  const input={'project.cbm':'SUBSYSTEM0=whole.cbm',
+    'whole.cbm':'ENTITYNAME=F4System\nOBJECTMODELPOINTER=whole.dev\nSUBDEVICE0=part.cbm',
+    'whole.dev':'TYPE=GIS\nSUBDEVICE0=part.dev','part.dev':'TYPE=GIS',
+    'part.cbm':'ENTITYNAME=PARTINDEX\nOBJECTMODELPOINTER=part.dev'};
+  const first=(await read(input)).graph;
+  const second=(await read({...input,'whole.cbm':input['whole.cbm'].replace('F4System','F2System'),
+    'part.cbm':input['part.cbm'].replace('PARTINDEX','F4System')})).graph;
+  const result=normalizeEngineeringSources('scope',collectEngineeringSources(first,[],[]));
+  expect(result.entities).toHaveLength(1);
+  expect(result.memberships.map(member=>member.interpretation.meaning)).toEqual(['object','part']);
+  expect(result.memberships[0].interpretation.category).toBe(result.memberships[1].interpretation.category);
+  expect(normalizeEngineeringSources('scope',collectEngineeringSources(second,[],[]))).toEqual(result);
+  expect(collectSourceGeometryOccurrences(second)).toEqual(collectSourceGeometryOccurrences(first));
+});

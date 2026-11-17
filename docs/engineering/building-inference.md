@@ -1,6 +1,6 @@
 # 建筑推断
 
-工程组成中的建筑/楼层/房间来自 IFC 空间结构、交付名称和项目声明，不由 F 层级、文件顺序或视图节点反推。当前实现只使用来源可追溯的空间关系和名称证据；算法入口见 [`compositionTemplate.ts`](../../desktop/src/engineering/compositionTemplate.ts)，几何轮廓补充见[空间推断](spatial-inference.md)。
+工程组成中的建筑/楼层/房间来自 IFC 空间结构、交付名称和项目声明，不由 F 层级、文件顺序或视图节点反推。当前实现只使用来源可追溯的空间关系和名称证据；算法入口见 [`compositionTemplate.ts`](../../packages/gim-sdk/src/engineering/compositionTemplate.ts)，几何轮廓补充见[空间推断](spatial-inference.md)。
 
 ## 目录
 

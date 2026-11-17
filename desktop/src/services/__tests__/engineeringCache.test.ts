@@ -1,15 +1,15 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
-import vocabulary from '../../gim/engineering/sourceVocabulary.json';
-import {projectEngineeringNavigation} from '../../gim/engineering/navigation.js';
+import vocabulary from '@gim/gim-sdk/gim/engineering/sourceVocabulary.json';
+import {projectEngineeringNavigation} from '@gim/gim-sdk/gim/engineering/navigation.js';
 import {encodeEngineeringNavigation} from '../engineeringNavigationCache.js';
-import { extractEngineeringSourceGraph } from '../../gim/engineering/sourceGraph.js';
-import {buildTestEngineeringSources} from '../../gim/engineering/__tests__/fixtures.js';
+import { extractEngineeringSourceGraph } from '@gim/gim-sdk/gim/engineering/sourceGraph.js';
+import {buildTestEngineeringSources} from '../../../../packages/gim-sdk/src/gim/engineering/__tests__/fixtures.js';
 import { decodeEngineeringArtifact,encodeEngineeringArtifact,decodeEngineeringEntities, decodeEngineeringSources, encodeEngineeringEntities, encodeEngineeringSources, engineeringCacheEntry, engineeringSourceCacheMatchesFiles } from '../engineeringCacheCodec.js';
 import {packEngineeringSource} from '../engineeringSourceCodec.js';
 import { markCacheFailure } from '../engineeringWorker.js';
 import type { EngineeringBuildResult } from '../engineeringWorkerProtocol.js';
-import {INVENTORY_TEMPLATE} from '../../engineering/inventoryTemplate.js';
+import {INVENTORY_TEMPLATE} from '@gim/gim-sdk/engineering/inventoryTemplate.js';
 
 const id = { sourceSha256: 'a'.repeat(64), parserVersion: 'parser-contract', entries: ['project.cbm', 'unit.dev', 'terminal.dev'] };
 async function fixture(extra: Record<string, string> = {}) {
@@ -35,8 +35,8 @@ describe('independent source and entity cache contracts', () => {
     const model=await fixture(),encoded=await encodeEngineeringSources(model.sources,id),sources=await decodeEngineeringSources(encoded.bytes,id);
     const entities=await encodeEngineeringEntities(model.snapshot,sources,id);
     const navigation=await encodeEngineeringNavigation(projectEngineeringNavigation(model.sources,model.snapshot),model.sources,model.snapshot,sources.digest,id);
-    vi.resetModules();vi.doMock('../../engineering/inventoryTemplate.js',async()=>({
-      ...await vi.importActual<typeof import('../../engineering/inventoryTemplate.js')>('../../engineering/inventoryTemplate.js'),
+    vi.resetModules();vi.doMock('@gim/gim-sdk/engineering/inventoryTemplate.js',async()=>({
+      ...await vi.importActual<typeof import('@gim/gim-sdk/engineering/inventoryTemplate.js')>('@gim/gim-sdk/engineering/inventoryTemplate.js'),
       INVENTORY_TEMPLATE:{...INVENTORY_TEMPLATE,members:'tree'},
     }));
     try{
@@ -44,7 +44,7 @@ describe('independent source and entity cache contracts', () => {
       expect((await next.decodeEngineeringSources(encoded.bytes,id)).digest).toBe(sources.digest);
       expect(await next.decodeEngineeringEntities(entities,sources,id)).toEqual(model.snapshot);
       await expect(nextNavigation.decodeEngineeringNavigation(navigation,model.sources,model.snapshot,sources.digest,id)).rejects.toThrow('identity / version');
-    }finally{vi.doUnmock('../../engineering/inventoryTemplate.js');vi.resetModules();}
+    }finally{vi.doUnmock('@gim/gim-sdk/engineering/inventoryTemplate.js');vi.resetModules();}
   });
   it('keeps gzip bytes compatible when canonical JSON is supplied as a stream',async()=>{
     const payload=Array.from({length:10000},(_,i)=>({i,text:'原始字段'+i}));
@@ -70,13 +70,13 @@ describe('independent source and entity cache contracts', () => {
     const sources=await decodeEngineeringSources(encoded.bytes,id),entities=await encodeEngineeringEntities(model.snapshot,sources,id);
     const navigation=await encodeEngineeringNavigation(projectEngineeringNavigation(model.sources,model.snapshot),model.sources,model.snapshot,sources.digest,id);
     expect(model.snapshot.rulesVersion).toContain(vocabulary.version);
-    vi.resetModules();vi.doMock('../../gim/engineering/sourceVocabulary.json',()=>({default:{...vocabulary,version:'substation-vocabulary-next'}}));
+    vi.resetModules();vi.doMock('@gim/gim-sdk/gim/engineering/sourceVocabulary.json',()=>({default:{...vocabulary,version:'substation-vocabulary-next'}}));
     try{
       const next=await import('../engineeringCacheCodec.js'),nextNavigation=await import('../engineeringNavigationCache.js');
       expect((await next.decodeEngineeringSources(encoded.bytes,id)).digest).toBe(sources.digest);
       await expect(next.decodeEngineeringEntities(entities,sources,id)).rejects.toThrow('identity / version');
       await expect(nextNavigation.decodeEngineeringNavigation(navigation,model.sources,model.snapshot,sources.digest,id)).rejects.toThrow('identity / version');
-    }finally{vi.doUnmock('../../gim/engineering/sourceVocabulary.json');vi.resetModules();}
+    }finally{vi.doUnmock('@gim/gim-sdk/gim/engineering/sourceVocabulary.json');vi.resetModules();}
   });
   it('round trips sources and membership without relying on a CBM UI tree or geometry', async () => {
     const model = await fixture();

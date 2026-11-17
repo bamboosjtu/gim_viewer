@@ -1,8 +1,8 @@
 import {expect,it} from 'vitest';
-import {normalizeEngineeringModel} from '../../../engineering/normalize.js';
+import {normalizeEngineeringModel} from '@gim/gim-sdk/engineering/normalize.js';
 import {type CompositionSpatialDiagnostics,fromIfcYUpBounds,projectSpatialComposition} from '../compositionSpatial.js';
-import type {CompositionAssignment} from '../../../engineering/composition.js';
-import {declaredObject} from '../../../engineering/__tests__/evidenceFixtures.js';
+import type {CompositionAssignment} from '@gim/gim-sdk/engineering/composition.js';
+import {declaredObject} from '../../../../../packages/gim-sdk/src/engineering/__tests__/evidenceFixtures.js';
 
 interface CompositionParityMismatch {entityId:string;sourceIds:string[];expectedPaths:string[];actualPaths:string[];}
 function compareCompositionAssignments(

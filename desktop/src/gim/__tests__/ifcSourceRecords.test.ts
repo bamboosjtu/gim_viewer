@@ -1,12 +1,12 @@
 import { expect, it } from 'vitest';
-import { ifcSourceRecords } from '../ifcSourceRecords.js';
-import { toObjectEvidence } from '../sourceEvidence.js';
-import { normalizeEngineeringModel } from '../../../engineering/normalize.js';
-import type { IfcSpatialObject } from '../../ifcSpatialParser.js';
-import { extractEngineeringSourceGraph } from '../sourceGraph.js';
-import {collectEngineeringSourceModel} from '../engineeringModel.js';
-import {buildTestEngineeringSources} from './fixtures.js';
-import { buildSubstationSpatialIndexFromTexts } from '../../ifcSpatialParser.js';
+import { ifcSourceRecords } from '../../../../packages/gim-sdk/src/gim/engineering/ifcSourceRecords.js';
+import { toObjectEvidence } from '../../../../packages/gim-sdk/src/gim/engineering/sourceEvidence.js';
+import { normalizeEngineeringModel } from '../../../../packages/gim-sdk/src/engineering/normalize.js';
+import type { IfcSpatialObject } from '../ifcSpatialParser.js';
+import { extractEngineeringSourceGraph } from '../../../../packages/gim-sdk/src/gim/engineering/sourceGraph.js';
+import {collectEngineeringSourceModel} from '../../../../packages/gim-sdk/src/gim/engineering/engineeringModel.js';
+import {buildTestEngineeringSources} from '../../../../packages/gim-sdk/src/gim/engineering/__tests__/fixtures.js';
+import { buildSubstationSpatialIndexFromTexts } from '../ifcSpatialParser.js';
 
 const object = (expressId: number, ifcType: string, name: string, extra: Partial<IfcSpatialObject> = {}): IfcSpatialObject => ({
   key: `model#${expressId}`, modelId: 'logical-model', expressId, ifcType, name, globalId: 'repeated-guid',
@@ -109,7 +109,7 @@ it('classifies proxies from their own category Pset without loading unrelated pr
   expect(index.objects[0].propertyDataDeferred).toBe(true);
   expect(index.objects[0].propertySets?.[0].truncated).toBe(true);
 });
-import proxyCategories from '../proxyCategories.json';
+import proxyCategories from '../../../../packages/gim-sdk/src/gim/engineering/proxyCategories.json';
 
 it('maps explicit proxy authoring categories and leaves broad electrical/generic equipment unresolved',()=>{
  const cases=[['喷头(Sprinklers)','C-D2'],['火警设备(Fire Alarm Devices)','C-D2'],['照明设备(Lighting Fixtures)','C-D1'],['楼梯(Stairs)','C-A9'],['栏杆(Railings)','C-A9'],['管道(Pipes)','C-D6'],['线管(Conduit Fittings)','C-D6'],['机械设备(Mechanical Equipment)','E19']];

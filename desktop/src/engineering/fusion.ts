@@ -1,3 +1,2 @@
-/** Joins semantic membership to representation addresses without reclassification. */
-export {EngineeringRepresentationIndex, representationEvidenceState} from './representations.js';
-export type {SourceRepresentation, RepresentationResolution, DevRepresentationHint} from './representations.js';
+/** Desktop compatibility entry; implementation and tests belong to gim-sdk. */
+export * from '@gim/gim-sdk/engineering/fusion.js';

@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppState } from '../../app/state.js';
-import { extractEngineeringSourceGraph } from '../../gim/engineering/sourceGraph.js';
-import {buildTestEngineeringSources} from '../../gim/engineering/__tests__/fixtures.js';
-import { projectEngineeringNavigation } from '../../gim/engineering/navigation.js';
+import { extractEngineeringSourceGraph } from '@gim/gim-sdk/gim/engineering/sourceGraph.js';
+import {buildTestEngineeringSources} from '../../../../packages/gim-sdk/src/gim/engineering/__tests__/fixtures.js';
+import { projectEngineeringNavigation } from '@gim/gim-sdk/gim/engineering/navigation.js';
 
 beforeEach(() => {
   vi.resetModules(); HTMLElement.prototype.scrollIntoView = vi.fn();

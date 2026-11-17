@@ -6,6 +6,7 @@
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "skipLibCheck": true,
     "moduleResolution": "bundler",
+    "customConditions": ["gim-source"],
     "baseUrl": ".",
     "paths": {
       "@desktop/*": ["bridge/*"]

@@ -1,16 +1,16 @@
-import {normalizeEngineeringSources} from '../../gim/engineering/semanticAdapter.js';
+import {normalizeEngineeringSources} from '@gim/gim-sdk/gim/engineering/semanticAdapter.js';
 // @vitest-environment node
 import {afterEach,expect,it,vi} from 'vitest';
 import {assembleEngineeringView,assembleStoredEngineeringView} from '../engineeringAssembly.js';
-import {extractEngineeringSourceGraph} from '../../gim/engineering/sourceGraph.js';
-import * as composition from '../../engineering/composition.js';
-import * as sourceProjection from '../../gim/engineering/sourceProjection.js';
-import * as inventory from '../../gim/engineering/inventory.js';
+import {extractEngineeringSourceGraph} from '@gim/gim-sdk/gim/engineering/sourceGraph.js';
+import * as composition from '@gim/gim-sdk/engineering/composition.js';
+import * as sourceProjection from '@gim/gim-sdk/gim/engineering/sourceProjection.js';
+import * as inventory from '@gim/gim-sdk/gim/engineering/inventory.js';
 import {assertEngineeringNavigation} from '../engineeringNavigationCache.js';
 
-import {assertEngineeringPartition} from '../../engineering/validate.js';
+import {assertEngineeringPartition} from '@gim/gim-sdk/engineering/validate.js';
 import {createEngineeringWorkerHandler} from '../engineeringWorker.js';
-import {ModelEvidenceProvider} from '../../gim/engineering/evidenceProvider.js';
+import {ModelEvidenceProvider} from '@gim/gim-sdk/gim/engineering/evidenceProvider.js';
 import {decodeEngineeringWorkerResult,encodeEngineeringWorkerResultAsync,type TransportGraphCache} from '../engineeringWorkerTransport.js';
 afterEach(()=>{vi.restoreAllMocks();});
 it.each(['composition','source','inventory','inventory-search'] as const)('transfers an explicitly failed %s projection while rejecting it as a complete cache',async failure=>{
