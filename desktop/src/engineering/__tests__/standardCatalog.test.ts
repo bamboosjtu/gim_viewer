@@ -39,9 +39,10 @@ it('recovers a part under the declared equipment despite an incorrect source par
   const member=result.memberships.find(m=>m.sourceId==='radiator')!;
   expect(member.interpretation).toMatchObject({meaning:'part',membershipStatus:'confirmed'});expect(member.interpretation.membershipEvidence?.[0]).toContain('HOSTEQUIPMENTCODE');
   const view=projectEngineeringComposition(result,[],'project'),entity=view.nodes.get(view.rowsByEntity.get(owner.id)![0])!;
-  expect(entity.children.map(key=>view.nodes.get(key)?.sourceId)).toContain('radiator');expect(entity.entityCount).toBe(1);
-  const inventory=projectInventoryTemplate(result,rows.map(r=>({id:r.id,parent:r.parent,title:r.name,documentPath:r.source,sourceType:r.source_type})));
-  const partGroup=inventory.nodes.get(inventory.nodes.get(inventory.rowsBySource.get('radiator')!)!.parent!);expect(partGroup?.title).toBe('散热器');expect(partGroup?.parent).toBe(inventory.rowsByEntity.get(owner.id)![0]);
+  expect(entity.children).toEqual([]);expect(entity.entityCount).toBe(1);
+  const inventory=projectInventoryTemplate(result);
+  expect(inventory.rowsBySource.get('radiator')).toBe(inventory.rowsByEntity.get(owner.id)![0]);
+  expect(inventory.nodes.get(inventory.rowsBySource.get('radiator')!)?.children).toEqual([]);
   expect(build([...rows].reverse())).toEqual(result);
 });
 it('does not use numbered names or own designations as host declarations',()=>{

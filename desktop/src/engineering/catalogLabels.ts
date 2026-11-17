@@ -71,6 +71,9 @@ export function directoryRecognitionCode(code:string):string|undefined{
   if(code==='E01')return 'E-T';if(code==='E02')return 'E-R';
   return roles[0];
 }
-export const catalogPathLabel=(entity:Pick<EngineeringEntity,'category'|'standardClass'>)=>{const row=catalogLocation(entity);return `${row.category} / ${row.label}`;};
+export const catalogPathLabel=(entity:Pick<EngineeringEntity,'category'|'standardClass'|'subtypeStatus'|'subtypeLabel'>)=>{
+  const row=catalogLocation(entity),subtype=entity.subtypeStatus==='confirmed'?entity.subtypeLabel:undefined;
+  return [...new Set([row.category,...(subtype&&row.label==='类型待确认'?[]:[row.label]),...(subtype?[subtype]:[])])].join(' / ');
+};
 
 export function componentDefinition(meaning:{componentType?:{id?:string}}){return componentById.get(meaning.componentType?.id??'');}

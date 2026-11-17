@@ -326,7 +326,8 @@ class MainWindow(QMainWindow):
     def _populate(self):
         r = self.result
         m = r['meta']
-        self.lb_status.setText('完成：用时 %.1f 秒' % m['elapsed'])
+        pending = r['stats']['待归整体']
+        self.lb_status.setText(('完成：用时 %.1f 秒' % m['elapsed']) + (' · %d 个整体归属待确认（见 JSON 导出）' % pending if pending else ''))
         self.lb_kpi.setText(self._kpi_html(r))
         self.lb_kpi.setToolTip(self._kpi_tip(r))
         self.prop.setHtml(self._prop_placeholder())
@@ -338,7 +339,8 @@ class MainWindow(QMainWindow):
         self.tree.clear()
         flt = self.search.text().strip().lower()
         for g in GROUP_ORDER:
-            grows = [r for r in rows if r['group'] == g and (r['dev'] or r['ifc'] or r.get('samples'))]
+            grows = [r for r in rows if r['group'] == g and (r['dev'] or r['ifc'])
+                     and (not flt or flt in r['template'].lower())]
             if not grows:
                 continue
             gd, gi = sum(r['dev'] for r in grows), sum(r['ifc'] for r in grows)
@@ -354,45 +356,40 @@ class MainWindow(QMainWindow):
             for cat in sorted(cats, key=lambda c: self._cat_key(g, c, cats[c])):
                 crows = cats[cat]
                 cd, ci = sum(r['dev'] for r in crows), sum(r['ifc'] for r in crows)
-                code = crows[0].get('code', '')
-                stdcat = crows[0].get('stdcat', '') or cat
-                label = cat
-                cit = QTreeWidgetItem([label,fmt(cd+ci)])
+                cit = QTreeWidgetItem([cat,fmt(cd+ci)])
                 cit.setToolTip(0, '目录口径：%s' % cat)
                 root.addChild(cit)
-                # 工作簿模型名称 → 名称模板 → 实体
+                # All secondary cabinet name templates share the category level.
+                # Functional subtypes remain classification evidence in the panel.
+                if g == E.G_DEV and all(r.get('code') == 'E17' for r in crows):
+                    self._add_templates(cit, crows)
+                    continue
+                # Model name → name template → entity. Empty subtypes add no level.
                 subs = {}
                 for r in crows:
                     key = (r.get('std_sub') or r['sub']) if g == E.G_DEV else r['sub']
                     subs.setdefault(key, []).append(r)
-                if len(subs) > 1 or '' not in subs:
-                    for sub in sorted(subs, key=lambda s: self._sub_key(g, code, s, subs[s])):
-                        srows = subs[sub]
+                for sub in sorted(subs, key=lambda s: self._sub_key(subs[s], s)):
+                    srows = subs[sub]
+                    parent = cit
+                    if sub:
                         sd, si = sum(r['dev'] for r in srows), sum(r['ifc'] for r in srows)
-                        scode = srows[0].get('code', '')
-                        slabel = sub or '（本体）'
-                        sit = QTreeWidgetItem([slabel,fmt(sd+si)])
-                        cit.addChild(sit)
-                        self._add_templates(sit, srows, flt)
-                    if flt:
-                        cit.setExpanded(True)
-                else:
-                    self._add_templates(cit, subs.get('', []), flt)
+                        parent = QTreeWidgetItem([sub,fmt(sd+si)])
+                        cit.addChild(parent)
+                    self._add_templates(parent, srows)
         if flt:
             self.tree.expandAll()
 
     def _cat_key(self,g,cat,crows):
         return (crows[0].get('catalogOrder',999),cat)
 
-    def _sub_key(self,g,catcode,sub,srows):
+    def _sub_key(self,srows,sub):
         return (srows[0].get('modelOrder',999),sub)
 
-    def _add_templates(self, parent_item, rows, flt):
+    def _add_templates(self, parent_item, rows):
         rows = sorted(rows, key=lambda r: (r.get('modelOrder',999),r['template']))
         for r in rows:
-            if flt and flt not in r['template'].lower():
-                continue
-            same=r['template'] in (r['cat'],r['sub'])
+            same=r['template'] in (r['cat'],parent_item.text(0))
             if same:it=parent_item
             else:
                 it=QTreeWidgetItem([r['template'] or '—',fmt(r['total'])])
@@ -400,22 +397,10 @@ class MainWindow(QMainWindow):
             entities=self._entities_by_id
             for entity_id in r.get('entityIds',[]):
                 entity=entities.get(entity_id)
-                if not entity:continue
+                if not entity or entity['pending']:continue
                 sample=next((s for s in r['samples'] if len(s)>5 and s[5]==entity_id),None)
-                instance=QTreeWidgetItem([entity['name'],'' if entity['pending'] else '1'])
-                instance.setData(0,Qt.UserRole,{**r,'samples':[sample] if sample else [],'entityId':entity_id,'nodeKind':'entity','total':int(not entity['pending']),'dev':int(bool(sample) and sample[0]=='dev' and not entity['pending']),'ifc':int(bool(sample) and sample[0]=='ifc' and not entity['pending'])});it.addChild(instance)
-                groups={}
-                for part in sorted(entity['parts'],key=lambda p:(p.get('componentOrder',999),p['componentLabel'],p['sourceId'])):
-                    meaning=part['interpretation']
-                    if meaning['meaning'] not in ('part','neutral_set','detail'):continue
-                    label='细节来源' if meaning['meaning']=='detail' else part['componentLabel'];group=groups.get(label)
-                    if group is None:group=QTreeWidgetItem([label,'']);groups[label]=group;instance.addChild(group)
-                    child=QTreeWidgetItem([part['name'] or part['componentLabel'],''])
-                    child.setToolTip(0,part['componentLabel'])
-                    if sample:
-                        part_sample=list(sample);part_sample[1]=part['name'];part_sample[2]=part['source'];part_sample[3]=part['type']
-                        child.setData(0,Qt.UserRole,{**r,'cat':label,'sub':'','samples':[part_sample],'selectedSourceId':part['sourceId'],'nodeKind':'source','total':0})
-                    group.addChild(child)
+                instance=QTreeWidgetItem([entity['name'],'1'])
+                instance.setData(0,Qt.UserRole,{**r,'samples':[sample] if sample else [],'entityId':entity_id,'nodeKind':'entity','total':1,'dev':int(bool(sample) and sample[0]=='dev'),'ifc':int(bool(sample) and sample[0]=='ifc')});it.addChild(instance)
 
     def _fill_group_summary(self):
         """默认选中第一个组，展示组内 top 模板。"""
@@ -426,14 +411,13 @@ class MainWindow(QMainWindow):
     def _on_tree_sel(self):
         items = self.tree.selectedItems()
         if not items:
+            self._fill_table([])
             return
         it = items[0]
-        depth = self._depth(it)
-        if depth >= 3:                       # 模板行：直接给样本
-            r = it.data(0, Qt.UserRole)
-            if r:
-                self._fill_table([(s, r) for s in r['samples']])
-                return
+        r = it.data(0, Qt.UserRole)
+        if r:
+            self._fill_table([(s, r) for s in r['samples']], select_entity=r.get('nodeKind')=='entity')
+            return
         # 组/类别/子类行：聚合下层模板样本
         rows = []
         self._collect_templates(it, rows)
@@ -444,22 +428,17 @@ class MainWindow(QMainWindow):
                 pairs.append((s, r))
         self._fill_table(pairs)
 
-    def _depth(self, it):
-        d = 0
-        p = it.parent()
-        while p is not None:
-            d += 1
-            p = p.parent()
-        return d
-
     def _collect_templates(self,it,out):
         row=it.data(0,Qt.UserRole)
         if row:
             out.append((row['total'],row));return
         for i in range(it.childCount()):self._collect_templates(it.child(i),out)
 
-    def _fill_table(self, pairs):
-        """pairs = [(sample, row), …]；切换分组后同步显示当前对象属性。"""
+    def _fill_table(self, pairs, select_entity=False):
+        """Groups list entities; only an entity selection opens its properties."""
+        blocked = self.table.blockSignals(True)
+        self.table.clearSelection()
+        self.table.setCurrentCell(-1, -1)
         self._table_pairs = pairs
         self.table.setRowCount(len(pairs))
         for i, (s, _r) in enumerate(pairs):
@@ -478,7 +457,8 @@ class MainWindow(QMainWindow):
             source_item=QTableWidgetItem(f'{len(paths)} 个文件')
             source_item.setToolTip('双击实体查看来源文件')
             self.table.setItem(i, 2, source_item)
-        if pairs:
+        self.table.blockSignals(blocked)
+        if pairs and select_entity:
             self.table.selectRow(0)
             # Replacing row 0 can retain the previous selection without a Qt
             # selection signal. Refresh the panel with the new row's data.
@@ -520,17 +500,13 @@ class MainWindow(QMainWindow):
 
     def _prop_html(self,s,r):
         name=s[1];entity=self._entities_by_id.get(s[5]) if len(s)>5 else None
-        selected=next((p for p in entity['parts'] if p['sourceId']==r.get('selectedSourceId')),None) if entity else None
         h=['<div style="padding:10px 12px;font-size:12px"><b>对象属性</b>']
         rows=[('名称',escape(name or '未命名'))]
-        if selected:
-            rows.extend([('部件名称',escape(selected['componentLabel'])),('所属设备',escape(entity['name']))])
-        else:
-            rows.append(('分类',escape(' / '.join(dict.fromkeys(v for v in [r.get('group'),r.get('cat'),r.get('sub')] if v)))))
+        rows.append(('分类',escape(' / '.join(dict.fromkeys(v for v in [r.get('group'),r.get('cat'),r.get('sub')] if v)))))
         status=s[4] if len(s)>4 else ''
         if status and status!='已确认':rows.append(('状态','待确认'))
         h.append(self._prop_block('基本信息',rows))
-        if entity and not selected:
+        if entity:
             names=list(dict.fromkeys(p['componentLabel'] if p['componentLabel']!='未识别部件' else p['name'] or '未命名部件'
                 for p in entity['parts'] if p['interpretation']['meaning'] in ('part','neutral_set')))
             h.append('<div style="color:#7b8899;margin-top:12px">部件</div>')
@@ -540,8 +516,7 @@ class MainWindow(QMainWindow):
     def _source_files(self,s,r):
         entity=self._entities_by_id.get(s[5]) if len(s)>5 else None
         if not entity:return E.source_file_paths(s[2].split('; '))
-        selected=r.get('selectedSourceId')
-        return E.source_file_paths(p['source'] for p in entity['parts'] if not selected or p['sourceId']==selected)
+        return E.source_file_paths(p['source'] for p in entity['parts'])
 
     def _show_source_files(self,s,r):
         paths=self._source_files(s,r)
@@ -563,7 +538,7 @@ class MainWindow(QMainWindow):
 
     def _on_tree_double_clicked(self,item,_column):
         record=item.data(0,Qt.UserRole)
-        if record and record.get('nodeKind') in ('entity','source') and record['samples']:
+        if record and record.get('nodeKind')=='entity' and record['samples']:
             self._show_source_files(record['samples'][0],record)
         else:item.setExpanded(not item.isExpanded())
 
@@ -652,10 +627,11 @@ class MainWindow(QMainWindow):
     def help_dialog(self):
         QMessageBox.information(self,'使用说明',"""
 Ctrl+O 打开 .gim 或解包目录，也可拖入窗口。
-目录：设备/材料/构件 → 索引类别 → 索引名称 → 名称模板/实例 → 部件 → 来源。
-名称相同的目录/模板层会合并。选择设备或分类时不把部件重复计为设备台数。
-部件按设备模型部件名称对照表归组，未知或歧义归属继续保留。
-双击实体或部件查看来源文件，每行一个文件，可选择或复制全部。
+右侧目录：设备/材料/构件 → 类别 → 模型名称（有时省略）→ 名称模板 → 实体。
+二次屏柜下按各类柜子的名称模板平级排列。空子类不生成“本体”占位层。
+点击实体或下方实例，左侧显示名称、分类和部件；分类/模板行只列实例。
+部件只在左侧显示，不重复计为设备。归属未确认的集合保留在 JSON 导出中。
+双击实体查看全部来源文件，每行一个文件，可选择或复制全部。
 来源层级与工程身份、用途及目录投影分别表达；不因目录改变几何。
 目录使用随工具附带的分类数据，导出的清册包含目录编号。
 Ctrl+E 导出 HTML，另支持 CSV / JSON。工具运行和打包只使用自身数据。
@@ -689,9 +665,19 @@ def main():
                 if not w.grab().save(outpng, 'PNG'):
                     app.exit(1)
                     return
+                counts={'entities':0,'entitiesWithChildren':0,'componentRows':0,'bodyPlaceholders':0}
+                stack=[w.tree.topLevelItem(i) for i in range(w.tree.topLevelItemCount())]
+                while stack:
+                    node=stack.pop();record=node.data(0,Qt.UserRole) or {}
+                    if record.get('nodeKind')=='entity':
+                        counts['entities']+=1;counts['entitiesWithChildren']+=int(node.childCount()>0)
+                    counts['componentRows']+=int(record.get('nodeKind')=='source')
+                    counts['bodyPlaceholders']+=int(node.text(0)=='（本体）')
+                    stack.extend(node.child(i) for i in range(node.childCount()))
                 with open(outpng + '.json', 'w', encoding='utf-8') as receipt:
                     json.dump({'frozen': bool(getattr(sys, 'frozen', False)),
                                'groups': [w.tree.topLevelItem(i).text(0).strip() for i in range(w.tree.topLevelItemCount())],
+                               'tree':counts,'pendingWholes':w.result['stats']['待归整体'],
                                'totals': w.result['totals']}, receipt, ensure_ascii=False, indent=2)
                 print('SMOKE_SHOT', outpng, flush=True)
                 app.quit()

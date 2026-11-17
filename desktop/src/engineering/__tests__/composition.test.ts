@@ -9,6 +9,7 @@ describe('whole-only composition projection', () => {
     const view = projectEngineeringComposition(snapshot, [], '工程');
     expect([...view.nodes.values()].filter(n => n.kind === 'entity').map(n => n.title).sort()).toEqual(['主变压器', '测控柜']);
     expect(view.nodes.get(view.rootKey)?.entityCount).toBe(2);
+    expect([...view.nodes.values()].filter(n=>n.kind==='entity').every(n=>n.children.length===0)).toBe(true);
     expect(snapshot.memberships.find(m => m.sourceId === 'radiator')?.ownerId).toBe(snapshot.memberships.find(m => m.sourceId === 'body')?.ownerId);
   });
   it('deduplicates entity counts across multiple contextual references without assigning a business parent to the entity', () => {

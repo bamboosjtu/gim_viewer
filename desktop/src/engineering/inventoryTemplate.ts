@@ -1,20 +1,21 @@
 import type { EngineeringSnapshot } from './types.js';
-import { categoryLabel, MODEL_CATALOG_CATEGORIES, COMPONENT_CATALOG, componentLabel, componentDefinition, catalogLocation } from './catalogLabels.js';
-const componentOrder=new Map(COMPONENT_CATALOG.map(row=>[row.id,row.order]));
+import { categoryLabel, MODEL_CATALOG_CATEGORIES, catalogLocation } from './catalogLabels.js';
 const directoryOrder=new Map(MODEL_CATALOG_CATEGORIES.map(row=>[`${row.kind}:${row.label}`,row.order]));
 const compareTitles=new Intl.Collator('zh-CN',{numeric:true}).compare;
 
 export const INVENTORY_TEMPLATE_VERSION='engineering-inventory-v1';
-export const INVENTORY_TEMPLATE=Object.freeze({version:INVENTORY_TEMPLATE_VERSION,groups:Object.freeze(['设备','材料','构件','其他']),levels:Object.freeze(['group','category','subtype','template','entity','source'])});
-export interface InventorySource {id:string;parent:string;title:string;documentPath:string;sourceType:string}
+export const INVENTORY_TEMPLATE=Object.freeze({version:INVENTORY_TEMPLATE_VERSION,groups:Object.freeze(['设备','材料','构件','其他']),levels:Object.freeze(['group','category','subtype','template','entity']),
+  secondaryCabinets:'category-template-entity',members:'inspector',pending:'quality-and-export'});
 export interface InventoryNode {
-  key:string;title:string;kind:'project'|'group'|'template'|'entity'|'pending'|'record';parent?:string;children:string[];
-  targetId?:string;sourceId?:string;entityCount:number;evidence:string[];category?:string;sourceCount?:number;
-  confirmedCount?:number;documentPath?:string;sourceType?:string;
+  key:string;title:string;kind:'project'|'group'|'template'|'entity';parent?:string;children:string[];
+  targetId?:string;entityCount:number;evidence:string[];category?:string;sourceCount?:number;
+  confirmedCount?:number;
   subtype?:string;subtypeLabel?:string;template?:string;classificationStatus?:string;boundaryStatus?:string;unknownReason?:string;grain?:string;
   attachmentCount?:number;
 }
-export interface EngineeringInventory {version:string;rootKey:string;nodes:Map<string,InventoryNode>;rowsByEntity:Map<string,string[]>;rowsBySource:Map<string,string>}
+export interface EngineeringInventory {version:string;rootKey:string;nodes:Map<string,InventoryNode>;rowsByEntity:Map<string,string[]>;
+  /** Source selections reveal their whole; members have no separate inventory row. */
+  rowsBySource:Map<string,string>}
 
 /** gim_element-style name template: dimensions, voltage and instance numbers
  * never split one catalog type into many rows. The real instance name remains
@@ -32,29 +33,27 @@ export function inventoryNameTemplate(name:string):string {
 
 /** A catalog view of existing wholes. Grouping never normalizes identities or
  * turns a member into an entity; every real instance keeps its own selectable row. */
-export function projectInventoryTemplate(snapshot:EngineeringSnapshot,records:readonly InventorySource[]):EngineeringInventory {
+export function projectInventoryTemplate(snapshot:EngineeringSnapshot):EngineeringInventory {
   const order=new Map<string,number>();
   const rootKey='inventory:root',nodes=new Map<string,InventoryNode>(),rowsByEntity=new Map<string,string[]>(),rowsBySource=new Map<string,string>();
   nodes.set(rootKey,{key:rootKey,title:'设备材料清册',kind:'project',children:[],entityCount:0,confirmedCount:0,evidence:[]});
   const add=(node:InventoryNode)=>{nodes.set(node.key,node);if(node.parent)nodes.get(node.parent)!.children.push(node.key);};
   const group=(parent:string,id:string,title:string)=>{const key=`${parent}/${id}`;if(!nodes.has(key))add({key,title,parent,kind:'group',children:[],entityCount:0,confirmedCount:0,evidence:[]});return key;};
-  const bySource=new Map(records.map(r=>[r.id,r])),owners=new Map(snapshot.memberships.map(m=>[m.sourceId,m.ownerId]));
-  const interpretations=new Map(snapshot.memberships.map(m=>[m.sourceId,m.interpretation]));
   for(const title of INVENTORY_TEMPLATE.groups)group(rootKey,title,title);
   const catalogParent=(entity:Parameters<typeof catalogLocation>[0],functionalSubtype=false)=>{
     const row=catalogLocation(entity);let parent=group(rootKey,row.group,row.group);
     parent=group(parent,`catalog:${encodeURIComponent(row.category)}`,row.category);
     order.set(parent,directoryOrder.get(`${row.kind}:${row.category}`)??999);
-    if(row.label!==row.category&&!(functionalSubtype&&row.label==='类型待确认')){parent=group(parent,`model:${encodeURIComponent(row.id)}`,row.label);order.set(parent,row.order);}
+    if(entity.category!=='E17'&&row.label!==row.category&&!(functionalSubtype&&row.label==='类型待确认')){parent=group(parent,`model:${encodeURIComponent(row.id)}`,row.label);order.set(parent,row.order);}
     return parent;
   };
   for(const entity of snapshot.entities){
-    const subtype=entity.subtypeStatus==='confirmed'&&entity.subtype&&entity.subtypeLabel?{id:entity.subtype,label:entity.subtypeLabel}:undefined;
+    const subtype=entity.category!=='E17'&&entity.subtypeStatus==='confirmed'&&entity.subtype&&entity.subtypeLabel?{id:entity.subtype,label:entity.subtypeLabel}:undefined;
     let parent=catalogParent(entity,!!subtype);
     if(subtype)parent=group(parent,`subtype:${subtype.id}`,subtype.label);
     const template=inventoryNameTemplate(entity.name||categoryLabel(entity.category));
     const location=catalogLocation(entity);
-    if(template!==inventoryNameTemplate(location.label)&&template!==inventoryNameTemplate(location.category)&&(!subtype||template!==inventoryNameTemplate(subtype.label))){
+    if(template!==inventoryNameTemplate(location.category)&&template!==inventoryNameTemplate(nodes.get(parent)!.title)){
       parent=group(parent,`template:${encodeURIComponent(template)}`,template);
       nodes.get(parent)!.kind='template';nodes.get(parent)!.template=template;
     }
@@ -63,35 +62,11 @@ export function projectInventoryTemplate(snapshot:EngineeringSnapshot,records:re
       subtype:entity.subtype,subtypeLabel:entity.subtypeLabel,classificationStatus:entity.classificationStatus,boundaryStatus:entity.boundaryStatus,unknownReason:entity.unknownReason,grain:entity.grain});rowsByEntity.set(entity.id,[key]);
     for(let cursor:string|undefined=parent;cursor;cursor=nodes.get(cursor)?.parent){nodes.get(cursor)!.entityCount++;nodes.get(cursor)!.confirmedCount!+=confirmed;}
   }
-  for(const pending of snapshot.pending){
-    const neutral=pending.reason==='neutral_set_main_unresolved'&&pending.sourceIds.some(id=>interpretations.get(id)?.meaning==='neutral_set');
-    const known=pending.sourceIds.map(id=>interpretations.get(id)).find(m=>m?.standardClass);
-    const parent=known?group(catalogParent({category:known.standardClass!.category,standardClass:known.standardClass}),'pending','宿主/边界待确认'):group(`${rootKey}/其他`,'pending','待归整体');
-    const template=inventoryNameTemplate(known?.standardClass?.label??'待归整体');
-    const templateParent=group(parent,`template:${encodeURIComponent(template)}`,template);
-    nodes.get(templateParent)!.kind='template';nodes.get(templateParent)!.template=template;
-    const key=`inventory:entity:${pending.id}`;
-    add({key,parent:templateParent,title:neutral?`中性点成套装置（宿主待确认） · ${pending.sourceIds.length} 个来源`:`待归整体集合 · ${pending.sourceIds.length} 个来源`,kind:'pending',targetId:pending.id,sourceCount:pending.sourceIds.length,entityCount:0,evidence:[pending.reason],children:[],
-      ...(neutral?{category:'E01',subtype:'neutral_set',subtypeLabel:'中性点成套装置',boundaryStatus:'unresolved'}:{})});rowsByEntity.set(pending.id,[key]);
-  }
-  const memberKeys=new Map(records.map(r=>[r.id,`inventory:source:${r.id}`]));
-  for(const [id,key]of memberKeys){
-    const source=bySource.get(id)!,owner=owners.get(id);
-    const interpretation=interpretations.get(id),neutral=interpretation?.meaning==='neutral_set';
-    let parent=interpretation?.meaning!=='part'&&source.parent&&owners.get(source.parent)===owner&&memberKeys.has(source.parent)?memberKeys.get(source.parent)!
-      :owner?`inventory:entity:${owner}`:group(`${rootKey}/其他`,'source-only','仅来源（不计整体）');
-    if(owner&&(interpretation?.meaning==='part'||neutral)){
-      const type=componentDefinition(interpretation)?.id??interpretation.componentType?.id;
-      const label=type?componentLabel(type):interpretation.standardClass?.label??'未识别部件';
-      parent=group(`inventory:entity:${owner}`,`part:${encodeURIComponent(type??interpretation.standardClass?.id??'unknown')}`,label);
-      order.set(parent,componentOrder.get(type??'')??999);
-    }
-    nodes.set(key,{key,parent,title:neutral?`${source.title} · 中性点成套装置（主变附件）`:source.title,kind:'record',sourceId:id,documentPath:source.documentPath,sourceType:source.sourceType,entityCount:0,evidence:interpretation?.classificationEvidence??[],children:[],
-      ...(neutral?{subtype:'neutral_set',subtypeLabel:'中性点成套装置',classificationStatus:interpretation.classificationStatus}:{})});rowsBySource.set(id,key);
-  }
-  for(const key of memberKeys.values()){const node=nodes.get(key)!;nodes.get(node.parent!)!.children.push(key);}
-  for(const member of snapshot.memberships)if(member.interpretation.meaning==='neutral_set'){
-    for(let cursor=nodes.get(rowsBySource.get(member.sourceId)!)?.parent;cursor;cursor=nodes.get(cursor)?.parent){const node=nodes.get(cursor)!;node.attachmentCount=(node.attachmentCount??0)+1;}
+  for(const member of snapshot.memberships){
+    const row=member.ownerId?rowsByEntity.get(member.ownerId)?.[0]:undefined;
+    if(!row)continue;
+    rowsBySource.set(member.sourceId,row);
+    if(member.interpretation.meaning==='neutral_set')for(let cursor:string|undefined=row;cursor;cursor=nodes.get(cursor)?.parent){const node=nodes.get(cursor)!;node.attachmentCount=(node.attachmentCount??0)+1;}
   }
   for(const node of nodes.values())if(node.key!==rootKey&&node.kind==='group')node.children.sort((a,b)=>{
     const left=nodes.get(a)!,right=nodes.get(b)!;

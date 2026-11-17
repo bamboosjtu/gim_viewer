@@ -43,10 +43,11 @@ it('groups a cabinet by confirmed protection-device family and actual ownership 
  expect(model.entities).toHaveLength(1);
  expect(model.entities[0]).toMatchObject({category:'E17',subtype:'main_transformer_protection_cabinet',subtypeLabel:'主变压器保护柜',subtypeStatus:'confirmed'});
  expect(model.entities[0].subtypeEvidence).toEqual(expect.arrayContaining([expect.stringContaining('protection.fam')]));
- const inventory=projectInventoryTemplate(model,graph.records.map(r=>({id:r.id,parent:r.parent,title:r.name,documentPath:r.source,sourceType:r.source_type})));
+ const inventory=projectInventoryTemplate(model);
  const row=inventory.nodes.get(inventory.rowsByEntity.get(model.entities[0].id)![0])!;
  const ancestors:string[]=[];for(let key=row.parent;key;key=inventory.nodes.get(key)?.parent)ancestors.push(inventory.nodes.get(key)!.title);
- expect(ancestors).toEqual(expect.arrayContaining(['二次屏柜','主变压器保护柜']));
+ expect(ancestors).toEqual(expect.arrayContaining(['二次屏柜']));
+ expect(ancestors).not.toContain('主变压器保护柜');
  expect(ancestors).not.toContain('变压器');
  expect(ancestors).not.toContain('类型待确认');
 });

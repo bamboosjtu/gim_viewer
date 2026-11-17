@@ -68,17 +68,18 @@ export function assertEngineeringNavigation(view: EngineeringNavigationData, sou
   valid(allowPartial||!Object.keys(errors??{}).length,'partial projection');
   const failed=(key:string)=>allowPartial&&!!errors?.[key];
   valid(view.projectionVersions?.composition===ENGINEERING_COMPOSITION_VERSION&&view.projectionVersions?.inventory===INVENTORY_TEMPLATE_VERSION&&view.projectionVersions?.source===SOURCE_TREE_TEMPLATE_VERSION&&(failed('inventory')&&!view.inventory||view.inventory?.version===INVENTORY_TEMPLATE_VERSION),'projection versions');
-  const entities = new Set([...snapshot.entities, ...snapshot.pending].map(e => e.id));
+  const entities = new Set(snapshot.entities.map(e => e.id));
   const sourceIds = new Set(engineeringSourceRecords(sources.graph,sources.ifcRecords).map(r => r.id));
   const contexts = new Set(sources.graph.cbmOccurrences.map(node=>node.id));
   function tree(nodes: Map<string, any>, root: string, composition: boolean, inventory=false) {
     valid(nodes instanceof Map && typeof root === 'string' && nodes.has(root), 'root');
     for (const [key, node] of nodes) {
       valid(typeof key === 'string' && object(node) && node.key === key && typeof node.title === 'string' && strings(node.children) && new Set(node.children).size === node.children.length, 'node');
-      valid((inventory ? ['project','group','template','entity','pending','record']:composition ? ['project', 'group', 'entity', 'pending','record'] : ['group', 'cbm', 'record', 'ifc-file', 'spatial']).includes(node.kind), 'node kind');
+      valid((inventory ? ['project','group','template','entity']:composition ? ['project', 'group', 'entity'] : ['group', 'cbm', 'record', 'ifc-file', 'spatial']).includes(node.kind), 'node kind');
       valid(key === root ? node.parent === undefined : typeof node.parent === 'string' && nodes.has(node.parent), 'parent');
       for (const child of node.children) valid(nodes.get(child)?.parent === key, 'child edge');
       if (composition) valid(Number.isSafeInteger(node.entityCount) && node.entityCount >= 0 && (node.targetId === undefined || entities.has(node.targetId)), 'entity reference');
+      if(composition&&node.kind==='entity')valid(entities.has(node.targetId)&&node.children.length===0,'entity leaf');
       if(inventory&&node.kind==='template')valid(typeof node.template==='string'&&node.template.length>0,'inventory template');
       if(inventory&&node.confirmedCount!==undefined)valid(Number.isSafeInteger(node.confirmedCount)&&node.confirmedCount>=0&&node.confirmedCount<=node.entityCount,'inventory confirmed count');
       valid(node.sourceId === undefined || sourceIds.has(node.sourceId), 'source reference');
@@ -107,10 +108,18 @@ export function assertEngineeringNavigation(view: EngineeringNavigationData, sou
   for(const entity of snapshot.entities){const node=inventory.nodes.get(inventory.rowsByEntity.get(entity.id)![0])!;
     valid(['category','subtype','subtypeLabel','classificationStatus','boundaryStatus','unknownReason','grain'].every(key=>node[key as keyof typeof node]===entity[key as keyof typeof entity])&&node.sourceCount===entity.sourceIds.length,'inventory entity facts');
   }
-  valid(inventory.rowsBySource.size===sourceIds.size,'inventory source coverage');
-  for(const member of snapshot.memberships){const row=inventory.nodes.get(inventory.rowsBySource.get(member.sourceId)??'');valid(row?.sourceId===member.sourceId,'inventory source row');}
+  let memberRows=0;
+  for(const member of snapshot.memberships){
+    const row=member.ownerId?inventory.rowsByEntity.get(member.ownerId)?.[0]:undefined;
+    if(row)memberRows++;
+    valid(inventory.rowsBySource.get(member.sourceId)===row,'inventory source owner row');
+  }
+  valid(inventory.rowsBySource.size===memberRows,'inventory source coverage');
   valid(Array.isArray(view.inventorySearch)&&view.inventorySearch.length===entities.size&&new Set(view.inventorySearch.map(r=>r.key)).size===entities.size&&view.inventorySearch.every(r=>entities.has(r.key)&&typeof r.title==='string'&&typeof r.subtitle==='string'&&typeof r.searchText==='string'),'inventory search');
   }else valid(Array.isArray(view.inventorySearch)&&view.inventorySearch.length===0,'failed inventory search');
+  const pending=view.metadata?.pendingWholes,pendingIds=new Set(snapshot.pending.map(p=>p.id));
+  valid(Array.isArray(pending)&&pending.length===pendingIds.size&&new Set(pending.map(p=>p.id)).size===pendingIds.size
+    &&pending.every(p=>object(p)&&typeof p.id==='string'&&pendingIds.has(p.id)&&typeof p.reason==='string'&&strings(p.sourceIds)),'pending diagnostics');
   const input=view.compositionInput;valid(input&&Array.isArray(input.facts)&&(failed('composition')||input.facts.length===snapshot.entities.length)&&new Set(input.facts.map(f=>f.entityId)).size===input.facts.length&&input.facts.every(f=>entities.has(f.entityId)&&Array.isArray(f.spaces)&&Array.isArray(f.declarations)&&strings(f.hostEntityIds)
     && (f.sourceHints===undefined||strings(f.sourceHints))
     && (f.deliveryBuildingNames===undefined||Array.isArray(f.deliveryBuildingNames)&&f.deliveryBuildingNames.every(n=>object(n)&&typeof n.value==='string'&&typeof n.evidenceId==='string'))

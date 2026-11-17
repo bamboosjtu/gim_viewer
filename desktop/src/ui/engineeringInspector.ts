@@ -20,7 +20,7 @@ export function renderEngineeringInspector(input: EngineeringInspectorInput): vo
   const parts=entity?'<div class="props-section"><h3>部件</h3>'+(input.parts?.length?'<ul>'+input.parts.map(name=>`<li>${escHtml(name)}</li>`).join('')+'</ul>':'<p class="props-note">未提供部件信息</p>')+'</div>':'';
   const params: [string, string][] = single
     ? single.properties.map(p => [[...(p.keys ?? []), ...(p.key ? [p.key] : [])].join(' / '), p.value])
-    : entity?.phaseBodyCount ? [['单相本体数', String(entity.phaseBodyCount)]] : [['属性', '选择具体对象或部件查看属性']];
+    : entity?.phaseBodyCount ? [['单相本体数', String(entity.phaseBodyCount)]] : [['属性', '选择具体实体或在来源视图查看属性']];
   renderInspectorTabs(`<div class="props-header">${escHtml(input.title)}</div>`, {
     overview: sectionHtml('对象信息', rows) +parts+ `<p class="props-note" data-engineering-geometry-note>${escHtml(unassignedDeclaration ? '当前分组暂无可用对象。' : input.geometryNote)}</p>` + '<div class="props-actions"><button class="prop-ref-link" id="engineering-fit">定位</button><button class="prop-ref-link" id="engineering-isolate">仅显示此范围</button><button class="prop-ref-link" id="engineering-restore">恢复显示</button></div>' + (input.onOwner ? '<button class="prop-ref-link" id="engineering-owner">查看所属对象</button>' : '') +
       (input.onRefine ? '<div class="props-actions"><button class="prop-ref-link" id="engineering-refine">查看精细模型</button><button class="prop-ref-link" id="engineering-release-fine">返回浏览表示</button></div><p class="props-note" id="engineering-refine-status"></p>' : ''),

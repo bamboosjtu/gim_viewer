@@ -9,6 +9,7 @@ import { decodeEngineeringArtifact,encodeEngineeringArtifact,decodeEngineeringEn
 import {packEngineeringSource} from '../engineeringSourceCodec.js';
 import { markCacheFailure } from '../engineeringWorker.js';
 import type { EngineeringBuildResult } from '../engineeringWorkerProtocol.js';
+import {INVENTORY_TEMPLATE} from '../../engineering/inventoryTemplate.js';
 
 const id = { sourceSha256: 'a'.repeat(64), parserVersion: 'parser-contract', entries: ['project.cbm', 'unit.dev', 'terminal.dev'] };
 async function fixture(extra: Record<string, string> = {}) {
@@ -19,6 +20,21 @@ async function fixture(extra: Record<string, string> = {}) {
 }
 
 describe('independent source and entity cache contracts', () => {
+  it('invalidates navigation alone when entity-tree presentation policy changes under the v1 contract',async()=>{
+    const model=await fixture(),encoded=await encodeEngineeringSources(model.sources,id),sources=await decodeEngineeringSources(encoded.bytes,id);
+    const entities=await encodeEngineeringEntities(model.snapshot,sources,id);
+    const navigation=await encodeEngineeringNavigation(projectEngineeringNavigation(model.sources,model.snapshot),model.sources,model.snapshot,sources.digest,id);
+    vi.resetModules();vi.doMock('../../engineering/inventoryTemplate.js',async()=>({
+      ...await vi.importActual<typeof import('../../engineering/inventoryTemplate.js')>('../../engineering/inventoryTemplate.js'),
+      INVENTORY_TEMPLATE:{...INVENTORY_TEMPLATE,members:'tree'},
+    }));
+    try{
+      const next=await import('../engineeringCacheCodec.js'),nextNavigation=await import('../engineeringNavigationCache.js');
+      expect((await next.decodeEngineeringSources(encoded.bytes,id)).digest).toBe(sources.digest);
+      expect(await next.decodeEngineeringEntities(entities,sources,id)).toEqual(model.snapshot);
+      await expect(nextNavigation.decodeEngineeringNavigation(navigation,model.sources,model.snapshot,sources.digest,id)).rejects.toThrow('identity / version');
+    }finally{vi.doUnmock('../../engineering/inventoryTemplate.js');vi.resetModules();}
+  });
   it('keeps gzip bytes compatible when canonical JSON is supplied as a stream',async()=>{
     const payload=Array.from({length:10000},(_,i)=>({i,text:'原始字段'+i}));
     const plain=new TextEncoder().encode(JSON.stringify(packEngineeringSource(payload)));

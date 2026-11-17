@@ -1,6 +1,6 @@
 import {engineeringSourceRecords} from './sourceGraph.js';
 import type { EngineeringSources } from './buildSources.js';
-import type { EngineeringSnapshot } from '../../engineering/types.js';
+import type { EngineeringSnapshot,PendingWhole } from '../../engineering/types.js';
 import { collectCompositionEvidence, collectDeclaredCompositionContexts, type SourceCompositionEvidence } from './compositionContexts.js';
 import { assignEngineeringComposition } from '../../engineering/compositionTemplate.js';
 import type { CompositionDeclaration } from '../../engineering/composition.js';
@@ -26,7 +26,7 @@ export interface EngineeringNavigationData {
   inventorySearch?: Array<{key:string;title:string;subtitle:string;searchText:string}>;
   projectionVersions?: {composition:string;source:string;inventory:string};
   inventory?: EngineeringInventory;
-  metadata?: {scope:string;rulesVersion:string;sourceComplete:boolean;sourceVersion:string};
+  metadata?: {scope:string;rulesVersion:string;sourceComplete:boolean;sourceVersion:string;pendingWholes?:readonly PendingWhole[]};
   compositionInput?:{facts:SourceCompositionEvidence[];declarations:CompositionDeclaration[]};
 }
 export const ENGINEERING_NAVIGATION_VERSION = 'engineering-navigation-v1';
@@ -57,18 +57,13 @@ export function projectEngineeringNavigation(sources: EngineeringSources, snapsh
     return { key: entity.id, title: entity.name, subtitle,
       searchText: [entity.name, subtitle, ...names, entity.id].join('\n').toLowerCase() };
   });
-  for (const pending of snapshot.pending) {
-    const title = '待归整体集合', subtitle = `整体归属待确认 · ${pending.sourceIds.length} 个来源`;
-    compositionSearch.push({ key: pending.id, title, subtitle,
-      searchText: [title, subtitle, pending.id, ...pending.sourceIds.map(id => records.get(id)?.name ?? '')].join('\n').toLowerCase() });
-  }
   let inventory:EngineeringInventory|undefined,inventorySearch:ReturnType<typeof projectInventorySearch>=[];
-  try {inventory=projectEngineeringInventory(snapshot,[...records.values()]);inventorySearch=projectInventorySearch(inventory,snapshot,[...records.values()]);} catch(error){inventory=undefined;inventorySearch=[];projectionErrors.inventory=String(error);}
+  try {inventory=projectEngineeringInventory(snapshot);inventorySearch=projectInventorySearch(inventory,snapshot,[...records.values()]);} catch(error){inventory=undefined;inventorySearch=[];projectionErrors.inventory=String(error);}
   return { version: ENGINEERING_NAVIGATION_VERSION,
     projectionVersions:{composition:ENGINEERING_COMPOSITION_VERSION,source:SOURCE_TREE_TEMPLATE_VERSION,inventory:INVENTORY_TEMPLATE_VERSION},
     projectionErrors:Object.keys(projectionErrors).length?projectionErrors:undefined,
     ...(projectionErrors.composition?{compositionComplete:false,compositionCoverage:'partial' as const}:{}),
     inventorySearch, composition, sourceNodes, sourceRoot, sourceRows, compositionSearch, sourceSearch,
     compositionInput:{facts,declarations},
-    inventory,metadata:{scope:snapshot.scope,rulesVersion:snapshot.rulesVersion,sourceComplete:sources.complete,sourceVersion:sources.version} };
+    inventory,metadata:{scope:snapshot.scope,rulesVersion:snapshot.rulesVersion,sourceComplete:sources.complete,sourceVersion:sources.version,pendingWholes:snapshot.pending} };
 }

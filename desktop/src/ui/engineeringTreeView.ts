@@ -30,7 +30,6 @@ function rowKey(state: AppState, data: EngineeringNavigationData): string {
   }
   if (state.viewState.mode === 'composition') {
     if (target.kind === 'engineering-group') return data.composition.nodes.has(target.key) ? target.key : '';
-    if(target.kind==='engineering-source')for(const node of data.composition.nodes.values())if(node.sourceId===target.key)return node.key;
     const owner = target.kind === 'engineering' ? target.key
       : state.engineering.snapshot?.memberships.find(m => m.sourceId === target.key)?.ownerId;
     return owner ? data.composition.rowsByEntity.get(owner)?.[0] ?? '' : '';
@@ -157,7 +156,6 @@ export function renderEngineeringTree(state: AppState): void {
       if (mode === 'composition' || mode==='inventory') {
         const node = mode==='inventory'?data.inventory!.nodes.get(key):data.composition.nodes.get(key);
         if (!node) return;
-        if('sourceId' in node && node.sourceId){const target={kind:'engineering-source' as const,key:node.sourceId},request=state.selection.beginSelection(target);syncEngineeringTreeSelection(state);const {selectEngineeringTarget}=await import('../services/engineeringSelection.js');if(state.selection.isCurrentSelection(request))await selectEngineeringTarget(state,target,request);return;}
         const target = node.targetId ? { kind: 'engineering' as const, key: node.targetId } : { kind: 'engineering-group' as const, key };
         const request = state.selection.beginSelection(target); syncEngineeringTreeSelection(state);
         const { selectEngineeringTarget } = await import('../services/engineeringSelection.js');

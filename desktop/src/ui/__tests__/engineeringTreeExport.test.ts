@@ -30,6 +30,13 @@ const data: EngineeringNavigationData = {
 };
 
 describe('engineering model tree export', () => {
+  it('keeps pending ownership diagnostics in JSON metadata outside the visible entity tree',()=>{
+    const pendingWholes=[{id:'pending:1',reason:'neutral_set_main_unresolved',sourceIds:['neutral']}];
+    const view={...data,metadata:{scope:'scope',rulesVersion:'v1',sourceComplete:true,sourceVersion:'v1',pendingWholes}};
+    const out=engineeringTreeExport(view,'composition','P');
+    expect(out.metadata?.pendingWholes).toEqual(pendingWholes);
+    expect(JSON.stringify(out.root)).not.toContain('pending:1');
+  });
   it('uses a confirmed native save result and reports cancellation and write errors',async()=>{
     mocks.native.mockReturnValue(true);mocks.save.mockResolvedValueOnce('C:/trees/P.json').mockResolvedValueOnce(null).mockRejectedValueOnce(Error('write denied'));
     expect(await downloadEngineeringTree(data,'composition','P')).toBe('C:/trees/P.json');

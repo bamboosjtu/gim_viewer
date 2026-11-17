@@ -21,8 +21,7 @@ export interface CompositionDeclaration {
 export interface CompositionNode {
   key: string;
   title: string;
-  kind: 'project' | 'group' | 'entity' | 'pending' | 'record';
-  sourceId?:string;
+  kind: 'project' | 'group' | 'entity';
   targetId?: string;
   children: string[];
   parent?: string;
@@ -60,10 +59,6 @@ export function projectEngineeringComposition(snapshot: EngineeringSnapshot, ass
   const orders = new Map<string, number>();
   nodes.set(rootKey, { key: rootKey, title: title || '工程组成', kind: 'project', children: [], entityCount: 0 });
   const byEntity = new Map(assignments.map(a => [a.entityId, a]));
-  const parts=new Map<string,EngineeringSnapshot['memberships']>();
-  for(const member of snapshot.memberships)if(member.ownerId&&member.interpretation.meaning==='part'){
-    const rows=parts.get(member.ownerId)??[];rows.push(member);parts.set(member.ownerId,rows);
-  }
   function group(parent: string, kind: string, value: string, name: string, inferred = false): string {
     const key = childKey(parent, kind, value);
     if (!nodes.has(key)) {
@@ -93,26 +88,10 @@ export function projectEngineeringComposition(snapshot: EngineeringSnapshot, ass
       const key = childKey(parent, 'entity', entity.id);
       nodes.set(key, { key, title: entity.name || categoryLabel(entity.category), kind: 'entity', targetId: entity.id, parent, children: [], entityCount: 1, ...(assignment?.inferred ? {inferred:true} : {}) });
       nodes.get(parent)!.children.push(key);
-      for(const member of parts.get(entity.id)??[]){
-        const partKey=childKey(key,'part',member.sourceId);
-        nodes.set(partKey,{key:partKey,parent:key,title:(member.interpretation.sourceName||member.interpretation.componentType?.id||'部件')+(member.interpretation.membershipStatus==='candidate'?' · 归属候选':''),kind:'record',sourceId:member.sourceId,children:[],entityCount:0});
-        nodes.get(key)!.children.push(partKey);
-      }
       const rows = rowsByEntity.get(entity.id) ?? []; rows.push(key); rowsByEntity.set(entity.id, rows);
       for (let cursor: string | undefined = parent; cursor; cursor = nodes.get(cursor)?.parent) {
         const ids = members.get(cursor) ?? new Set<string>(); ids.add(entity.id); members.set(cursor, ids);
       }
-    }
-  }
-  if (snapshot.pending.length) {
-    const unresolved = group(rootKey, 'discipline', 'unclassified', '未分类');
-    orders.set(unresolved, 2);
-    const other = group(unresolved, 'category', 'pending-other', '其他');
-    const parent = group(other, 'pending', 'wholes', '整体归属待确认');
-    for (const pending of snapshot.pending) {
-      const key = childKey(parent, 'pending', pending.id);
-      nodes.set(key, { key, title: `待归整体集合 · ${pending.sourceIds.length} 个来源`, kind: 'pending', targetId: pending.id, parent, children: [], entityCount: 0 });
-      nodes.get(parent)!.children.push(key); rowsByEntity.set(pending.id, [key]);
     }
   }
   for (const [key, node] of nodes) {
