@@ -15,7 +15,6 @@ const mocks = vi.hoisted(() => ({
   buildIfcNameIndex: vi.fn(),
   fitCameraToScene: vi.fn(),
   fitCameraToStationOverview: vi.fn(),
-  autoLoadModAndStlGeometry: vi.fn(),
   buildAndRenderCbmTree: vi.fn(),
   renderFileDevPanel: vi.fn(),
   showLoading: vi.fn(),
@@ -30,7 +29,7 @@ vi.mock('../presentation/shell_statusBar.js',async importOriginal=>({...(await i
 
 vi.mock('../../viewer/ifcLoader.js', () => ({ ensureEngineReady: mocks.ensureEngineReady }));
 vi.mock('../../viewer/ifcEntryLoader.js', () => ({ loadIfcEntry: mocks.loadIfcEntry }));
-vi.mock('../../viewer/ifcNameIndex.js', () => ({ buildIfcNameIndex: mocks.buildIfcNameIndex }));
+vi.mock('.././ifcNameIndex.js', () => ({ buildIfcNameIndex: mocks.buildIfcNameIndex }));
 vi.mock('../../viewer/camera.js', () => ({
   fitCameraToScene: mocks.fitCameraToScene,
   fitCameraToStationOverview: mocks.fitCameraToStationOverview,
@@ -40,8 +39,6 @@ vi.mock('../coordinateAlignmentService.js', () => ({
   syncProjectSourceToViewerFromFragments: mocks.syncProjectSourceToViewerFromFragments,
   loadManualCoordOffsetFromLocalStorage: mocks.loadManualCoordOffsetFromLocalStorage,
 }));
-vi.mock('../modAutoLoadService.js', () => ({ autoLoadModAndStlGeometry: mocks.autoLoadModAndStlGeometry,
-  isGeometryTokenValid:(state:AppState,token:number)=>state.geometryLoadToken===token }));
 vi.mock('../../ui/cbmTreeView.js', () => ({ buildAndRenderCbmTree: mocks.buildAndRenderCbmTree }));
 vi.mock('../../ui/fileDevView.js', () => ({ renderFileDevPanel: mocks.renderFileDevPanel }));
 vi.mock('../gimOpenCore.js', () => ({
@@ -135,7 +132,6 @@ describe('Substation Loading readiness lifecycle', () => {
     mocks.syncProjectSourceToViewerFromFragments.mockImplementation(async (state: AppState) => {
       state.projectSourceToViewerMatrix = new THREE.Matrix4();
     });
-    mocks.autoLoadModAndStlGeometry.mockResolvedValue({ modCount: 0, stlCount: 0 });
     mocks.loadIfcEntry.mockImplementation(async (
       runtimeCtx: any,
       state: AppState,
@@ -231,7 +227,7 @@ describe('Substation Loading readiness lifecycle', () => {
     const ctx={fragments:{list:new Map(),core:{disposeModel:vi.fn()}},world:{scene:{three:new THREE.Scene()}}} as any;
     mocks.getViewerRuntimeWithUI.mockResolvedValue({ctx,modelCallbacks:{}});mocks.ensureEngineReady.mockResolvedValue(undefined);
     const nameIndexGate=deferred<void>();
-    mocks.buildIfcNameIndex.mockReturnValue(nameIndexGate.promise);mocks.autoLoadModAndStlGeometry.mockResolvedValue({modCount:0,stlCount:0});
+    mocks.buildIfcNameIndex.mockReturnValue(nameIndexGate.promise);
     mocks.syncProjectSourceToViewerFromFragments.mockImplementation(async()=>{state.projectSourceToViewerMatrix=new THREE.Matrix4();});
     let progress!:(p:number)=>void,callbacks!:{onStage:(stage:string)=>void;onLoadSource:(source:'ifc'|'lod-cache')=>void};
     mocks.loadIfcEntry.mockImplementation(async(_ctx:any,_state:AppState,item:IfcEntry,_read:unknown,onProgress:(p:number)=>void,options:typeof callbacks)=>{

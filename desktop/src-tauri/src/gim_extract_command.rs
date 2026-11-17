@@ -13,8 +13,8 @@
 //! SQLite 缓存目录（app_data_dir/extracted/{project_id}/），前端只接收
 //! manifest；不会构造完整解压 Vec，也不会通过 IPC 回传条目字节。
 
+pub use gim_native_core::{ExtractedEntryMeta, ExtractionManifest, ExtractionManifestEntry, ExtractManifest};
 use gim_native_core::{NativeError, NativeErrorCode};
-use serde::{Deserialize, Serialize};
 use tauri::Manager;
 use std::path::Path;
 
@@ -29,45 +29,17 @@ use crate::gim_extract::{
 };
 use crate::{require_authorized_path, AuthorizedFilePaths};
 
-#[derive(Serialize, Clone)]
-struct ExtractedEntryMeta {
-    path: String,
-    offset: u64,
-    size: u64,
-    /// 已落盘的缓存绝对路径（传入 project_id 时填充）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    cache_path: Option<String>,
-    /// 线路语义 pack 中的偏移；存在时不再创建同名小文件。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    semantic_pack_offset: Option<u64>,
-    /// 变电源 pack 成员：没有独立落盘文件，读取时按 offset 懒读。
-    #[serde(skip_serializing_if = "is_false")]
-    packed: bool,
-}
 
-fn is_false(value: &bool) -> bool {
-    !*value
-}
+
+
 
 /// 解压完成后写入项目缓存根的清单，供“索引尚未提交就切换工程”后的再次
 /// 打开直接复用已解压文件，避免重新解压 3.6 万条目。
 pub(crate) const EXTRACTION_MANIFEST_FILE: &str = ".gim-extract-manifest.json";
 
-#[derive(Serialize, Deserialize)]
-pub(crate) struct ExtractionManifest {
-    pub source_sha256: String,
-    pub entries: Vec<ExtractionManifestEntry>,
-}
 
-#[derive(Serialize, Deserialize)]
-pub(crate) struct ExtractionManifestEntry {
-    pub path: String,
-    pub size: u64,
-    #[serde(default)]
-    pub packed: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cache_path: Option<String>,
-}
+
+
 
 /// 清单元数据命令：只读 small JSON，不触发解压。
 #[tauri::command]
@@ -87,26 +59,7 @@ pub async fn read_extraction_manifest(
     }).await
 }
 
-#[derive(Serialize)]
-struct ExtractManifest {
-    magic: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    project_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    project_name: Option<String>,
-    entries: Vec<ExtractedEntryMeta>,
-    /// 线路 semantic pack 的相对文件名。条目自身通过 semantic_pack_offset
-    /// 指向数据区；非线路/旧 payload 不携带此字段。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    semantic_pack_path: Option<String>,
-    /// 原生磁盘优先路径的 Rust 阶段计时；inline 兼容 payload 可省略。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    profile: Option<ExtractionProfile>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    parse_copy: Option<crate::substation_parse_copy::CopyReceipt>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    entry_trace: Option<Vec<crate::gim_extract::ExtractionEntryTiming>>,
-}
+
 
 /// 线路 parser 需要的文本文件上限。CBM/DEV/FAM/PHM 通常是小文本；MOD
 /// 中只有小型文本族（例如包含 CROSS CODE 的文件）需要进入 parser，较大
@@ -474,26 +427,7 @@ fn build_manifest_payload(
     // 计时写回 manifest。使用借用视图，避免为第二次序列化复制数万条
     // entry 元数据（这部分虽不是解压字节，但会放大冷启动峰值）。
     let manifest_started = std::time::Instant::now();
-    #[derive(Serialize)]
-    struct ManifestView<'a> {
-        magic: &'a str,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        project_id: Option<&'a String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        project_name: Option<&'a String>,
-        entries: &'a [ExtractedEntryMeta],
-        #[serde(skip_serializing_if = "Option::is_none")]
-        semantic_pack_path: Option<&'a String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        profile: Option<&'a ExtractionProfile>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        parse_copy: Option<&'a crate::substation_parse_copy::CopyReceipt>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        entry_trace: Option<&'a Vec<crate::gim_extract::ExtractionEntryTiming>>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        semantic_checkpoint: Option<crate::substation_extraction_profile::SemanticCheckpoint>,
-    }
-    let manifest_without_profile = serde_json::to_vec(&ManifestView {
+    let manifest_without_profile = serde_json::to_vec(&gim_native_core::ExtractManifestView {
         magic: &info.magic,
         project_id: info.project_id.as_ref(),
         project_name: info.project_name.as_ref(),
@@ -510,7 +444,7 @@ fn build_manifest_payload(
         p.total_ms = command_started.elapsed().as_secs_f64() * 1000.0;
     }
     let manifest = if let Some(ref profile_ref) = profile {
-        serde_json::to_vec(&ManifestView {
+        serde_json::to_vec(&gim_native_core::ExtractManifestView {
             magic: &info.magic,
             project_id: info.project_id.as_ref(),
             project_name: info.project_name.as_ref(),
@@ -583,6 +517,7 @@ fn build_payload(
     }
 
     let manifest = serde_json::to_vec(&ExtractManifest {
+        semantic_checkpoint:None,
         magic: extracted.magic,
         project_id: extracted.project_id,
         project_name: extracted.project_name,

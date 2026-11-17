@@ -1,10 +1,11 @@
+import {logger} from '../utils/logger.js';
 import type { ProjectLoadSession } from '../shared/projectSession.js';
 import {hasErrorCode} from '@desktop/contracts.js';
 
 import { scheduleHideLoading } from './gimOpenCore.js';
 import { SUBSTATION_EARLY_SEMANTIC_DEFAULT } from '../config/features.js';
 import type { AppState } from '../app/state.js';
-import { btnLoadGim, gimFileInput } from './presentation/dom.js';
+import {projectOpenPresentation} from './projectOpenPresentationPort.js';
 import { isTauri } from '@desktop/runtime.js';
 import { openGimFilePath } from '@desktop/fileDialog.js';
 import { DEBUG_RUNTIME_LOGS } from '../config/debug.js';
@@ -36,7 +37,6 @@ import { extractGimFile, getProjectTypeName } from '../gim/gimExtractor.js';
 import { detectGimProjectType } from '../gim/projectType.js';
 import { openPowerlineProject } from './powerlineRuntime.js';
 import { openSubstationProject, onGimExtracted, loadAllIfcFiles } from './substationRuntime.js';
-import { chooseBrowserGimFile } from './browserGimChooser.js';
 
 export { onGimExtracted, loadAllIfcFiles };
 
@@ -267,7 +267,7 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
           extracted = recovered;
         } else {
         if (!canFallbackFromNativeExtraction(nativeError)) throw nativeError;
-        console.warn('[Shared Core] 原生解压不可用，回退 libarchive.js WASM 路径:', nativeError);
+        logger.warn('[Shared Core] 原生解压不可用，回退 libarchive.js WASM 路径:', nativeError);
         const { readFileBytes } = await import('@desktop/fileReader.js');
         showLoading('正在读取 GIM 文件...');
         const endRead = perfBegin('冷启动：读取 GIM 原始文件（WASM 回退）', undefined, perfSession);
@@ -360,27 +360,27 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
       endPostDetect(undefined,{diagnosticReads:DEBUG_RUNTIME_LOGS});
     } catch (error) {
       endDetect('（失败）', { error: error instanceof Error ? error.message : String(error) });
-      console.warn('[GIM] 解压内容工程类型校验失败:', error);
+      logger.warn('[GIM] 解压内容工程类型校验失败:', error);
     }
 
     const detectedRuntime = resolveGimRuntimeType('unknown', detectedType);
     if (source.runtimeType === 'unknown') {
       routingType = resolveGimRuntimeType(source.runtimeType, detectedType);
       if (detectedType === 'hybrid') {
-        console.warn('[GIM] hybrid content detected; using Substation Runtime as the diagnostic fallback');
+        logger.warn('[GIM] hybrid content detected; using Substation Runtime as the diagnostic fallback');
       }
     } else if (source.runtimeType === 'substation' && detectedType === 'equipment') {
       // GIMPKGS is shared by stations and standalone equipment. This refines
       // the family using the actual Device entry, never a cache row.
       routingType = 'equipment';
     } else if (detectedRuntime !== 'unknown' && detectedRuntime !== source.runtimeType) {
-      console.warn('[GIM] source magic/content type mismatch; source magic wins routing:', {
+      logger.warn('[GIM] source magic/content type mismatch; source magic wins routing:', {
         sourceMagic: source.magic,
         sourceType: source.runtimeType,
         detectedType,
       });
     } else if (detectedType === 'hybrid') {
-      console.warn('[GIM] hybrid content detected; source magic selects the runtime');
+      logger.warn('[GIM] hybrid content detected; source magic selects the runtime');
     }
 
     if (!state.isCurrentSession(session)) return {status:'cancelled'};
@@ -431,7 +431,7 @@ async function openTauriGim(
   const ownsOpen=()=>openedSession ? state.isCurrentSession(openedSession) : state.projectGeneration===requestGeneration;
   perfReset({ generation: requestGeneration, projectId: null, sourceSha256: null });
   scheduleBaselineBeforeOpen(state, requestGeneration);
-  btnLoadGim.disabled = true;
+  projectOpenPresentation().setBusy('gim',true);
 
   try {
     showLoading('正在读取 GIM 文件信息...');
@@ -457,7 +457,7 @@ async function openTauriGim(
       runtimeType: source.runtimeType,
     });
     if (source.runtimeType === 'unknown') {
-      console.warn('[GIM] GIM source magic is unknown; content detector will be the fallback');
+      logger.warn('[GIM] GIM source magic is unknown; content detector will be the fallback');
     }
 
     showLoading('正在登记工程记录...');
@@ -499,12 +499,12 @@ async function openTauriGim(
     await opened;
   } catch (error) {
     if(!ownsOpen())return;
-    console.error(error);
+    logger.error(error);
     showLoading(`GIM 解析失败: ${error instanceof Error ? error.message : String(error)}`);
     scheduleHideLoading(ownsOpen, 3000);
     if(options.rethrowError)throw error;
   } finally {
-    if(ownsRequest())btnLoadGim.disabled = false;
+    if(ownsRequest())projectOpenPresentation().setBusy('gim',false);
   }
 }
 
@@ -513,7 +513,7 @@ async function openBrowserGim(
   showMessage: (text: string) => void,
 ): Promise<void> {
   const chooserGeneration = state.projectGeneration;
-  const file = await chooseBrowserGimFile(gimFileInput);
+  const file = await projectOpenPresentation().chooseGim();
   if (!file || state.projectGeneration !== chooserGeneration) return;
   state.invalidatePendingLoads();
   const requestGeneration = state.projectGeneration;
@@ -523,7 +523,7 @@ async function openBrowserGim(
   perfReset({ generation: requestGeneration, projectId: null, sourceSha256: null });
   scheduleBaselineBeforeOpen(state, requestGeneration);
 
-  btnLoadGim.disabled = true;
+  projectOpenPresentation().setBusy('gim',true);
   try {
     const bytes = await file.arrayBuffer();
     if (state.projectGeneration !== requestGeneration) return;
@@ -535,12 +535,12 @@ async function openBrowserGim(
     });
   } catch (error) {
     if(!ownsOpen())return;
-    console.error(error);
+    logger.error(error);
     showLoading(`GIM 解析失败: ${error instanceof Error ? error.message : String(error)}`);
     scheduleHideLoading(ownsOpen, 3000);
   } finally {
-    if(ownsRequest())gimFileInput.value = '';
-    if(ownsRequest())btnLoadGim.disabled = false;
+    if(ownsRequest())projectOpenPresentation().resetInput('gim');
+    if(ownsRequest())projectOpenPresentation().setBusy('gim',false);
   }
 }
 

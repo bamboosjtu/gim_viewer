@@ -1,6 +1,21 @@
 use gim_native_core::NativeErrorCode;
 use std::collections::HashSet;
 #[test]
+fn schema_version_is_checked_before_any_schema_mutation() {
+    use super::*;
+    for version in [0,2,99] {
+        let conn=Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE existing(value TEXT); INSERT INTO existing VALUES('preserved');").unwrap();
+        conn.pragma_update(None,"user_version",version).unwrap();
+        let error=initialize_schema(&conn).unwrap_err();assert_eq!(error.code,NativeErrorCode::SchemaUnsupported);
+        assert_eq!(conn.pragma_query_value(None,"user_version",|row|row.get::<_,i64>(0)).unwrap(),version);
+        assert_eq!(conn.query_row("SELECT value FROM existing",[],|row|row.get::<_,String>(0)).unwrap(),"preserved");
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM sqlite_master WHERE name='gim_project'",[],|row|row.get::<_,i64>(0)).unwrap(),0);
+    }
+    let conn=Connection::open_in_memory().unwrap();initialize_schema(&conn).unwrap();initialize_schema(&conn).unwrap();
+    assert_eq!(conn.pragma_query_value(None,"user_version",|row|row.get::<_,i64>(0)).unwrap(),1);
+}
+#[test]
 fn queued_old_line_begin_cannot_clear_a_newer_session() {
     use std::sync::{Arc,Mutex,mpsc};
     use super::*;

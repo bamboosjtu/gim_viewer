@@ -1,5 +1,6 @@
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
-import { loadPresentation } from './presentationPort.js';
+import {selectionPresentation} from './selectionPresentationPort.js';
+import {projectPresentation} from './projectPresentationPort.js';
 import { perfMark, perfMarkProductMoment } from '../utils/perfTimings.js';
 import { isSubstationSourceMaterializing, substationSourcePreparationMessage } from './substationExtractionJob.js';
 import { buildSubstationAliasIndex, deviceOccurrenceScope, type DeviceOccurrenceScope } from '../gim/substationEvidence.js';
@@ -36,7 +37,7 @@ import {
  *    a. 检查对应 IFC 模型是否已加载
  *    b. 未加载 → getViewerRuntimeWithUI() → ensureEngineReady() → loadIfcBuffer() → buildIfcNameIndex()
  *    c. 已加载 → getViewerRuntimeWithUI()
- *    d. highlightIfcFromNode() + 刷新完整属性
+ *    d. highlightIfcItems() + 刷新完整属性
  * 3. 如果节点无 IFC 关联，只显示基础属性
  */
 /** Selection feedback owns no project loading progress or busy task. A caller
@@ -86,30 +87,12 @@ export async function clearSelectionHighlight(state: AppState, request: Selectio
 }
 
 /** UI projections follow the request; rendering a tree never starts a selection. */
-let navigationDependencies: ReturnType<typeof loadNavigationDependencies> | undefined;
-function loadNavigationDependencies() {
-  return Promise.all([
-    loadPresentation('cbmTreeView'),loadPresentation('sldView'),import('../gim/stdSldIndex.js'),
-  ]);
-}
-export async function syncSelectionNavigation(state: AppState, request: SelectionRequest): Promise<void> {
-  const end = beginSelectionStage(state, request, 'navigation');
-  try {
-    const endImports=beginSelectionStage(state,request,'navigation.imports');
-    navigationDependencies ??= loadNavigationDependencies().catch(error => { navigationDependencies=undefined; throw error; });
-    const dependencies=await navigationDependencies.finally(endImports);
-    const [{syncSelectedTreeRow},{highlightSldByGridId},{getGridIdByCbmPath}]=dependencies;
-    if (!state.isCurrentSelection(request)) return;
-    const endTree=beginSelectionStage(state,request,'navigation.tree');
-    try { syncSelectedTreeRow(state); } finally { endTree(); }
-    const target=request.target;
-    const endLookup=beginSelectionStage(state,request,'navigation.sldLookup');
-    let gridId: string | null;
-    try { gridId=target?.kind==='sld' ? target.key : target?.kind==='cbm' && state.currentStdSldIndex
-      ? getGridIdByCbmPath(state.currentStdSldIndex,target.key) : null; } finally { endLookup(); }
-    const endSld=beginSelectionStage(state,request,'navigation.sldCommit');
-    try { highlightSldByGridId(gridId); } finally { endSld(); }
-  } finally { end(); }
+export async function syncSelectionNavigation(state:AppState,request:SelectionRequest):Promise<void>{
+  const end=beginSelectionStage(state,request,'navigation');
+  try {await selectionPresentation().syncNavigation(state,request,async()=>{
+    const {getGridIdByCbmPath}=await import('../gim/stdSldIndex.js');
+    return ()=>request.target?.kind==='sld'?request.target.key:request.target?.kind==='cbm'&&state.currentStdSldIndex?getGridIdByCbmPath(state.currentStdSldIndex,request.target.key):null;
+  });}finally{end();}
 }
 
 export async function handleNodeClick(
@@ -121,12 +104,13 @@ export async function handleNodeClick(
   const isSelected=() => state.isCurrentSelection(request);
   if (!isSessionCurrent()) return;
   const message=selectionMessage(state,request);
-  const {showNodePropertiesBasic,openPropsDrawerUI}=await loadPresentation('propsDrawer');
+  const inspector=await selectionPresentation().nodeInspector(state,request);
+  if(!isSessionCurrent())return;
   if (isSelected()) {
     state.selectionGeometry=describeNodeSelectionGeometry(state,node);
-    openPropsDrawerUI();
+
   }
-  const basic=showNodePropertiesBasic(state,node,request);
+  const basic=inspector.show(node);
   // Resource loading and property reads are concurrent. Only the short visual
   // reset/apply commit waits behind an already-started external operation.
   const cleared=clearSelectionHighlight(state,request,message);
@@ -146,7 +130,7 @@ export async function handleNodeClick(
     if (refs.size===0 && node.devPath) {
       await loadModStlForNode(state,node,session,request);
       await basic;
-      if (isSelected()) await showNodePropertiesBasic(state,node,request);
+      if (isSelected()) await inspector.show(node);
       return;
     }
     const modelsToLoad=new Set([...refs.keys()].filter((id) => !state.loadedModels.has(id)));
@@ -173,27 +157,30 @@ export async function handleNodeClick(
         catch (error) { ifcFailure=`IFC 加载失败：${entry.name}`;if (isSessionCurrent()) message(ifcFailure); }
       }
       if (!isSessionCurrent()) return;
-      const {buildIfcNameIndex}=await import('../viewer/ifcNameIndex.js');
+      const {buildIfcNameIndex}=await import('./ifcNameIndex.js');
       await buildIfcNameIndex(ctx,state,{session});
       if (!isSessionCurrent()) return;
-      const {buildAndRenderCbmTree}=await loadPresentation('cbmTreeView');
-      const {renderFileDevPanel}=await loadPresentation('fileDevView');
+
       // This callback handles future user clicks; it is scoped to the project,
       // not to the old selection which happened to refresh the names.
       const click=(n:CbmNode) => { if (isSessionCurrent()) void Promise.resolve(handleNodeClick(state,n,showMessage)).catch(reportBackgroundError); };
-      buildAndRenderCbmTree(state,click); renderFileDevPanel(state,click);
+      await projectPresentation().renderNavigation(state,click,isSessionCurrent);
     }
     if (!isSelected()) return;
-    const {highlightIfcFromNode}=await import('../viewer/highlight.js');
-    const {showNodeProperties,openPropsDrawer}=await loadPresentation('propsDrawer');
-    await highlightIfcFromNode(ctx,state,node,message,request);
+    const {highlightIfcItems}=await import('../viewer/highlight.js');
+
+    const {projectNodeIfcSelection}=await import('./ifcSelectionProjection.js');
+    const projected=await projectNodeIfcSelection(ctx,state,node,request);
+    if(!isSelected())return;
+    await highlightIfcItems(ctx,state,projected.items,request);
+    if(isSelected()&&!Object.keys(projected.items).length)message(projected.emptyMessage);
     if (!isSelected()) return;
     state.selectionGeometry=refs.size>0 && state.highlightedItems
       ? ifcFailure ? {status:'partial',detail:`已定位当前可用的直接 GUID 构件；${ifcFailure}`} : {status:'available',detail:'已定位直接 GUID 关联的 IFC 构件。'}
       : ifcFailure ? {status:'failed',detail:ifcFailure} : describeNodeSelectionGeometry(state,node,true);
     await basic;
-    await showNodeProperties(ctx,state,node,request);
-    if (isSelected()) openPropsDrawer(ctx);
+    await inspector.show(node,ctx);
+
   } finally { await Promise.all([basic,cleared]); }
 }
 
@@ -249,7 +236,7 @@ function findCachedPath(paths: Map<string, string>, requestedPath: string): stri
 
 /**
  * 确保 MOD/STL 图层根节点存在。
- * 与 modAutoLoadService 的图层机制一致。
+ * 与 DEV LOD 的图层机制一致。
  */
 function ensureModStlLayer(
   state: AppState,
@@ -282,7 +269,7 @@ function ensureModStlLayer(
  *
  * 用于 collectDeviceGroups 匹配：
  * - geometryNode.devPath 形如 "abc.dev"（无 DEV/ 前缀）
- * - group.userData.devPath 形如 "DEV/abc.dev"（glbCacheService / modAutoLoadService 标记）
+ * - group.userData.devPath 形如 "DEV/abc.dev"（DEV LOD 标记）
  * 归一化后两者可正确比较。
  */
 function normalizeDevPathForCompare(devPath: string | undefined): string {

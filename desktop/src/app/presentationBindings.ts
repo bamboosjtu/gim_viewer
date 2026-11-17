@@ -1,10 +1,16 @@
+import {bindProjectOpenPresentation} from '../services/projectOpenPresentationPort.js';
+import {projectOpenPresentation} from '../ui/projectOpenPresentation.js';
+import {bindSelectionPresentation} from '../services/selectionPresentationPort.js';
+import {selectionPresentation} from '../ui/selectionPresentation.js';
+import {bindDiagramPresentation} from '../services/diagramPresentationPort.js';
+import {diagramPresentation} from '../ui/diagramPresentation.js';
+import {bindLinePresentation} from '../services/linePresentationPort.js';
+import {linePresentation} from '../ui/linePresentation.js';
 import {bindLoadingPresentation} from '../services/loadingPresentationPort.js';
 import * as loadingView from '../ui/loadingView.js';
 import {bindViewerPresentation} from '../services/viewerPresentationPort.js';
 import {bindSourceInspectorPresentation} from '../services/sourceInspectorPresentationPort.js';
 import { bindPublicationView } from '../services/cachePublishStatus.js';
-import type { PresentationModules } from '../services/presentationPort.js';
-import { bindPresentationLoader } from '../services/presentationPort.js';
 import {bindEquipmentPresentation} from '../services/equipmentPresentationPort.js';
 import {createEquipmentProjectPresentation} from '../ui/equipmentProjectView.js';
 import * as shell_statusBar from '../ui/shell/statusBar.js';
@@ -19,6 +25,8 @@ import {projectPresentation} from '../ui/projectPresentation.js';
 
 
 export function configurePresentation():void {
+  bindProjectOpenPresentation(projectOpenPresentation);
+  bindSelectionPresentation(selectionPresentation);bindDiagramPresentation(diagramPresentation);bindLinePresentation(linePresentation);
   bindLoadingPresentation(loadingView);
   bindViewerPresentation(async()=>(await import('../ui/viewerPresentation.js')).viewerPresentation);
   bindSourceInspectorPresentation({
@@ -32,16 +40,4 @@ export function configurePresentation():void {
   bind_shell_projectBar(shell_projectBar);
   bind_dom(dom);
   bindProjectPresentation(projectPresentation);
-  const loaders: { [K in keyof PresentationModules]: () => Promise<PresentationModules[K]> } = {
-    'cbmTreeView': () => import('../ui/cbmTreeView.js'),
-    'deviceBoundsMarker': () => import('../ui/deviceBoundsMarker.js'),
-    'engineeringInspector': () => import('../ui/engineeringInspector.js'),
-    'engineeringTreeView': () => import('../ui/engineeringTreeView.js'),
-    'fileDevView': () => import('../ui/fileDevView.js'),
-    'lineProjectView': () => import('../ui/lineProjectView.js'),
-    'propsDrawer': () => import('../ui/propsDrawer.js'),
-    'selectionSources': () => import('../ui/selectionSources.js'),
-    'sldView': () => import('../ui/sldView.js'),
-  };
-  bindPresentationLoader(key => loaders[key]());
 }

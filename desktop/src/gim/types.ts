@@ -29,24 +29,23 @@ export interface CbmNode {
   systemNames: string[];
   /**
    * 来自 DEV 文件 SYMBOLNAME 字段（设备名称，如"柜体"）。
-   * 由 buildCbmTreeEnhanced 异步解析 DEV 文件后填入；传统 buildCbmTree 不填充此字段。
-   * 缺失时为空字符串。
+   * 由 buildCbmTree 解析 DEV 文件时填入；缺失时为空字符串。
    */
   devSymbolName: string;
   /**
    * 来自 DEV 文件 TYPE 字段（设备类型，如"OTHERS"）。
-   * 由 buildCbmTreeEnhanced 异步解析 DEV 文件后填入。
    */
   devType: string;
   /**
    * 此节点是否展开过 DEV SUBDEVICES（防止重复解析）。
-   * 由 buildCbmTreeEnhanced 在解析 DEV 后设置。
+   * 由 buildCbmTree 在解析 DEV 后设置。
    */
   devExpanded: boolean;
 }
 
 /** FileDevRelation 条目 */
 export interface FileDevEntry {
+  sourceDiagnostics?:import('./sourceDocument.js').SourceDiagnostic[];
   /** Original design-document NAME, independent from IFC model discovery. */
   sourceDesignFile?: string;
   ifcName: string;

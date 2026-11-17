@@ -1,6 +1,6 @@
 import measuredWorkerAsset from './compositionProjectionWorker.ts?worker&url';
 import { createMeasuredWorker, measurementWorkerUrl } from '../measurement/hostWorker.js';
-import { loadPresentation } from './presentationPort.js';
+import {selectionPresentation} from './selectionPresentationPort.js';
 import type { AppState } from '../app/state.js';
 import type { CompositionBounds } from './projections/compositionSpatial.js';
 import { fromIfcYUpBounds } from './projections/compositionSpatial.js';
@@ -22,10 +22,7 @@ export async function reconcileProjectionSelection(state: AppState): Promise<voi
     const { clearEngineeringHighlight } = await import('./engineeringSelection.js');
     await clearEngineeringHighlight(state, cleared);
     if (!state.isCurrentSelection(cleared)) return;
-    const { renderInspectorTabs, sectionHtml } = await loadPresentation('propsDrawer');
-    if (state.isCurrentSelection(cleared)) renderInspectorTabs('<div class="props-header">工程分组已更新</div>', {
-      overview: sectionHtml('选择范围', [['状态', state.selectionMessage]]), params: '', relations: '', source: '',
-    });
+    await selectionPresentation().projectionChanged(state.selectionMessage,()=>state.isCurrentSelection(cleared));
   } else if (target.kind === 'engineering' || target.kind === 'engineering-source' || target.kind === 'engineering-group') {
     const { selectEngineeringTarget } = await import('./engineeringSelection.js');
     if (state.isCurrentSelection(request)) await selectEngineeringTarget(state, { kind: target.kind, key: target.key }, request, { fit: false, load: false });

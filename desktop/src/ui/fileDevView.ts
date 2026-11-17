@@ -10,7 +10,7 @@ const ENTITY_ICONS: Record<string, string> = {
 /**
  * 判断 CBM 节点是否为 MOD 几何加载起点。
  *
- * 与 services/modAutoLoadService.isGeometryAutoLoadSeed 保持一致：
+ * 与 DEV LOD 的设备 seed 规则一致：
  * 必须有 devPath，排除 DEV_SUBDEVICE（虚拟节点）和 PARTINDEX（父 DEV 的语义别名，
  * 自身无 SUBDEVICE 局部矩阵，由根 DEV 递归覆盖）。
  */
@@ -23,7 +23,7 @@ function isModDeviceNode(node: CbmNode): boolean {
 /**
  * 遍历 CBM 树，收集所有可作为 MOD 几何加载起点的设备节点。
  *
- * 与 services/modAutoLoadService.collectCbmDeviceInstances 的筛选逻辑一致，
+ * 与 DEV LOD 的 CBM 设备实例筛选一致，
  * 但不含 transform 累积（UI 层不需要矩阵，只用于列表展示和点击回调）。
  */
 function collectModDeviceNodes(root: CbmNode | null): CbmNode[] {
@@ -151,7 +151,7 @@ export function renderFileDevPanelUI(
     const isIfcSource = /\.ifc$/i.test(entry.ifcFile);
     const { nodeEl, row, childrenEl } = createCollapsibleNode(
       isIfcSource ? '📄' : '🗺️',
-      `${entry.ifcName || entry.ifcFile || '未命名来源'} (${entry.deviceCount})${isIfcSource ? '' : ' · 来源图纸'}`,
+      `${entry.ifcName || entry.ifcFile || '未命名来源'} (${entry.deviceCount})${entry.sourceDiagnostics?.length?' · 来源字段有歧义':isIfcSource ? '' : ' · 来源图纸'}`,
       '0px',
     );
 

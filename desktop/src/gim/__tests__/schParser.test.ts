@@ -101,3 +101,8 @@ describe('discoverStdSldFromSCH', () => {
     expect(await discoverStdSldFromSCH(new Map())).toEqual([]);
   });
 });
+import {it as sourceIt,expect as sourceExpect} from 'vitest';
+sourceIt('distinguishes a conflicting SCH reference from an empty document',()=>{
+  sourceExpect(()=>parseSch('SCH.NUM=1\nSCH0=a.std\nSCH0=b.std')).toThrow('来源字段存在冲突');
+  sourceExpect(parseSch('')).toEqual([]);
+});

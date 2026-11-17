@@ -24,6 +24,7 @@ import type {
 } from '@desktop/database.js';
 import { LineRefKind } from '../gim/lineRefKind.js';
 import { normalizeGimPath, getFileNameLower } from '../gim/linePathNormalize.js';
+import {SourceConflictError} from '../gim/sourceDocument.js';
 
 /** refs 中数组型字段名（对应 GimGraphNode.refs 的 8 个 string[] 字段，排除 rawRefs） */
 type ArrayRefField = 'cbmFiles' | 'devFiles' | 'famFiles' | 'phmFiles' | 'modFiles' | 'stlFiles' | 'wireFiles' | 'ifcFiles';
@@ -53,6 +54,7 @@ const FILE_TYPE_KEYS: ReadonlyArray<keyof GimGraph['filesByType']> = [
 
 /** 单个节点 → LineCbmNodePayload */
 function toNodePayload(node: GimGraphNode, sortOrder: number | null): LineCbmNodePayload {
+  if(node.sourceDiagnostics?.length)throw new SourceConflictError(node.sourceDiagnostics);
   return {
     path: node.path,
     name: node.name || null,

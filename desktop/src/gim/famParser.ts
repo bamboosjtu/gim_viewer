@@ -1,4 +1,4 @@
-import { parseFamPhysicalRecords } from '../../../packages/powerline-core/src/famRecords.js';
+import { parseFamPhysicalRecords } from '@gim/powerline-core/famRecords.js';
 import { isGimEmptyValue } from './gimValueSemantics.js';
 
 /**

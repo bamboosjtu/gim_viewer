@@ -37,11 +37,13 @@ npm run tauri:dev     # Tauri 开发窗口
 | `npm run tauri:dev` | Tauri 开发窗口 |
 | `npm run build` | TypeScript 检查 + Vite 生产分包 |
 | `npm run tauri:build` | Release EXE、NSIS 与 portable ZIP |
-| `npm run lint` | ESLint（`src`、`bridge`） |
+| `npm run lint` | ESLint（`src`、`bridge`）；已接入模块执行 recommended type-checked 规则 |
+| `npm run format:architecture` | 格式化已接入的日志、视图状态、投影与展示端口模块 |
+| `npm run check:format` | 只检查上述模块的 Prettier 格式，不改文件 |
 | `npm run check:version` | npm/Cargo 版本一致性；构建前自动执行 |
 | `npm run check:types` | TypeScript 检查（含测试替身的接口完整性） |
 | `npm run check:engineering-boundaries` | 纯领域、来源与 Viewer 边界检查 |
-| `npm run generate:native-contracts` | 从 contracts/native-v1.json 生成 TS/Rust FAM/DEV DTO 和错误契约 |
+| `npm run generate:native-contracts` | 从 contracts/native-v1.json 生成 TS/Rust 原生 DTO、错误、命令名和共享版本 |
 | `npm run test:native-contracts` | 生成漂移、类型所有权与共享夹具 TS 编译检查，无工程样本 |
 | `cargo test --manifest-path src-tauri/Cargo.toml --lib command_registry --locked` | 桌面与 Android 命令注册表 AST 线程边界检查，无工程样本 |
 | `npm run sync:engineering-catalog` | 同步独立 JSON 词汇、工具配置副本和目录文档，不读取 XLSX |
@@ -61,7 +63,7 @@ npm run tauri:dev     # Tauri 开发窗口
 | `npm run test:engineering:worker` | 真实 Worker/Blob/缓存/取消（headless Edge，`desktop/tests/engineering/worker-check.html`，无样本） |
 | `npm run local-tests:check` | 检查跟踪的 `local-tests/mini-samples.example.json` |
 | `npm run test:local -- --build <原生构建清单>` | 打开开发者登记的一变、一线、一设备；skip 不计通过 |
-| `npm run test:coverage` | `engineering/` 与 `gim/` 覆盖率下限 |
+| `npm run test:coverage` | 领域、来源及打开/Viewer/线路热点逐文件覆盖率下限，权威门槛见验证文档 |
 | `npm run test:ifc-critical` | IFC 转换、会话竞态、缓存与开洞策略 |
 | `npm run test:ifc-connections-local` | 仅本地：真实 web-ifc/WASM 分块/完整扫描对照和实际堆增长；默认 Node，追加 `-- --build <隔离构建清单>` 在固定 WebView2 执行同一案例；证据写入 `tmp/local-tests/`，不加入 CI |
 | `npm run test:acceptance-tools` | 验收构建、清单与探针协议 |

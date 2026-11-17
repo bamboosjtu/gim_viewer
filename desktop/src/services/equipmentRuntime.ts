@@ -64,7 +64,7 @@ export async function startGeometryOnlyView(
   scope.withSession(() => {
     state.projectSourceToViewerMatrix = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
     state.initialized = true;
-    state.stationOverview = () => { scope.withSession(() => { fitCameraToScene(ctx, state, { force: true }); }); };
+    state.stationOverview = () => { scope.withSession(() => { fitCameraToScene(ctx, state.viewState, { force: true }); }); };
   });
   let interactive = false, fitted = false;
   const rawPlacement = state.currentCbmTree?.transformMatrix;
@@ -78,7 +78,7 @@ export async function startGeometryOnlyView(
       if (Number(d?.shown) > 0 && !interactive) {
         interactive = true;
         perfMarkProductMoment('firstUsableGeometryReady', { kind: state.currentProjectType });
-        if (!state.selectionRequest?.target && !state.viewerUserInteracted) fitCameraToScene(ctx, state, {force: true});
+        if (!state.selectionRequest?.target && !state.viewState.viewerUserInteracted) fitCameraToScene(ctx, state.viewState, {force: true});
         if (state.modRootGroup) {
           void observeFirstGeometry(state, ctx, state.modRootGroup, session, hideLoading).catch(error => {
             if (current()) console.warn('[Geometry presentation]', error);
@@ -87,7 +87,7 @@ export async function startGeometryOnlyView(
       }
       if (d?.baseRepresentationsSettled && !fitted) {
         fitted = true;
-        if (!state.selectionRequest?.target && !state.viewerUserInteracted) fitCameraToScene(ctx, state, {force: true});
+        if (!state.selectionRequest?.target && !state.viewState.viewerUserInteracted) fitCameraToScene(ctx, state.viewState, {force: true});
         if (!interactive) { hideLoading(); showMessage('设备模型没有可显示几何，请查看几何诊断。'); }
       }
     });

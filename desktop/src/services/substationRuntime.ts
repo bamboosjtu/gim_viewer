@@ -1,3 +1,4 @@
+import {logger} from '../utils/logger.js';
 import {SUBSTATION_PARSER_DOMAIN_VERSION} from './substationSpatialCodec.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
 /** Substation cold/warm project orchestration and core semantic publication. */
@@ -96,7 +97,7 @@ export async function onGimExtracted(
     } catch (err) {
       // 旧工程的异常不能清空新工程已经提交的关系；失效会话直接放弃。
       if (!scope.isCurrent()) return [];
-      console.warn('[GIM] FileDevRelation 解析失败，保留空间/功能系统视图:', err);
+      logger.warn('[GIM] FileDevRelation 解析失败，保留空间/功能系统视图:', err);
     }
 
     scope.withSession(()=>{state.fileDevRelations = fileDevRelations;});
@@ -235,7 +236,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
       } catch (error) {
         if(!scope.isCurrent())return;
         endValidation('（失败）', { error: error instanceof Error ? error.message : String(error) });
-        console.warn('[Substation Runtime] cache validation failed, falling back to cold path:', error);
+        logger.warn('[Substation Runtime] cache validation failed, falling back to cold path:', error);
       }
 
     }
@@ -309,7 +310,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
         }
 
         if (state.fileDevRelations.length === 0) {
-          console.warn('[Tauri] 缓存索引中没有文件设备关系');
+          logger.warn('[Tauri] 缓存索引中没有文件设备关系');
         }
 
         // Core navigation is available before optional IFC semantics. Entity
@@ -410,9 +411,6 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
           startStdSld,
           scheduleSpatialSemantic,
           scheduleStdSld,
-          geometryCacheValid: validation.geometry_cache_valid ?? validation.geometry_cache_version_match,
-          geometryCacheManifestValid: validation.geometry_cache_manifest_valid,
-          geometryCacheVersionFileMatch: validation.geometry_cache_version_file_match,
         }));
         debugLog(DEBUG_GIM_CACHE, '[Tauri] 变电工程缓存命中：自动加载全部 IFC + MOD + STL');
         if (validation?.substation_properties_complete === false && context.projectId != null) {
@@ -455,7 +453,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
         return; // 缓存命中，短路完成
       } catch (err) {
         if (!scope.isCurrent()) return;
-        console.warn('[Substation Runtime] warm cache restore failed, falling back to cold path:', err);
+        logger.warn('[Substation Runtime] warm cache restore failed, falling back to cold path:', err);
       }
     }
 
@@ -571,10 +569,10 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
                   errors: cacheResult.errors,
                 });
                 if (cacheResult.errors.length > 0) {
-                  console.warn('[Tauri] 部分 IFC 缓存失败:', cacheResult.errors);
+                  logger.warn('[Tauri] 部分 IFC 缓存失败:', cacheResult.errors);
                 }
               } catch (err) {
-                console.error('[Tauri] IFC 文件缓存失败:', err);
+                logger.error('[Tauri] IFC 文件缓存失败:', err);
               }
 
               // WASM 回退把全部原始条目持久化，避免只缓存已知扩展名
@@ -595,10 +593,10 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
                   });
                   for (const [path, localPath] of geoCacheResult.pathMap) localCachePathMap.set(path, localPath);
                   if (geoCacheResult.errors.length > 0) {
-                    console.warn('[Tauri] 部分来源文件缓存失败:', geoCacheResult.errors);
+                    logger.warn('[Tauri] 部分来源文件缓存失败:', geoCacheResult.errors);
                   }
                 } catch (err) {
-                  console.error('[Tauri] 来源文件缓存失败:', err);
+                  logger.error('[Tauri] 来源文件缓存失败:', err);
                 }
               }
             }
@@ -674,7 +672,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
               error: err instanceof Error ? err.message : String(err),
             }, perfSession);
           }
-          console.error('[Tauri] 缓存/索引入库后台任务失败:', err);
+          logger.error('[Tauri] 缓存/索引入库后台任务失败:', err);
         });
       return persistPromise;
     };

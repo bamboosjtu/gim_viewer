@@ -54,11 +54,11 @@ mod substation_sqlite_tests;
 mod tests;
 
 /// Current database publication marker; semantic validity uses its own domain.
-pub const PARSER_VERSION: &str = "gim-cache-schema-v1";
+pub use gim_native_core::DATABASE_PARSER_VERSION as PARSER_VERSION;
 
-pub const LINE_PARSER_VERSION: &str = "gim-line-parser-v1";
+pub use gim_native_core::LINE_PARSER_VERSION;
 
-pub const SUBSTATION_PARSER_VERSION: &str = "gim-substation-parser-v1";
+pub use gim_native_core::SUBSTATION_PARSER_VERSION;
 
 
 /// GLB 几何缓存版本（方案 C：MOD/STL → glTF 序列化格式版本）
@@ -68,7 +68,7 @@ pub const SUBSTATION_PARSER_VERSION: &str = "gim-substation-parser-v1";
 /// - GEOMETRY_CACHE_VERSION 变 → 仅 geometry domain 失效，由前端复用
 ///   substation source/index、重新构建 DEV GLB；不删除整个项目缓存
 /// 版本文件：{app_data_dir}/glbcache/{project_id}/_version.txt
-pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v1-source-bound-stl";
+pub use gim_native_core::GEOMETRY_CACHE_VERSION;
 
 /// 应用级数据库连接
 pub struct DbState(pub Mutex<Connection>);
@@ -87,6 +87,7 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, NativeError>
     let conn = Connection::open(&path).map_err(|e| format!("打开数据库失败: {}", e))?;
     conn.busy_timeout(std::time::Duration::from_secs(5))
         .map_err(|e| format!("设置数据库 busy_timeout 失败: {}", e))?;
+    initialize_schema(&conn)?;
 
     // WAL is an optimization, not a startup requirement. If another dev
     // instance is still holding the database lock, forcing WAL here would make
@@ -97,7 +98,6 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, NativeError>
         eprintln!("[db] 跳过 synchronous=NORMAL 设置: {}", e);
     }
 
-    initialize_schema(&conn)?;
     Ok(conn)
 }
 

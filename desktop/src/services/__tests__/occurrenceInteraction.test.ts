@@ -7,8 +7,6 @@ import { loadModStlForNode, collectDeviceGroups, frameAndHighlightDevice } from 
 import { serializeDevToGlbDetailed, parseDevGlbAsset } from '../glbCacheService.js';
 import { DevGlbTemplatePool } from '../devGlbTemplateRuntime.js';
 import { highlightModGroups, resetModHighlight } from '../../viewer/highlight.js';
-import { autoLoadModAndStlGeometry } from '../modAutoLoadService.js';
-import { runProgressiveDevGlbPipeline } from '../progressiveGeometryService.js';
 import type { ViewerContext } from '../../viewer/viewerEngine.js';
 import { nestedPartFixture } from './nestedPartIndexFixture.js';
 import {createDeviceRuntimeMock} from './helpers/deviceRuntime.js';
@@ -89,17 +87,6 @@ it('a GLB becoming available after raw loading does not duplicate the same occur
   expect(state.loadedXmlModGroups.size).toBe(3);
 });
 
-it('full raw auto load retains occurrence ownership and a subsequent progressive GLB commit adds no duplicate', async () => {
-  const files=fixture(), tree=(await buildCbmTree(files))!;
-  const state=new AppState(); state.currentFiles=files; state.currentCbmTree=tree;
-  const scene=mock.ctx.world.scene.three;
-  state.currentProjectType='equipment';
-  await autoLoadModAndStlGeometry(state,scene,() => {},{includeMod:true});
-  expect(state.loadedXmlModGroups.size).toBe(6);
-  for (const seed of tree.children) expect(collectDeviceGroups(state,seed.devPath,deviceOccurrenceScope(tree,seed))).toHaveLength(3);
-  await runProgressiveDevGlbPipeline(state,scene,() => {});
-  expect(state.loadedXmlModGroups.size).toBe(6);
-});
 it('A loaded does not let B PARTINDEX skip loading; reverse aliases and repeated assembly candidates stay scoped', async () => {
   const files = fixture(), tree = (await buildCbmTree(files))!;
   const state = new AppState(); state.currentFiles = files; state.currentCbmTree = tree;

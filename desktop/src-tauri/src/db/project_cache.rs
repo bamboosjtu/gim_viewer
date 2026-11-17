@@ -1,9 +1,9 @@
 //! Settings, recent projects, source authorization and cache deletion.
 
+pub use gim_native_core::{CachedProjectSummary};
 use gim_native_core::NativeError;
 use tauri::Manager;
 use rusqlite::params;
-use serde::Serialize;
 use std::collections::HashMap;
 use std::path::Path;
 use super::cache_paths::{remove_cache_dir_if_safe};
@@ -11,18 +11,7 @@ use super::projects::{ensure_project_exists};
 use super::{DbState, now_ms};
 
 /// 缓存项目摘要（用于缓存管理 UI 列表）
-#[derive(Debug, Serialize)]
-pub struct CachedProjectSummary {
-    pub id: i64,
-    pub name: String,
-    pub path: String,
-    pub project_type: Option<String>,
-    pub parser_version: Option<String>,
-    pub size: u64,
-    pub modified_ms: u64,
-    pub updated_at_ms: u64,
-    pub last_opened_at_ms: u64,
-}
+
 
 /// 读取全部应用设置。密钥只保存在本地 SQLite，不进入构建产物。
 #[tauri::command]

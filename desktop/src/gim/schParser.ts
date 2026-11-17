@@ -17,9 +17,10 @@
  * 关联文档：docs/schema/logical-model.md
  */
 
-import { parseKeyValue } from './cbmParser.js';
+import {parseKeyValue,keyValueDiagnostics} from './kvParser.js';
+import {SourceConflictError} from './sourceDocument.js';
+import {getFileEntryResolver,getFileEntryIndex} from './entryResolver.js';
 import { parseBoundedCount } from './parserLimits.js';
-import { findFileByPath } from './fileLookup.js';
 
 /** SCH 条目类型 */
 export type SchEntryType = 'std' | 'sld' | 'unknown';
@@ -46,8 +47,9 @@ export interface SchEntry {
  * @param text SCH 文件原始文本
  * @returns 条目列表（按 index 升序）。若 NUM 缺失或为 0，返回空数组。
  */
-export function parseSch(text: string): SchEntry[] {
-  const kv = parseKeyValue(text);
+export function parseSch(text: string,sourcePath='CBM/project.sch'): SchEntry[] {
+  const kv = parseKeyValue(text,sourcePath);
+  const conflicts=keyValueDiagnostics(kv);if(conflicts.length)throw new SourceConflictError(conflicts);
   const num = parseBoundedCount(kv['SCH.NUM'], 'SCH.NUM');
   if (num <= 0) return [];
 
@@ -60,7 +62,7 @@ export function parseSch(text: string): SchEntry[] {
     entries.push({
       index: i,
       filename: trimmed,
-      path: `CBM/${trimmed}`,
+      path: `${sourcePath.replace(/\\/g,'/').split('/').slice(0,-1).join('/')}/${trimmed}`.replace(/^\//,''),
       type,
       name: trimmed.replace(/\.(std|sld)$/i, ''),
     });
@@ -86,38 +88,11 @@ function inferSchEntryType(filename: string): SchEntryType {
  * @param files GIM 解压后的文件集合（key 形如 `CBM/project.sch`）
  * @returns SCH 条目列表
  */
-export async function discoverStdSldFromSCH(files: Map<string, File>): Promise<SchEntry[]> {
-  // 候选路径：覆盖 GIM 解压后可能的大小写变体
-  const candidates = ['CBM/project.sch', 'Cbm/project.sch', 'cbm/project.sch'];
-  let schFile: File | undefined;
-  let matchedPath = '';
-  for (const candidate of candidates) {
-    const entry = findFileByPath(files, candidate);
-    if (entry) {
-      schFile = entry.file;
-      matchedPath = entry.path;
-      break;
-    }
-  }
-  if (!schFile) {
-    // 兜底：在所有 .sch 文件中查找 project.sch（不区分大小写）
-    for (const [path, file] of files) {
-      if (/^cbm\/project\.sch$/i.test(path)) {
-        schFile = file;
-        matchedPath = path;
-        break;
-      }
-    }
-  }
-  if (!schFile) return [];
-  try {
-    const text = await schFile.text();
-    const entries = parseSch(text);
-    if (entries.length > 0 && matchedPath !== 'CBM/project.sch') {
-      console.log(`[SCH] SCH 入口路径非默认大小写：${matchedPath}`);
-    }
-    return entries;
-  } catch {
-    return [];
-  }
+export async function discoverStdSldFromSCH(files:Map<string,File>):Promise<SchEntry[]> {
+  const resolve=getFileEntryResolver(files),candidates=getFileEntryIndex(files).candidates('project.sch');
+  if(candidates.length>1)throw new SourceConflictError([{kind:'ambiguous-field',path:'',field:'project.sch',lines:[],values:[...candidates]}]);
+  const path=candidates[0];if(!path)return [];
+  const file=files.get(path);if(!file)return [];
+  const entries=parseSch(await file.text(),path);
+  return entries.map(entry=>({...entry,path:resolve(entry.filename,path)??entry.path}));
 }

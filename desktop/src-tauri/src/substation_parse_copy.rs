@@ -1,26 +1,17 @@
 //! Optional cold-parse acceleration copy. Independent extracted files remain authoritative.
+pub use gim_native_core::{CopyReceipt, ParseCopyEntry as Entry};
 use gim_native_core::NativeError;
 use tauri::Manager;
 use crate::db::{cache_file_path, ensure_project_exists, DbState};
-use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{io::Write, path::Path};
 
 pub const COPY_PATH: &str = "_substation-parse-copy.bin";
 pub const MAX_COPY_BYTES: usize = 16 * 1024 * 1024;
 
-#[derive(Serialize, Clone)]
-pub struct CopyReceipt {
-    pub size: usize,
-    pub sha256: String,
-}
 
-#[derive(Serialize)]
-struct Entry {
-    path: String,
-    offset: usize,
-    size: usize,
-}
+
+
 
 #[derive(Default)]
 pub struct ParseCopy {

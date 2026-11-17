@@ -20,7 +20,7 @@
  * @param args 透传给 console.log 的参数
  */
 export function debugLog(enabled: boolean, ...args: unknown[]): void {
-  if (enabled) console.log(...args);
+  if (enabled) logger.log(...args);
 }
 
 /**
@@ -29,5 +29,23 @@ export function debugLog(enabled: boolean, ...args: unknown[]): void {
  * @param args 透传给 console.warn 的参数
  */
 export function debugWarn(enabled: boolean, ...args: unknown[]): void {
-  if (enabled) console.warn(...args);
+  if (enabled) logger.warn(...args);
 }
+
+type LogLevel = 'log' | 'info' | 'warn' | 'error';
+type LogSink = (level: LogLevel, args: readonly unknown[]) => void;
+let sink: LogSink | undefined;
+/** A host can capture structured errors and context without classifying message text. */
+export function setLogSink(next?: LogSink): void {
+  sink = next;
+}
+function emit(level: LogLevel, args: unknown[]): void {
+  if (sink) sink(level, args);
+  else console[level](...args);
+}
+export const logger = {
+  log: (...args: unknown[]) => emit('log', args),
+  info: (...args: unknown[]) => emit('info', args),
+  warn: (...args: unknown[]) => emit('warn', args),
+  error: (...args: unknown[]) => emit('error', args),
+};

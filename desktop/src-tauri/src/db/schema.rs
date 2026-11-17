@@ -282,8 +282,16 @@ fn create_schema(conn: &Connection) -> Result<(), NativeError> {
 
 /// Unreleased physical schema. Remove the development database after structural changes.
 pub(super) fn initialize_schema(conn: &Connection) -> Result<(), NativeError> {
-    create_schema(conn)?;
-    conn.pragma_update(None,"user_version",1).map_err(|e|e.to_string()).map_err(NativeError::from)
+    let version:i64=conn.pragma_query_value(None,"user_version",|row|row.get(0)).map_err(|e|NativeError::from(e.to_string()))?;
+    let populated:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%')",[],|row|row.get(0)).map_err(|e|NativeError::from(e.to_string()))?;
+    if version!=i64::from(gim_native_core::DATABASE_SCHEMA_VERSION) && (version!=0 || populated) {
+        return Err(NativeError::new(gim_native_core::NativeErrorCode::SchemaUnsupported,
+            format!("不支持的数据库 schema 版本 {version}，当前固定为 v1；请删除旧开发数据库后重建")));
+    }
+    let tx=conn.unchecked_transaction().map_err(|e|NativeError::from(e.to_string()))?;
+    create_schema(&tx)?;
+    tx.pragma_update(None,"user_version",gim_native_core::DATABASE_SCHEMA_VERSION).map_err(|e|NativeError::from(e.to_string()))?;
+    tx.commit().map_err(|e|NativeError::from(e.to_string()))
 }
 
 pub(super) const PER_PROJECT_TABLES: &[&str] = &[

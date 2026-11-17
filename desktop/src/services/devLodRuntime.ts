@@ -1,6 +1,6 @@
 import {setRenderVisibility,requestObjectRender} from '../viewer/demandRendering.js';
 import { createLazyGeometrySourceFiles } from './modGeometrySourceFiles.js';
-import { loadPresentation } from './presentationPort.js';
+import {projectPresentation} from './projectPresentationPort.js';
 import { deleteDevArtifact, readDevArtifactBatch, readDevArtifactResult, type DevArtifactRead } from '@desktop/devLodCache.js';
 import * as THREE from 'three';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
@@ -464,9 +464,8 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
     ));
     if (!this.current()) return;
     this.catalogLookupReady=true;this.diagnostics.catalogReady = true; this.finishCatalog();
-    const { refreshDeviceBoundsMarkers } = await loadPresentation('deviceBoundsMarker');
-    if (!this.current()) return;
-    refreshDeviceBoundsMarkers(this.state);
+    await projectPresentation().refreshDeviceBounds(this.state,()=>this.current());
+    if(!this.current())return;
     perfMark('DEV directory ready', { ...this.diagnostics, fingerprints: undefined }, this.perf);
     this.update();
   }

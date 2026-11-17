@@ -1,36 +1,18 @@
 //! Project identity registration, source guards and project records.
 
+pub use gim_native_core::{FileInfoInput, GimProjectRecord};
 use gim_native_core::{NativeError, NativeErrorCode};
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::io::Write;
 use super::cache_paths::{ensure_cache_project_id};
 use super::{DbState, now_ms};
 
 /// GIM 文件元信息（从前端传入，需 Deserialize）
-#[derive(Debug, Deserialize)]
-pub struct FileInfoInput {
-    pub path: String,
-    pub name: String,
-    pub size: u64,
-    pub modified_ms: u64,
-    pub sha256: String,
-}
+
 
 /// 数据库中的完整项目记录
-#[derive(Debug, Serialize)]
-pub struct GimProjectRecord {
-    pub id: i64,
-    pub path: String,
-    pub name: String,
-    pub size: u64,
-    pub modified_ms: u64,
-    pub sha256: String,
-    pub created_at_ms: u64,
-    pub updated_at_ms: u64,
-    pub last_opened_at_ms: u64,
-}
+
 
 pub(crate) fn ensure_project_exists(conn: &Connection, project_id: i64) -> Result<(), NativeError> {
     ensure_cache_project_id(project_id)?;

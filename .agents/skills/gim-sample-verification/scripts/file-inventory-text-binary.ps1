@@ -139,10 +139,11 @@ foreach ($ext in @(".cbm", ".fam", ".dev", ".phm")) {
   if (-not $files) { continue }
   $textLike = ($files | Where-Object { $_.kind -eq "text-like" }).Count
   $unknownText = ($files | Where-Object { $_.kind -eq "unknown-text" }).Count
+  $empty = ($files | Where-Object { $_.kind -eq "empty" }).Count
   if ($textLike -eq $files.Count) {
     Write-Host ("PASS: all {0} files are text-like ({1})" -f $ext, $textLike)
-  } elseif ($textLike + $unknownText -eq $files.Count) {
-    Write-Host ("PASS: {0} files text-like + unknown-text (no binary) ({1} + {2})" -f $ext, $textLike, $unknownText)
+  } elseif ($textLike + $unknownText + $empty -eq $files.Count) {
+    Write-Host ("PASS: {0} files text-like + unknown-text + empty (no binary) ({1} + {2} + {3})" -f $ext, $textLike, $unknownText, $empty)
   } else {
     Write-Host ("FAIL: some {0} files are binary-like" -f $ext)
   }

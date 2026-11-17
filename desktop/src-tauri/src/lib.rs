@@ -1,3 +1,4 @@
+pub use gim_native_core::{FileInfo, ProcessMemorySnapshot};
 use gim_native_core::{NativeError, NativeErrorCode};
 mod db;
 mod native_command;
@@ -14,7 +15,6 @@ mod substation_parse_copy;
 mod substation_extraction_job;
 mod substation_extraction_profile;
 
-use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs;
@@ -66,6 +66,10 @@ fn ensure_fixed_webview2_acl() {
     if marker_path.is_file() {
         return;
     }
+    if let Err(error)=runtime_acl::validate_runtime_tree(&runtime_dir) {
+        eprintln!("[WebView2 ACL] 拒绝递归修改运行时权限: {error}");
+        return;
+    }
 
     // WebView2 Fixed Runtime 120+ 在 Windows 10 的非安装应用中需要给
     // ALL APPLICATION PACKAGES / ALL RESTRICTED APPLICATION PACKAGES 读取权限。
@@ -100,14 +104,7 @@ fn ensure_fixed_webview2_acl() {
 #[cfg(not(windows))]
 fn ensure_fixed_webview2_acl() {}
 
-#[derive(Serialize)]
-struct FileInfo {
-    path: String,
-    name: String,
-    size: u64,
-    modified_ms: u64,
-    sha256: String,
-}
+
 
 /// 由后端文件选择器登记的文件路径。
 ///
@@ -278,22 +275,7 @@ async fn get_file_info(
 ///
 /// WebView2 子进程与 Rust 后端是不同进程，因此该值只代表后端进程；前端
 /// 性能埋点会把 source 一并记录，不能将它当作 JS heap 或整个进程树 RSS。
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ProcessMemorySnapshot {
-    pid: u32,
-    rss_bytes: Option<u64>,
-    source: String,
-    rss_source: String,
-    process_tree_rss_bytes: Option<u64>,
-    process_tree_private_bytes: Option<u64>,
-    root_private_bytes: Option<u64>,
-    process_instances: Vec<(u32, String)>,
-    process_count: Option<u32>,
-    process_tree_available: bool,
-    process_tree_source: String,
-    process_tree_reason: Option<String>,
-}
+
 
 #[cfg(windows)]
 fn current_process_id() -> u32 {
@@ -645,3 +627,5 @@ fn inspect_authorized_file(access: &AuthorizedFilePaths, path: &str) -> Result<F
     })
 
 }
+#[cfg(any(windows,test))]
+mod runtime_acl;

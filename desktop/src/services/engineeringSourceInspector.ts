@@ -1,5 +1,5 @@
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
-import { loadPresentation } from './presentationPort.js';
+import {selectionPresentation} from './selectionPresentationPort.js';
 import type { AppState, SelectionRequest } from '../app/state.js';
 import { engineeringSourceRecord } from './engineeringViewService.js';
 import { selectEngineeringTarget } from './engineeringSelection.js';
@@ -16,9 +16,9 @@ export async function inspectEngineeringDocument(state: AppState, path: string, 
   if (!inventory.has(path)) return;
   const request = existing ?? state.beginSelection({ kind: 'engineering-source', key: cbmOccurrenceId ?? `document:${path}` }), guard = state.selectionGuard(request);
   if (!guard.isCurrent()) return;
-  const tree = await loadPresentation('engineeringTreeView');
+  await selectionPresentation().sourceTree(state,guard.isCurrent);
   if (!guard.isCurrent()) return;
-  state.viewState.mode = 'source'; tree.renderEngineeringTree(state); tree.syncEngineeringTreeSelection(state);
+
 
   let doc = sources.graph.documents.find(doc => doc.path === path);
   const isIfc = /\.ifc$/i.test(path);
@@ -86,9 +86,9 @@ export async function inspectEngineeringContext(state: AppState, key: string, ex
   if (!sources || !node) return;
   const request = existing ?? state.beginSelection({ kind: 'engineering-source', key: `context:${key}` }), guard = state.selectionGuard(request);
   if (!guard.isCurrent()) return;
-  const tree=await loadPresentation('engineeringTreeView');
+  await selectionPresentation().sourceTree(state,guard.isCurrent);
   if (!guard.isCurrent()) return;
-  state.viewState.mode = 'source'; tree.renderEngineeringTree(state); tree.syncEngineeringTreeSelection(state);
+
   const children = new Map<string, string[]>();
   for (const context of sources.spatialNodes) if (context.parentKey) { const rows = children.get(context.parentKey) ?? []; rows.push(context.key); children.set(context.parentKey, rows); }
   const subtree = new Set<string>(), queue = [node.key];

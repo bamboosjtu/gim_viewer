@@ -1,8 +1,8 @@
 //! Domain cache validity and source/attribute completeness checks.
 
+pub use gim_native_core::{GimCacheValidation};
 use gim_native_core::{NativeError, NativeErrorCode};
 use rusqlite::{params, Connection};
-use serde::Serialize;
 use tauri::Manager;
 use super::cache_paths::{
     CacheValidationContext,
@@ -39,70 +39,7 @@ use super::substation_index::{
 use super::validation_profile::{ValidationProfile, ValidationSpan};
 
 /// 缓存校验结果
-#[derive(Debug, Serialize)]
-pub struct GimCacheValidation {
-    pub project_id: i64,
-    pub has_index: bool,
-    pub ifc_models_count: u64,
-    pub ifc_entry_count: u64,
-    pub cached_ifc_count: u64,
-    pub cbm_nodes_count: u64,
-    pub file_dev_entries_count: u64,
-    pub missing_cache_paths: Vec<String>,
-    pub stored_parser_version: Option<String>,
-    pub current_parser_version: String,
-    pub parser_version_match: bool,
-    /// v22：线路/变电独立缓存 domain 版本（旧字段保留兼容）。
-    pub stored_line_parser_version: Option<String>,
-    pub current_line_parser_version: String,
-    pub line_parser_version_match: bool,
-    pub stored_substation_parser_version: Option<String>,
-    pub current_substation_parser_version: String,
-    pub substation_parser_version_match: bool,
-    /// invalid 时给出可操作的首要原因；多个原因以 `; ` 分隔。
-    pub cache_miss_reason: Option<String>,
-    pub valid: bool,
-    /// 旧缓存记录中的工程类型，仅用于诊断，不参与本次校验分支选择。
-    pub project_type: Option<String>,
-    /// 本次校验实际使用的源工程类型。它来自当前 GIM source magic。
-    pub validated_project_type: String,
-    /// v4: powerline_cbm_node 表行数（transmission_line 缓存校验用）
-    pub line_cbm_node_count: u64,
-    /// v5: powerline_fam_property 不同 file_name_lower 的去重数量
-    pub line_fam_source_count: u64,
-    /// v5: powerline_dev_property 不同 file_name_lower 的去重数量
-    pub line_dev_source_count: u64,
-    /// v5: powerline_cbm_ref 中 ref_kind=famFiles 的 file_name_lower 去重数量
-    pub line_expected_fam_ref_count: u64,
-    /// v5: powerline_cbm_ref 中 ref_kind=devFiles 的 file_name_lower 去重数量
-    pub line_expected_dev_ref_count: u64,
-    /// v5: 图引用中存在但 powerline_fam_property 缺失的 file_name_lower 列表
-    pub missing_line_fam_sources: Vec<String>,
-    /// v5: 图引用中存在但 powerline_dev_property 缺失的 file_name_lower 列表
-    pub missing_line_dev_sources: Vec<String>,
-    /// v21: 线路 semantic source 状态：valid / missing / invalid。
-    /// missing 表示旧缓存尚未生成 pack，可使用 SQLite fallback；invalid
-    /// 表示 pack/index 或 metadata 整体损坏，必须重新解压重建。
-    pub line_semantic_pack_status: String,
-    pub line_semantic_pack_error: Option<String>,
-    /// v6（方案 C）: GLB geometry cache 是否完整有效（版本标记、manifest
-    /// 结构及每个 GLB 文件均通过校验）。版本/文件不匹配只影响 geometry
-    /// domain，不影响 source/index cache 的有效性。
-    pub geometry_cache_version_match: bool,
-    /// v6（方案 C）: 当前 GEOMETRY_CACHE_VERSION（供前端诊断显示）
-    pub current_geometry_cache_version: String,
-    /// 版本标记文件本身是否匹配；与单个 GLB 文件完整性分开。
-    pub geometry_cache_version_file_match: bool,
-    /// manifest 可解析、source SHA 和条目结构是否完整；不检查每个 GLB 文件。
-    /// 该值为 true 时允许前端按 DEV 隔离缺失/截断 GLB。
-    pub geometry_cache_manifest_valid: bool,
-    /// 变电基础索引/IFC source cache 是否有效（不包含几何版本）。
-    pub substation_semantic_cache_valid: bool,
-    /// 两阶段发布的第二阶段是否已完成（几何引用 + FAM/DEV 属性）。
-    pub substation_properties_complete: bool,
-    /// DEV GLB geometry cache 是否有效。
-    pub geometry_cache_valid: bool,
-}
+
 
 /// v5: 线路工程 FAM/DEV 属性缓存诊断结果（内部辅助结构，供 validate/diagnostic 共用）
 #[derive(Debug, Clone, Default)]

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
-import { diagnoseGroupBBox } from '../modAutoLoadService.js';
+import { diagnoseGroupBBox } from '../modGeometryScene.js';
 
 function makeBoxGroup(sizeM: number, centerM: [number, number, number] = [0, 0, 0]): THREE.Group {
   const group = new THREE.Group();

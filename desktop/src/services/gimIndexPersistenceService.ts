@@ -1,3 +1,6 @@
+import {getFileEntryResolver} from '../gim/entryResolver.js';
+import type {SubstationRestPayload} from '@gim/powerline-core/generated/nativeContracts.js';
+export type {SubstationRestPayload} from '@gim/powerline-core/generated/nativeContracts.js';
 import type { CbmNode, FileDevEntry, IfcEntry } from '../gim/types.js';
 import type {
   GimIndexPayload,
@@ -14,8 +17,9 @@ import { parseFamSectionsWithDiagnostics } from '../gim/famParser.js';
 
 /** 属性文件文本读取并发数（acc-plan P2-3） */
 const PARSE_CONCURRENCY = 32;
-import { parseKeyValue } from '../gim/cbmParser.js';
-import { getFileByPath, normalizeFilePath } from '../gim/fileLookup.js';
+import {parseKeyValue,keyValueDiagnostics} from '../gim/kvParser.js';
+import {SourceConflictError} from '../gim/sourceDocument.js';
+import { normalizeFilePath } from '../gim/fileLookup.js';
 import { isGimEmptyValue, resolveBaseFamilyReferences } from '../gim/gimValueSemantics.js';
 
 /** 根据路径判断 entry_type */
@@ -132,6 +136,12 @@ async function collectSubstationProperties(
   if (isCancelled()) throw new IndexBuildCancelledError();
   collectExtraFamRefs(cbmTree, refs.famPaths);
 
+  const resolveSource=getFileEntryResolver(files);
+  const readPropertySource=(path:string):Promise<string>=>{
+    const actual=resolveSource(path),file=actual?files.get(actual):undefined;
+    if(!file)throw Error(`属性来源缺失或存在歧义，拒绝发布完整属性快照: ${path}`);
+    return file.text();
+  };
   // 5a. 读取 DEV 文件，解析键值对 → dev_property，同时收集 BASEFAMILY 引用
   const devFamRefs = new Set<string>();
   const devPathsArr = Array.from(refs.devPaths);
@@ -139,13 +149,14 @@ async function collectSubstationProperties(
     if (isCancelled()) throw new IndexBuildCancelledError();
     const chunkPaths = devPathsArr.slice(i, i + PARSE_CONCURRENCY);
     const texts = await Promise.all(
-      chunkPaths.map((p) => getFileByPath(files, p)?.text().catch(() => null) ?? Promise.resolve(null)),
+      chunkPaths.map(readPropertySource),
     );
     for (let j = 0; j < chunkPaths.length; j++) {
       const text = texts[j];
       if (!text) continue;
-      const kv = parseKeyValue(text);
       const devPath = chunkPaths[j];
+      const kv = parseKeyValue(text,devPath);
+      const diagnostics=keyValueDiagnostics(kv);if(diagnostics.length)throw new SourceConflictError(diagnostics);
       for (const [key, val] of Object.entries(kv)) {
         if (!isGimEmptyValue(val)) devProperties.push({ dev_path: devPath, prop_key: key, prop_value: val });
       }
@@ -164,7 +175,7 @@ async function collectSubstationProperties(
     if (isCancelled()) throw new IndexBuildCancelledError();
     const chunkPaths = famPathsArr.slice(i, i + PARSE_CONCURRENCY);
     const texts = await Promise.all(
-      chunkPaths.map((p) => getFileByPath(files, p)?.text().catch(() => null) ?? Promise.resolve(null)),
+      chunkPaths.map(readPropertySource),
     );
     for (let j = 0; j < chunkPaths.length; j++) {
       const text = texts[j];
@@ -195,6 +206,8 @@ export async function buildGimIndexPayload(
   isCurrent?: () => boolean,
   options: { coreOnly?: boolean } = {},
 ): Promise<GimIndexPayload> {
+  const conflicts=fileDevRelations.flatMap(entry=>entry.sourceDiagnostics??[]);
+  if(conflicts.length)throw new SourceConflictError(conflicts);
   const cancelled = (): boolean => Boolean(isCurrent && !isCurrent());
   // 1. entries
   const entries: GimEntryPayload[] = [];
@@ -267,14 +280,7 @@ function withEntryPrefix(prefix: string, value: string): string {
 }
 
 /** 两阶段发布第二阶段负载：几何引用 + FAM/DEV 属性 + 能力摘要。 */
-export interface SubstationRestPayload {
-  project_id: number;
-  source_sha256: string | null;
-  refs: GeometryRefsPayload;
-  fam_properties: FamPropertyPayload[];
-  dev_properties: DevPropertyPayload[];
-  capability_summary_json: string | null;
-}
+
 
 export async function buildSubstationRestPayload(
   projectId: number,
@@ -297,6 +303,7 @@ export async function buildSubstationRestPayload(
     phm_solid_models: [],
   };
   return {
+    properties_mode:'replace',
     project_id: projectId,
     source_sha256: sourceSha256,
     refs,

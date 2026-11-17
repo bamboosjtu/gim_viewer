@@ -158,6 +158,16 @@ afterEach(() => {
 });
 
 describe('线路 Canvas 渐进绘制与运行时投影索引', () => {
+  it('detaches layer change handlers even when a caller retains removed controls',()=>{
+    const stubs=installCanvasStubs(),raf=installRafQueue(),container=document.createElement('div');
+    document.body.append(container);container.getBoundingClientRect=()=>({width:800,height:600} as DOMRect);
+    const handle=renderLineMap(makeMapData(),container,()=>{});
+    const checkbox=handle.getLayerPanel!()!.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    const checked=vi.spyOn(checkbox,'checked','get');
+    checkbox.dispatchEvent(new Event('change'));expect(checked).toHaveBeenCalled();checked.mockClear();
+    handle.destroy();checkbox.dispatchEvent(new Event('change'));expect(checked).not.toHaveBeenCalled();
+    checked.mockRestore();raf.restore();stubs.restore();
+  });
   it('先提交首帧，再分帧补齐导线，并复用共享端点投影', async () => {
     const stubs = installCanvasStubs();
     const container = document.createElement('div');

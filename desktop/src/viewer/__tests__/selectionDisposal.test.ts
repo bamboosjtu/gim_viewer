@@ -16,12 +16,12 @@ it('detaches listeners idempotently, ignores a pending pick and allows one fresh
   const remove=vi.spyOn(controls,'removeEventListener'),dispose=setupSelection(ctx,state,container,selected,cleared);
   container.click();expect(pick).toHaveBeenCalledOnce();dispose();dispose();finish(null);await Promise.resolve();await Promise.resolve();
   expect(selected).not.toHaveBeenCalled();expect(cleared).not.toHaveBeenCalled();expect(state.selectionRequest).toBeNull();expect(state.hoverCleanup).toBeNull();expect(remove).toHaveBeenCalledOnce();
-  container.dispatchEvent(new WheelEvent('wheel'));controls.dispatchEvent(new Event('controlstart'));expect(state.cameraNavigationVersion).toBe(0);
-  const next=setupSelection(ctx,state,container,selected,cleared);container.dispatchEvent(new WheelEvent('wheel'));expect(state.cameraNavigationVersion).toBe(1);next();
+  container.dispatchEvent(new WheelEvent('wheel'));controls.dispatchEvent(new Event('controlstart'));expect(state.viewState.cameraNavigationVersion).toBe(0);
+  const next=setupSelection(ctx,state,container,selected,cleared);container.dispatchEvent(new WheelEvent('wheel'));expect(state.viewState.cameraNavigationVersion).toBe(1);next();
 });
 it('rolls back listeners when registration fails halfway through setup',()=>{
   const {state,container,ctx,controls}=fixture(),add=vi.spyOn(window,'addEventListener').mockImplementationOnce(()=>{throw Error('binding failure');});
   expect(()=>setupSelection(ctx,state,container,vi.fn())).toThrow('binding failure');add.mockRestore();
   container.dispatchEvent(new WheelEvent('wheel'));controls.dispatchEvent(new Event('controlstart'));
-  expect(state.cameraNavigationVersion).toBe(0);expect(state.hoverCleanup).toBeNull();
+  expect(state.viewState.cameraNavigationVersion).toBe(0);expect(state.hoverCleanup).toBeNull();
 });

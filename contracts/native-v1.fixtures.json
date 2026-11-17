@@ -71,6 +71,500 @@
       "prop_value": null,
       "raw_line": "设备名称=NAME=A=B",
       "sort_order": 7
+    },
+    "GimIndexPayload": {
+      "capability_summary_json": "fixture",
+      "project_id": 1,
+      "source_sha256": "fixture",
+      "entries": [
+        {
+          "entry_path": "fixture",
+          "file_name": "fixture",
+          "entry_type": "fixture",
+          "file_size": 1,
+          "local_cache_path": "fixture"
+        }
+      ],
+      "cbm_nodes": [
+        {
+          "raw_properties_json": "fixture",
+          "node_key": "fixture",
+          "parent_key": "fixture",
+          "path": "fixture",
+          "name": "fixture",
+          "entity_name": "fixture",
+          "classify_name": "fixture",
+          "fam_path": "fixture",
+          "dev_path": "fixture",
+          "ifc_file": "fixture",
+          "ifc_guid": "fixture",
+          "transform_matrix": "fixture",
+          "sort_order": 1
+        }
+      ],
+      "ifc_models": [
+        {
+          "model_id": "fixture",
+          "name": "fixture",
+          "entry_path": "fixture"
+        }
+      ],
+      "file_dev_entries": [
+        {
+          "source_design_file": "fixture",
+          "model_id": "fixture",
+          "ifc_name": "fixture",
+          "ifc_file": "fixture",
+          "device_count": 1,
+          "device_cbm": "fixture",
+          "sort_order": 1
+        }
+      ],
+      "fam_properties": [
+        {
+          "source_line": 1,
+          "raw_property_json": "fixture",
+          "source_path": "fixture",
+          "section_name": "fixture",
+          "prop_key": "fixture",
+          "prop_value": "fixture",
+          "sort_order": 1
+        }
+      ],
+      "dev_properties": [
+        {
+          "dev_path": "fixture",
+          "prop_key": "fixture",
+          "prop_value": "fixture"
+        }
+      ]
+    },
+    "GimIndexResult": {
+      "capability_summary_json": "fixture",
+      "entries": [
+        {
+          "id": 1,
+          "project_id": 1,
+          "entry_path": "fixture",
+          "file_name": "fixture",
+          "entry_type": "fixture",
+          "file_size": 1,
+          "local_cache_path": "fixture",
+          "created_at_ms": 1
+        }
+      ],
+      "cbm_nodes": [
+        {
+          "raw_properties_json": "fixture",
+          "id": 1,
+          "project_id": 1,
+          "node_key": "fixture",
+          "parent_key": "fixture",
+          "path": "fixture",
+          "name": "fixture",
+          "entity_name": "fixture",
+          "classify_name": "fixture",
+          "fam_path": "fixture",
+          "dev_path": "fixture",
+          "ifc_file": "fixture",
+          "ifc_guid": "fixture",
+          "transform_matrix": "fixture",
+          "sort_order": 1,
+          "created_at_ms": 1
+        }
+      ],
+      "ifc_models": [
+        {
+          "id": 1,
+          "project_id": 1,
+          "model_id": "fixture",
+          "name": "fixture",
+          "entry_path": "fixture",
+          "created_at_ms": 1
+        }
+      ],
+      "file_dev_entries": [
+        {
+          "source_design_file": "fixture",
+          "id": 1,
+          "project_id": 1,
+          "model_id": "fixture",
+          "ifc_name": "fixture",
+          "ifc_file": "fixture",
+          "device_count": 1,
+          "device_cbm": "fixture",
+          "sort_order": 1,
+          "created_at_ms": 1
+        }
+      ],
+      "fam_properties": [
+        {
+          "source_line": 1,
+          "raw_property_json": "fixture",
+          "source_path": "fixture",
+          "section_name": "fixture",
+          "prop_key": "fixture",
+          "prop_value": "fixture",
+          "sort_order": 1,
+          "id": 1,
+          "project_id": 1,
+          "created_at_ms": 1
+        }
+      ],
+      "dev_properties": [
+        {
+          "dev_path": "fixture",
+          "prop_key": "fixture",
+          "prop_value": "fixture",
+          "id": 1,
+          "project_id": 1,
+          "created_at_ms": 1
+        }
+      ]
+    },
+    "LineGraphPayload": {
+      "project_id": 1,
+      "project_type": "fixture",
+      "source_sha256": "fixture",
+      "nodes": [
+        {
+          "path": "fixture",
+          "name": "fixture",
+          "entity_name": "fixture",
+          "classify_name": "fixture",
+          "raw_props_json": "fixture",
+          "sort_order": 1
+        }
+      ],
+      "children": [
+        {
+          "parent_path": "fixture",
+          "child_path": "fixture",
+          "sort_order": 1,
+          "ref_type": "fixture",
+          "extra": "fixture"
+        }
+      ],
+      "refs": [
+        {
+          "node_path": "fixture",
+          "ref_kind": "fixture",
+          "ref_key": "fixture",
+          "ref_value": "fixture",
+          "sort_order": 1,
+          "normalized_ref_value": "fixture",
+          "file_name_lower": "fixture"
+        }
+      ],
+      "file_stats": [
+        {
+          "file_type": "fixture",
+          "count": 1
+        }
+      ]
+    },
+    "LineGraphResult": {
+      "project_type": "fixture",
+      "nodes": [
+        {
+          "path": "fixture",
+          "name": "fixture",
+          "entity_name": "fixture",
+          "classify_name": "fixture",
+          "raw_props_json": "fixture",
+          "sort_order": 1
+        }
+      ],
+      "children": [
+        {
+          "parent_path": "fixture",
+          "child_path": "fixture",
+          "sort_order": 1,
+          "ref_type": "fixture",
+          "extra": "fixture"
+        }
+      ],
+      "refs": [
+        {
+          "node_path": "fixture",
+          "ref_kind": "fixture",
+          "ref_key": "fixture",
+          "ref_value": "fixture",
+          "sort_order": 1,
+          "normalized_ref_value": "fixture",
+          "file_name_lower": "fixture"
+        }
+      ],
+      "file_stats": [
+        {
+          "file_type": "fixture",
+          "count": 1
+        }
+      ]
+    },
+    "GeometryRefsPayload": {
+      "project_id": 1,
+      "source_sha256": "fixture",
+      "dev_solid_models": [
+        {
+          "dev_path": "fixture",
+          "solid_model_path": "fixture",
+          "transform_matrix": "fixture",
+          "sort_order": 1
+        }
+      ],
+      "dev_sub_devices": [
+        {
+          "dev_path": "fixture",
+          "child_dev_path": "fixture",
+          "transform_matrix": "fixture",
+          "sort_order": 1
+        }
+      ],
+      "phm_solid_models": [
+        {
+          "phm_path": "fixture",
+          "solid_model_path": "fixture",
+          "transform_matrix": "fixture",
+          "color": "fixture",
+          "phm_color_max_a": 0.5,
+          "sort_order": 1
+        }
+      ]
+    },
+    "GeometryCacheManifest": {
+      "source_sha256": "fixture",
+      "entries": [
+        {
+          "diagnostic": "fixture",
+          "entry_path": "fixture",
+          "status": "glb",
+          "size": 1
+        }
+      ]
+    },
+    "SubstationSemanticRestPayload": {
+      "properties_mode": "replace",
+      "project_id": 1,
+      "source_sha256": "fixture",
+      "refs": {
+        "project_id": 1,
+        "source_sha256": "fixture",
+        "dev_solid_models": [
+          {
+            "dev_path": "fixture",
+            "solid_model_path": "fixture",
+            "transform_matrix": "fixture",
+            "sort_order": 1
+          }
+        ],
+        "dev_sub_devices": [
+          {
+            "dev_path": "fixture",
+            "child_dev_path": "fixture",
+            "transform_matrix": "fixture",
+            "sort_order": 1
+          }
+        ],
+        "phm_solid_models": [
+          {
+            "phm_path": "fixture",
+            "solid_model_path": "fixture",
+            "transform_matrix": "fixture",
+            "color": "fixture",
+            "phm_color_max_a": 0.5,
+            "sort_order": 1
+          }
+        ]
+      },
+      "fam_properties": [
+        {
+          "source_line": 1,
+          "raw_property_json": "fixture",
+          "source_path": "fixture",
+          "section_name": "fixture",
+          "prop_key": "fixture",
+          "prop_value": "fixture",
+          "sort_order": 1
+        }
+      ],
+      "dev_properties": [
+        {
+          "dev_path": "fixture",
+          "prop_key": "fixture",
+          "prop_value": "fixture"
+        }
+      ],
+      "capability_summary_json": "fixture"
+    },
+    "JobSnapshot": {
+      "jobId": "fixture",
+      "projectId": 1,
+      "sourceSha256": "fixture",
+      "status": "fixture",
+      "entries": [
+        [
+          "fixture",
+          1
+        ]
+      ],
+      "semanticCopy": {
+        "size": 1,
+        "sha256": "fixture"
+      },
+      "semanticReadyAtMs": 0.5,
+      "materializationCompleteAtMs": 0.5,
+      "materializedEntries": 1,
+      "error": {
+        "code": "INVALID_INPUT",
+        "message": "fixture",
+        "context": {
+          "operation": "fixture",
+          "project_id": 1,
+          "entry_path": "fixture"
+        }
+      },
+      "profile": {
+        "totalMs": 0.5,
+        "archiveMs": 0.5,
+        "headerMs": 0.5,
+        "decodeMs": 0.5,
+        "writeMs": 0.5,
+        "writeOpenMs": 0.5,
+        "writeDataMs": 0.5,
+        "manifestMs": 0.5,
+        "commitMs": 0.5,
+        "writeMode": "fixture",
+        "archiveBytes": 1,
+        "entryCount": 1,
+        "totalBytes": 1,
+        "semanticPackEntries": 1,
+        "semanticPackBytes": 1,
+        "semanticPackWriteMs": 0.5,
+        "maxEntryWriteMs": 0.5,
+        "maxEntryWritePath": "fixture",
+        "maxEntryDecodeMs": 0.5,
+        "maxEntryDecodePath": "fixture"
+      },
+      "trace": [
+        {
+          "path": "fixture",
+          "archiveIndex": 1,
+          "folderIndex": 1,
+          "physicalOrder": 1,
+          "size": 1,
+          "decodeMs": 0.5,
+          "sinkWriteMs": 0.5,
+          "decodedAtMs": 0.5,
+          "sinkCompleteAtMs": 0.5,
+          "cumulativeBytes": 1
+        }
+      ],
+      "cacheRoot": "fixture"
+    },
+    "ProjectMeta": {
+      "id": "fixture",
+      "name": "fixture",
+      "sha256": "fixture",
+      "size": 1,
+      "importedAt": 1,
+      "lastOpenedAt": 1,
+      "parserVersion": "fixture",
+      "counts": {}
+    },
+    "Prepared": {
+      "meta": {
+        "id": "fixture",
+        "name": "fixture",
+        "sha256": "fixture",
+        "size": 1,
+        "importedAt": 1,
+        "lastOpenedAt": 1,
+        "parserVersion": "fixture",
+        "counts": {}
+      },
+      "duplicate": true,
+      "cache": {}
+    },
+    "Settings": {
+      "tiandituKey": "fixture",
+      "baseLayer": "imagery"
+    },
+    "ExtractionManifest": {
+      "source_sha256": "fixture",
+      "entries": [
+        {
+          "path": "fixture",
+          "size": 1,
+          "packed": true,
+          "cache_path": "fixture"
+        }
+      ]
+    },
+    "ExtractManifest": {
+      "magic": "fixture",
+      "project_id": "fixture",
+      "project_name": "fixture",
+      "entries": [
+        {
+          "path": "fixture",
+          "offset": 1,
+          "size": 1,
+          "cache_path": "fixture",
+          "semantic_pack_offset": 1,
+          "packed": true
+        }
+      ],
+      "semantic_pack_path": "fixture",
+      "profile": {
+        "totalMs": 0.5,
+        "archiveMs": 0.5,
+        "headerMs": 0.5,
+        "decodeMs": 0.5,
+        "writeMs": 0.5,
+        "writeOpenMs": 0.5,
+        "writeDataMs": 0.5,
+        "manifestMs": 0.5,
+        "commitMs": 0.5,
+        "writeMode": "fixture",
+        "archiveBytes": 1,
+        "entryCount": 1,
+        "totalBytes": 1,
+        "semanticPackEntries": 1,
+        "semanticPackBytes": 1,
+        "semanticPackWriteMs": 0.5,
+        "maxEntryWriteMs": 0.5,
+        "maxEntryWritePath": "fixture",
+        "maxEntryDecodeMs": 0.5,
+        "maxEntryDecodePath": "fixture"
+      },
+      "parse_copy": {
+        "size": 1,
+        "sha256": "fixture"
+      },
+      "entry_trace": [
+        {
+          "path": "fixture",
+          "archiveIndex": 1,
+          "folderIndex": 1,
+          "physicalOrder": 1,
+          "size": 1,
+          "decodeMs": 0.5,
+          "sinkWriteMs": 0.5,
+          "decodedAtMs": 0.5,
+          "sinkCompleteAtMs": 0.5,
+          "cumulativeBytes": 1
+        }
+      ],
+      "semantic_checkpoint": {
+        "semanticInputsDecodedAt": 0.5,
+        "semanticInputsWrittenAt": 0.5,
+        "semanticBytesDecodedAt": 1,
+        "remainingArchiveAfterSemantic": 1,
+        "remainingEntriesAfterSemantic": 1,
+        "largeIfcDecodedBeforeSemantic": true,
+        "physicalOrder": 1
+      }
     }
   },
   "errors": [
@@ -247,6 +741,15 @@
     },
     {
       "code": "RESPONSE_INVALID",
+      "message": "同一展示文本，与错误分类无关",
+      "context": {
+        "operation": "contract-test",
+        "project_id": 1,
+        "entry_path": "CBM/a.fam"
+      }
+    },
+    {
+      "code": "SCHEMA_UNSUPPORTED",
       "message": "同一展示文本，与错误分类无关",
       "context": {
         "operation": "contract-test",

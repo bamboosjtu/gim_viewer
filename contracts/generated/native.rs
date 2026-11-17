@@ -43,7 +43,34 @@ pub enum NativeErrorCode {
     Internal,
     #[serde(rename = "RESPONSE_INVALID")]
     ResponseInvalid,
+    #[serde(rename = "SCHEMA_UNSUPPORTED")]
+    SchemaUnsupported,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PropertyWriteMode {
+    #[serde(rename = "replace")]
+    Replace,
+    #[serde(rename = "preserve")]
+    Preserve,
+}
+
+pub type GeometryCacheManifestStatus = String;
+pub const GEOMETRY_CACHE_MANIFEST_STATUS_VALUES: &[&str] = &["glb", "partial", "empty", "unsupported", "source-invalid"];
+fn deserialize_geometrycachemanifeststatus<'de,D:serde::Deserializer<'de>>(deserializer:D)->Result<String,D::Error>{let value=String::deserialize(deserializer)?;if GEOMETRY_CACHE_MANIFEST_STATUS_VALUES.contains(&value.as_str()){Ok(value)}else{Err(serde::de::Error::custom("unsupported GeometryCacheManifestStatus"))}}
+
+pub type MobileBaseLayer = String;
+pub const MOBILE_BASE_LAYER_VALUES: &[&str] = &["imagery", "vector", "terrain", "osm", "canvas"];
+fn deserialize_mobilebaselayer<'de,D:serde::Deserializer<'de>>(deserializer:D)->Result<String,D::Error>{let value=String::deserialize(deserializer)?;if MOBILE_BASE_LAYER_VALUES.contains(&value.as_str()){Ok(value)}else{Err(serde::de::Error::custom("unsupported MobileBaseLayer"))}}
+pub const DATABASE_SCHEMA_VERSION: u32 = 1;
+pub const DATABASE_PARSER_VERSION: &str = "gim-cache-schema-v1";
+pub const LINE_PARSER_VERSION: &str = "gim-line-parser-v1";
+pub const SUBSTATION_PARSER_VERSION: &str = "gim-substation-parser-v1";
+pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v1-source-bound-stl";
+pub const MOBILE_PARSER_VERSION: &str = "mobile-powerline-v1";
+pub const DESKTOP_COMMAND_NAMES: &[&str] = &["save_engineering_tree_json", "read_file_bytes", "read_file_head", "get_file_info", "get_process_memory", "authorize_gim_file_path_for_dev", "benchmark_authorize_sample", "pick_gim_file_path", "pick_ifc_file_paths", "extract_gim_archive", "read_extraction_manifest", "read_substation_parse_copy", "inspect_substation_early_eligibility", "start_substation_extraction", "substation_extraction_status", "read_substation_extraction_source", "cancel_substation_extraction", "upsert_gim_project", "save_gim_index", "save_substation_semantic_rest", "write_cache_file_binary", "read_cached_ifc", "read_cached_entry", "batch_read_cached_files", "read_line_semantic_pack", "read_line_semantic_pack_all", "write_glb_file_binary", "read_glb_file", "read_device_lod_artifacts", "write_device_lod_artifact", "delete_device_lod_artifact", "batch_read_glb_files", "read_geometry_cache_manifest", "write_geometry_cache_version", "write_geometry_cache_manifest", "invalidate_glb_cache_entry", "get_gim_index", "validate_gim_cache", "get_db_path", "get_latest_project_cache_diagnostic", "get_line_gim_graph", "save_line_graph_begin", "save_line_attrs_chunk", "save_line_project_finish", "get_line_attributes", "list_cached_projects", "get_app_settings", "set_app_setting", "authorize_cached_gim_project", "touch_gim_project_opened", "delete_project_cache", "get_project_diagnostic", "save_geometry_refs"];
+pub const MOBILE_COMMAND_NAMES: &[&str] = &["list_projects", "prepare_project", "cancel_import", "discard_import", "get_project_cache", "read_text_entries", "commit_project", "read_source", "read_project_header", "delete_project", "preview_cache", "get_settings", "save_settings"];
+pub const IMPORT_PLUGIN_COMMAND_NAMES: &[&str] = &["pick", "cancel", "check_location_permissions", "request_location_permissions", "get_position", "get_window_state", "set_immersive"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -152,5 +179,852 @@ pub struct NativeError {
     pub context: Option<NativeErrorContext>,
 }
 
-fn required_nullable<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where D: serde::Deserializer<'de>, T: Deserialize<'de> { Option::<T>::deserialize(deserializer) }
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileInfo {
+    pub path: String,
+    pub name: String,
+    pub size: u64,
+    pub modified_ms: u64,
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ProcessMemorySnapshot {
+    pub pid: u32,
+    pub rss_bytes: Option<u64>,
+    pub source: String,
+    pub rss_source: String,
+    pub process_tree_rss_bytes: Option<u64>,
+    pub process_tree_private_bytes: Option<u64>,
+    pub root_private_bytes: Option<u64>,
+    pub process_instances: Vec<(u32, String)>,
+    pub process_count: Option<u32>,
+    pub process_tree_available: bool,
+    pub process_tree_source: String,
+    pub process_tree_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileInfoInput {
+    pub path: String,
+    pub name: String,
+    pub size: u64,
+    pub modified_ms: u64,
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GimProjectRecord {
+    pub id: i64,
+    pub path: String,
+    pub name: String,
+    pub size: u64,
+    pub modified_ms: u64,
+    pub sha256: String,
+    pub created_at_ms: u64,
+    pub updated_at_ms: u64,
+    pub last_opened_at_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GimEntryPayload {
+    pub entry_path: String,
+    pub file_name: String,
+    pub entry_type: String,
+    pub file_size: u64,
+    pub local_cache_path: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CbmNodePayload {
+    pub raw_properties_json: Option<String>,
+    pub node_key: String,
+    pub parent_key: Option<String>,
+    pub path: String,
+    pub name: String,
+    pub entity_name: Option<String>,
+    pub classify_name: Option<String>,
+    pub fam_path: Option<String>,
+    pub dev_path: Option<String>,
+    pub ifc_file: Option<String>,
+    pub ifc_guid: Option<String>,
+    pub transform_matrix: Option<String>,
+    pub sort_order: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IfcModelPayload {
+    pub model_id: String,
+    pub name: String,
+    pub entry_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileDevEntryPayload {
+    pub source_design_file: Option<String>,
+    pub model_id: String,
+    pub ifc_name: String,
+    pub ifc_file: String,
+    pub device_count: i64,
+    pub device_cbm: String,
+    pub sort_order: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GimIndexPayload {
+    pub capability_summary_json: Option<String>,
+    pub project_id: i64,
+    pub source_sha256: Option<String>,
+    pub entries: Vec<GimEntryPayload>,
+    pub cbm_nodes: Vec<CbmNodePayload>,
+    pub ifc_models: Vec<IfcModelPayload>,
+    pub file_dev_entries: Vec<FileDevEntryPayload>,
+    pub fam_properties: Vec<FamPropertyPayload>,
+    pub dev_properties: Vec<DevPropertyPayload>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IfcModelRecord {
+    pub id: i64,
+    pub project_id: i64,
+    pub model_id: String,
+    pub name: String,
+    pub entry_path: String,
+    pub created_at_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CbmNodeRecord {
+    pub raw_properties_json: Option<String>,
+    pub id: i64,
+    pub project_id: i64,
+    pub node_key: String,
+    pub parent_key: Option<String>,
+    pub path: String,
+    pub name: String,
+    pub entity_name: Option<String>,
+    pub classify_name: Option<String>,
+    pub fam_path: Option<String>,
+    pub dev_path: Option<String>,
+    pub ifc_file: Option<String>,
+    pub ifc_guid: Option<String>,
+    pub transform_matrix: Option<String>,
+    pub sort_order: i64,
+    pub created_at_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GimEntryRecord {
+    pub id: i64,
+    pub project_id: i64,
+    pub entry_path: String,
+    pub file_name: String,
+    pub entry_type: String,
+    pub file_size: u64,
+    pub local_cache_path: Option<String>,
+    pub created_at_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileDevEntryRecord {
+    pub source_design_file: Option<String>,
+    pub id: i64,
+    pub project_id: i64,
+    pub model_id: String,
+    pub ifc_name: String,
+    pub ifc_file: String,
+    pub device_count: i64,
+    pub device_cbm: String,
+    pub sort_order: i64,
+    pub created_at_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GetGimIndexResult {
+    pub capability_summary_json: Option<String>,
+    pub entries: Vec<GimEntryRecord>,
+    pub cbm_nodes: Vec<CbmNodeRecord>,
+    pub ifc_models: Vec<IfcModelRecord>,
+    pub file_dev_entries: Vec<FileDevEntryRecord>,
+    pub fam_properties: Vec<FamPropertyRecord>,
+    pub dev_properties: Vec<DevPropertyRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DevSolidModelPayload {
+    pub dev_path: String,
+    pub solid_model_path: String,
+    pub transform_matrix: Option<String>,
+    pub sort_order: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DevSubDevicePayload {
+    pub dev_path: String,
+    pub child_dev_path: String,
+    pub transform_matrix: Option<String>,
+    pub sort_order: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhmSolidModelPayload {
+    pub phm_path: String,
+    pub solid_model_path: String,
+    pub transform_matrix: Option<String>,
+    pub color: Option<String>,
+    pub phm_color_max_a: Option<f64>,
+    pub sort_order: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GeometryRefsPayload {
+    pub project_id: i64,
+    pub source_sha256: Option<String>,
+    pub dev_solid_models: Vec<DevSolidModelPayload>,
+    pub dev_sub_devices: Vec<DevSubDevicePayload>,
+    pub phm_solid_models: Vec<PhmSolidModelPayload>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SubstationSemanticRestPayload {
+    pub properties_mode: PropertyWriteMode,
+    pub project_id: i64,
+    pub source_sha256: Option<String>,
+    pub refs: GeometryRefsPayload,
+    pub fam_properties: Vec<FamPropertyPayload>,
+    pub dev_properties: Vec<DevPropertyPayload>,
+    #[serde(default)]
+    pub capability_summary_json: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LineCbmNodePayload {
+    pub path: String,
+    pub name: Option<String>,
+    pub entity_name: Option<String>,
+    pub classify_name: Option<String>,
+    pub raw_props_json: String,
+    pub sort_order: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LineCbmChildPayload {
+    pub parent_path: String,
+    pub child_path: String,
+    pub sort_order: Option<i64>,
+    pub ref_type: String,
+    pub extra: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LineCbmRefPayload {
+    pub node_path: String,
+    pub ref_kind: String,
+    pub ref_key: Option<String>,
+    pub ref_value: String,
+    pub sort_order: Option<i64>,
+    pub normalized_ref_value: Option<String>,
+    pub file_name_lower: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LineFileStatPayload {
+    pub file_type: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LineGraphPayload {
+    pub project_id: i64,
+    pub project_type: String,
+    pub source_sha256: Option<String>,
+    pub nodes: Vec<LineCbmNodePayload>,
+    pub children: Vec<LineCbmChildPayload>,
+    pub refs: Vec<LineCbmRefPayload>,
+    pub file_stats: Vec<LineFileStatPayload>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LineCbmNodeRecord {
+    pub path: String,
+    pub name: Option<String>,
+    pub entity_name: Option<String>,
+    pub classify_name: Option<String>,
+    pub raw_props_json: String,
+    pub sort_order: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LineCbmChildRecord {
+    pub parent_path: String,
+    pub child_path: String,
+    pub sort_order: Option<i64>,
+    pub ref_type: String,
+    pub extra: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LineCbmRefRecord {
+    pub node_path: String,
+    pub ref_kind: String,
+    pub ref_key: Option<String>,
+    pub ref_value: String,
+    pub sort_order: Option<i64>,
+    pub normalized_ref_value: Option<String>,
+    pub file_name_lower: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LineFileStatRecord {
+    pub file_type: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LineGraphResult {
+    pub project_type: Option<String>,
+    pub nodes: Vec<LineCbmNodeRecord>,
+    pub children: Vec<LineCbmChildRecord>,
+    pub refs: Vec<LineCbmRefRecord>,
+    pub file_stats: Vec<LineFileStatRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LineAttributeResult {
+    pub fam_properties: Vec<LineFamPropertyRecord>,
+    pub dev_properties: Vec<LineDevPropertyRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GeometryCacheManifestEntry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostic: Option<String>,
+    pub entry_path: String,
+    #[serde(deserialize_with = "deserialize_geometrycachemanifeststatus")]
+    pub status: GeometryCacheManifestStatus,
+    pub size: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GeometryCacheManifest {
+    pub source_sha256: String,
+    pub entries: Vec<GeometryCacheManifestEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct DeviceLodWriteTiming {
+    pub resolve_ms: f64,
+    pub write_ms: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GimCacheValidation {
+    pub project_id: i64,
+    pub has_index: bool,
+    pub ifc_models_count: u64,
+    pub ifc_entry_count: u64,
+    pub cached_ifc_count: u64,
+    pub cbm_nodes_count: u64,
+    pub file_dev_entries_count: u64,
+    pub missing_cache_paths: Vec<String>,
+    pub stored_parser_version: Option<String>,
+    pub current_parser_version: String,
+    pub parser_version_match: bool,
+    pub stored_line_parser_version: Option<String>,
+    pub current_line_parser_version: String,
+    pub line_parser_version_match: bool,
+    pub stored_substation_parser_version: Option<String>,
+    pub current_substation_parser_version: String,
+    pub substation_parser_version_match: bool,
+    pub cache_miss_reason: Option<String>,
+    pub valid: bool,
+    pub project_type: Option<String>,
+    pub validated_project_type: String,
+    pub line_cbm_node_count: u64,
+    pub line_fam_source_count: u64,
+    pub line_dev_source_count: u64,
+    pub line_expected_fam_ref_count: u64,
+    pub line_expected_dev_ref_count: u64,
+    pub missing_line_fam_sources: Vec<String>,
+    pub missing_line_dev_sources: Vec<String>,
+    pub line_semantic_pack_status: String,
+    pub line_semantic_pack_error: Option<String>,
+    pub geometry_cache_version_match: bool,
+    pub current_geometry_cache_version: String,
+    pub geometry_cache_version_file_match: bool,
+    pub geometry_cache_manifest_valid: bool,
+    pub substation_semantic_cache_valid: bool,
+    pub substation_properties_complete: bool,
+    pub geometry_cache_valid: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IfcCacheFileDiagnostic {
+    pub entry_path: String,
+    pub local_cache_path: Option<String>,
+    pub exists: bool,
+    pub file_size: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectCacheDiagnostic {
+    pub project_id: i64,
+    pub path: String,
+    pub name: String,
+    pub size: u64,
+    pub modified_ms: u64,
+    pub sha256: String,
+    pub entries_count: u64,
+    pub cbm_nodes_count: u64,
+    pub ifc_models_count: u64,
+    pub file_dev_entries_count: u64,
+    pub fam_properties_count: u64,
+    pub dev_properties_count: u64,
+    pub ifc_entry_count: u64,
+    pub cached_ifc_count: u64,
+    pub missing_cache_paths: Vec<String>,
+    pub stored_parser_version: Option<String>,
+    pub current_parser_version: String,
+    pub parser_version_match: bool,
+    pub stored_line_parser_version: Option<String>,
+    pub current_line_parser_version: String,
+    pub line_parser_version_match: bool,
+    pub stored_substation_parser_version: Option<String>,
+    pub current_substation_parser_version: String,
+    pub substation_parser_version_match: bool,
+    pub cache_miss_reason: Option<String>,
+    pub line_semantic_pack_status: String,
+    pub line_semantic_pack_error: Option<String>,
+    pub geometry_cache_version_match: bool,
+    pub current_geometry_cache_version: String,
+    pub geometry_cache_version_file_match: bool,
+    pub geometry_cache_manifest_valid: bool,
+    pub substation_semantic_cache_valid: bool,
+    pub geometry_cache_valid: bool,
+    pub valid: bool,
+    pub ifc_cache_files: Vec<IfcCacheFileDiagnostic>,
+    pub project_type: Option<String>,
+    pub line_cbm_node_count: u64,
+    pub line_cbm_child_count: u64,
+    pub line_cbm_ref_count: u64,
+    pub line_file_stat_count: u64,
+    pub line_fam_property_count: u64,
+    pub line_dev_property_count: u64,
+    pub line_fam_source_count: u64,
+    pub line_dev_source_count: u64,
+    pub line_expected_fam_ref_count: u64,
+    pub line_expected_dev_ref_count: u64,
+    pub missing_line_fam_sources: Vec<String>,
+    pub missing_line_dev_sources: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CachedProjectSummary {
+    pub id: i64,
+    pub name: String,
+    pub path: String,
+    pub project_type: Option<String>,
+    pub parser_version: Option<String>,
+    pub size: u64,
+    pub modified_ms: u64,
+    pub updated_at_ms: u64,
+    pub last_opened_at_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BinaryCacheWriteMeta {
+    pub project_id: i64,
+    pub entry_path: String,
+    #[serde(default)]
+    pub source_gim_sha256: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BatchCacheFileResult {
+    pub entry_path: String,
+    pub bytes: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ProjectMeta {
+    pub id: String,
+    pub name: String,
+    pub sha256: String,
+    pub size: u64,
+    pub imported_at: u64,
+    pub last_opened_at: u64,
+    pub parser_version: String,
+    pub counts: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImportFile {
+    pub path: String,
+    pub name: String,
+    pub sha256: String,
+    pub size: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct Prepared {
+    pub meta: ProjectMeta,
+    pub duplicate: bool,
+    pub cache: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TextEntry {
+    pub path: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct Settings {
+    pub tianditu_key: String,
+    #[serde(deserialize_with = "deserialize_mobilebaselayer")]
+    pub base_layer: MobileBaseLayer,
+}
+impl Default for Settings {fn default()->Self {Self{tianditu_key: "".into(), base_layer: "imagery".into()}}}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedSettings {
+    pub version: u32,
+    pub settings: Settings,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExtractedEntryMeta {
+    pub path: String,
+    pub offset: u64,
+    pub size: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_pack_offset: Option<u64>,
+    #[serde(default, skip_serializing_if = "native_is_false")]
+    pub packed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExtractionManifest {
+    pub source_sha256: String,
+    pub entries: Vec<ExtractionManifestEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExtractionManifestEntry {
+    pub path: String,
+    pub size: u64,
+    #[serde(default)]
+    pub packed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_path: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExtractManifest {
+    pub magic: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_name: Option<String>,
+    pub entries: Vec<ExtractedEntryMeta>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_pack_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<ExtractionProfile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parse_copy: Option<CopyReceipt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry_trace: Option<Vec<ExtractionEntryTiming>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_checkpoint: Option<SemanticCheckpoint>,
+}
+#[derive(Serialize)]
+pub struct ExtractManifestView<'a> {
+    pub magic: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<&'a String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_name: Option<&'a String>,
+    pub entries: &'a [ExtractedEntryMeta],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_pack_path: Option<&'a String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<&'a ExtractionProfile>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parse_copy: Option<&'a CopyReceipt>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry_trace: Option<&'a Vec<ExtractionEntryTiming>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_checkpoint: Option<SemanticCheckpoint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CopyReceipt {
+    pub size: usize,
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParseCopyEntry {
+    pub path: String,
+    pub offset: usize,
+    pub size: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct JobSnapshot {
+    pub job_id: String,
+    pub project_id: i64,
+    pub source_sha256: String,
+    pub status: String,
+    pub entries: Vec<(String, u64)>,
+    pub semantic_copy: Option<CopyReceipt>,
+    pub semantic_ready_at_ms: Option<f64>,
+    pub materialization_complete_at_ms: Option<f64>,
+    pub materialized_entries: usize,
+    pub error: Option<NativeError>,
+    pub profile: Option<ExtractionProfile>,
+    pub trace: Vec<ExtractionEntryTiming>,
+    pub cache_root: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct SemanticCheckpoint {
+    pub semantic_inputs_decoded_at: f64,
+    pub semantic_inputs_written_at: f64,
+    pub semantic_bytes_decoded_at: u64,
+    pub remaining_archive_after_semantic: u64,
+    pub remaining_entries_after_semantic: usize,
+    pub large_ifc_decoded_before_semantic: bool,
+    pub physical_order: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ExtractionProfile {
+    pub total_ms: f64,
+    pub archive_ms: f64,
+    pub header_ms: f64,
+    pub decode_ms: f64,
+    pub write_ms: f64,
+    pub write_open_ms: f64,
+    pub write_data_ms: f64,
+    pub manifest_ms: f64,
+    pub commit_ms: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub write_mode: Option<String>,
+    pub archive_bytes: u64,
+    pub entry_count: usize,
+    pub total_bytes: u64,
+    pub semantic_pack_entries: usize,
+    pub semantic_pack_bytes: u64,
+    pub semantic_pack_write_ms: f64,
+    pub max_entry_write_ms: f64,
+    pub max_entry_write_path: Option<String>,
+    pub max_entry_decode_ms: f64,
+    pub max_entry_decode_path: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ExtractionEntryTiming {
+    pub path: String,
+    pub archive_index: usize,
+    pub folder_index: Option<usize>,
+    pub physical_order: usize,
+    pub size: u64,
+    pub decode_ms: f64,
+    pub sink_write_ms: f64,
+    pub decoded_at_ms: f64,
+    pub sink_complete_at_ms: f64,
+    pub cumulative_bytes: u64,
+}
+
+pub type GimIndexResult = GetGimIndexResult;
+
+pub type NativeExtractionProfile = ExtractionProfile;
+
+pub type NativeExtractionEntryTiming = ExtractionEntryTiming;
+
+pub type ParseCopyReceipt = CopyReceipt;
+
+pub type ExtractManifestEntry = ExtractedEntryMeta;
+
+pub type SubstationRestPayload = SubstationSemanticRestPayload;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImportProgress {
+    pub stage: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub done: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PickedFile {
+    pub path: String,
+    pub name: String,
+    pub sha256: String,
+    pub size: u64,
+    #[serde(rename = "copyMs")]
+    pub copy_ms: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct SubstationEarlyEligibility {
+    pub eligible: bool,
+    pub reason: String,
+    pub archive_format: String,
+    pub folder_count: usize,
+    pub core_entry_count: usize,
+    pub core_bytes: u64,
+    pub stream_core_entries: usize,
+    pub empty_core_entries: usize,
+    pub core_only_folders: Vec<usize>,
+    pub semantic_physical_order: usize,
+    pub checkpoint_decoded_bytes: u64,
+    pub total_decoded_bytes: u64,
+}
+
+pub type EarlySemanticEligibility = SubstationEarlyEligibility;
+
+fn required_nullable<'de,D,T>(deserializer:D)->Result<Option<T>,D::Error> where D:serde::Deserializer<'de>,T:Deserialize<'de>{Option::<T>::deserialize(deserializer)}
+fn native_is_false(value:&bool)->bool{!*value}
+#[cfg(test)]
+pub fn roundtrip_native_model(name:&str,value:serde_json::Value)->Result<serde_json::Value,serde_json::Error>{match name {
+    "FamPropertyPayload" => serde_json::from_value::<FamPropertyPayload>(value).and_then(serde_json::to_value),
+    "DevPropertyPayload" => serde_json::from_value::<DevPropertyPayload>(value).and_then(serde_json::to_value),
+    "FamPropertyRecord" => serde_json::from_value::<FamPropertyRecord>(value).and_then(serde_json::to_value),
+    "DevPropertyRecord" => serde_json::from_value::<DevPropertyRecord>(value).and_then(serde_json::to_value),
+    "LineFamPropertyPayload" => serde_json::from_value::<LineFamPropertyPayload>(value).and_then(serde_json::to_value),
+    "LineDevPropertyPayload" => serde_json::from_value::<LineDevPropertyPayload>(value).and_then(serde_json::to_value),
+    "LineFamPropertyRecord" => serde_json::from_value::<LineFamPropertyRecord>(value).and_then(serde_json::to_value),
+    "LineDevPropertyRecord" => serde_json::from_value::<LineDevPropertyRecord>(value).and_then(serde_json::to_value),
+    "NativeErrorContext" => serde_json::from_value::<NativeErrorContext>(value).and_then(serde_json::to_value),
+    "NativeError" => serde_json::from_value::<NativeError>(value).and_then(serde_json::to_value),
+    "FileInfo" => serde_json::from_value::<FileInfo>(value).and_then(serde_json::to_value),
+    "ProcessMemorySnapshot" => serde_json::from_value::<ProcessMemorySnapshot>(value).and_then(serde_json::to_value),
+    "FileInfoInput" => serde_json::from_value::<FileInfoInput>(value).and_then(serde_json::to_value),
+    "GimProjectRecord" => serde_json::from_value::<GimProjectRecord>(value).and_then(serde_json::to_value),
+    "GimEntryPayload" => serde_json::from_value::<GimEntryPayload>(value).and_then(serde_json::to_value),
+    "CbmNodePayload" => serde_json::from_value::<CbmNodePayload>(value).and_then(serde_json::to_value),
+    "IfcModelPayload" => serde_json::from_value::<IfcModelPayload>(value).and_then(serde_json::to_value),
+    "FileDevEntryPayload" => serde_json::from_value::<FileDevEntryPayload>(value).and_then(serde_json::to_value),
+    "GimIndexPayload" => serde_json::from_value::<GimIndexPayload>(value).and_then(serde_json::to_value),
+    "IfcModelRecord" => serde_json::from_value::<IfcModelRecord>(value).and_then(serde_json::to_value),
+    "CbmNodeRecord" => serde_json::from_value::<CbmNodeRecord>(value).and_then(serde_json::to_value),
+    "GimEntryRecord" => serde_json::from_value::<GimEntryRecord>(value).and_then(serde_json::to_value),
+    "FileDevEntryRecord" => serde_json::from_value::<FileDevEntryRecord>(value).and_then(serde_json::to_value),
+    "GetGimIndexResult" => serde_json::from_value::<GetGimIndexResult>(value).and_then(serde_json::to_value),
+    "DevSolidModelPayload" => serde_json::from_value::<DevSolidModelPayload>(value).and_then(serde_json::to_value),
+    "DevSubDevicePayload" => serde_json::from_value::<DevSubDevicePayload>(value).and_then(serde_json::to_value),
+    "PhmSolidModelPayload" => serde_json::from_value::<PhmSolidModelPayload>(value).and_then(serde_json::to_value),
+    "GeometryRefsPayload" => serde_json::from_value::<GeometryRefsPayload>(value).and_then(serde_json::to_value),
+    "SubstationSemanticRestPayload" => serde_json::from_value::<SubstationSemanticRestPayload>(value).and_then(serde_json::to_value),
+    "LineCbmNodePayload" => serde_json::from_value::<LineCbmNodePayload>(value).and_then(serde_json::to_value),
+    "LineCbmChildPayload" => serde_json::from_value::<LineCbmChildPayload>(value).and_then(serde_json::to_value),
+    "LineCbmRefPayload" => serde_json::from_value::<LineCbmRefPayload>(value).and_then(serde_json::to_value),
+    "LineFileStatPayload" => serde_json::from_value::<LineFileStatPayload>(value).and_then(serde_json::to_value),
+    "LineGraphPayload" => serde_json::from_value::<LineGraphPayload>(value).and_then(serde_json::to_value),
+    "LineCbmNodeRecord" => serde_json::from_value::<LineCbmNodeRecord>(value).and_then(serde_json::to_value),
+    "LineCbmChildRecord" => serde_json::from_value::<LineCbmChildRecord>(value).and_then(serde_json::to_value),
+    "LineCbmRefRecord" => serde_json::from_value::<LineCbmRefRecord>(value).and_then(serde_json::to_value),
+    "LineFileStatRecord" => serde_json::from_value::<LineFileStatRecord>(value).and_then(serde_json::to_value),
+    "LineGraphResult" => serde_json::from_value::<LineGraphResult>(value).and_then(serde_json::to_value),
+    "LineAttributeResult" => serde_json::from_value::<LineAttributeResult>(value).and_then(serde_json::to_value),
+    "GeometryCacheManifestEntry" => serde_json::from_value::<GeometryCacheManifestEntry>(value).and_then(serde_json::to_value),
+    "GeometryCacheManifest" => serde_json::from_value::<GeometryCacheManifest>(value).and_then(serde_json::to_value),
+    "DeviceLodWriteTiming" => serde_json::from_value::<DeviceLodWriteTiming>(value).and_then(serde_json::to_value),
+    "GimCacheValidation" => serde_json::from_value::<GimCacheValidation>(value).and_then(serde_json::to_value),
+    "IfcCacheFileDiagnostic" => serde_json::from_value::<IfcCacheFileDiagnostic>(value).and_then(serde_json::to_value),
+    "ProjectCacheDiagnostic" => serde_json::from_value::<ProjectCacheDiagnostic>(value).and_then(serde_json::to_value),
+    "CachedProjectSummary" => serde_json::from_value::<CachedProjectSummary>(value).and_then(serde_json::to_value),
+    "BinaryCacheWriteMeta" => serde_json::from_value::<BinaryCacheWriteMeta>(value).and_then(serde_json::to_value),
+    "BatchCacheFileResult" => serde_json::from_value::<BatchCacheFileResult>(value).and_then(serde_json::to_value),
+    "ProjectMeta" => serde_json::from_value::<ProjectMeta>(value).and_then(serde_json::to_value),
+    "ImportFile" => serde_json::from_value::<ImportFile>(value).and_then(serde_json::to_value),
+    "Prepared" => serde_json::from_value::<Prepared>(value).and_then(serde_json::to_value),
+    "TextEntry" => serde_json::from_value::<TextEntry>(value).and_then(serde_json::to_value),
+    "Settings" => serde_json::from_value::<Settings>(value).and_then(serde_json::to_value),
+    "SavedSettings" => serde_json::from_value::<SavedSettings>(value).and_then(serde_json::to_value),
+    "ExtractedEntryMeta" => serde_json::from_value::<ExtractedEntryMeta>(value).and_then(serde_json::to_value),
+    "ExtractionManifest" => serde_json::from_value::<ExtractionManifest>(value).and_then(serde_json::to_value),
+    "ExtractionManifestEntry" => serde_json::from_value::<ExtractionManifestEntry>(value).and_then(serde_json::to_value),
+    "ExtractManifest" => serde_json::from_value::<ExtractManifest>(value).and_then(serde_json::to_value),
+    "CopyReceipt" => serde_json::from_value::<CopyReceipt>(value).and_then(serde_json::to_value),
+    "ParseCopyEntry" => serde_json::from_value::<ParseCopyEntry>(value).and_then(serde_json::to_value),
+    "JobSnapshot" => serde_json::from_value::<JobSnapshot>(value).and_then(serde_json::to_value),
+    "SemanticCheckpoint" => serde_json::from_value::<SemanticCheckpoint>(value).and_then(serde_json::to_value),
+    "ExtractionProfile" => serde_json::from_value::<ExtractionProfile>(value).and_then(serde_json::to_value),
+    "ExtractionEntryTiming" => serde_json::from_value::<ExtractionEntryTiming>(value).and_then(serde_json::to_value),
+    "GimIndexResult" => serde_json::from_value::<GimIndexResult>(value).and_then(serde_json::to_value),
+    "NativeExtractionProfile" => serde_json::from_value::<NativeExtractionProfile>(value).and_then(serde_json::to_value),
+    "NativeExtractionEntryTiming" => serde_json::from_value::<NativeExtractionEntryTiming>(value).and_then(serde_json::to_value),
+    "ParseCopyReceipt" => serde_json::from_value::<ParseCopyReceipt>(value).and_then(serde_json::to_value),
+    "ExtractManifestEntry" => serde_json::from_value::<ExtractManifestEntry>(value).and_then(serde_json::to_value),
+    "SubstationRestPayload" => serde_json::from_value::<SubstationRestPayload>(value).and_then(serde_json::to_value),
+    "ImportProgress" => serde_json::from_value::<ImportProgress>(value).and_then(serde_json::to_value),
+    "PickedFile" => serde_json::from_value::<PickedFile>(value).and_then(serde_json::to_value),
+    "SubstationEarlyEligibility" => serde_json::from_value::<SubstationEarlyEligibility>(value).and_then(serde_json::to_value),
+    "EarlySemanticEligibility" => serde_json::from_value::<EarlySemanticEligibility>(value).and_then(serde_json::to_value),
+    _ => Err(<serde_json::Error as serde::de::Error>::custom("unknown native contract model")),
+}}

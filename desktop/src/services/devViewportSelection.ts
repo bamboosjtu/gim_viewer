@@ -1,4 +1,4 @@
-import { loadPresentation } from './presentationPort.js';
+import {selectionPresentation} from './selectionPresentationPort.js';
 import type {AppState, SelectionRequest} from '../app/state.js';
 import type {CbmNode} from '../gim/types.js';
 import type {ViewerContext} from '../viewer/viewerEngine.js';
@@ -26,9 +26,7 @@ export async function selectViewportDev(ctx: ViewerContext, state: AppState, roo
     if (guard.isCurrent()) await handleNodeClick(state, candidates[0].node, showMessage, request);
     return;
   }
-  const [{commitSelectionHighlight, highlightModGroups}, {showSelectionSources}] = await Promise.all([
-    import('../viewer/highlight.js'), loadPresentation('selectionSources'),
-  ]);
+  const {commitSelectionHighlight,highlightModGroups}=await import('../viewer/highlight.js');
   const highlightPicked = async (selected: SelectionRequest): Promise<void> => {
     const selectedGuard = state.selectionGuard(selected);
     await commitSelectionHighlight(ctx, state, selectedGuard, () => {
@@ -41,12 +39,10 @@ export async function selectViewportDev(ctx: ViewerContext, state: AppState, roo
   const message = candidates.length ? '请选择对应的模型节点；当前拾取设备与节点的自动关联尚未确认。' : '此设备没有对应的模型导航节点。';
   state.selectionMessage = message;
   setSelectionStatus(message);
-  showSelectionSources(message, candidates.map(candidate => ({label: candidate.label, choose: () => {
+  await selectionPresentation().chooseSources(message, candidates.map(candidate => ({label: candidate.label, choose: () => {
     if (!guard.isCurrent()) return;
     const selected = state.beginSelection({kind: 'cbm', key: candidate.node.path});
     state.selectionGeometry = {status: 'ambiguous', detail: '已显示您选择的节点属性；与当前拾取设备的自动关联尚未确认。'};
-    void Promise.all([highlightPicked(selected), loadPresentation('propsDrawer').then(({showNodePropertiesBasic}) => {
-      if (state.isCurrentSelection(selected)) return showNodePropertiesBasic(state, candidate.node, selected);
-    })]).catch(error => console.warn('[DEV source choice]', error));
+    void Promise.all([highlightPicked(selected), selectionPresentation().nodeInspector(state,selected).then(inspector=>inspector.show(candidate.node))]).catch(error => console.warn('[DEV source choice]', error));
   }})), guard.isCurrent);
 }

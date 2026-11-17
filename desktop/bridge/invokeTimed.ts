@@ -52,7 +52,7 @@ export interface InvokeTimedOptions {
  * payload（write_*_binary command）。
  */
 export async function invokeTimed<T>(
-  command: string,
+  command: DesktopCommand,
   args?: unknown,
   options: InvokeTimedOptions = {},
 ): Promise<T> {
@@ -92,3 +92,4 @@ export async function invokeTimed<T>(
     throw nativeError(error);
   }
 }
+import type {DesktopCommand} from './contracts.js';

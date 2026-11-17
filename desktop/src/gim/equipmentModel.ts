@@ -1,7 +1,7 @@
 import { GIM_LIMITS } from '../shared/gimLimits.js';
 import { decodeGimText, readGimText } from '../shared/textDecode.js';
-import { getFileByPath, findFileByPath } from './fileLookup.js';
-import { parseKeyValue } from './kvParser.js';
+import { parseKeyValue,keyValueDiagnostics } from './kvParser.js';
+import {getFileEntryResolver} from './entryResolver.js';
 
 /** Device packages have a semantic Device entry, not an F1–F4 project tree.
  * Directory casing and the exporter/vendor are not classification signals. */
@@ -12,21 +12,16 @@ export async function findEquipmentEntry(files: Map<string, File>, readText: (fi
     // one connected assembly root; never choose an arbitrary library member.
     const devs = [...files].filter(([path]) => /\.dev$/i.test(path));
     if (!devs.length) return null;
-    const resolve = (ref: string): string | null => {
-      const exact = findFileByPath(files, ref);
-      if (exact) return exact.path;
-      const name = ref.replace(/\\/g, '/').split('/').pop()!.toLowerCase();
-      const matches = [...files.keys()].filter(p => p.replace(/\\/g, '/').split('/').pop()!.toLowerCase() === name);
-      return matches.length === 1 ? matches[0] : null;
-    };
+    const resolve=getFileEntryResolver(files);
     const children = new Map<string, string[]>(), referenced = new Set<string>();
     let hasGeometry = false;
     for (const [path, file] of devs) {
       if (file.size > GIM_LIMITS.smallTextBytes) return null;
-      const kv = parseKeyValue(await readText(file)), refs: string[] = [];
+      const kv = parseKeyValue(await readText(file),path), refs: string[] = [];
+      if(keyValueDiagnostics(kv).some(row=>/^(?:SUBDEVICE|SOLIDMODEL)/.test(row.field)))return null;
       for (const [key, value] of Object.entries(kv)) {
         if (/^SUBDEVICE\d+$/i.test(key) && value.trim()) {
-          const target = resolve(value.trim());
+          const target = resolve(value.trim(),path);
           if (!target || !/\.dev$/i.test(target)) return null;
           refs.push(target); referenced.add(target);
         }
@@ -51,14 +46,11 @@ export async function findEquipmentEntry(files: Map<string, File>, readText: (fi
   if (entries.length !== 1) return null;
   const [path, file] = entries[0];
   if (file.size > GIM_LIMITS.smallTextBytes) return null;
-  const kv = parseKeyValue(await readText(file));
+  const kv = parseKeyValue(await readText(file),path);
   if (kv.ENTITYNAME?.trim().toLowerCase() !== 'device') return null;
   const dev = kv.OBJECTMODELPOINTER?.trim();
   if (!dev) return null;
-  if (getFileByPath(files, dev)) return path;
-  const name = dev.replace(/\\/g, '/').split('/').pop()!.toLowerCase();
-  const matches = [...files.keys()].filter(p => p.replace(/\\/g, '/').split('/').pop()!.toLowerCase() === name);
-  return matches.length === 1 ? path : null;
+  return getFileEntryResolver(files)(dev,path)?path:null;
 }
 
 /** UTF-8 first; the equipment corpus also contains legacy GBK text. Keep

@@ -1,16 +1,16 @@
 import type { SubstationFineQueue } from './selectionContracts.js';
 import type { IfcRegionalRuntime } from '../viewer/ifcRegionalRuntime.js';
-import type { IfcEntry, CbmNode } from '../gim/types.js';
 import type * as OBCF from '@thatopen/fragments';
 import type * as THREE from 'three';
 
 import type { ProjectLoadSession } from './projectSession.js';
 import type { SelectionRequest, SelectionCommitGuard } from './selectionContracts.js';
 export interface ViewerState {
+  viewState: Pick<import('./projectViewState.js').ProjectViewState,'viewHistory'|'hasFittedCamera'|'viewerUserInteracted'|'cameraNavigationVersion'>;
   substationFineQueue: SubstationFineQueue | null;
   substationMemoryPressure: import("../utils/memoryPressure.js").MemoryPressure;
   onlySelected: boolean;
-  cameraNavigationVersion: number;
+
   hoverCleanup: (() => void) | null;
   selectionDecorationCleanup: (() => void) | null;
   selectionVisibility: { registerModel(id: string, model: import("../viewer/ifcModelVisibility.js").IfcVisibilityModel): import("../viewer/ifcModelVisibility.js").IfcModelVisibility; removeModel(id: string, runtimeId: string): void; setModelVisible(id: string, visible: boolean): void; sync(guard?: SelectionCommitGuard): Promise<void>; reset(): void; } | null;
@@ -23,13 +23,9 @@ export interface ViewerState {
   isCurrentSelection: (request: SelectionRequest) => boolean;
   canAutoLocate: (request: SelectionRequest) => boolean;
   selectionGuard: (request: SelectionRequest) => SelectionCommitGuard;
-  currentIfcEntries: IfcEntry[];
-  ifcGuidIndex: Map<string, CbmNode>;
-  ifcGuidToName: Map<string, string>;
   ifcRuntimeModelIds: Map<string, string>;
   ifcLogicalModelIds: Map<string, string>;
   ifcRuntimeModelOwners: Map<string, ProjectLoadSession>;
-  deviceToIfcFile: Map<string, string>;
   loadedModels: Map<string, { modelId: string; runtimeModelId: string; visible: boolean; }>;
   ifcRegionalRuntimes: Map<string, IfcRegionalRuntime>;
   highlightedItems: OBCF.ModelIdMap | null;
@@ -42,6 +38,6 @@ export interface ViewerState {
   isCurrentRuntimeModel: (runtimeModelId: string) => boolean;
   initialized: boolean;
   eventsRegistered: boolean;
-  hasFittedCamera: boolean;
-  viewerUserInteracted: boolean;
+
+
 }

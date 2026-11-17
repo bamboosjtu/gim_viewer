@@ -1,5 +1,5 @@
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
-import { loadPresentation } from './presentationPort.js';
+import {diagramPresentation} from './diagramPresentationPort.js';
 /** Optional STD/SLD parsing and cache restore. */
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import { perfBegin, perfMarkProductMoment, type PerfSession } from '../utils/perfTimings.js';
@@ -47,9 +47,8 @@ export async function buildAndCommitSubstationStdSld(
 
     let rendered = false;
     try {
-      const { renderSldView } = await loadPresentation('sldView');
-      if (!state.isCurrentSession(session)) return false;
-      renderSldView(state);
+      await diagramPresentation().render(state,()=>state.isCurrentSession(session));
+      if(!state.isCurrentSession(session))return false;
       rendered = true;
     } catch (err) {
       if (state.isCurrentSession(session)) {

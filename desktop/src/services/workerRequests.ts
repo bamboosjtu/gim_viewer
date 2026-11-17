@@ -1,4 +1,4 @@
-import {GimError} from '../../../packages/powerline-core/src/errors.js';
+import {GimError} from '@gim/powerline-core/errors.js';
 /** One settlement path for worker requests, regardless of transport/protocol. */
 export class WorkerRequests<T> {
   get size():number{return this.pending.size;}

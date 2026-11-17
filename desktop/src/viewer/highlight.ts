@@ -5,12 +5,7 @@ import type { ViewerContext } from './viewerEngine.js';
 import type { ViewerState as AppState } from '../shared/viewerState.js';
 import type { SelectionCommitGuard } from '../shared/selectionContracts.js';
 import type { SelectionRequest } from '../shared/selectionContracts.js';
-import { collectIfcRefs } from '../gim/cbmParser.js';
-import { getNodeDisplayName } from '../shared/displayName.js';
 import { frameBox } from './camera.js';
-import { DEBUG_IFC_LOAD } from '../config/debug.js';
-import { debugLog } from '../utils/logger.js';
-import { resolveIfcModelId } from '../gim/modelIdentity.js';
 import { setDevInstanceHighlight } from './devInstanceBatches.js';
 import { perfBegin } from '../utils/perfTimings.js';
 import { addSelectionOutline, removeSelectionOutline, clearMeshOutlines, clearFragmentOutlines, outlineFragmentItems, SELECTION_AMBER } from './selectionOutline.js';
@@ -161,83 +156,18 @@ export async function resetHighlight(ctx: ViewerContext, state: AppState, isCurr
   await commitSelectionHighlight(ctx,state,{isCurrent,isSessionCurrent:isCurrent});
 }
 
-/** 从 CbmNode 高亮对应的 IFC 构件 */
-export async function highlightIfcFromNode(
-  ctx: ViewerContext,
-  state: AppState,
-  node: import('../gim/types.js').CbmNode,
-  showMessage: (text: string) => void,
-  request: SelectionRequest = state.beginSelection({kind:'cbm',key:node.path}),
-): Promise<void> {
-  const guard = state.selectionGuard(request);
-  if (!guard.isCurrent()) return;
-  const refs = collectIfcRefs(node, state.currentIfcEntries);
-
-  if (refs.size > 0) {
-    const items: OBC.ModelIdMap = {};
-    let totalHighlighted = 0;
-    const highlightBoxes: THREE.Box3[] = [];
-
-    for (const [modelId, guids] of refs) {
-      if (!guard.isCurrent()) return;
-      const runtimeModelId = state.getRuntimeModelId(modelId);
-      const model = ctx.fragments.list.get(runtimeModelId);
-      if (!model) {
-        debugLog(DEBUG_IFC_LOAD, `模型 ${modelId} 未加载，跳过 ${guids.size} 个 GUID`);
-        continue;
-      }
-      try {
-        const localIds = await model.getLocalIdsByGuids(Array.from(guids));
-        const validIds = localIds.filter((id): id is number => id !== null);
-        if (validIds.length > 0) {
-          items[runtimeModelId] = new Set(validIds);
-          totalHighlighted += validIds.length;
-          try {
-            const box = await model.getMergedBox(validIds);
-            if (box && !box.isEmpty()) highlightBoxes.push(box);
-          } catch { /* 包围盒获取失败 */ }
-        } else {
-          debugLog(DEBUG_IFC_LOAD, `模型 ${modelId} 中未找到匹配的 GUID (尝试了 ${guids.size} 个)`);
-        }
-      } catch (err) {
-        console.warn(`GUID 转换失败 (${modelId}):`, err);
-      }
-    }
-
-    if (Object.keys(items).length > 0) {
-      await commitSelectionHighlight(ctx,state,guard,async () => {
-        await outlineFragmentItems(ctx, state, items as any, guard);
-        // Bookkeeping includes an already-started apply so the next commit can reset it.
-        if (guard.isSessionCurrent()) state.highlightedItems = items as any;
-      });
-      if (!guard.isCurrent()) return;
-      debugLog(DEBUG_IFC_LOAD, `已高亮 ${totalHighlighted} 个 IFC 构件`);
-      if (highlightBoxes.length > 0 && state.canAutoLocate(request)) {
-        const unionBox = highlightBoxes.reduce((acc, b) => acc.union(b), highlightBoxes[0].clone());
-        await frameBox(ctx, unionBox, guard);
-      }
-      return;
-    }
+/** Render a resolved selection; source documents and GUID ownership stay in services. */
+export async function highlightIfcItems(ctx:ViewerContext,state:AppState,selected:Readonly<Record<string,readonly number[]>>,request:SelectionRequest):Promise<void> {
+  const guard=state.selectionGuard(request);if(!guard.isCurrent())return;
+  const items:OBC.ModelIdMap={},boxes:THREE.Box3[]=[];
+  for(const [runtimeId,ids] of Object.entries(selected)) {
+    if(!guard.isCurrent())return;if(!ids.length)continue;
+    items[runtimeId]=new Set(ids);
+    try {const box=await ctx.fragments.list.get(runtimeId)?.getMergedBox([...ids]);if(box&&!box.isEmpty())boxes.push(box);}catch{/* Bounds are optional. */}
   }
-
-  // 回退：无 IFCGUID
-  await commitSelectionHighlight(ctx,state,guard);
-  if (!guard.isCurrent()) return;
-  const cbmFileName = node.path.split('/').pop() || '';
-  const ifcModelId = node.ifcFile
-    ? resolveIfcModelId(node.ifcFile, state.currentIfcEntries)
-    : state.deviceToIfcFile.get(cbmFileName);
-  if (ifcModelId) {
-    const ifcLabel = state.currentIfcEntries.find((entry) => entry.modelId === ifcModelId)?.name
-      || 'IFC 模型';
-    const runtimeModelId = state.getRuntimeModelId(ifcModelId);
-    const loaded = ctx.fragments.list.has(runtimeModelId);
-    if (loaded) {
-      showMessage(`设备 "${getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries)}" 属于 ${ifcLabel}，但无 IFCGUID 映射到具体构件`);
-    } else {
-      showMessage(`设备 "${getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries)}" 属于 ${ifcLabel}，该 IFC 文件未加载`);
-    }
-  } else {
-    showMessage(`设备 "${getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries)}" 无 IFC 关联`);
-  }
+  await commitSelectionHighlight(ctx,state,guard,Object.keys(items).length?async()=>{
+    await outlineFragmentItems(ctx,state,items as any,guard);
+    if(guard.isSessionCurrent())state.highlightedItems=items as any;
+  }:undefined);
+  if(guard.isCurrent()&&boxes.length&&state.canAutoLocate(request))await frameBox(ctx,boxes.reduce((box,next)=>box.union(next),boxes[0].clone()),guard);
 }

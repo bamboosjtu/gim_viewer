@@ -1,11 +1,11 @@
 //! Chunked line graph/attribute transactions and queries.
 
+pub use gim_native_core::{LineGraphPayload, LineCbmNodeRecord, LineCbmChildRecord, LineCbmRefRecord, LineFileStatRecord, LineGraphResult, LineAttributeResult};
 use gim_native_core::{NativeError, NativeErrorCode};
 pub use gim_native_core::{LineFamPropertyPayload, LineDevPropertyPayload, LineFamPropertyRecord, LineDevPropertyRecord};
 
 use tauri::Manager;
 use rusqlite::params;
-use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock, atomic::{AtomicU64, Ordering}};
@@ -31,54 +31,15 @@ fn claim_line_begin(state: &DbState, project_id: i64, ticket: u64) -> Result<(),
 
 // ===== 线路工程图缓存（v4） =====
 
-#[derive(Debug, Deserialize)]
-pub struct LineCbmNodePayload {
-    pub path: String,
-    pub name: Option<String>,
-    pub entity_name: Option<String>,
-    pub classify_name: Option<String>,
-    pub raw_props_json: String,
-    pub sort_order: Option<i64>,
-}
 
-#[derive(Debug, Deserialize)]
-pub struct LineCbmChildPayload {
-    pub parent_path: String,
-    pub child_path: String,
-    pub sort_order: Option<i64>,
-    pub ref_type: String,
-    pub extra: Option<String>,
-}
 
-#[derive(Debug, Deserialize)]
-pub struct LineCbmRefPayload {
-    pub node_path: String,
-    pub ref_kind: String,
-    pub ref_key: Option<String>,
-    pub ref_value: String,
-    pub sort_order: Option<i64>,
-    /// v5: 归一化后的引用值（路径统一为 / 分隔，去空段），用于诊断时匹配 FAM/DEV 文件
-    pub normalized_ref_value: Option<String>,
-    /// v5: 引用值的文件名小写（如 "x.fam"），用于诊断时的文件名匹配
-    pub file_name_lower: Option<String>,
-}
 
-#[derive(Debug, Deserialize)]
-pub struct LineFileStatPayload {
-    pub file_type: String,
-    pub count: i64,
-}
 
-#[derive(Debug, Deserialize)]
-pub struct LineGraphPayload {
-    pub project_id: i64,
-    pub project_type: String,
-    pub source_sha256: Option<String>,
-    pub nodes: Vec<LineCbmNodePayload>,
-    pub children: Vec<LineCbmChildPayload>,
-    pub refs: Vec<LineCbmRefPayload>,
-    pub file_stats: Vec<LineFileStatPayload>,
-}
+
+
+
+
+
 
 // ===== v5: 线路工程 FAM/DEV 属性缓存 =====
 
@@ -518,52 +479,15 @@ pub async fn save_line_project_finish(
 
 // ===== 线路工程图读取 =====
 
-#[derive(Debug, Serialize)]
-pub struct LineCbmNodeRecord {
-    pub path: String,
-    pub name: Option<String>,
-    pub entity_name: Option<String>,
-    pub classify_name: Option<String>,
-    pub raw_props_json: String,
-    pub sort_order: Option<i64>,
-}
 
-#[derive(Debug, Serialize)]
-pub struct LineCbmChildRecord {
-    pub parent_path: String,
-    pub child_path: String,
-    pub sort_order: Option<i64>,
-    pub ref_type: String,
-    pub extra: Option<String>,
-}
 
-#[derive(Debug, Serialize)]
-pub struct LineCbmRefRecord {
-    pub node_path: String,
-    pub ref_kind: String,
-    pub ref_key: Option<String>,
-    pub ref_value: String,
-    pub sort_order: Option<i64>,
-    /// v5: 归一化后的引用值
-    pub normalized_ref_value: Option<String>,
-    /// v5: 引用值的文件名小写
-    pub file_name_lower: Option<String>,
-}
 
-#[derive(Debug, Serialize)]
-pub struct LineFileStatRecord {
-    pub file_type: String,
-    pub count: i64,
-}
 
-#[derive(Debug, Serialize)]
-pub struct LineGraphResult {
-    pub project_type: Option<String>,
-    pub nodes: Vec<LineCbmNodeRecord>,
-    pub children: Vec<LineCbmChildRecord>,
-    pub refs: Vec<LineCbmRefRecord>,
-    pub file_stats: Vec<LineFileStatRecord>,
-}
+
+
+
+
+
 
 /// Tauri command：读取线路工程图缓存
 #[tauri::command]
@@ -686,11 +610,7 @@ pub async fn get_line_gim_graph(
 /// powerline_dev_property 读取记录
 
 /// 线路工程 FAM/DEV 属性读取结果
-#[derive(Debug, Serialize)]
-pub struct LineAttributeResult {
-    pub fam_properties: Vec<LineFamPropertyRecord>,
-    pub dev_properties: Vec<LineDevPropertyRecord>,
-}
+
 
 /// Tauri command：读取线路工程 FAM/DEV 属性缓存（只读）
 ///

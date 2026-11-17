@@ -11,3 +11,4 @@ export { classifyLineMod, parseLineMod, parseHNumCommaRecord, parsePointLine } f
 export * from './domain.js';
 export * from './preview.js';
 export * from './crossingClassification.js';
+export * from './sourceDocument.js';

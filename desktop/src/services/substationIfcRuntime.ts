@@ -133,9 +133,6 @@ export async function loadAllIfcFiles(
   options: {
     session?: ProjectLoadSession;
     ifcSourceSizes?: ReadonlyMap<string, number>;
-    geometryCacheValid?: boolean;
-    geometryCacheManifestValid?: boolean;
-    geometryCacheVersionFileMatch?: boolean;
     /** Start optional spatial semantic only after first interactive. */
     startSpatialSemantic?: () => void | Promise<unknown>;
     /** Start STD/SLD parsing or cache restore only after first interactive. */
@@ -191,12 +188,7 @@ export async function loadAllIfcFiles(
 
   if (entries.length === 0) {
     // 无 IFC 但仍触发 MOD/STL 自动加载（纯 xml-mod 工程）
-    await autoLoadModStlPostIfc(state, showMessage, undefined, {
-      session,
-      geometryCacheValid: options.geometryCacheValid,
-      geometryCacheManifestValid: options.geometryCacheManifestValid,
-      geometryCacheVersionFileMatch: options.geometryCacheVersionFileMatch,
-    });
+    await autoLoadModStlPostIfc(state, showMessage, undefined, { session });
     return;
   }
 
@@ -237,9 +229,9 @@ export async function loadAllIfcFiles(
   if (state.projectSourceToViewerMatrix) connectionPreview.setTransform?.(state.projectSourceToViewerMatrix);
   state.stationOverview = () => {
     if (!state.isCurrentSession(session) || state.currentProjectType === 'transmission_line') return;
-    state.cameraNavigationVersion++;
+    state.viewState.cameraNavigationVersion++;
     void Promise.resolve(import('../viewer/camera.js').then(({ fitCameraToStationOverview }) => {
-      if (state.isCurrentSession(session)) fitCameraToStationOverview(ctx, state, { force: true,...stationViewPolicy(state) });
+      if (state.isCurrentSession(session)) fitCameraToStationOverview(ctx, state.viewState, { force: true,...stationViewPolicy(state) });
     })).catch(reportBackgroundError);
   };
   endEngine();
@@ -319,7 +311,7 @@ export async function loadAllIfcFiles(
     const marked = canvas as (HTMLCanvasElement & { __gimCameraTracking?: boolean }) | undefined;
     if (!canvas || marked?.__gimCameraTracking) return;
     if (marked) marked.__gimCameraTracking = true;
-    const mark = (): void => { state.viewerUserInteracted = true; };
+    const mark = (): void => { state.viewState.viewerUserInteracted = true; };
     for (const eventName of ['pointerdown', 'wheel', 'touchstart'] as const) {
       canvas.addEventListener(eventName, mark, { passive: true });
     }
@@ -330,10 +322,10 @@ export async function loadAllIfcFiles(
     // 视角停在“只看得到一栋建筑”的近景。
     for (const delay of [1500, 5000, 12000]) {
       window.setTimeout(() => {
-        if (!isCurrent() || state.viewerUserInteracted || state.selectionRequest?.target) return;
+        if (!isCurrent() || state.viewState.viewerUserInteracted || state.selectionRequest?.target) return;
         void Promise.resolve(import('../viewer/camera.js').then(({ fitCameraToStationOverview }) => {
-          if (!isCurrent() || state.viewerUserInteracted || state.selectionRequest?.target) return;
-          fitCameraToStationOverview(ctx, state, { force: true,...stationViewPolicy(state) });
+          if (!isCurrent() || state.viewState.viewerUserInteracted || state.selectionRequest?.target) return;
+          fitCameraToStationOverview(ctx, state.viewState, { force: true,...stationViewPolicy(state) });
         })).catch(reportBackgroundError);
       }, delay);
     }
@@ -356,9 +348,9 @@ export async function loadAllIfcFiles(
     const { restoreTreeState } = await import('./viewStateStore.js');
     restoreTreeState(state);
     if (!isCurrent()) return;
-    if (!state.selectionRequest?.target && !state.viewerUserInteracted) {
+    if (!state.selectionRequest?.target && !state.viewState.viewerUserInteracted) {
       trackCameraInteraction();
-      fitCameraToStationOverview(ctx, state, stationViewPolicy(state));
+      fitCameraToStationOverview(ctx, state.viewState, stationViewPolicy(state));
       scheduleStationOverviewRefit();
     }
     interactiveInitialized = true;
@@ -413,18 +405,8 @@ export async function loadAllIfcFiles(
       startAfter,
       run: async () => {
         state.geometryLoadToken++;
-        const token = state.geometryLoadToken;
         try {
-          await autoLoadModStlPostIfc(state, showMessage, ctx, {
-            onDevCheckpoint: unit => background.servicePendingUserFineAtCheckpoint(unit),
-            token,
-            includeMod: true,
-            includeStl: false,
-            session,
-            geometryCacheValid: options.geometryCacheValid,
-            geometryCacheManifestValid: options.geometryCacheManifestValid,
-            geometryCacheVersionFileMatch: options.geometryCacheVersionFileMatch,
-          });
+          await autoLoadModStlPostIfc(state, showMessage, ctx, { session });
         } catch (err) {
           console.warn('[GIM] 后台 MOD 加载失败:', err);
         }
@@ -720,7 +702,7 @@ total: entries.length, loaded: state.loadedModels.size,
       void Promise.resolve(sampleSubstationMemory(state, 'allIfcReady', perfSession, { total: entries.length, loaded: state.loadedModels.size, failed: failed.length }, ctx)).catch(reportBackgroundError);
 
       // buildIfcNameIndex 失败不应阻断 UI 渲染
-      const { buildIfcNameIndex } = await import('../viewer/ifcNameIndex.js');
+      const { buildIfcNameIndex } = await import('./ifcNameIndex.js');
       if (!isCurrent()) return;
       state.engineering.ifcGeometryFinished = true;
       state.engineeringGeometryEvidenceChanged?.();

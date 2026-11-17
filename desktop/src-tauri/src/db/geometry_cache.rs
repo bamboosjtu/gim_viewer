@@ -1,7 +1,7 @@
 //! DEV GLB/LOD cache validation, manifests and publication markers.
 
+pub use gim_native_core::{GeometryCacheManifestEntry, GeometryCacheManifest, DeviceLodWriteTiming};
 use gim_native_core::{NativeError, NativeErrorCode};
-use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use std::collections::{HashMap, HashSet};
 use std::fs as stdfs;
@@ -27,23 +27,9 @@ use super::{DbState, GEOMETRY_CACHE_VERSION};
 use super::semantic_pack::{normalize_cache_lookup_path};
 use super::validation_profile::{ValidationSpan};
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GeometryCacheManifestEntry {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub diagnostic: Option<String>,
-    pub entry_path: String,
-    /// DEV 几何结果：`glb`/`partial` 表示有可加载的 GLB，`empty` 表示
-    /// 确定性空几何，`unsupported` 表示源非空但当前 renderer 不支持。
-    /// 旧 manifest 没有该字段，反序列化失败后会整体失效并重建。
-    pub status: String,
-    pub size: u64,
-}
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GeometryCacheManifest {
-    pub source_sha256: String,
-    pub entries: Vec<GeometryCacheManifestEntry>,
-}
+
+
 
 // ===== GLB 几何缓存（方案 C：MOD → glTF 离线预序列化） =====
 
@@ -268,9 +254,7 @@ pub async fn read_device_lod_artifacts(app_handle: tauri::AppHandle, project_id:
     }).await.map_err(|e| NativeError::new(NativeErrorCode::Internal,format!("设备缓存批量读取失败: {}",e)))?
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeviceLodWriteTiming { resolve_ms: f64, write_ms: f64 }
+
 
 #[tauri::command]
 pub async fn write_device_lod_artifact(app_handle: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Result<DeviceLodWriteTiming, NativeError> {

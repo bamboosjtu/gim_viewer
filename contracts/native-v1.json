@@ -20,7 +20,8 @@
     "PROTOCOL_INVALID": "IPC 契约或响应无效",
     "OPERATION_FAILED": "未分类的操作失败",
     "INTERNAL": "原生任务异常或实现错误",
-    "RESPONSE_INVALID": "已返回的原生响应无法解码，只允许复用有效来源清单"
+    "RESPONSE_INVALID": "已返回的原生响应无法解码，只允许复用有效来源清单",
+    "SCHEMA_UNSUPPORTED": "数据库物理 schema 不受支持，开发库须删除重建"
   },
   "types": {
     "FamPropertyPayload": {
@@ -183,6 +184,2089 @@
         "optional": true,
         "nullable": true
       }
+    },
+    "FileInfo": {
+      "path": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "size": {
+        "type": "u64"
+      },
+      "modified_ms": {
+        "type": "u64"
+      },
+      "sha256": {
+        "type": "string"
+      }
+    },
+    "ProcessMemorySnapshot": {
+      "pid": {
+        "type": "u32"
+      },
+      "rss_bytes": {
+        "type": "u64",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "source": {
+        "type": "string"
+      },
+      "rss_source": {
+        "type": "string",
+        "optional": true,
+        "rustOptional": false
+      },
+      "process_tree_rss_bytes": {
+        "type": "u64",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "process_tree_private_bytes": {
+        "type": "u64",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": true,
+        "skipNone": false
+      },
+      "root_private_bytes": {
+        "type": "u64",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": true,
+        "skipNone": false
+      },
+      "process_instances": {
+        "type": {
+          "array": {
+            "tuple": [
+              "u32",
+              "string"
+            ]
+          }
+        },
+        "optional": true,
+        "rustOptional": false
+      },
+      "process_count": {
+        "type": "u32",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "process_tree_available": {
+        "type": "bool"
+      },
+      "process_tree_source": {
+        "type": "string",
+        "optional": true,
+        "rustOptional": false
+      },
+      "process_tree_reason": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": true,
+        "skipNone": false
+      },
+      "$renameAll": "camelCase"
+    },
+    "FileInfoInput": {
+      "path": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "size": {
+        "type": "u64"
+      },
+      "modified_ms": {
+        "type": "u64"
+      },
+      "sha256": {
+        "type": "string"
+      }
+    },
+    "GimProjectRecord": {
+      "id": {
+        "type": "i64"
+      },
+      "path": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "size": {
+        "type": "u64"
+      },
+      "modified_ms": {
+        "type": "u64"
+      },
+      "sha256": {
+        "type": "string"
+      },
+      "created_at_ms": {
+        "type": "u64"
+      },
+      "updated_at_ms": {
+        "type": "u64"
+      },
+      "last_opened_at_ms": {
+        "type": "u64"
+      }
+    },
+    "GimEntryPayload": {
+      "entry_path": {
+        "type": "string"
+      },
+      "file_name": {
+        "type": "string"
+      },
+      "entry_type": {
+        "type": "string"
+      },
+      "file_size": {
+        "type": "u64"
+      },
+      "local_cache_path": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": true,
+        "skipNone": false
+      }
+    },
+    "CbmNodePayload": {
+      "raw_properties_json": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": true,
+        "skipNone": false
+      },
+      "node_key": {
+        "type": "string"
+      },
+      "parent_key": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "path": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "entity_name": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "classify_name": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "fam_path": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "dev_path": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "ifc_file": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "ifc_guid": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "transform_matrix": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "sort_order": {
+        "type": "i64"
+      }
+    },
+    "IfcModelPayload": {
+      "model_id": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "entry_path": {
+        "type": "string"
+      }
+    },
+    "FileDevEntryPayload": {
+      "source_design_file": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": true,
+        "skipNone": false
+      },
+      "model_id": {
+        "type": "string"
+      },
+      "ifc_name": {
+        "type": "string"
+      },
+      "ifc_file": {
+        "type": "string"
+      },
+      "device_count": {
+        "type": "i64"
+      },
+      "device_cbm": {
+        "type": "string"
+      },
+      "sort_order": {
+        "type": "i64"
+      }
+    },
+    "GimIndexPayload": {
+      "capability_summary_json": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": true,
+        "skipNone": false
+      },
+      "project_id": {
+        "type": "i64"
+      },
+      "source_sha256": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": true,
+        "skipNone": false
+      },
+      "entries": {
+        "type": {
+          "array": "GimEntryPayload"
+        }
+      },
+      "cbm_nodes": {
+        "type": {
+          "array": "CbmNodePayload"
+        }
+      },
+      "ifc_models": {
+        "type": {
+          "array": "IfcModelPayload"
+        }
+      },
+      "file_dev_entries": {
+        "type": {
+          "array": "FileDevEntryPayload"
+        }
+      },
+      "fam_properties": {
+        "type": {
+          "array": "FamPropertyPayload"
+        }
+      },
+      "dev_properties": {
+        "type": {
+          "array": "DevPropertyPayload"
+        }
+      }
+    },
+    "IfcModelRecord": {
+      "id": {
+        "type": "i64"
+      },
+      "project_id": {
+        "type": "i64"
+      },
+      "model_id": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "entry_path": {
+        "type": "string"
+      },
+      "created_at_ms": {
+        "type": "u64"
+      }
+    },
+    "CbmNodeRecord": {
+      "raw_properties_json": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": true,
+        "skipNone": false
+      },
+      "id": {
+        "type": "i64"
+      },
+      "project_id": {
+        "type": "i64"
+      },
+      "node_key": {
+        "type": "string"
+      },
+      "parent_key": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "path": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "entity_name": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "classify_name": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "fam_path": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "dev_path": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "ifc_file": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "ifc_guid": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "transform_matrix": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "sort_order": {
+        "type": "i64"
+      },
+      "created_at_ms": {
+        "type": "u64"
+      }
+    },
+    "GimEntryRecord": {
+      "id": {
+        "type": "i64"
+      },
+      "project_id": {
+        "type": "i64"
+      },
+      "entry_path": {
+        "type": "string"
+      },
+      "file_name": {
+        "type": "string"
+      },
+      "entry_type": {
+        "type": "string"
+      },
+      "file_size": {
+        "type": "u64"
+      },
+      "local_cache_path": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "created_at_ms": {
+        "type": "u64"
+      }
+    },
+    "FileDevEntryRecord": {
+      "source_design_file": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": true,
+        "skipNone": false
+      },
+      "id": {
+        "type": "i64"
+      },
+      "project_id": {
+        "type": "i64"
+      },
+      "model_id": {
+        "type": "string"
+      },
+      "ifc_name": {
+        "type": "string"
+      },
+      "ifc_file": {
+        "type": "string"
+      },
+      "device_count": {
+        "type": "i64"
+      },
+      "device_cbm": {
+        "type": "string"
+      },
+      "sort_order": {
+        "type": "i64"
+      },
+      "created_at_ms": {
+        "type": "u64"
+      }
+    },
+    "GetGimIndexResult": {
+      "capability_summary_json": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": true,
+        "skipNone": false
+      },
+      "entries": {
+        "type": {
+          "array": "GimEntryRecord"
+        }
+      },
+      "cbm_nodes": {
+        "type": {
+          "array": "CbmNodeRecord"
+        }
+      },
+      "ifc_models": {
+        "type": {
+          "array": "IfcModelRecord"
+        }
+      },
+      "file_dev_entries": {
+        "type": {
+          "array": "FileDevEntryRecord"
+        }
+      },
+      "fam_properties": {
+        "type": {
+          "array": "FamPropertyRecord"
+        }
+      },
+      "dev_properties": {
+        "type": {
+          "array": "DevPropertyRecord"
+        }
+      }
+    },
+    "DevSolidModelPayload": {
+      "dev_path": {
+        "type": "string"
+      },
+      "solid_model_path": {
+        "type": "string"
+      },
+      "transform_matrix": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "sort_order": {
+        "type": "i64"
+      }
+    },
+    "DevSubDevicePayload": {
+      "dev_path": {
+        "type": "string"
+      },
+      "child_dev_path": {
+        "type": "string"
+      },
+      "transform_matrix": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "sort_order": {
+        "type": "i64"
+      }
+    },
+    "PhmSolidModelPayload": {
+      "phm_path": {
+        "type": "string"
+      },
+      "solid_model_path": {
+        "type": "string"
+      },
+      "transform_matrix": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "color": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "phm_color_max_a": {
+        "type": "f64",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": true,
+        "skipNone": false
+      },
+      "sort_order": {
+        "type": "i64"
+      }
+    },
+    "GeometryRefsPayload": {
+      "project_id": {
+        "type": "i64"
+      },
+      "source_sha256": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": true,
+        "skipNone": false
+      },
+      "dev_solid_models": {
+        "type": {
+          "array": "DevSolidModelPayload"
+        }
+      },
+      "dev_sub_devices": {
+        "type": {
+          "array": "DevSubDevicePayload"
+        }
+      },
+      "phm_solid_models": {
+        "type": {
+          "array": "PhmSolidModelPayload"
+        }
+      }
+    },
+    "SubstationSemanticRestPayload": {
+      "properties_mode": {
+        "type": "PropertyWriteMode"
+      },
+      "project_id": {
+        "type": "i64"
+      },
+      "source_sha256": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "refs": {
+        "type": "GeometryRefsPayload"
+      },
+      "fam_properties": {
+        "type": {
+          "array": "FamPropertyPayload"
+        }
+      },
+      "dev_properties": {
+        "type": {
+          "array": "DevPropertyPayload"
+        }
+      },
+      "capability_summary_json": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false,
+        "default": true
+      }
+    },
+    "LineCbmNodePayload": {
+      "path": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "entity_name": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "classify_name": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "raw_props_json": {
+        "type": "string"
+      },
+      "sort_order": {
+        "type": "i64",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      }
+    },
+    "LineCbmChildPayload": {
+      "parent_path": {
+        "type": "string"
+      },
+      "child_path": {
+        "type": "string"
+      },
+      "sort_order": {
+        "type": "i64",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "ref_type": {
+        "type": "string"
+      },
+      "extra": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      }
+    },
+    "LineCbmRefPayload": {
+      "node_path": {
+        "type": "string"
+      },
+      "ref_kind": {
+        "type": "string"
+      },
+      "ref_key": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "ref_value": {
+        "type": "string"
+      },
+      "sort_order": {
+        "type": "i64",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "normalized_ref_value": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "file_name_lower": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      }
+    },
+    "LineFileStatPayload": {
+      "file_type": {
+        "type": "string"
+      },
+      "count": {
+        "type": "i64"
+      }
+    },
+    "LineGraphPayload": {
+      "project_id": {
+        "type": "i64"
+      },
+      "project_type": {
+        "type": "string"
+      },
+      "source_sha256": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": true,
+        "skipNone": false
+      },
+      "nodes": {
+        "type": {
+          "array": "LineCbmNodePayload"
+        }
+      },
+      "children": {
+        "type": {
+          "array": "LineCbmChildPayload"
+        }
+      },
+      "refs": {
+        "type": {
+          "array": "LineCbmRefPayload"
+        }
+      },
+      "file_stats": {
+        "type": {
+          "array": "LineFileStatPayload"
+        }
+      }
+    },
+    "LineCbmNodeRecord": {
+      "path": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "entity_name": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "classify_name": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "raw_props_json": {
+        "type": "string"
+      },
+      "sort_order": {
+        "type": "i64",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      }
+    },
+    "LineCbmChildRecord": {
+      "parent_path": {
+        "type": "string"
+      },
+      "child_path": {
+        "type": "string"
+      },
+      "sort_order": {
+        "type": "i64",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "ref_type": {
+        "type": "string"
+      },
+      "extra": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      }
+    },
+    "LineCbmRefRecord": {
+      "node_path": {
+        "type": "string"
+      },
+      "ref_kind": {
+        "type": "string"
+      },
+      "ref_key": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "ref_value": {
+        "type": "string"
+      },
+      "sort_order": {
+        "type": "i64",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "normalized_ref_value": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "file_name_lower": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      }
+    },
+    "LineFileStatRecord": {
+      "file_type": {
+        "type": "string"
+      },
+      "count": {
+        "type": "i64"
+      }
+    },
+    "LineGraphResult": {
+      "project_type": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "nodes": {
+        "type": {
+          "array": "LineCbmNodeRecord"
+        }
+      },
+      "children": {
+        "type": {
+          "array": "LineCbmChildRecord"
+        }
+      },
+      "refs": {
+        "type": {
+          "array": "LineCbmRefRecord"
+        }
+      },
+      "file_stats": {
+        "type": {
+          "array": "LineFileStatRecord"
+        }
+      }
+    },
+    "LineAttributeResult": {
+      "fam_properties": {
+        "type": {
+          "array": "LineFamPropertyRecord"
+        }
+      },
+      "dev_properties": {
+        "type": {
+          "array": "LineDevPropertyRecord"
+        }
+      }
+    },
+    "GeometryCacheManifestEntry": {
+      "diagnostic": {
+        "type": "string",
+        "nullable": false,
+        "inputOptional": true,
+        "optional": true,
+        "default": true
+      },
+      "entry_path": {
+        "type": "string"
+      },
+      "status": {
+        "type": "GeometryCacheManifestStatus"
+      },
+      "size": {
+        "type": "u64"
+      }
+    },
+    "GeometryCacheManifest": {
+      "source_sha256": {
+        "type": "string"
+      },
+      "entries": {
+        "type": {
+          "array": "GeometryCacheManifestEntry"
+        }
+      }
+    },
+    "DeviceLodWriteTiming": {
+      "resolve_ms": {
+        "type": "f64"
+      },
+      "write_ms": {
+        "type": "f64"
+      },
+      "$renameAll": "camelCase"
+    },
+    "GimCacheValidation": {
+      "project_id": {
+        "type": "i64"
+      },
+      "has_index": {
+        "type": "bool"
+      },
+      "ifc_models_count": {
+        "type": "u64"
+      },
+      "ifc_entry_count": {
+        "type": "u64"
+      },
+      "cached_ifc_count": {
+        "type": "u64"
+      },
+      "cbm_nodes_count": {
+        "type": "u64"
+      },
+      "file_dev_entries_count": {
+        "type": "u64"
+      },
+      "missing_cache_paths": {
+        "type": {
+          "array": "string"
+        }
+      },
+      "stored_parser_version": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "current_parser_version": {
+        "type": "string"
+      },
+      "parser_version_match": {
+        "type": "bool"
+      },
+      "stored_line_parser_version": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "current_line_parser_version": {
+        "type": "string"
+      },
+      "line_parser_version_match": {
+        "type": "bool"
+      },
+      "stored_substation_parser_version": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "current_substation_parser_version": {
+        "type": "string"
+      },
+      "substation_parser_version_match": {
+        "type": "bool"
+      },
+      "cache_miss_reason": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "valid": {
+        "type": "bool"
+      },
+      "project_type": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "validated_project_type": {
+        "type": "string"
+      },
+      "line_cbm_node_count": {
+        "type": "u64"
+      },
+      "line_fam_source_count": {
+        "type": "u64"
+      },
+      "line_dev_source_count": {
+        "type": "u64"
+      },
+      "line_expected_fam_ref_count": {
+        "type": "u64"
+      },
+      "line_expected_dev_ref_count": {
+        "type": "u64"
+      },
+      "missing_line_fam_sources": {
+        "type": {
+          "array": "string"
+        }
+      },
+      "missing_line_dev_sources": {
+        "type": {
+          "array": "string"
+        }
+      },
+      "line_semantic_pack_status": {
+        "type": "string"
+      },
+      "line_semantic_pack_error": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "geometry_cache_version_match": {
+        "type": "bool"
+      },
+      "current_geometry_cache_version": {
+        "type": "string"
+      },
+      "geometry_cache_version_file_match": {
+        "type": "bool"
+      },
+      "geometry_cache_manifest_valid": {
+        "type": "bool"
+      },
+      "substation_semantic_cache_valid": {
+        "type": "bool"
+      },
+      "substation_properties_complete": {
+        "type": "bool"
+      },
+      "geometry_cache_valid": {
+        "type": "bool"
+      }
+    },
+    "IfcCacheFileDiagnostic": {
+      "entry_path": {
+        "type": "string"
+      },
+      "local_cache_path": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "exists": {
+        "type": "bool"
+      },
+      "file_size": {
+        "type": "u64",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      }
+    },
+    "ProjectCacheDiagnostic": {
+      "project_id": {
+        "type": "i64"
+      },
+      "path": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "size": {
+        "type": "u64"
+      },
+      "modified_ms": {
+        "type": "u64"
+      },
+      "sha256": {
+        "type": "string"
+      },
+      "entries_count": {
+        "type": "u64"
+      },
+      "cbm_nodes_count": {
+        "type": "u64"
+      },
+      "ifc_models_count": {
+        "type": "u64"
+      },
+      "file_dev_entries_count": {
+        "type": "u64"
+      },
+      "fam_properties_count": {
+        "type": "u64"
+      },
+      "dev_properties_count": {
+        "type": "u64"
+      },
+      "ifc_entry_count": {
+        "type": "u64"
+      },
+      "cached_ifc_count": {
+        "type": "u64"
+      },
+      "missing_cache_paths": {
+        "type": {
+          "array": "string"
+        }
+      },
+      "stored_parser_version": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "current_parser_version": {
+        "type": "string"
+      },
+      "parser_version_match": {
+        "type": "bool"
+      },
+      "stored_line_parser_version": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "current_line_parser_version": {
+        "type": "string"
+      },
+      "line_parser_version_match": {
+        "type": "bool"
+      },
+      "stored_substation_parser_version": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "current_substation_parser_version": {
+        "type": "string"
+      },
+      "substation_parser_version_match": {
+        "type": "bool"
+      },
+      "cache_miss_reason": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "line_semantic_pack_status": {
+        "type": "string"
+      },
+      "line_semantic_pack_error": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "geometry_cache_version_match": {
+        "type": "bool"
+      },
+      "current_geometry_cache_version": {
+        "type": "string"
+      },
+      "geometry_cache_version_file_match": {
+        "type": "bool"
+      },
+      "geometry_cache_manifest_valid": {
+        "type": "bool"
+      },
+      "substation_semantic_cache_valid": {
+        "type": "bool"
+      },
+      "geometry_cache_valid": {
+        "type": "bool"
+      },
+      "valid": {
+        "type": "bool"
+      },
+      "ifc_cache_files": {
+        "type": {
+          "array": "IfcCacheFileDiagnostic"
+        }
+      },
+      "project_type": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "line_cbm_node_count": {
+        "type": "u64"
+      },
+      "line_cbm_child_count": {
+        "type": "u64"
+      },
+      "line_cbm_ref_count": {
+        "type": "u64"
+      },
+      "line_file_stat_count": {
+        "type": "u64"
+      },
+      "line_fam_property_count": {
+        "type": "u64"
+      },
+      "line_dev_property_count": {
+        "type": "u64"
+      },
+      "line_fam_source_count": {
+        "type": "u64"
+      },
+      "line_dev_source_count": {
+        "type": "u64"
+      },
+      "line_expected_fam_ref_count": {
+        "type": "u64"
+      },
+      "line_expected_dev_ref_count": {
+        "type": "u64"
+      },
+      "missing_line_fam_sources": {
+        "type": {
+          "array": "string"
+        }
+      },
+      "missing_line_dev_sources": {
+        "type": {
+          "array": "string"
+        }
+      }
+    },
+    "CachedProjectSummary": {
+      "id": {
+        "type": "i64"
+      },
+      "name": {
+        "type": "string"
+      },
+      "path": {
+        "type": "string"
+      },
+      "project_type": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "parser_version": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "size": {
+        "type": "u64"
+      },
+      "modified_ms": {
+        "type": "u64"
+      },
+      "updated_at_ms": {
+        "type": "u64"
+      },
+      "last_opened_at_ms": {
+        "type": "u64"
+      }
+    },
+    "BinaryCacheWriteMeta": {
+      "project_id": {
+        "type": "i64"
+      },
+      "entry_path": {
+        "type": "string"
+      },
+      "source_gim_sha256": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false,
+        "default": true
+      }
+    },
+    "BatchCacheFileResult": {
+      "entry_path": {
+        "type": "string"
+      },
+      "bytes": {
+        "type": {
+          "array": "u8"
+        },
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      }
+    },
+    "ProjectMeta": {
+      "id": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "sha256": {
+        "type": "string"
+      },
+      "size": {
+        "type": "u64"
+      },
+      "imported_at": {
+        "type": "u64"
+      },
+      "last_opened_at": {
+        "type": "u64"
+      },
+      "parser_version": {
+        "type": "string"
+      },
+      "counts": {
+        "type": "json",
+        "ts": "Record<string, number>"
+      },
+      "$renameAll": "camelCase"
+    },
+    "ImportFile": {
+      "path": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "sha256": {
+        "type": "string"
+      },
+      "size": {
+        "type": "u64"
+      }
+    },
+    "Prepared": {
+      "meta": {
+        "type": "ProjectMeta"
+      },
+      "duplicate": {
+        "type": "bool"
+      },
+      "cache": {
+        "type": "json",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": true,
+        "skipNone": false,
+        "ts": "Cache"
+      },
+      "$tsGeneric": "Cache = unknown",
+      "$renameAll": "camelCase"
+    },
+    "TextEntry": {
+      "path": {
+        "type": "string"
+      },
+      "text": {
+        "type": "string"
+      }
+    },
+    "Settings": {
+      "tianditu_key": {
+        "type": "string"
+      },
+      "base_layer": {
+        "type": "MobileBaseLayer"
+      },
+      "$defaultValues": {
+        "tianditu_key": "",
+        "base_layer": "imagery"
+      },
+      "$renameAll": "camelCase"
+    },
+    "SavedSettings": {
+      "version": {
+        "type": "u32"
+      },
+      "settings": {
+        "type": "Settings"
+      }
+    },
+    "ExtractedEntryMeta": {
+      "path": {
+        "type": "string"
+      },
+      "offset": {
+        "type": "u64"
+      },
+      "size": {
+        "type": "u64"
+      },
+      "cache_path": {
+        "type": "string",
+        "nullable": false,
+        "inputOptional": true,
+        "optional": true
+      },
+      "semantic_pack_offset": {
+        "type": "u64",
+        "nullable": false,
+        "inputOptional": true,
+        "optional": true
+      },
+      "packed": {
+        "type": "bool",
+        "optional": true,
+        "rustOptional": false,
+        "skipFalse": true
+      }
+    },
+    "ExtractionManifest": {
+      "source_sha256": {
+        "type": "string"
+      },
+      "entries": {
+        "type": {
+          "array": "ExtractionManifestEntry"
+        }
+      }
+    },
+    "ExtractionManifestEntry": {
+      "path": {
+        "type": "string"
+      },
+      "size": {
+        "type": "u64"
+      },
+      "packed": {
+        "type": "bool",
+        "default": true
+      },
+      "cache_path": {
+        "type": "string",
+        "nullable": false,
+        "inputOptional": true,
+        "optional": true,
+        "default": true
+      }
+    },
+    "ExtractManifest": {
+      "magic": {
+        "type": "string"
+      },
+      "project_id": {
+        "type": "string",
+        "nullable": false,
+        "inputOptional": true,
+        "optional": true
+      },
+      "project_name": {
+        "type": "string",
+        "nullable": false,
+        "inputOptional": true,
+        "optional": true
+      },
+      "entries": {
+        "type": {
+          "array": "ExtractedEntryMeta"
+        }
+      },
+      "semantic_pack_path": {
+        "type": "string",
+        "nullable": false,
+        "inputOptional": true,
+        "optional": true
+      },
+      "profile": {
+        "type": "ExtractionProfile",
+        "nullable": false,
+        "inputOptional": true,
+        "optional": true
+      },
+      "parse_copy": {
+        "type": "CopyReceipt",
+        "nullable": false,
+        "inputOptional": true,
+        "optional": true
+      },
+      "entry_trace": {
+        "type": {
+          "array": "ExtractionEntryTiming"
+        },
+        "nullable": false,
+        "inputOptional": true,
+        "optional": true
+      },
+      "semantic_checkpoint": {
+        "type": "SemanticCheckpoint",
+        "optional": true,
+        "nullable": false,
+        "inputOptional": true
+      },
+      "$borrowed": {
+        "name": "ExtractManifestView",
+        "owned": [
+          "semantic_checkpoint"
+        ]
+      }
+    },
+    "CopyReceipt": {
+      "size": {
+        "type": "usize"
+      },
+      "sha256": {
+        "type": "string"
+      }
+    },
+    "ParseCopyEntry": {
+      "path": {
+        "type": "string"
+      },
+      "offset": {
+        "type": "usize"
+      },
+      "size": {
+        "type": "usize"
+      }
+    },
+    "JobSnapshot": {
+      "job_id": {
+        "type": "string"
+      },
+      "project_id": {
+        "type": "i64"
+      },
+      "source_sha256": {
+        "type": "string"
+      },
+      "status": {
+        "type": "string"
+      },
+      "entries": {
+        "type": {
+          "array": {
+            "tuple": [
+              "string",
+              "u64"
+            ]
+          }
+        }
+      },
+      "semantic_copy": {
+        "type": "CopyReceipt",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "semantic_ready_at_ms": {
+        "type": "f64",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "materialization_complete_at_ms": {
+        "type": "f64",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "materialized_entries": {
+        "type": "usize"
+      },
+      "error": {
+        "type": "NativeError",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "profile": {
+        "type": "ExtractionProfile",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "trace": {
+        "type": {
+          "array": "ExtractionEntryTiming"
+        }
+      },
+      "cache_root": {
+        "type": "string",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "$renameAll": "camelCase"
+    },
+    "SemanticCheckpoint": {
+      "semantic_inputs_decoded_at": {
+        "type": "f64"
+      },
+      "semantic_inputs_written_at": {
+        "type": "f64"
+      },
+      "semantic_bytes_decoded_at": {
+        "type": "u64"
+      },
+      "remaining_archive_after_semantic": {
+        "type": "u64"
+      },
+      "remaining_entries_after_semantic": {
+        "type": "usize"
+      },
+      "large_ifc_decoded_before_semantic": {
+        "type": "bool"
+      },
+      "physical_order": {
+        "type": "usize"
+      },
+      "$renameAll": "camelCase",
+      "$tsIndex": "number | boolean"
+    },
+    "ExtractionProfile": {
+      "total_ms": {
+        "type": "f64"
+      },
+      "archive_ms": {
+        "type": "f64"
+      },
+      "header_ms": {
+        "type": "f64"
+      },
+      "decode_ms": {
+        "type": "f64"
+      },
+      "write_ms": {
+        "type": "f64"
+      },
+      "write_open_ms": {
+        "type": "f64",
+        "optional": true,
+        "rustOptional": false
+      },
+      "write_data_ms": {
+        "type": "f64",
+        "optional": true,
+        "rustOptional": false
+      },
+      "manifest_ms": {
+        "type": "f64"
+      },
+      "commit_ms": {
+        "type": "f64",
+        "optional": true,
+        "rustOptional": false
+      },
+      "write_mode": {
+        "type": "string",
+        "nullable": false,
+        "inputOptional": true,
+        "optional": true
+      },
+      "archive_bytes": {
+        "type": "u64"
+      },
+      "entry_count": {
+        "type": "usize"
+      },
+      "total_bytes": {
+        "type": "u64"
+      },
+      "semantic_pack_entries": {
+        "type": "usize",
+        "optional": true,
+        "rustOptional": false
+      },
+      "semantic_pack_bytes": {
+        "type": "u64",
+        "optional": true,
+        "rustOptional": false
+      },
+      "semantic_pack_write_ms": {
+        "type": "f64",
+        "optional": true,
+        "rustOptional": false
+      },
+      "max_entry_write_ms": {
+        "type": "f64"
+      },
+      "max_entry_write_path": {
+        "type": "string",
+        "nullable": false,
+        "inputOptional": true,
+        "optional": true,
+        "skipNone": false
+      },
+      "max_entry_decode_ms": {
+        "type": "f64"
+      },
+      "max_entry_decode_path": {
+        "type": "string",
+        "nullable": false,
+        "inputOptional": true,
+        "optional": true,
+        "skipNone": false
+      },
+      "$renameAll": "camelCase",
+      "$deriveDefault": true
+    },
+    "ExtractionEntryTiming": {
+      "path": {
+        "type": "string"
+      },
+      "archive_index": {
+        "type": "usize"
+      },
+      "folder_index": {
+        "type": "usize",
+        "nullable": true,
+        "inputOptional": true,
+        "optional": false,
+        "skipNone": false
+      },
+      "physical_order": {
+        "type": "usize"
+      },
+      "size": {
+        "type": "u64"
+      },
+      "decode_ms": {
+        "type": "f64"
+      },
+      "sink_write_ms": {
+        "type": "f64"
+      },
+      "decoded_at_ms": {
+        "type": "f64"
+      },
+      "sink_complete_at_ms": {
+        "type": "f64"
+      },
+      "cumulative_bytes": {
+        "type": "u64"
+      },
+      "$renameAll": "camelCase"
+    },
+    "GimIndexResult": {
+      "$alias": "GetGimIndexResult"
+    },
+    "NativeExtractionProfile": {
+      "$alias": "ExtractionProfile"
+    },
+    "NativeExtractionEntryTiming": {
+      "$alias": "ExtractionEntryTiming"
+    },
+    "ParseCopyReceipt": {
+      "$alias": "CopyReceipt"
+    },
+    "ExtractManifestEntry": {
+      "$alias": "ExtractedEntryMeta"
+    },
+    "SubstationRestPayload": {
+      "$alias": "SubstationSemanticRestPayload"
+    },
+    "ImportProgress": {
+      "stage": {
+        "type": "string"
+      },
+      "done": {
+        "type": "u64",
+        "optional": true,
+        "nullable": false
+      },
+      "total": {
+        "type": "u64",
+        "optional": true,
+        "nullable": true
+      }
+    },
+    "PickedFile": {
+      "$base": "ImportFile",
+      "copy_ms": {
+        "type": "f64",
+        "wireName": "copyMs"
+      }
+    },
+    "SubstationEarlyEligibility": {
+      "$deriveDefault": true,
+      "$renameAll": "camelCase",
+      "eligible": {
+        "type": "bool"
+      },
+      "reason": {
+        "type": "string"
+      },
+      "archive_format": {
+        "type": "string"
+      },
+      "folder_count": {
+        "type": "usize"
+      },
+      "core_entry_count": {
+        "type": "usize"
+      },
+      "core_bytes": {
+        "type": "u64"
+      },
+      "stream_core_entries": {
+        "type": "usize"
+      },
+      "empty_core_entries": {
+        "type": "usize"
+      },
+      "core_only_folders": {
+        "type": {
+          "array": "usize"
+        }
+      },
+      "semantic_physical_order": {
+        "type": "usize"
+      },
+      "checkpoint_decoded_bytes": {
+        "type": "u64"
+      },
+      "total_decoded_bytes": {
+        "type": "u64"
+      }
+    },
+    "EarlySemanticEligibility": {
+      "$alias": "SubstationEarlyEligibility"
+    }
+  },
+  "enums": {
+    "PropertyWriteMode": {
+      "rust": "enum",
+      "values": [
+        "replace",
+        "preserve"
+      ]
+    },
+    "GeometryCacheManifestStatus": {
+      "rust": "string",
+      "values": [
+        "glb",
+        "partial",
+        "empty",
+        "unsupported",
+        "source-invalid"
+      ]
+    },
+    "MobileBaseLayer": {
+      "rust": "string",
+      "values": [
+        "imagery",
+        "vector",
+        "terrain",
+        "osm",
+        "canvas"
+      ]
+    }
+  },
+  "constants": {
+    "DATABASE_SCHEMA_VERSION": {
+      "type": "u32",
+      "value": 1
+    },
+    "DATABASE_PARSER_VERSION": {
+      "type": "string",
+      "value": "gim-cache-schema-v1"
+    },
+    "LINE_PARSER_VERSION": {
+      "type": "string",
+      "value": "gim-line-parser-v1"
+    },
+    "SUBSTATION_PARSER_VERSION": {
+      "type": "string",
+      "value": "gim-substation-parser-v1"
+    },
+    "GEOMETRY_CACHE_VERSION": {
+      "type": "string",
+      "value": "geometry-cache-v1-source-bound-stl"
+    },
+    "MOBILE_PARSER_VERSION": {
+      "type": "string",
+      "value": "mobile-powerline-v1"
+    }
+  },
+  "commands": {
+    "desktop": {
+      "names": [
+        "save_engineering_tree_json",
+        "read_file_bytes",
+        "read_file_head",
+        "get_file_info",
+        "get_process_memory",
+        "authorize_gim_file_path_for_dev",
+        "benchmark_authorize_sample",
+        "pick_gim_file_path",
+        "pick_ifc_file_paths",
+        "extract_gim_archive",
+        "read_extraction_manifest",
+        "read_substation_parse_copy",
+        "inspect_substation_early_eligibility",
+        "start_substation_extraction",
+        "substation_extraction_status",
+        "read_substation_extraction_source",
+        "cancel_substation_extraction",
+        "upsert_gim_project",
+        "save_gim_index",
+        "save_substation_semantic_rest",
+        "write_cache_file_binary",
+        "read_cached_ifc",
+        "read_cached_entry",
+        "batch_read_cached_files",
+        "read_line_semantic_pack",
+        "read_line_semantic_pack_all",
+        "write_glb_file_binary",
+        "read_glb_file",
+        "read_device_lod_artifacts",
+        "write_device_lod_artifact",
+        "delete_device_lod_artifact",
+        "batch_read_glb_files",
+        "read_geometry_cache_manifest",
+        "write_geometry_cache_version",
+        "write_geometry_cache_manifest",
+        "invalidate_glb_cache_entry",
+        "get_gim_index",
+        "validate_gim_cache",
+        "get_db_path",
+        "get_latest_project_cache_diagnostic",
+        "get_line_gim_graph",
+        "save_line_graph_begin",
+        "save_line_attrs_chunk",
+        "save_line_project_finish",
+        "get_line_attributes",
+        "list_cached_projects",
+        "get_app_settings",
+        "set_app_setting",
+        "authorize_cached_gim_project",
+        "touch_gim_project_opened",
+        "delete_project_cache",
+        "get_project_diagnostic",
+        "save_geometry_refs"
+      ]
+    },
+    "mobile": {
+      "names": [
+        "list_projects",
+        "prepare_project",
+        "cancel_import",
+        "discard_import",
+        "get_project_cache",
+        "read_text_entries",
+        "commit_project",
+        "read_source",
+        "read_project_header",
+        "delete_project",
+        "preview_cache",
+        "get_settings",
+        "save_settings"
+      ]
+    },
+    "importPlugin": {
+      "prefix": "plugin:gim-import|",
+      "names": [
+        "pick",
+        "cancel",
+        "check_location_permissions",
+        "request_location_permissions",
+        "get_position",
+        "get_window_state",
+        "set_immersive"
+      ]
     }
   }
 }

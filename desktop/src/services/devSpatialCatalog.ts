@@ -1,3 +1,5 @@
+import {GEOMETRY_CACHE_VERSION as DEV_GEOMETRY_VERSION} from '@desktop/contracts.js';
+export {DEV_GEOMETRY_VERSION};
 import * as THREE from 'three';
 import { stretchedBodyDisplacement } from '../gim/geometry/stretchedBody.js';
 import { offsetRectangularTableVertices } from '../gim/geometry/offsetRectangularTable.js';
@@ -7,7 +9,7 @@ import { discoverGeometriesFromDevPath } from './modGeometryDiscovery.js';
 import { getFileByPath } from '../gim/fileLookup.js';
 
 export const DEV_SPATIAL_CATALOG_VERSION = 'dev-spatial-catalog-v1';
-export const DEV_GEOMETRY_VERSION = 'geometry-cache-v1-source-bound-stl';
+
 export type BoundsTuple = [number, number, number, number, number, number];
 export interface DevSourceBounds {
   devPath: string;

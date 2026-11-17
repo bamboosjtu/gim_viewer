@@ -1,7 +1,7 @@
 import type { FileDevEntry } from './types.js';
-import { parseKeyValue } from './cbmParser.js';
+import {parseKeyValue,keyValueDiagnostics} from './kvParser.js';
 import { parseBoundedCount } from './parserLimits.js';
-import { getFileByPath } from './fileLookup.js';
+import {getFileEntryResolver} from './entryResolver.js';
 import { createIfcModelId } from './modelIdentity.js';
 import { resolveIfcPath } from './gimIndexer.js';
 import { getCaseInsensitiveKv, getFirstNonEmptyKv, isGimEmptyValue } from './gimValueSemantics.js';
@@ -19,9 +19,11 @@ import { getCaseInsensitiveKv, getFirstNonEmptyKv, isGimEmptyValue } from './gim
  * 作为“来源图纸”证据。
  */
 export async function parseFileDevRelation(files: Map<string, File>): Promise<FileDevEntry[]> {
-  const f = getFileByPath(files, 'CBM/FileDevRelation.cbm');
+  const path=getFileEntryResolver(files)('FileDevRelation.cbm');
+  const f=path?files.get(path):undefined;
   if (!f) return [];
-  const kv = parseKeyValue(await f.text());
+  const kv = parseKeyValue(await f.text(),path??f.name);
+  const diagnostics=keyValueDiagnostics(kv);
   const countKey = !isGimEmptyValue(getCaseInsensitiveKv(kv, 'FILES.NUM')) ? 'FILES.NUM' : 'FILE.NUM';
   const num = parseBoundedCount(getFirstNonEmptyKv(kv, ['FILES.NUM', 'FILE.NUM']), countKey);
   const entries: FileDevEntry[] = [];
@@ -35,6 +37,7 @@ export async function parseFileDevRelation(files: Map<string, File>): Promise<Fi
       && !hasNonEmptyKv(kv, `FILE${i}.NAME`));
 
   const appendEntry = (i: number, pairedIfc: string = ''): void => {
+    const sourceDiagnostics=diagnostics.filter(row=>row.field.startsWith(`FILE${i}.`));
     const rawName = getFirstNonEmptyKv(kv, [`FILE${i}.NAME`]);
     const directIfc = getFirstNonEmptyKv(kv, [`FILE${i}.IFC`]);
     const devKey = hasDeviceCount(kv, i)
@@ -57,15 +60,17 @@ export async function parseFileDevRelation(files: Map<string, File>): Promise<Fi
     // 只有实际存在且唯一解析到的 IFC 才生成 runtime hash；缺失或重复 basename
     // 不猜测 modelId。ifcFile 仍保留原始引用，供来源面板诊断，但不会进入
     // deviceToIfcFile，也不会让缓存入库引用一个不存在的模型。
-    const modelId = resolvedIfc.kind === 'resolved'
+    const referenceConflict=sourceDiagnostics.some(row=>row.field===`FILE${i}.IFC`||(!directIfc&&row.field===`FILE${i}.NAME`));
+    const modelId = !referenceConflict&&resolvedIfc.kind === 'resolved'
       ? createIfcModelId(resolvedIfc.path)
       : '';
     if (resolvedIfc.kind === 'ambiguous') {
       console.warn('[GIM] FileDevRelation IFC 引用存在重复 basename，跳过模型关联:', ifcFile, resolvedIfc.candidates);
     }
     // 有 NAME、IFC 或设备列表任一事实就保留条目；不要静默丢掉“仅 IFC 清单”行。
-    if (ifcName || ifcFile || devKey) {
-      entries.push({ sourceDesignFile: rawName, ifcName, ifcFile, modelId, deviceCount: devNum, deviceCbms });
+    if (ifcName || ifcFile || devKey || sourceDiagnostics.length) {
+      entries.push({ sourceDesignFile: rawName, ifcName, ifcFile, modelId, deviceCount: devNum, deviceCbms,
+        ...(sourceDiagnostics.length?{sourceDiagnostics}:{}), });
     }
   };
 

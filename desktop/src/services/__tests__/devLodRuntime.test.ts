@@ -55,9 +55,9 @@ it('streams cached catalog rows before later prefetch batches complete',async()=
   internal.state.sourceGeometryCatalog={occurrences:entries,diagnostics:[]};
   internal.ctx.world={scene:{three:scene},camera:{three:new THREE.PerspectiveCamera(),controls:{addEventListener:vi.fn(),removeEventListener:vi.fn()}}};
   internal.update=vi.fn();internal.schedule=vi.fn();internal.requestReady=vi.fn();internal.notifyCoordinateAnchor=vi.fn();
-  const worker=await import('../devGeometryWorkerClient.js'),cache=await import('@desktop/devLodCache.js'),presentation=await import('../presentationPort.js');
+  const worker=await import('../devGeometryWorkerClient.js'),cache=await import('@desktop/devLodCache.js'),presentation=(await import('../projectPresentationPort.js')).projectPresentation();
   const create=vi.spyOn(worker,'createDevGeometryPreprocessor').mockReturnValue(createDevWorkerMock() as never);
-  const show=vi.spyOn(presentation,'loadPresentation').mockResolvedValue({refreshDeviceBoundsMarkers:()=>{}} as never);
+  const show=vi.spyOn(presentation,'refreshDeviceBounds').mockResolvedValue(undefined);
   let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});let batch=0;
   const read=vi.spyOn(cache,'readDevArtifactBatch').mockImplementation(async(_domain,keys)=>{
     if(++batch===2)await held;

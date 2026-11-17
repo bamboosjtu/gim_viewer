@@ -309,3 +309,12 @@ describe('parsePhm', () => {
     });
   });
 });
+import {it as sourceIt,expect as sourceExpect} from 'vitest';
+sourceIt('keeps PHM group-local matrices and rejects conflicting reference slots with line evidence',()=>{
+  const first='1,0,0,0,0,1,0,0,0,0,1,0,1,0,0,1',second='1,0,0,0,0,1,0,0,0,0,1,0,2,0,0,1';
+  const valid=parsePhm(`SOLIDS.NUM=1\nSOLIDS0=a.mod\nTRANSFORMMATRIX0=${first}\nSOLIDMODELS.NUM=1\nSOLIDMODEL0=b.mod\nTRANSFORMMATRIX0=${second}`,'root.phm');
+  sourceExpect(valid.solidModels.map(row=>row.transformMatrix[12])).toEqual([1,2]);sourceExpect(valid.sourceDiagnostics).toBeUndefined();
+  const bad=parsePhm('SOLIDMODELS.NUM=1\nSOLIDMODEL0=a.mod\nSOLIDMODEL0=b.mod','root.phm');
+  sourceExpect(bad.solidModels).toEqual([]);sourceExpect(bad.sourceDiagnostics?.[0]).toMatchObject({field:'SOLIDMODEL0',lines:[2,3],values:['a.mod','b.mod']});
+  sourceExpect(parsePhm('SOLIDMODELS.NUM=1\nSOLIDMODEL0=a.mod\nTRANSFORMMATRIX0=invalid','root.phm').sourceDiagnostics?.[0]).toMatchObject({kind:'invalid-source-matrix',lines:[3]});
+});

@@ -73,7 +73,7 @@
 
 ## 自动验证
 
-跨语言契约由 `npm run test:native-contracts` 检查生成输出、DTO 所有权和共享夹具的 TS 编译；`gim-native-core` Rust 单测对同一 JSON 夹具做序列化往返，检查必需 nullable、未知字段/错误码。注册表测试要求桌面、Android 和平台插件命令使用生成的错误 DTO。前端回归分别验证 code 与展示文本无关、pack 完整性、来源物化重试和未知协议拒绝；合法响应解码故障仍可恢复已提交的源 SHA 清单，安全/源/会话错误不能换解码器。
+跨语言契约由 `npm run test:native-contracts` 检查生成输出、DTO 所有权和共享夹具的 TS 编译；范围包括图、几何引用/manifest、提取、平台元数据、命令名和共享版本，借用序列化视图保持无条目复制；`gim-native-core` Rust 单测对同一 JSON 夹具做序列化往返，检查必需 nullable、未知字段/错误码。注册表测试对照生成命令名集合，并要求桌面、Android 和平台插件使用生成的错误 DTO；TS 编译约束 command union，边界脚本拒绝原生命令字面量。前端回归分别验证 code 与展示文本无关、pack 完整性、来源物化重试和未知协议拒绝；合法响应解码故障仍可恢复已提交的源 SHA 清单，安全/源/会话错误不能换解码器。
 
 原生命令线程门禁随桌面 `cargo test --lib` 执行，亦可用 `cargo test --manifest-path desktop/src-tauri/Cargo.toml --lib command_registry --locked` 定向运行。它对照桌面/Android 注册表检查 async 工作入口、spawn_blocking 范围和内存取消例外；回归另外覆盖排队后的源替换/线路 session 替换、旧解压预检、读锁期间取消、文件授权与 SHA、任务 panic 后恢复。这些检查证明线程与提交契约，不证明真实磁盘吞吐、WebView 响应或性能收益。Android 主机侧库测试不替代真机验收。
 
@@ -287,7 +287,7 @@ cargo test --manifest-path app/src-tauri/Cargo.toml six_native_imports -- --igno
 | `ui/lineProjectView.ts` | 70% | 60% | 65% |
 | `ui/lineMapView.ts` | 65% | 65% | 60% |
 
-热点门禁覆盖打开/取消/失败、变电冷开与暖恢复、后台发布、Viewer 重试、线路导航/地图/检查器联动及资源释放。其余层只报告覆盖率，不自动调整阈值；这些无工程样本的单元证据不代表真实工程或原生性能通过。`npm run test:presentation-boundaries` 验证展示边界检查器，`check:engineering-boundaries` 在本地与 CI 检查实际源码。
+热点门禁覆盖打开/取消/失败、变电冷开与暖恢复、后台发布、Viewer 重试、线路导航/地图/检查器联动及资源释放。其余层只报告覆盖率，不自动调整阈值；这些无工程样本的单元证据不代表真实工程或原生性能通过。`npm run test:presentation-boundaries` 验证展示边界检查器，`check:engineering-boundaries` 在本地与 CI 检查实际源码，包括零通用 UI loader、包导出与 Viewer 源语义限制。schema 回归验证拒绝不匹配库且不改原表；属性补写回归覆盖显式空/保留、无效属性、混合源及来源读取失败；源详情回归计数证明身份未变的连续读取只计算一次 SHA。
 
 ### Python 纯逻辑测试
 

@@ -1,17 +1,16 @@
-import {GimError, nativeError, hasErrorCode, type NativeError} from '@desktop/contracts.js';
+import {DESKTOP_COMMANDS} from '@desktop/contracts.js';
+import type {EarlySemanticEligibility,JobSnapshot as JobStatus} from '@desktop/contracts.js';
+export type {EarlySemanticEligibility} from '@desktop/contracts.js';
+import {GimError, nativeError, hasErrorCode} from '@desktop/contracts.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { ExtractedGimSource } from './gimOpenCore.js';
 import { invokeTimed } from '@desktop/invokeTimed.js';
-import { decodeSubstationParseCopy, type ParseCopyReceipt } from '@desktop/substationParseCopy.js';
+import { decodeSubstationParseCopy } from '@desktop/substationParseCopy.js';
 import { perfCurrentSession, perfMark } from '../utils/perfTimings.js';
 
-export interface EarlySemanticEligibility {
-  eligible: boolean; reason: string; archiveFormat: string; folderCount: number;
-  coreEntryCount: number; coreBytes: number; streamCoreEntries: number; emptyCoreEntries: number;
-  coreOnlyFolders: number[]; semanticPhysicalOrder: number; checkpointDecodedBytes: number; totalDecodedBytes: number;
-}
+
 export async function inspectEarlySemanticEligibility(filePath: string, projectId: number, sourceSha256: string): Promise<EarlySemanticEligibility> {
-  return invokeTimed('inspect_substation_early_eligibility', { filePath, projectId, sourceSha256 });
+  return invokeTimed(DESKTOP_COMMANDS.inspect_substation_early_eligibility, { filePath, projectId, sourceSha256 });
 }
 /** No catch here: safety/identity/decode errors must not select another decoder. */
 export async function withEarlySemanticCapability<T>(capability: EarlySemanticEligibility, early: () => Promise<T>, fullNative: () => Promise<T>): Promise<T> {
@@ -21,13 +20,7 @@ export async function withEarlySemanticCapability<T>(capability: EarlySemanticEl
   }
   return fullNative();
 }
-interface JobStatus {
-  jobId: string; projectId: number; sourceSha256: string; status: string; entries: [string, number][];
-  semanticCopy: ParseCopyReceipt | null; semanticReadyAtMs: number | null;
-  materializationCompleteAtMs: number | null; cacheRoot: string | null; error: NativeError | null;
-  trace: import('@desktop/gimExtract.js').NativeExtractionEntryTiming[];
-  profile: import('@desktop/gimExtract.js').NativeExtractionProfile | null;
-}
+
 interface ActiveJob { id: string; current: () => boolean; complete: boolean; error?: string }
 const jobs = new WeakMap<AppState, ActiveJob>();
 const pause = () => new Promise<void>(resolve => setTimeout(resolve, 200));
@@ -41,7 +34,7 @@ export function substationSourcePreparationMessage(state: AppState): string {
 }
 export function cancelSubstationExtraction(state: AppState): void {
   const job = jobs.get(state); jobs.delete(state);
-  if (job) void invokeTimed('cancel_substation_extraction', { jobId: job.id }).catch(() => {});
+  if (job) void invokeTimed(DESKTOP_COMMANDS.cancel_substation_extraction, { jobId: job.id }).catch(() => {});
 }
 
 /** All parser bytes come from the exact decoded entry, not a second semantic model. */
@@ -49,11 +42,11 @@ export async function startSubstationExtractionJob(
   state: AppState, session: ProjectLoadSession, filePath: string, projectId: number,
 ): Promise<ExtractedGimSource> {
   const perfSession = perfCurrentSession(), current = () => state.isCurrentSession(session);
-  const start = await invokeTimed<JobStatus>('start_substation_extraction', {
+  const start = await invokeTimed<JobStatus>(DESKTOP_COMMANDS.start_substation_extraction, {
     filePath, projectId, sourceSha256: session.sourceSha256,
   });
   if (!current()) {
-    await invokeTimed('cancel_substation_extraction', { jobId: start.jobId });
+    await invokeTimed(DESKTOP_COMMANDS.cancel_substation_extraction, { jobId: start.jobId });
     throw new GimError('CANCELLED','extraction session cancelled');
   }
   const active: ActiveJob = { id: start.jobId, current, complete: false }; jobs.set(state, active);
@@ -65,7 +58,7 @@ export async function startSubstationExtractionJob(
   const completion = (async () => {
     try {
       while (current()) {
-        latest = await invokeTimed<JobStatus>('substation_extraction_status', { jobId: start.jobId });
+        latest = await invokeTimed<JobStatus>(DESKTOP_COMMANDS.substation_extraction_status, { jobId: start.jobId });
         if (!current()) break;
         if (latest.sourceSha256 !== session.sourceSha256 || latest.projectId !== projectId) throw new GimError('SOURCE_CHANGED','extraction identity mismatch');
         if (latest.status === 'failed' || latest.status === 'cancelled') throw latest.error ? nativeError(latest.error) : new GimError(latest.status==='cancelled'?'CANCELLED':'OPERATION_FAILED','source extraction failed');
@@ -74,7 +67,7 @@ export async function startSubstationExtractionJob(
           if (!latest.cacheRoot) throw Error('materialized source root missing');
           for (const [path] of start.entries) cachePaths.set(path, `${latest.cacheRoot}/${path}`);
           active.complete = true;
-          const details = await invokeTimed<JobStatus>('substation_extraction_status', { jobId: start.jobId, details: true });
+          const details = await invokeTimed<JobStatus>(DESKTOP_COMMANDS.substation_extraction_status, { jobId: start.jobId, details: true });
           if (!current()) break;
           perfMark('sourceMaterializationComplete', { jobId: start.jobId, nativeAtMs: latest.materializationCompleteAtMs,
             files: start.entries.length, extraction: details.profile, entryTrace: details.trace }, perfSession);
@@ -103,7 +96,7 @@ export async function startSubstationExtractionJob(
   void completion.catch(() => {});
   const read = async (path: string): Promise<ArrayBuffer> => {
     while (current()) {
-      try { const bytes = await invokeTimed<ArrayBuffer>('read_substation_extraction_source', { jobId: start.jobId, entryPath: path }); if (!current()) throw new GimError('CANCELLED','extraction session cancelled'); return bytes; }
+      try { const bytes = await invokeTimed<ArrayBuffer>(DESKTOP_COMMANDS.read_substation_extraction_source, { jobId: start.jobId, entryPath: path }); if (!current()) throw new GimError('CANCELLED','extraction session cancelled'); return bytes; }
       catch (error) {
         if (!hasErrorCode(error,'SOURCE_MATERIALIZING')) throw error;
         await pause();
@@ -118,7 +111,7 @@ export async function startSubstationExtractionJob(
   }
   const ready = await semantic;
   const bytes = ready.semanticCopy
-    ? await decodeSubstationParseCopy(await invokeTimed<ArrayBuffer>('read_substation_extraction_source', { jobId: start.jobId }), ready.semanticCopy, files)
+    ? await decodeSubstationParseCopy(await invokeTimed<ArrayBuffer>(DESKTOP_COMMANDS.read_substation_extraction_source, { jobId: start.jobId }), ready.semanticCopy, files)
     : new Map<string, Uint8Array>();
   if (!current()) throw new GimError('CANCELLED','extraction session cancelled');
   for (const [path, data] of bytes) files.set(path, new File([data.slice().buffer], path.split('/').pop()!));

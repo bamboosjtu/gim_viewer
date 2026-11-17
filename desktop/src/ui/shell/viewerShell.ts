@@ -135,7 +135,7 @@ export function setupViewerShell(state: AppState): void {
         const settingsItem = document.getElementById('menu-settings');
         if (settingsItem) settingsItem.hidden = !isTauri();
         const viewItem = document.getElementById('menu-previous-view');
-        if (viewItem) viewItem.hidden = !state.viewHistory?.canGoBack;
+        if (viewItem) viewItem.hidden = !state.viewState.viewHistory?.canGoBack;
         const onlyItem = document.getElementById('menu-only-selected');
         if (onlyItem) onlyItem.hidden = !['substation', 'equipment'].includes(state.currentProjectType ?? '') || !state.selectionRequest?.target || state.onlySelected || !state.canIsolateSelection;
         const allItem = document.getElementById('menu-show-all');
@@ -167,7 +167,7 @@ export function setupViewerShell(state: AppState): void {
     closeMenu();
     const session = state.captureProjectSession();
     const selection = state.selectionRequest;
-    void Promise.resolve(state.viewHistory?.back().catch(error => {
+    void Promise.resolve(state.viewState.viewHistory?.back().catch(error => {
       if (!state.isCurrentSession(session) || state.selectionRequest !== selection) return;
       console.warn('[View history]', error);
       setSelectionStatus('暂时无法恢复上一视角，请重试。');

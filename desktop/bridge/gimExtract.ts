@@ -1,3 +1,6 @@
+import {DESKTOP_COMMANDS} from './contracts.js';
+import type {NativeExtractionProfile, NativeExtractionEntryTiming, ExtractManifest, ExtractionManifest} from './contracts.js';
+export type {NativeExtractionProfile, NativeExtractionEntryTiming, ExtractManifestEntry, ExtractManifest, ExtractionManifest} from './contracts.js';
 import { GIM_LIMITS } from '../src/shared/gimLimits.js';
 import {GimError} from './contracts.js';
 import type { ParseCopyReceipt } from './substationParseCopy.js';
@@ -36,62 +39,15 @@ export interface NativeExtractionResult {
   semanticCheckpoint?: Record<string, number | boolean>;
 }
 
-export interface NativeExtractionProfile {
-  totalMs: number;
-  archiveMs: number;
-  headerMs: number;
-  decodeMs: number;
-  writeMs: number;
-  /** Rust staging writer 中打开/创建文件的累计耗时。 */
-  writeOpenMs?: number;
-  /** Rust staging writer 中写入文件内容的累计耗时。 */
-  writeDataMs?: number;
-  /** 线路 semantic pack 连续写入的条目、字节与耗时。 */
-  semanticPackEntries?: number;
-  semanticPackBytes?: number;
-  semanticPackWriteMs?: number;
-  manifestMs: number;
-  commitMs?: number;
-  writeMode?: string;
-  archiveBytes: number;
-  entryCount: number;
-  totalBytes: number;
-  maxEntryWriteMs: number;
-  maxEntryWritePath?: string;
-  maxEntryDecodeMs: number;
-  maxEntryDecodePath?: string;
-}
 
-export interface NativeExtractionEntryTiming {
-  path: string; archiveIndex: number; folderIndex: number | null; physicalOrder: number;
-  size: number; decodeMs: number; sinkWriteMs: number; decodedAtMs: number;
-  sinkCompleteAtMs: number; cumulativeBytes: number;
-}
+
+
 
 /** manifest 条目 */
-interface ExtractManifestEntry {
-  path: string;
-  offset: number;
-  size: number;
-  cache_path?: string;
-  /** 线路语义 pack 中的偏移；有此字段时对应独立小文件未落盘。 */
-  semantic_pack_offset?: number;
-  /** 变电源 pack 成员：没有独立落盘文件，读取时按 offset 懒读。 */
-  packed?: boolean;
-}
+
 
 /** manifest 结构 */
-interface ExtractManifest {
-  magic: string;
-  project_id?: string;
-  project_name?: string;
-  entries: ExtractManifestEntry[];
-  semantic_pack_path?: string;
-  profile?: NativeExtractionProfile;
-  parse_copy?: ParseCopyReceipt;
-  entry_trace?: NativeExtractionEntryTiming[];
-  semantic_checkpoint?: Record<string, number | boolean>;
-}
+
 
 /**
  * 磁盘条目的最小 File 兼容实现。
@@ -319,7 +275,7 @@ export async function extractGimArchiveNative(
   projectId?: number,
   experiments: { traceEntries?: boolean; substationParseCopy?: boolean; expectedSourceSha256?: string } = {},
 ): Promise<NativeExtractionResult> {
-  const buf = await invokeTimed<ArrayBuffer>('extract_gim_archive', { filePath, projectId, ...experiments });
+  const buf = await invokeTimed<ArrayBuffer>(DESKTOP_COMMANDS.extract_gim_archive, { filePath, projectId, ...experiments });
   try {return parseExtractionPayload(buf, { cacheProjectId: projectId });}
   catch(error){
     if(error instanceof GimError)throw error;
@@ -328,13 +284,10 @@ export async function extractGimArchiveNative(
 }
 
 /** 上次成功解压留下的清单（索引未提交就切换工程时复用已解压文件）。 */
-export interface ExtractionManifest {
-  source_sha256: string;
-  entries: Array<{ path: string; size: number; packed?: boolean; cache_path?: string }>;
-}
+
 
 export async function readExtractionManifest(projectId: number): Promise<ExtractionManifest | null> {
-  const result = await invokeTimed<ExtractionManifest | null>('read_extraction_manifest', { projectId });
+  const result = await invokeTimed<ExtractionManifest | null>(DESKTOP_COMMANDS.read_extraction_manifest, { projectId });
   if (!result || typeof result.source_sha256 !== 'string' || !Array.isArray(result.entries)) return null;
   return result;
 }

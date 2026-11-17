@@ -1,4 +1,5 @@
 //! Opt-in desktop 7z job. Early sources are session-local, not a published cache.
+pub use gim_native_core::{JobSnapshot};
 use gim_native_core::{NativeError, NativeErrorCode};
 use crate::db::{
     commit_cache_staging, create_cache_staging_dir, ensure_project_exists,
@@ -6,11 +7,10 @@ use crate::db::{
 };
 use crate::gim_extract::{
     extract_substation_semantic_order_cancellable, inspect_substation_entries,
-    is_core_semantic_path, ExtractionEntryTiming, ExtractionProfile, ExtractionQuota,
+    is_core_semantic_path, ExtractionQuota,
 };
-use crate::substation_parse_copy::{CopyReceipt, ParseCopy, COPY_PATH};
+use crate::substation_parse_copy::{ParseCopy, COPY_PATH};
 use crate::{require_authorized_path, AuthorizedFilePaths};
-use serde::Serialize;
 use tauri::Manager;
 use sha2::{Digest, Sha256};
 use std::{
@@ -56,42 +56,25 @@ fn registry() -> &'static Mutex<HashMap<String, RegisteredJob>> {
     JOBS.get_or_init(Default::default)
 }
 
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct JobSnapshot {
-    job_id: String,
-    project_id: i64,
-    source_sha256: String,
-    status: String,
-    entries: Vec<(String, u64)>,
-    semantic_copy: Option<CopyReceipt>,
-    semantic_ready_at_ms: Option<f64>,
-    materialization_complete_at_ms: Option<f64>,
-    materialized_entries: usize,
-    error: Option<NativeError>,
-    profile: Option<ExtractionProfile>,
-    trace: Vec<ExtractionEntryTiming>,
-    cache_root: Option<String>,
-}
-impl JobSnapshot {
-    fn clone_without_details(&self) -> Self {
-        Self {
-            job_id: self.job_id.clone(),
-            project_id: self.project_id,
-            source_sha256: self.source_sha256.clone(),
-            status: self.status.clone(),
+
+fn clone_without_details(snapshot:&JobSnapshot)->JobSnapshot {
+        JobSnapshot {
+            job_id: snapshot.job_id.clone(),
+            project_id: snapshot.project_id,
+            source_sha256: snapshot.source_sha256.clone(),
+            status: snapshot.status.clone(),
             entries: Vec::new(),
             trace: Vec::new(),
-            semantic_copy: self.semantic_copy.clone(),
-            semantic_ready_at_ms: self.semantic_ready_at_ms,
-            materialization_complete_at_ms: self.materialization_complete_at_ms,
-            materialized_entries: self.materialized_entries,
-            error: self.error.clone(),
-            profile: self.profile.clone(),
-            cache_root: self.cache_root.clone(),
+            semantic_copy: snapshot.semantic_copy.clone(),
+            semantic_ready_at_ms: snapshot.semantic_ready_at_ms,
+            materialization_complete_at_ms: snapshot.materialization_complete_at_ms,
+            materialized_entries: snapshot.materialized_entries,
+            error: snapshot.error.clone(),
+            profile: snapshot.profile.clone(),
+            cache_root: snapshot.cache_root.clone(),
         }
     }
-}
+
 struct Job {
     snapshot: JobSnapshot,
     staging: PathBuf,
@@ -372,7 +355,7 @@ pub async fn substation_extraction_status(
         let mut snapshot = JobSnapshot {
             entries: Vec::new(),
             trace: Vec::new(),
-            ..j.snapshot.clone_without_details()
+            ..clone_without_details(&j.snapshot)
         };
         if details == Some(true) {
             snapshot.entries = j.snapshot.entries.clone();

@@ -69,13 +69,15 @@ bootstrap
   └─ viewerUIBinding（选择/高亮/相机/属性路由）
 ```
 
-`app/presentationBindings` 是展示端口的组合根。`ProjectPresentation` 管理树渲染、面板清理、展开状态、选择反馈和候选交互；`SourceInspectorPresentation` 接收来源文档/空间上下文与回调，UI 持有分页与 DOM 监听；`ViewerPresentation` 提供属性/模型展示及绑定释放器；加载遮罩与计时由 `LoadingPresentation` 的 UI 实现持有。状态栏端口仅声明状态命令，不从 UI 模块推导接口。services 不直接值导入 ui，不查询或修改 DOM。Viewer 使用 `shared/viewerState`、会话和选择契约，不引用 AppState。
+`app/presentationBindings` 是展示端口的组合根。`ProjectPresentation` 管理树渲染、面板清理、展开状态、选择反馈和候选交互；`SourceInspectorPresentation` 接收来源文档/空间上下文与回调，UI 持有分页与 DOM 监听；`ViewerPresentation` 提供属性/模型展示及绑定释放器；加载遮罩与计时由 `LoadingPresentation` 的 UI 实现持有。状态栏端口仅声明状态命令，不从 UI 模块推导接口。services 不直接值导入 ui，不查询或修改 DOM。Viewer 使用 `shared/viewerState`、会话和选择契约，不引用 AppState。CBM/GUID 与 IFC 名称补充属于 services；Viewer 高亮只接收已解析的 runtime model/local ID 集合。几何纯函数按符号白名单导入，不能借此引入 CBM 业务语义。
 
-旧视图加载器只允许 `scripts/presentation-legacy-budget.json` 登记的 22 个调用、10 个模块和 9 个 key；边界脚本检查 registry key、别名调用、字面量及逐调用模块预算，禁止新增 key/调用点和 service DOM 操作。尚未迁完的选择/线路视图使用受限旧适配器，新增能力使用显式意图端口。
+通用 UI 模块 loader 已删除。`SelectionPresentation` 接收选择意图、只读属性模型与有效性回调；`DiagramPresentation` 返回绑定释放器；`LinePresentation` 返回视图句柄并由 SessionScope 持有；`ProjectOpenPresentation` 管理浏览器选择器、按钮与输入框。惰性 UI import 留在 UI 实现，services 不请求 UI 模块或操作 DOM。边界脚本拒绝任何旧 loader 调用（含别名和非字面量）、DOM 写入及未声明共享包导入。
 
 独立设备打开使用显式 `EquipmentPresentationPort`：服务提交工程身份、导航树、选择回调与会话 signal，UI 的 `equipmentProjectView` 负责工程栏、导航 DOM、搜索、空态及设备状态栏；端口返回仅属于该视图实例的释放器。旧释放器不能移除新导航。设备运行时不访问 DOM 或 `loadPresentation`，边界脚本单独禁止其退回通用 UI 模块加载器和旧 DOM 适配器。通用加载遮罩保留 `gimOpenCore` 公开入口，内部只转发加载展示端口；DOM、进度格式和计时器均属于 UI。
 
-`AppState` 只持有会话、请求和已发布结果；工程实体、导航、几何目录的构建由服务层启动，UI 通过订阅/回调刷新。工程切换后，旧 Worker、旧请求和旧投影必须释放或拒绝提交。
+`AppState.engineering` 持有工程事实与构建状态，`viewState` 持有导航、展开、相机意图和历史；应用组合根仍保留运行面协调状态。工程实体、导航、几何目录的构建由服务层启动，UI 通过订阅/回调刷新。工程切换后，旧 Worker、旧请求和旧投影必须释放或拒绝提交。
+
+共享包通过 package.json 声明依赖和 package exports 访问。桌面来源门面保留当前模块入口的一行 re-export；`@gim/measurement-core/source` 是显式源码出口，SDK 默认入口仍为构建后的 dist。生产代码不允许用深相对路径绕过包边界。
 
 ## 边界检查
 

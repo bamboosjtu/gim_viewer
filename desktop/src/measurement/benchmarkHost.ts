@@ -1,3 +1,4 @@
+import {DESKTOP_COMMANDS} from '@desktop/contracts.js';
 import measuredWorkerAsset from './capabilityWorker.ts?worker&url';
 import type { AppState } from '../app/state.js';
 import { measurementSnapshot, drainMeasurementEvents, measurementPrivateSources, measurementRun,finishMeasurementOperation,measurementContext,openMeasurementContext } from './runtime.js';
@@ -37,7 +38,7 @@ export function installBenchmarkHost(state:AppState):void {
       opening=true;openError=false;openErrorCode=null;
       try{
         const {invoke}=await import('@tauri-apps/api/core');
-        const path=await invoke<string>('benchmark_authorize_sample',{sampleId,nonce});
+        const path=await invoke<string>(DESKTOP_COMMANDS.benchmark_authorize_sample,{sampleId,nonce});
         if(sequence!==openSequence)return;
         (globalThis as {__GIM_MEASUREMENT_CONFIG__?:unknown}).__GIM_MEASUREMENT_CONFIG__={...config,sampleId};
         const {openGimForBenchmark}=await import('../services/openGimService.js');

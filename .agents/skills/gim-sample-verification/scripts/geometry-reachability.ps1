@@ -164,7 +164,12 @@ foreach ($dev in $cbmDevs.Keys) {
 # 递归：DEV → 子 DEV
 while ($queue.Count -gt 0) {
   $current = $queue[0]
-  $queue = $queue[1..($queue.Count - 1)]
+  # 1..0 is a descending two-item range in PowerShell, not an empty slice.
+  if ($queue.Count -gt 1) {
+    $queue = @($queue[1..($queue.Count - 1)])
+  } else {
+    $queue = @()
+  }
   if ($devSubDevs.ContainsKey($current)) {
     foreach ($sub in $devSubDevs[$current]) {
       if (-not $reachableDevs.ContainsKey($sub)) {

@@ -7,7 +7,7 @@ import {highlightModGroups} from '../../viewer/highlight.js';
 
 const mocks=vi.hoisted(()=>({handle:vi.fn(async()=>{}),properties:vi.fn(async(..._args:unknown[])=>{})}));
 vi.mock('../nodeInteractionService.js',()=>({handleNodeClick:mocks.handle}));
-vi.mock('../../ui/propsDrawer.js',()=>({showNodePropertiesBasic:mocks.properties}));
+vi.mock('../../ui/propsDrawer.js',()=>({showNodePropertiesBasic:mocks.properties,openPropsDrawerUI:vi.fn()}));
 vi.mock('../../ui/shell/viewerShell.js',()=>({shouldAutoShowProps:()=>true}));
 function node(path:string,name:string,children:CbmNode[]=[]):CbmNode {
   return {path,name,children,devPath:'a.dev'} as CbmNode;

@@ -1,7 +1,9 @@
+import {DESKTOP_COMMANDS} from './contracts.js';
 import { invokeTimed } from './invokeTimed.js';
 
-export interface ParseCopyReceipt { size: number; sha256: string }
-interface CopyEntry { path: string; offset: number; size: number }
+import type {ParseCopyReceipt,ParseCopyEntry as CopyEntry} from './contracts.js';
+export type {ParseCopyReceipt} from './contracts.js';
+
 const MAX_BYTES = 32 * 1024 * 1024 + 4;
 
 /** Receipt is captured from this extraction, never restored as an authoritative source. */
@@ -32,5 +34,5 @@ export async function decodeSubstationParseCopy(
 }
 
 export async function readSubstationParseCopy(projectId: number, receipt: ParseCopyReceipt, expected: Map<string, File>) {
-  return decodeSubstationParseCopy(await invokeTimed<ArrayBuffer>('read_substation_parse_copy', { projectId }), receipt, expected);
+  return decodeSubstationParseCopy(await invokeTimed<ArrayBuffer>(DESKTOP_COMMANDS.read_substation_parse_copy, { projectId }), receipt, expected);
 }

@@ -1,5 +1,6 @@
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
-import { loadPresentation } from './presentationPort.js';
+import {selectionPresentation} from './selectionPresentationPort.js';
+import {diagramPresentation} from './diagramPresentationPort.js';
 import { isSubstationViewerInteractive } from './substationLoadingState.js';
 /** Substation navigation, selection callbacks and loading presentation. */
 import { setSelectionStatus } from './presentation/shell_statusBar.js';
@@ -48,14 +49,9 @@ export function createNodeClickHandler(state: AppState, showMessage: (text: stri
   };
 }
 
-export function setupSldGridIdInteraction(
-  state: AppState,
-  showMessage: (text: string) => void,
-  session?: ProjectLoadSession,
-): Promise<void> {
-  return loadPresentation('sldView').then(({ setSldGridIdClickHandler }) => {
-    if (session && !state.isCurrentSession(session)) return;
-    setSldGridIdClickHandler(async (gridId: string) => {
+export function setupSldGridIdInteraction(state:AppState,showMessage:(text:string)=>void,session?:ProjectLoadSession):Promise<void>{
+  const scope=state.sessionScope(session??state.captureProjectSession());
+  const selected=async (gridId: string) => {
       if (session && !state.isCurrentSession(session)) return;
       if (!state.currentStdSldIndex) return;
       const request = state.beginSelection({ kind: 'sld', key: gridId });
@@ -64,11 +60,9 @@ export function setupSldGridIdInteraction(
         if (session && !state.isCurrentSession(session)) return;
         const nodes = getCbmNodesByGridId(state.currentStdSldIndex, gridId);
         if (nodes.length === 0) {
-          const [{ clearSelectionHighlight, syncSelectionNavigation }, { showUnlinkedSldProperties }] = await Promise.all([
-            import('./nodeInteractionService.js'), loadPresentation('propsDrawer'),
-          ]);
+          const {clearSelectionHighlight,syncSelectionNavigation}=await import('./nodeInteractionService.js');
           if (!state.isCurrentSelection(request)) return;
-          showUnlinkedSldProperties(state, gridId, request);
+          await selectionPresentation().unlinkedDiagram(state,gridId,request);
           await Promise.all([clearSelectionHighlight(state, request, showMessage), syncSelectionNavigation(state, request)]);
           console.log('[SLD→CBM] gridId 无对应 CBM 节点:', gridId);
           return;
@@ -81,8 +75,7 @@ export function setupSldGridIdInteraction(
             if (state.isCurrentSelection(request)) await selectEngineeringCbmSource(state, nodes[0].path, request);
           } else {
             const { clearEngineeringHighlight } = await import('./engineeringSelection.js'); await clearEngineeringHighlight(state, request);
-            const { showSelectionSources } = await loadPresentation('selectionSources');
-            if (state.isCurrentSelection(request)) showSelectionSources('该单线图对象关联多个来源，请选择要查看的来源', nodes.map(node => ({
+            if (state.isCurrentSelection(request)) await selectionPresentation().chooseSources('该单线图对象关联多个来源，请选择要查看的来源', nodes.map(node => ({
               label: `${node.name || '来源对象'} · ${node.path}`,
               choose: () => { if (state.isCurrentSelection(request)) createNodeClickHandler(state, showMessage)(node); },
             })), () => state.isCurrentSelection(request));
@@ -96,10 +89,9 @@ export function setupSldGridIdInteraction(
       } catch (err) {
         console.warn('[SLD→CBM] 联动失败:', err);
       }
-    });
-  }).catch((err) => {
-    console.warn('[SLD→CBM] 注册联动回调失败:', err);
-  });
+    };
+  return diagramPresentation().onSelect(async gridId=>{if(scope.isCurrent())await selected(gridId);},scope.isCurrent)
+    .then(dispose=>{scope.own(dispose);}).catch(error=>{if(scope.isCurrent())console.warn('[SLD→CBM] 注册联动回调失败:',error);});
 }
 
 export function markSubstationCoreSemanticReady(

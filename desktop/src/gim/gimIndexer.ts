@@ -1,7 +1,9 @@
 import type { IfcEntry, CbmNode } from './types.js';
-import {readCbmDocument}from'./cbmDocument.js';
+import {readCbmSourceDocument}from'./cbmDocument.js';
+import {getFileEntryIndex} from './entryResolver.js';
+import {sourceScalarProperties,sourceReferenceFields} from './sourceDocument.js';
 import { PARSER_LIMITS, parseBoundedCount } from './parserLimits.js';
-import { getFileByPath, hasFileByPath } from './fileLookup.js';
+
 import {
   createIfcModelId,
   normalizeEntryPath,
@@ -23,30 +25,11 @@ export type IfcPathResolveResult =
   | { kind: 'ambiguous'; candidates: string[] };
 
 export function resolveIfcPath(files: Map<string, File>, ref: string): IfcPathResolveResult {
-  if (isGimEmptyValue(ref)) return { kind: 'not-found' };
-  const normalizedRef = normalizeEntryPath(ref);
-  if (!normalizedRef) return { kind: 'not-found' };
-
-  // 保留 Map 的真实键；后续解析通过 getFileByPath 读取，不能把 Windows
-  // 反斜杠键只转换成展示用的正斜杠而丢失可读性/可访问性。
-  const allPaths = Array.from(files.keys());
-  const exactCandidates = allPaths.filter((path) => normalizeEntryPath(path) === normalizedRef);
-  if (normalizedRef.includes('/')) {
-    if (exactCandidates.length === 1) return { kind: 'resolved', path: exactCandidates[0] };
-    if (exactCandidates.length > 1) return { kind: 'ambiguous', candidates: exactCandidates };
-    return { kind: 'not-found' };
-  }
-
-  // 裸文件名可能同时出现在 DEV/、CBM/ 或其他目录。即使 DEV/ 是常见布局，
-  // 也不能按目录顺序猜测，否则两个同名 IFC 会串联到错误模型。
-  const refLower = normalizedIfcBasename(ref);
-  const basenameCandidates = allPaths.filter((path) => {
-    if (!normalizeEntryPath(path).endsWith('.ifc')) return false;
-    return normalizedIfcBasename(path) === refLower;
-  });
-  if (basenameCandidates.length === 1) return { kind: 'resolved', path: basenameCandidates[0] };
-  if (basenameCandidates.length > 1) return { kind: 'ambiguous', candidates: basenameCandidates };
-  return { kind: 'not-found' };
+  if(isGimEmptyValue(ref))return {kind:'not-found'};
+  const normalized=normalizeEntryPath(ref),index=getFileEntryIndex(files);
+  const candidates=[...(normalized.includes('/')?index.exactCandidates(ref):index.basenameCandidates(ref))]
+    .filter(path=>normalizeEntryPath(path).endsWith('.ifc'));
+  return candidates.length===1?{kind:'resolved',path:candidates[0]}:candidates.length?{kind:'ambiguous',candidates}:{kind:'not-found'};
 }
 
 /** 扫描全部目录下的 IFC 文件（兼容 DEV/、CBM/ 等不同导出布局） */
@@ -64,65 +47,41 @@ export function scanIfcFiles(files: Map<string, File>): IfcEntry[] {
 
 /** 从 CBM 层级递归发现 IFC 文件引用 */
 export async function discoverIfcFromCBM(files: Map<string, File>): Promise<IfcEntry[]> {
-  const visited = new Set<string>();
-  const ifcSet = new Map<string, IfcEntry>();
-  let visitedCount = 0;
-  async function walk(p: string, depth = 0) {
-    if (depth > PARSER_LIMITS.maxRecursionDepth) throw new Error(`CBM IFC 引用递归深度超过 ${PARSER_LIMITS.maxRecursionDepth}`);
-    const normalized = p.replace(/\\/g, '/');
-    const visitKey = normalized.toLowerCase();
-    if (visited.has(visitKey)) return; visited.add(visitKey);
-    visitedCount++;
-    if (visitedCount > PARSER_LIMITS.maxCbmNodes) throw new Error(`CBM IFC 节点数超过安全上限 ${PARSER_LIMITS.maxCbmNodes}`);
-    const f = getFileByPath(files, p); if (!f) return;
-    const kv = await readCbmDocument(f);
-    const n = parseBoundedCount(getFirstNonEmptyKv(kv, ['IFC.NUM']), 'IFC.NUM');
-    for (let i = 0; i < n; i++) {
-      const r = getFirstNonEmptyKv(kv, [`IFC${i}`]);
-      if (!r) continue;
-      const nm = stripIfcExtension(r.split(/[\\/]/).pop() || r);
-      const resolved = resolveIfcPath(files, r);
-      if (resolved.kind === 'ambiguous') {
-        console.warn('[GIM] IFC 引用存在重复 basename，保留全部候选但不猜测关联:', r, resolved.candidates);
-        for (const candidate of resolved.candidates) {
-          if (!normalizeEntryPath(candidate).endsWith('.ifc')) continue;
-          const candidateName = candidate.replace(/\\/g, '/').split('/').pop() || candidate;
-          ifcSet.set(normalizeEntryPath(candidate), {
-            name: stripIfcExtension(candidateName),
-            path: candidate,
-            modelId: createIfcModelId(candidate),
-          });
-        }
-      } else if (resolved.kind === 'resolved') {
-        ifcSet.set(normalizeEntryPath(resolved.path), {
-          name: nm,
-          path: resolved.path,
-          modelId: createIfcModelId(resolved.path),
-        });
-      } else {
-        console.warn('[GIM] CBM 引用的 IFC 文件不存在:', r);
-        // 不生成虚假的 IfcEntry：占位路径不在 GIM entry 清单中，若继续
-        // 写入 substation_ifc_model 会让 SQLite 拒绝整份索引。原始 CBM
-        // 引用仍保留在节点和诊断日志中，用户可据此定位缺失资源。
+  const index=getFileEntryIndex(files),visited=new Set<string>(),found=new Map<string,IfcEntry>();
+  const ambiguous=(key:string)=>console.warn('[GIM] CBM 引用槽存在冲突，保留来源诊断且不猜测:',key);
+  async function walk(path:string,depth=0):Promise<void> {
+    if(depth>PARSER_LIMITS.maxRecursionDepth)throw Error('CBM IFC 引用递归深度超过安全上限');
+    const key=normalizeEntryPath(path);if(visited.has(key))return;visited.add(key);
+    if(visited.size>PARSER_LIMITS.maxCbmNodes)throw Error('CBM IFC 节点数超过安全上限');
+    const file=files.get(path);if(!file)return;
+    let doc:Awaited<ReturnType<typeof readCbmSourceDocument>>;
+    try {doc=await readCbmSourceDocument(file,path);}catch(error){console.warn('[GIM] CBM IFC 来源读取失败，保留其他来源:',path,error);return;}
+    const props=sourceScalarProperties(doc);
+    parseBoundedCount(getFirstNonEmptyKv(props,['IFC.NUM']),'IFC.NUM');
+    parseBoundedCount(getFirstNonEmptyKv(props,['SUBSYSTEMS.NUM']),'SUBSYSTEMS.NUM');
+    for(const field of sourceReferenceFields(doc,/^IFC\d+$/,ambiguous)) {
+      const ref=field.value;if(isGimEmptyValue(ref))continue;
+      const resolved=resolveIfcPath(files,ref);
+      if(resolved.kind==='ambiguous')console.warn('[GIM] IFC 引用存在多个候选:',ref,resolved.candidates);
+      if(resolved.kind==='not-found'){console.warn('[GIM] CBM 引用的 IFC 文件不存在:',ref);continue;}
+      for(const actual of resolved.kind==='resolved'?[resolved.path]:resolved.candidates) {
+        const name=stripIfcExtension(actual.replace(/\\/g,'/').split('/').pop()!);
+        found.set(normalizeEntryPath(actual),{path:actual,name,modelId:createIfcModelId(actual)});
       }
     }
-    const sn = parseBoundedCount(getFirstNonEmptyKv(kv, ['SUBSYSTEMS.NUM']), 'SUBSYSTEMS.NUM');
-    for (let i = 0; i < sn; i++) {
-      const s = getFirstNonEmptyKv(kv, [`SUBSYSTEM${i}`]);
-      if (s) await walk(`CBM/${s}`, depth + 1);
+    for(const field of sourceReferenceFields(doc,/^SUBSYSTEM(?:\d+)?$/,ambiguous)) {
+      if(isGimEmptyValue(field.value))continue;
+      const candidates=index.candidates(field.value,path);
+      if(candidates.length===1)await walk(candidates[0],depth+1);
+      else if(candidates.length>1)console.warn('[GIM] CBM 子系统引用存在多个候选:',field.value,candidates);
     }
-    const sg = getFirstNonEmptyKv(kv, ['SUBSYSTEM']);
-    if (sg) await walk(`CBM/${sg}`, depth + 1);
   }
-  const entry = hasFileByPath(files, 'CBM/project.cbm')
-    ? 'CBM/project.cbm'
-    : Array.from(files.keys()).find((path) => path.replace(/\\/g, '/').toLowerCase() === 'cbm/project.cbm');
-  if (entry) await walk(entry);
-  // CBM 引用清单可能不完整；补入包内未被引用的 IFC，确保同名文件也都可加载。
-  for (const entry of scanIfcFiles(files)) {
-    if (!ifcSet.has(normalizeEntryPath(entry.path))) ifcSet.set(normalizeEntryPath(entry.path), entry);
-  }
-  return Array.from(ifcSet.values()).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN') || a.path.localeCompare(b.path));
+  const roots=index.basenameCandidates('project.cbm');
+  if(roots.length===1)await walk(roots[0]);
+  else if(roots.length>1)console.warn('[GIM] 工程 CBM 入口不唯一:',roots);
+  // Retain all delivered IFCs even when a CBM is missing, ambiguous or unreadable.
+  for(const entry of scanIfcFiles(files))if(!found.has(normalizeEntryPath(entry.path)))found.set(normalizeEntryPath(entry.path),entry);
+  return [...found.values()].sort((a,b)=>a.name.localeCompare(b.name,'zh-CN')||a.path.localeCompare(b.path));
 }
 
 /** 构建 IFCGUID → CbmNode 反向索引 */

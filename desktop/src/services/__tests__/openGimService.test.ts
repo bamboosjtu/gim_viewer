@@ -13,16 +13,17 @@ vi.mock('../powerlineRuntime.js',()=>({openPowerlineProject:m.line}));
 vi.mock('../equipmentRuntime.js',()=>({openEquipmentProject:m.equipment}));
 vi.mock('../../gim/projectType.js',()=>({detectGimProjectType:m.detect}));
 vi.mock('../../gim/gimExtractor.js',async original=>({...await original<typeof import('../../gim/gimExtractor.js')>(),extractGimFile:m.extract}));
-vi.mock('../browserGimChooser.js',()=>({chooseBrowserGimFile:m.choose}));
 vi.mock('../substationResourceTelemetry.js',()=>({sampleSubstationRuntimeResources:async()=>{}}));
 vi.mock('../gimOpenCore.js',async original=>({...await original<typeof import('../gimOpenCore.js')>(),showLoading:m.show,hideLoading:m.hide,scheduleHideLoading:m.scheduleHide}));
 function deferred<T>() {let resolve!:(value:T)=>void;const promise=new Promise<T>(r=>{resolve=r;});return {promise,resolve};}
+let loadButton:HTMLButtonElement;
 const bytes=(magic='GIMPKGS')=>new TextEncoder().encode(magic).buffer;
 const sourceFiles=()=>new Map([['unit.cbm',new File(['ENTITYNAME=PROJECT'],'unit.cbm')]]);
 beforeEach(async()=>{
   vi.clearAllMocks();m.native=true;
-  const {bind}=await import('../presentation/dom.js');
-  bind({btnLoadGim:document.createElement('button'),gimFileInput:document.createElement('input')} as Parameters<typeof bind>[0]);
+  loadButton=document.createElement('button');
+  const {bindProjectOpenPresentation}=await import('../projectOpenPresentationPort.js');
+  bindProjectOpenPresentation({chooseGim:()=>m.choose(),chooseIfc:async()=>[],setBusy:(kind,busy)=>{if(kind==='gim')loadButton.disabled=busy;},resetInput:vi.fn()});
   m.info.mockResolvedValue({name:'open.gim',path:'tmp/open.gim',size:7,modified_ms:1,sha256:'source-a'});
   m.head.mockResolvedValue(bytes());m.register.mockResolvedValue({id:1,sha256:'source-a'});
   m.cleanup.mockImplementation(async(state:AppState)=>{state.invalidatePendingLoads();return true;});
@@ -30,7 +31,7 @@ beforeEach(async()=>{
   m.extract.mockResolvedValue({magic:'GIMPKGS',files:sourceFiles()});m.detect.mockResolvedValue({type:'substation'});
 });
 afterEach(()=>{vi.restoreAllMocks();});
-async function button(){return (await import('../presentation/dom.js')).btnLoadGim;}
+async function button(){return loadButton;}
 it.each([['GIMPKGS','station'],['GIMPKGT','line']])('routes %s by source identity, activates after cleanup and always restores the button',async(magic,runtime)=>{
   const state=new AppState();m.head.mockResolvedValue(bytes(magic));
   await openGimProjectFromId(state,vi.fn(),1);

@@ -1,3 +1,4 @@
+import {DESKTOP_COMMANDS} from './contracts.js';
 import { reportBackgroundError } from '../src/utils/backgroundErrors.js';
 /** Separate derived device domain. Each template/catalog row commits atomically;
  * no whole-project completion marker is written for an on-demand view.
@@ -105,7 +106,7 @@ async function readNativeBatchRaw<T>(
     const result = new Map<string, DevArtifactRead<T>>();
     if (remainingBytes === 0) return new Map(chunk.map(entry => [entry.slice(store.length + 1), {status:'deferred' as const}]));
     try {
-      const payload = await invokeTimed<ArrayBuffer>('read_device_lod_artifacts', {
+      const payload = await invokeTimed<ArrayBuffer>(DESKTOP_COMMANDS.read_device_lod_artifacts, {
         projectId: args.projectId,
         sourceGimSha256: args.sourceGimSha256,
         entryPaths: chunk,
@@ -256,7 +257,7 @@ export async function writeDevArtifactDetailed(
       const releasePacket=observe?.('ipc-wire-copy',[packet]);
       let timing:{resolveMs?:number;writeMs?:number}|undefined;
       const invokeStarted=performance.now();
-      try{timing=await invokeTimed('write_device_lod_artifact',packet);}finally{releasePacket?.();}
+      try{timing=await invokeTimed(DESKTOP_COMMANDS.write_device_lod_artifact,packet);}finally{releasePacket?.();}
       return { ok: true,packMs,invokeWallMs:performance.now()-invokeStarted,
         ...(Number.isFinite(timing?.resolveMs)?{nativeResolveMs:timing!.resolveMs}:{}),
         ...(Number.isFinite(timing?.writeMs)?{nativeWriteMs:timing!.writeMs}:{}) };
@@ -279,7 +280,7 @@ export async function writeDevArtifactDetailed(
 export async function deleteDevArtifact(store: 'templates' | 'catalog', key: string, context?: CacheContext): Promise<void> {
   if (isTauri()) {
     const args = nativeArgs(store, key, context); if (!args) return;
-    try { await invokeTimed('delete_device_lod_artifact', args); } catch { /* source rebuild */ } return;
+    try { await invokeTimed(DESKTOP_COMMANDS.delete_device_lod_artifact, args); } catch { /* source rebuild */ } return;
   }
   try {
     const db = await open(); await new Promise<void>((resolve, reject) => {

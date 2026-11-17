@@ -185,3 +185,5 @@ IFC 空间归属、分解、host 边界与局部 placement 有独立来源。
 - [实体与来源模型](../engineering/entities.md)
 - [线路文本 MOD](powerline-mod.md)
 - [变电 XML MOD](substation-mod.md)
+
+普通键值文本统一由共享 SourceDocument 保留物理行和重复拼写。parseKeyValue 只是标量投影：冲突值返回空投影并保留诊断，不使用后写覆盖。重复 SUBSYSTEM 是列表边；编号槽冲突保留候选与行号，不自动绑定。线路图和 FileDev 视图显示冲突证据；包含冲突的不可恢复完整投影不发布为完整缓存。SCH 读取/解析失败与无 SCH/空索引分别处理。

@@ -1,3 +1,4 @@
+import {SUBSTATION_PARSER_VERSION} from '@desktop/contracts.js';
 import {RECOGNITION_FIELDS_FINGERPRINT} from '../gim/engineering/recognitionFieldPolicy.js';
 import type {
   IfcSpatialNode,
@@ -22,7 +23,7 @@ export const SUBSTATION_SPATIAL_SEMANTIC_CACHE_ENTRY =
   '__derived__/substation-spatial-semantic-v1.json';
 
 /** Spatial parser contract; intentionally independent of CBM/FAM domain upgrades. */
-export const SUBSTATION_PARSER_DOMAIN_VERSION = `gim-substation-parser-v1|recognition-fields:${RECOGNITION_FIELDS_FINGERPRINT}`;
+export const SUBSTATION_PARSER_DOMAIN_VERSION = `${SUBSTATION_PARSER_VERSION}|recognition-fields:${RECOGNITION_FIELDS_FINGERPRINT}`;
 
 /** Refuse to parse an unbounded/corrupt derived payload in the WebView. */
 export const MAX_SUBSTATION_SPATIAL_SNAPSHOT_BYTES = 128 * 1024 * 1024;

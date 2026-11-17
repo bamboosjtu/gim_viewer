@@ -1,19 +1,36 @@
-/**
- * GIM 文本文件共用的 KEY=VALUE 解析器。
- *
- * CBM、DEV、PHM 以及部分线路辅助文件都使用“按首个等号拆分”的基础
- * 语法。更高层的 FAM/线路 MOD parser 仍保留自己的 grammar；这里只负责
- * 不带 section 和 block 语义的普通键值行。
- */
-export function parseKeyValue(text: string): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.replace(/^\uFEFF/, '');
-    const idx = line.indexOf('=');
-    if (idx <= 0) continue;
-    const key = line.slice(0, idx).trim();
-    if (!key) continue;
-    result[key] = line.slice(idx + 1).trim();
+import {
+  parseSourceDocument,
+  sourceScalarProperties,
+  sourceConflicts,
+  sourceFields,
+} from './sourceDocument.js';
+import type { SourceDiagnostic, SourceField } from './sourceDocument.js';
+import { debugLog } from './diagnostics.js';
+const lists = new WeakMap<Record<string, string>, readonly SourceField[]>();
+const conflicts = new WeakMap<Record<string, string>, readonly SourceDiagnostic[]>();
+/** Scalar projection: conflicting values never silently pick a winner. List/reference
+ * consumers read SourceDocument fields; sparse conflict evidence survives this projection. */
+export function parseKeyValue(text: string, path = ''): Record<string, string> {
+  const doc = parseSourceDocument(path, text),
+    properties = sourceScalarProperties(doc),
+    diagnostics = sourceConflicts(doc);
+  const repeated = sourceFields(doc, 'SUBSYSTEM');
+  if (repeated.length > 1) lists.set(properties, repeated);
+  if (diagnostics.length) {
+    conflicts.set(properties, diagnostics);
+    debugLog(true, '[GIM] ambiguous source fields', diagnostics);
   }
-  return result;
+  return properties;
+}
+export function keyValueDiagnostics(
+  properties: Record<string, string>,
+): readonly SourceDiagnostic[] {
+  return conflicts.get(properties) ?? [];
+}
+
+export function keyValueListFields(properties: Record<string, string>): readonly SourceField[] {
+  return (
+    lists.get(properties) ??
+    (properties.SUBSYSTEM ? [{ path: '', keys: ['SUBSYSTEM'], value: properties.SUBSYSTEM }] : [])
+  );
 }

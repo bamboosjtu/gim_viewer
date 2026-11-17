@@ -1,3 +1,5 @@
+import {MOBILE_PARSER_VERSION} from './generated/nativeContracts.js';
+export {MOBILE_PARSER_VERSION};
 import { buildLineGimGraphFromTexts } from './lineCbmParserCore.js';
 import { LineParserTextCache, type LineParserTextFile } from './lineParserCache.js';
 import { parseLineFam } from './lineFamParser.js';
@@ -6,7 +8,7 @@ import { parsePointLine, classifyLineMod } from './geometry/lineModParser.js';
 import type { GimGraphNode } from './gimGraphTypes.js';
 import { classifyCrossing, type CrossingClassification } from './crossingClassification.js';
 
-export const MOBILE_PARSER_VERSION = 'mobile-powerline-v1';
+
 export const PREVIEW_VERSION = 'hnum-xz-v1';
 export type Coordinate = [number, number, number?]; // longitude, latitude, elevation
 export type ObjectKind = 'project' | 'line' | 'strain' | 'tower' | 'span' | 'cross';
@@ -250,6 +252,10 @@ export function buildPowerlineProject(files: LineParserTextFile[], identity: Pro
     const measured = objects.filter(o => o.kind === 'span' && o.lineIds.includes(line.id)).reduce((s, o) => s + (o.horizontalMeters ?? 0), 0);
     if (Number.isFinite(expected) && expected > 0 && Math.abs(expected - measured) / expected > 0.05) findings.push({ severity: 'WARNING', code: 'length-difference', message: `源线路长度 ${raw} km 与去重档水平长度 ${(measured / 1000).toFixed(3)} km 存在差异`, objectId: line.id });
   }
+  for(const node of graph.nodesByPath.values())for(const diagnostic of node.sourceDiagnostics??[])findings.push({
+    severity:'WARNING',code:'source-field-ambiguous',source:diagnostic.path,
+    message:`${diagnostic.field} 在原文行 ${diagnostic.lines.join('、')} 存在候选：${diagnostic.values.join(' / ')}`,
+  });
   progress?.('空间索引就绪', objects.length, objects.length);
   return { id: identity.id, name: projectObj.name, sourceSha256: identity.sha256, sourceSize: identity.size, parserVersion: MOBILE_PARSER_VERSION, objects, rawWires, tree, findings, bounds, geometryLengthMeters, counts };
 }

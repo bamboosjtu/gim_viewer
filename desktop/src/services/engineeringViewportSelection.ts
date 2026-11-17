@@ -1,5 +1,5 @@
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
-import { loadPresentation } from './presentationPort.js';
+import {selectionPresentation} from './selectionPresentationPort.js';
 import type { AppState, SelectionRequest } from '../app/state.js';
 import type { DevRepresentationHint, RepresentationResolution } from '../engineering/representations.js';
 import { getEngineeringRepresentations } from './engineeringRepresentationService.js';
@@ -8,11 +8,10 @@ import { selectEngineeringTarget, clearEngineeringHighlight } from './engineerin
 async function showUnboundSource(state: AppState, request: SelectionRequest): Promise<boolean> {
   const guard = state.selectionGuard(request);
   await clearEngineeringHighlight(state, request); if (!guard.isCurrent()) return true;
-  const { showSelectionSources } = await loadPresentation('selectionSources');
   if (!guard.isCurrent()) return true;
   state.selectionMessage = state.engineering.snapshot ? '当前表示的来源尚未可靠关联，请在来源视图查看。' : '工程来源正在解析，暂不能确认此表示对应的整体。';
   state.selectionGeometry = { status: 'unassociated', detail: state.selectionMessage };
-  showSelectionSources(state.selectionMessage, [], guard.isCurrent);
+  await selectionPresentation().chooseSources(state.selectionMessage, [], guard.isCurrent);
   return true;
 }
 
@@ -22,12 +21,11 @@ async function selectResolution(state: AppState, resolved: RepresentationResolut
   if (resolved.ownerIds.length === 1) return selectEngineeringTarget(state, { kind: 'engineering', key: resolved.ownerIds[0] }, request, { fit: false, load: false });
   if (resolved.ownerIds.length > 1) {
     await clearEngineeringHighlight(state, request); if (!guard.isCurrent()) return true;
-    const { showSelectionSources } = await loadPresentation('selectionSources');
     if (!guard.isCurrent()) return true;
     state.selectionGeometry = { status: 'ambiguous', detail: '当前粗表示包含多个工程整体，范围尚未分离。' };
     state.selectionMessage = state.selectionGeometry.detail;
     const snapshot = state.engineering.snapshot;
-    showSelectionSources(state.selectionMessage, resolved.ownerIds.map(key => ({
+    await selectionPresentation().chooseSources(state.selectionMessage, resolved.ownerIds.map(key => ({
       label: snapshot?.entities.find(e => e.id === key)?.name ?? '待归整体集合',
       choose: () => { if (guard.isCurrent()) void Promise.resolve(selectEngineeringTarget(state, { kind: 'engineering', key }, undefined, { fit: false, load: false })).catch(reportBackgroundError); },
     })), guard.isCurrent);

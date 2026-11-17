@@ -1,9 +1,9 @@
 //! Read-only project/cache diagnostics for the frontend.
 
+pub use gim_native_core::{IfcCacheFileDiagnostic, ProjectCacheDiagnostic};
 use gim_native_core::NativeError;
 use tauri::Manager;
 use rusqlite::params;
-use serde::Serialize;
 use std::fs as stdfs;
 use super::cache_paths::{is_expected_cache_path};
 use super::cache_validation::{
@@ -32,80 +32,11 @@ use super::substation_index::{missing_substation_sources, substation_index_recei
 // ==================== 诊断 command ====================
 
 /// 单个 IFC 缓存文件诊断
-#[derive(Debug, Serialize)]
-pub struct IfcCacheFileDiagnostic {
-    pub entry_path: String,
-    pub local_cache_path: Option<String>,
-    pub exists: bool,
-    pub file_size: Option<u64>,
-}
+
 
 
 /// 项目缓存完整诊断
-#[derive(Debug, Serialize)]
-pub struct ProjectCacheDiagnostic {
-    pub project_id: i64,
-    pub path: String,
-    pub name: String,
-    pub size: u64,
-    pub modified_ms: u64,
-    pub sha256: String,
 
-    pub entries_count: u64,
-    pub cbm_nodes_count: u64,
-    pub ifc_models_count: u64,
-    pub file_dev_entries_count: u64,
-    pub fam_properties_count: u64,
-    pub dev_properties_count: u64,
-
-    pub ifc_entry_count: u64,
-    pub cached_ifc_count: u64,
-    pub missing_cache_paths: Vec<String>,
-    pub stored_parser_version: Option<String>,
-    pub current_parser_version: String,
-    pub parser_version_match: bool,
-    pub stored_line_parser_version: Option<String>,
-    pub current_line_parser_version: String,
-    pub line_parser_version_match: bool,
-    pub stored_substation_parser_version: Option<String>,
-    pub current_substation_parser_version: String,
-    pub substation_parser_version_match: bool,
-    pub cache_miss_reason: Option<String>,
-    /// 线路 semantic source 的完整性状态；missing 表示旧 SQLite 缓存可用但
-    /// 尚未生成 pack，invalid 表示 pack/index 整体损坏，必须重建而不能 partial fallback。
-    pub line_semantic_pack_status: String,
-    pub line_semantic_pack_error: Option<String>,
-    /// 变电 GLB geometry cache 是否完整有效。线路工程不把该字段纳入
-    /// valid，但仍返回它以便诊断 JSON 明确区分几何缓存域。
-    pub geometry_cache_version_match: bool,
-    pub current_geometry_cache_version: String,
-    pub geometry_cache_version_file_match: bool,
-    pub geometry_cache_manifest_valid: bool,
-    pub substation_semantic_cache_valid: bool,
-    pub geometry_cache_valid: bool,
-    pub valid: bool,
-
-    pub ifc_cache_files: Vec<IfcCacheFileDiagnostic>,
-
-    // Fragments 缓存诊断
-
-    // v4: 线路工程图缓存诊断
-    pub project_type: Option<String>,
-    pub line_cbm_node_count: u64,
-    pub line_cbm_child_count: u64,
-    pub line_cbm_ref_count: u64,
-    pub line_file_stat_count: u64,
-
-    // v5: 线路工程 FAM/DEV 属性缓存诊断
-    pub line_fam_property_count: u64,
-    pub line_dev_property_count: u64,
-    pub line_fam_source_count: u64,
-    pub line_dev_source_count: u64,
-    pub line_expected_fam_ref_count: u64,
-    pub line_expected_dev_ref_count: u64,
-    pub missing_line_fam_sources: Vec<String>,
-    pub missing_line_dev_sources: Vec<String>,
-}
 
 /// 返回当前 SQLite 文件路径
 #[tauri::command]

@@ -1,10 +1,28 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { scanIfcFiles, discoverIfcFromCBM } from '../gimIndexer.js';
 import { buildCbmTree, collectIfcRefs } from '../cbmParser.js';
 
 function textFile(text: string, name: string): File {
   return new File([text], name, { type: 'text/plain' });
 }
+
+it('discovers arbitrary CBM folders and repeated list references with one shared path index',async()=>{
+  const files=new Map<string,File>([
+    ['source/project.cbm',textFile('SUBSYSTEM=left.cbm\nSUBSYSTEM=right.cbm','project.cbm')],
+    ['source/left.cbm',textFile('IFC.NUM=1\nIFC0=first.ifc','left.cbm')],
+    ['source/right.cbm',textFile('IFC.NUM=1\nIFC0=second.ifc','right.cbm')],
+    ['models/first.ifc',textFile('IFC','first.ifc')],['elsewhere/second.ifc',textFile('IFC','second.ifc')],
+  ]);
+  const keys=vi.spyOn(files,'keys'),left=vi.spyOn(files.get('source/left.cbm')!,'arrayBuffer'),right=vi.spyOn(files.get('source/right.cbm')!,'arrayBuffer');
+  expect(await discoverIfcFromCBM(files)).toHaveLength(2);expect(left).toHaveBeenCalledOnce();expect(right).toHaveBeenCalledOnce();
+  await discoverIfcFromCBM(files);expect(keys).toHaveBeenCalledOnce();
+});
+it('isolates a failed CBM read and preserves the delivered IFC inventory',async()=>{
+  const file=textFile('','project.cbm'),files=new Map([['custom/project.cbm',file],['other/model.ifc',textFile('IFC','model.ifc')]]);
+  vi.spyOn(file,'arrayBuffer').mockRejectedValue(Error('unreadable'));
+  const warn=vi.spyOn(console,'warn').mockImplementation(()=>{});
+  expect((await discoverIfcFromCBM(files)).map(row=>row.path)).toEqual(['other/model.ifc']);expect(warn).toHaveBeenCalled();warn.mockRestore();
+});
 
 describe('scanIfcFiles', () => {
   it('扫描全部目录下的 IFC（兼容 DEV/ 与 CBM/ 布局）', () => {

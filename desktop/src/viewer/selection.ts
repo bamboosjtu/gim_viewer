@@ -28,7 +28,7 @@ export function setupSelection(
   let hoverPoint: {x: number; y: number} | null = null;
   const clearHover = () => { hoverSerial++; hoverPoint = null; clearTimeout(hoverTimer); clearHoverOutline(state); };
   state.hoverCleanup = clearHover;
-  const cameraIntent = () => { state.cameraNavigationVersion++; state.viewerUserInteracted = true; state.hasFittedCamera = true; pickSerial++; state.hoverCleanup?.(); };
+  const cameraIntent = () => { state.viewState.cameraNavigationVersion++; state.viewState.viewerUserInteracted = true; state.viewState.hasFittedCamera = true; pickSerial++; state.hoverCleanup?.(); };
   const dispose = () => {
     if(signal.aborted)return;
     abort.abort();pointer=null;pickSerial++;

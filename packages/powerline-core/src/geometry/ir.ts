@@ -499,6 +499,7 @@ export interface PhmSolidModelEntry {
  * 详见 docs/schema/geometry-model.md。
  */
 export interface PhmDocument {
+  sourceDiagnostics?:SourceDiagnostic[];
   /** PHM 文件路径（如 "PHM/abc.phm"） */
   phmPath: string;
   /** SOLIDMODEL 引用列表 */

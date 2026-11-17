@@ -1,7 +1,7 @@
 import {projectPresentation} from './projectPresentationPort.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import {hasErrorCode} from '@desktop/contracts.js';
-import { loadPresentation } from './presentationPort.js';
+import {linePresentation} from './linePresentationPort.js';
 import { scheduleHideLoading } from './gimOpenCore.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { LineParserWorkerResult } from './lineParserWorkerClient.js';
@@ -192,18 +192,18 @@ export async function openPowerlineProject(context: GimRuntimeOpenContext): Prom
                 (globalThis as { __GIM_DEV_LINE_SEMANTIC_FAST_PATH__?: boolean }).__GIM_DEV_LINE_SEMANTIC_FAST_PATH__ = false;
               }
             }
-
-            const { renderLineProjectPanels } = await loadPresentation('lineProjectView');
             if (!state.isCurrentSession(session)) return;
             const endRestoreMap = perfBegin(
               usedSemanticFastPath ? '线路面板+地图渲染（semantic warm）' : '线路面板+地图渲染（SQLite 缓存命中）',
               undefined,
               perfSession,
             );
-            renderLineProjectPanels(state, graph, showMessage, {
+            const view=await linePresentation().present(state,graph,showMessage,{
               perfSession,
               enableCatenary: getDevLineCatenaryMode(),
-            });
+            },()=>state.isCurrentSession(session));
+    if(view)state.sessionScope(session).own(()=>view.destroy());
+    if(!state.isCurrentSession(session))return;
             endRestoreMap(undefined, {
               nodes: graph.stats.total,
               towers: graph.stats.Tower_Device,
@@ -388,12 +388,13 @@ export async function openPowerlineProject(context: GimRuntimeOpenContext): Prom
     // 渲染面板（在属性恢复之后，确保地图 tooltip/标签有完整 FAM/DEV 属性）
     if (!state.isCurrentSession(session)) return;
     const endRender = perfBegin('线路面板+地图渲染', undefined, perfSession);
-    const { renderLineProjectPanels } = await loadPresentation('lineProjectView');
     if (!state.isCurrentSession(session)) { endRender('（会话已失效）'); return; }
-    renderLineProjectPanels(state, graph, showMessage, {
+    const view=await linePresentation().present(state,graph,showMessage,{
       perfSession,
       enableCatenary: getDevLineCatenaryMode(),
-    });
+    },()=>state.isCurrentSession(session));
+    if(view)state.sessionScope(session).own(()=>view.destroy());
+    if(!state.isCurrentSession(session))return;
     endRender();
     perfMarkProductMoment('navigationUiReady',{domain:'line',cache:false},perfSession);
     perfMarkProductMoment('interactive',{domain:'line',cache:false},perfSession);

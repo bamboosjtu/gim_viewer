@@ -1,118 +1,80 @@
-import {projectPresentation} from './projectPresentationPort.js';
-import { scheduleHideLoading } from './gimOpenCore.js';
+import { projectPresentation } from './projectPresentationPort.js';
+import { projectOpenPresentation } from './projectOpenPresentationPort.js';
+import { scheduleHideLoading, showLoading, hideLoading } from './gimOpenCore.js';
 import type { AppState } from '../app/state.js';
-import { ensureEngineReady, loadIfcBuffer } from '../viewer/ifcLoader.js';
-import { fitCameraToScene } from '../viewer/camera.js';
-import { fileInput, btnLoadLocal } from './presentation/dom.js';
 import { isTauri } from '@desktop/runtime.js';
 import { openIfcFilePaths } from '@desktop/fileDialog.js';
-import { showLoading, hideLoading } from './gimOpenCore.js';
+import { logger } from '../utils/logger.js';
 
-/**
- * 打开本地 IFC 文件的动作函数（供 bootstrap 懒加载调用）。
- * - 对话框立即打开，不等待 3D 引擎
- * - 文件选中后才加载 3D 引擎并渲染
- */
+/** File choice belongs to UI; loading and source/session ownership belong here. */
 export async function openIfcWithDialog(
   state: AppState,
   showMessage: (text: string) => void,
 ): Promise<void> {
-  if (isTauri()) {
-    // 1. 对话框立即打开（无 3D 依赖）
-    const filePaths = await openIfcFilePaths();
-    if (!filePaths || filePaths.length === 0) return;
-    const session = state.captureProjectSession();
-    btnLoadLocal.disabled = true;
-    try {
-      // 2. 加载 3D 引擎
-      showLoading('正在加载 3D 引擎...');
-      const { getViewerRuntimeWithUI } = await import('./viewerUIBinding.js');
-      const runtime = await getViewerRuntimeWithUI(state, showMessage);
-      if (!state.isCurrentSession(session)) return;
-      const { readFileBytes } = await import('@desktop/fileReader.js');
-
-      // 3. 逐个加载 IFC
-      await ensureEngineReady(runtime.ctx, state, runtime.modelCallbacks);
-      if (!state.isCurrentSession(session)) return;
-      for (const fp of filePaths) {
-        if (!state.isCurrentSession(session)) return;
-        showLoading(`正在加载 ${fp}...`);
-        const ab = await readFileBytes(fp);
-        if (!state.isCurrentSession(session)) return;
-        const buffer = new Uint8Array(ab);
-        const name = (fp.split(/[\\/]/).pop() || 'model.ifc').replace(/\.ifc$/i, '');
-        await loadIfcBuffer(
-          runtime.ctx,
-          name,
-          buffer,
-          state,
-          (p) => showLoading(`${name}: ${Math.round(p * 100)}%`),
-          fp,
-          { session,readBytes:async()=>new Uint8Array(await readFileBytes(fp)) },
-        );
-      }
-      if (!state.isCurrentSession(session)) return;
-      projectPresentation().hideEmptyState();
-      fitCameraToScene(runtime.ctx, state);
-    } catch (err) {
-      if (!state.isCurrentSession(session)) return;
-      console.error(err);
-      showLoading(`IFC 加载失败: ${err instanceof Error ? err.message : String(err)}`);
-      scheduleHideLoading(() => state.isCurrentSession(session), 3000);
-    } finally {
-      btnLoadLocal.disabled = false;
-      if (state.isCurrentSession(session)) hideLoading();
-    }
-    return;
-  }
-
-  // 浏览器模式：input.click() 立即触发，change 后加载 3D
-  return new Promise<void>((resolve) => {
-    const handler = async () => {
-      fileInput.removeEventListener('change', handler);
-      const files = Array.from(fileInput.files || []);
-      if (files.length === 0) { resolve(); return; }
-      const session = state.captureProjectSession();
-      btnLoadLocal.disabled = true;
-      try {
-        showLoading('正在加载 3D 引擎...');
-        const { getViewerRuntimeWithUI } = await import('./viewerUIBinding.js');
-        const runtime = await getViewerRuntimeWithUI(state, showMessage);
-        if (!state.isCurrentSession(session)) return;
-        await ensureEngineReady(runtime.ctx, state, runtime.modelCallbacks);
-        if (!state.isCurrentSession(session)) return;
-        for (const file of files) {
-          if (!state.isCurrentSession(session)) return;
-          showLoading(`正在加载 ${file.name}...`);
-          const buffer = new Uint8Array(await file.arrayBuffer());
-          if (!state.isCurrentSession(session)) return;
-          const name = file.name.replace(/\.ifc$/i, '');
-          await loadIfcBuffer(
-            runtime.ctx,
+  const native = isTauri(),
+    presentation = projectOpenPresentation();
+  const paths = native ? await openIfcFilePaths() : null,
+    files = native ? null : await presentation.chooseIfc();
+  if (native ? !paths?.length : !files?.length) return;
+  const session = state.captureProjectSession();
+  presentation.setBusy('ifc', true);
+  try {
+    showLoading('正在加载 3D 引擎...');
+    const [{ getViewerRuntimeWithUI }, { ensureEngineReady, loadIfcBuffer }, { fitCameraToScene }] =
+      await Promise.all([
+        import('./viewerUIBinding.js'),
+        import('../viewer/ifcLoader.js'),
+        import('../viewer/camera.js'),
+      ]);
+    const runtime = await getViewerRuntimeWithUI(state, showMessage);
+    if (!state.isCurrentSession(session)) return;
+    const reader = native ? await import('@desktop/fileReader.js') : undefined;
+    await ensureEngineReady(runtime.ctx, state, runtime.modelCallbacks);
+    if (!state.isCurrentSession(session)) return;
+    const sources = native
+      ? (paths ?? []).map((path) => {
+          const name = (path.split(/[\\/]/).pop() || 'model.ifc').replace(/\.ifc$/i, '');
+          return {
             name,
-            buffer,
-            state,
-            (p) => showLoading(`${file.name}: ${Math.round(p * 100)}%`),
-            file.webkitRelativePath || file.name,
-            { session,readBytes:async()=>new Uint8Array(await file.arrayBuffer()) },
-          );
-        }
-        if (!state.isCurrentSession(session)) return;
-        projectPresentation().hideEmptyState();
-        fitCameraToScene(runtime.ctx, state);
-      } catch (err) {
-        if (!state.isCurrentSession(session)) return;
-      console.error(err);
-        showLoading(`IFC 加载失败: ${err instanceof Error ? err.message : String(err)}`);
-        scheduleHideLoading(() => state.isCurrentSession(session), 3000);
-      } finally {
-        fileInput.value = '';
-        btnLoadLocal.disabled = false;
-        if (state.isCurrentSession(session)) hideLoading();
-        resolve();
-      }
-    };
-    fileInput.addEventListener('change', handler);
-    fileInput.click();
-  });
+            label: path,
+            progressLabel: name,
+            key: path,
+            read: async () => new Uint8Array(await reader!.readFileBytes(path)),
+          };
+        })
+      : (files ?? []).map((file) => ({
+          name: file.name.replace(/\.ifc$/i, ''),
+          label: file.name,
+          progressLabel: file.name,
+          key: file.webkitRelativePath || file.name,
+          read: async () => new Uint8Array(await file.arrayBuffer()),
+        }));
+    for (const source of sources) {
+      if (!state.isCurrentSession(session)) return;
+      showLoading(`正在加载 ${source.label}...`);
+      const bytes = await source.read();
+      if (!state.isCurrentSession(session)) return;
+      await loadIfcBuffer(
+        runtime.ctx,
+        source.name,
+        bytes,
+        state,
+        (p) => showLoading(`${source.progressLabel}: ${Math.round(p * 100)}%`),
+        source.key,
+        { session, readBytes: source.read },
+      );
+    }
+    if (!state.isCurrentSession(session)) return;
+    projectPresentation().hideEmptyState();
+    fitCameraToScene(runtime.ctx, state.viewState);
+  } catch (error) {
+    if (!state.isCurrentSession(session)) return;
+    logger.error(error);
+    showLoading(`IFC 加载失败: ${error instanceof Error ? error.message : String(error)}`);
+    scheduleHideLoading(() => state.isCurrentSession(session), 3000);
+  } finally {
+    if (!native) presentation.resetInput('ifc');
+    presentation.setBusy('ifc', false);
+    if (state.isCurrentSession(session)) hideLoading();
+  }
 }

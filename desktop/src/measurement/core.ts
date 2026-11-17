@@ -1,1 +1,1 @@
-export * from '../../../packages/measurement-core/src/index.js';
+export * from '@gim/measurement-core/source';

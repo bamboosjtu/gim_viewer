@@ -9,7 +9,7 @@ it('controls only tree auto-location and remembers the preference',()=>{
   const state=new AppState();dispose=setupSelectionToolbar(state);
   const button=document.getElementById('btn-auto-locate')!;expect(button.getAttribute('aria-pressed')).toBe('true');button.click();expect(state.autoLocate).toBe(false);expect(localStorage.getItem('gim-auto-locate')).toBe('0');
   const request=state.beginSelection({kind:'engineering',key:'device'});expect(state.canAutoLocate(request)).toBe(false);button.click();expect(state.canAutoLocate(request)).toBe(true);
-  state.cameraNavigationVersion++;expect(state.canAutoLocate(request)).toBe(false);
+  state.viewState.cameraNavigationVersion++;expect(state.canAutoLocate(request)).toBe(false);
 });
 
 it.each(['button','escape'])('explicit %s clearing exits isolation instead of hiding an empty selected range',async mode=>{

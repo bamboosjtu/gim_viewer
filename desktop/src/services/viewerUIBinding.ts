@@ -60,11 +60,11 @@ export async function getViewerRuntimeWithUI(
     const { createSelectionVisibility } = await import('./selectionVisibility.js');
     const { ViewerViewHistory } = await import('../viewer/viewHistory.js');
     const {syncSelectionNavigation}=await import('./nodeInteractionService.js');
-    const previousVisibility=state.selectionVisibility, previousHistory=state.viewHistory;
+    const previousVisibility=state.selectionVisibility, previousHistory=state.viewState.viewHistory;
     state.selectionVisibility ??= createSelectionVisibility(state, ctx);
 
-    rollback.push(()=>{if(!previousVisibility){state.selectionVisibility?.reset();state.selectionVisibility=null;}if(!previousHistory){state.viewHistory?.dispose();state.viewHistory=null;}});
-    state.viewHistory ??= new ViewerViewHistory(ctx, 20, {
+    rollback.push(()=>{if(!previousVisibility){state.selectionVisibility?.reset();state.selectionVisibility=null;}if(!previousHistory){state.viewState.viewHistory?.dispose();state.viewState.viewHistory=null;}});
+    state.viewState.viewHistory ??= new ViewerViewHistory(ctx, 20, {
       getVisibility: () => state.onlySelected ? 'only-selected' : 'all',
       setVisibility: (value) => state.setOnlySelected(value === 'only-selected'),
     });

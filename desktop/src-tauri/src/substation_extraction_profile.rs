@@ -1,17 +1,7 @@
+pub use gim_native_core::{SemanticCheckpoint};
 use crate::gim_extract::{is_core_semantic_path, ExtractionEntryTiming};
-use serde::Serialize;
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SemanticCheckpoint {
-    pub semantic_inputs_decoded_at: f64,
-    pub semantic_inputs_written_at: f64,
-    pub semantic_bytes_decoded_at: u64,
-    pub remaining_archive_after_semantic: u64,
-    pub remaining_entries_after_semantic: usize,
-    pub large_ifc_decoded_before_semantic: bool,
-    pub physical_order: usize,
-}
+
 pub fn checkpoint(entries: &[ExtractionEntryTiming]) -> Option<SemanticCheckpoint> {
     let last = entries
         .iter()

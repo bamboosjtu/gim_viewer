@@ -143,6 +143,16 @@ fn check_registry(sources: &[(&str, &str)]) {
 #[test]
 fn desktop_command_registry_thread_boundaries() { check_registry(DESKTOP); }
 #[test]
+fn registered_names_match_the_generated_v1_command_contract() {
+    fn compare(sources:&[(&str,&str)],expected:&[&str]) {
+        let mut registry=Registry::default();for (_,source) in sources {registry.visit_file(&syn::parse_file(source).unwrap());}
+        assert_eq!(registry.registered,expected.iter().map(|name|name.to_string()).collect());
+    }
+    compare(DESKTOP,gim_native_core::DESKTOP_COMMAND_NAMES);
+    compare(&[("mobile",include_str!("../../../app/src-tauri/src/lib.rs"))],gim_native_core::MOBILE_COMMAND_NAMES);
+    compare(&[("plugin",include_str!("../../../crates/tauri-plugin-gim-import/src/lib.rs"))],gim_native_core::IMPORT_PLUGIN_COMMAND_NAMES);
+}
+#[test]
 fn registered_command_failures_use_the_generated_error_contract() {
     let mut registry=Registry::default();
     for (_,source) in DESKTOP {registry.visit_file(&syn::parse_file(source).unwrap());}

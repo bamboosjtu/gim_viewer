@@ -13,7 +13,7 @@ function fixture() {
   const state = {
     currentProjectType: 'substation', selectionRequest: { id: 1 },
     captureProjectSession: () => ({ generation: 1 }), isCurrentSession: vi.fn(() => true),
-    viewHistory: { back: vi.fn(() => new Promise<boolean>((_, fail) => { reject = fail; })) },
+    viewState: {viewHistory: { back: vi.fn(() => new Promise<boolean>((_, fail) => { reject = fail; })) }},
   };
   setupViewerShell(state as any);
   document.getElementById('menu-previous-view')!.click();

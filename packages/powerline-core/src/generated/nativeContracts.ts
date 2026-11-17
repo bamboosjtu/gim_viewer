@@ -20,9 +20,107 @@ export const NATIVE_ERROR_CODES = [
   "PROTOCOL_INVALID",
   "OPERATION_FAILED",
   "INTERNAL",
-  "RESPONSE_INVALID"
+  "RESPONSE_INVALID",
+  "SCHEMA_UNSUPPORTED"
 ] as const;
 export type NativeErrorCode = typeof NATIVE_ERROR_CODES[number];
+
+export const PROPERTY_WRITE_MODE_VALUES = ["replace","preserve"] as const;
+export type PropertyWriteMode = typeof PROPERTY_WRITE_MODE_VALUES[number];
+
+export const GEOMETRY_CACHE_MANIFEST_STATUS_VALUES = ["glb","partial","empty","unsupported","source-invalid"] as const;
+export type GeometryCacheManifestStatus = typeof GEOMETRY_CACHE_MANIFEST_STATUS_VALUES[number];
+
+export const MOBILE_BASE_LAYER_VALUES = ["imagery","vector","terrain","osm","canvas"] as const;
+export type MobileBaseLayer = typeof MOBILE_BASE_LAYER_VALUES[number];
+export const DATABASE_SCHEMA_VERSION = 1 as const;
+export const DATABASE_PARSER_VERSION = "gim-cache-schema-v1" as const;
+export const LINE_PARSER_VERSION = "gim-line-parser-v1" as const;
+export const SUBSTATION_PARSER_VERSION = "gim-substation-parser-v1" as const;
+export const GEOMETRY_CACHE_VERSION = "geometry-cache-v1-source-bound-stl" as const;
+export const MOBILE_PARSER_VERSION = "mobile-powerline-v1" as const;
+export const DESKTOP_COMMANDS = {
+  "save_engineering_tree_json": "save_engineering_tree_json",
+  "read_file_bytes": "read_file_bytes",
+  "read_file_head": "read_file_head",
+  "get_file_info": "get_file_info",
+  "get_process_memory": "get_process_memory",
+  "authorize_gim_file_path_for_dev": "authorize_gim_file_path_for_dev",
+  "benchmark_authorize_sample": "benchmark_authorize_sample",
+  "pick_gim_file_path": "pick_gim_file_path",
+  "pick_ifc_file_paths": "pick_ifc_file_paths",
+  "extract_gim_archive": "extract_gim_archive",
+  "read_extraction_manifest": "read_extraction_manifest",
+  "read_substation_parse_copy": "read_substation_parse_copy",
+  "inspect_substation_early_eligibility": "inspect_substation_early_eligibility",
+  "start_substation_extraction": "start_substation_extraction",
+  "substation_extraction_status": "substation_extraction_status",
+  "read_substation_extraction_source": "read_substation_extraction_source",
+  "cancel_substation_extraction": "cancel_substation_extraction",
+  "upsert_gim_project": "upsert_gim_project",
+  "save_gim_index": "save_gim_index",
+  "save_substation_semantic_rest": "save_substation_semantic_rest",
+  "write_cache_file_binary": "write_cache_file_binary",
+  "read_cached_ifc": "read_cached_ifc",
+  "read_cached_entry": "read_cached_entry",
+  "batch_read_cached_files": "batch_read_cached_files",
+  "read_line_semantic_pack": "read_line_semantic_pack",
+  "read_line_semantic_pack_all": "read_line_semantic_pack_all",
+  "write_glb_file_binary": "write_glb_file_binary",
+  "read_glb_file": "read_glb_file",
+  "read_device_lod_artifacts": "read_device_lod_artifacts",
+  "write_device_lod_artifact": "write_device_lod_artifact",
+  "delete_device_lod_artifact": "delete_device_lod_artifact",
+  "batch_read_glb_files": "batch_read_glb_files",
+  "read_geometry_cache_manifest": "read_geometry_cache_manifest",
+  "write_geometry_cache_version": "write_geometry_cache_version",
+  "write_geometry_cache_manifest": "write_geometry_cache_manifest",
+  "invalidate_glb_cache_entry": "invalidate_glb_cache_entry",
+  "get_gim_index": "get_gim_index",
+  "validate_gim_cache": "validate_gim_cache",
+  "get_db_path": "get_db_path",
+  "get_latest_project_cache_diagnostic": "get_latest_project_cache_diagnostic",
+  "get_line_gim_graph": "get_line_gim_graph",
+  "save_line_graph_begin": "save_line_graph_begin",
+  "save_line_attrs_chunk": "save_line_attrs_chunk",
+  "save_line_project_finish": "save_line_project_finish",
+  "get_line_attributes": "get_line_attributes",
+  "list_cached_projects": "list_cached_projects",
+  "get_app_settings": "get_app_settings",
+  "set_app_setting": "set_app_setting",
+  "authorize_cached_gim_project": "authorize_cached_gim_project",
+  "touch_gim_project_opened": "touch_gim_project_opened",
+  "delete_project_cache": "delete_project_cache",
+  "get_project_diagnostic": "get_project_diagnostic",
+  "save_geometry_refs": "save_geometry_refs"
+} as const;
+export type DesktopCommand = typeof DESKTOP_COMMANDS[keyof typeof DESKTOP_COMMANDS];
+export const MOBILE_COMMANDS = {
+  "list_projects": "list_projects",
+  "prepare_project": "prepare_project",
+  "cancel_import": "cancel_import",
+  "discard_import": "discard_import",
+  "get_project_cache": "get_project_cache",
+  "read_text_entries": "read_text_entries",
+  "commit_project": "commit_project",
+  "read_source": "read_source",
+  "read_project_header": "read_project_header",
+  "delete_project": "delete_project",
+  "preview_cache": "preview_cache",
+  "get_settings": "get_settings",
+  "save_settings": "save_settings"
+} as const;
+export type MobileCommand = typeof MOBILE_COMMANDS[keyof typeof MOBILE_COMMANDS];
+export const IMPORT_PLUGIN_COMMANDS = {
+  "pick": "plugin:gim-import|pick",
+  "cancel": "plugin:gim-import|cancel",
+  "check_location_permissions": "plugin:gim-import|check_location_permissions",
+  "request_location_permissions": "plugin:gim-import|request_location_permissions",
+  "get_position": "plugin:gim-import|get_position",
+  "get_window_state": "plugin:gim-import|get_window_state",
+  "set_immersive": "plugin:gim-import|set_immersive"
+} as const;
+export type ImportPluginCommand = typeof IMPORT_PLUGIN_COMMANDS[keyof typeof IMPORT_PLUGIN_COMMANDS];
 
 export interface FamPropertyPayload {
   source_line?: number | null;
@@ -98,3 +196,615 @@ export interface NativeError {
   message: string;
   context?: NativeErrorContext | null;
 }
+
+export interface FileInfo {
+  path: string;
+  name: string;
+  size: number;
+  modified_ms: number;
+  sha256: string;
+}
+
+export interface ProcessMemorySnapshot {
+  pid: number;
+  rssBytes: number | null;
+  source: string;
+  rssSource?: string;
+  processTreeRssBytes: number | null;
+  processTreePrivateBytes?: number | null;
+  rootPrivateBytes?: number | null;
+  processInstances?: Array<[number, string]>;
+  processCount: number | null;
+  processTreeAvailable: boolean;
+  processTreeSource?: string;
+  processTreeReason?: string | null;
+}
+
+export interface FileInfoInput {
+  path: string;
+  name: string;
+  size: number;
+  modified_ms: number;
+  sha256: string;
+}
+
+export interface GimProjectRecord {
+  id: number;
+  path: string;
+  name: string;
+  size: number;
+  modified_ms: number;
+  sha256: string;
+  created_at_ms: number;
+  updated_at_ms: number;
+  last_opened_at_ms: number;
+}
+
+export interface GimEntryPayload {
+  entry_path: string;
+  file_name: string;
+  entry_type: string;
+  file_size: number;
+  local_cache_path?: string | null;
+}
+
+export interface CbmNodePayload {
+  raw_properties_json?: string | null;
+  node_key: string;
+  parent_key: string | null;
+  path: string;
+  name: string;
+  entity_name: string | null;
+  classify_name: string | null;
+  fam_path: string | null;
+  dev_path: string | null;
+  ifc_file: string | null;
+  ifc_guid: string | null;
+  transform_matrix: string | null;
+  sort_order: number;
+}
+
+export interface IfcModelPayload {
+  model_id: string;
+  name: string;
+  entry_path: string;
+}
+
+export interface FileDevEntryPayload {
+  source_design_file?: string | null;
+  model_id: string;
+  ifc_name: string;
+  ifc_file: string;
+  device_count: number;
+  device_cbm: string;
+  sort_order: number;
+}
+
+export interface GimIndexPayload {
+  capability_summary_json?: string | null;
+  project_id: number;
+  source_sha256?: string | null;
+  entries: Array<GimEntryPayload>;
+  cbm_nodes: Array<CbmNodePayload>;
+  ifc_models: Array<IfcModelPayload>;
+  file_dev_entries: Array<FileDevEntryPayload>;
+  fam_properties: Array<FamPropertyPayload>;
+  dev_properties: Array<DevPropertyPayload>;
+}
+
+export interface IfcModelRecord {
+  id: number;
+  project_id: number;
+  model_id: string;
+  name: string;
+  entry_path: string;
+  created_at_ms: number;
+}
+
+export interface CbmNodeRecord {
+  raw_properties_json?: string | null;
+  id: number;
+  project_id: number;
+  node_key: string;
+  parent_key: string | null;
+  path: string;
+  name: string;
+  entity_name: string | null;
+  classify_name: string | null;
+  fam_path: string | null;
+  dev_path: string | null;
+  ifc_file: string | null;
+  ifc_guid: string | null;
+  transform_matrix: string | null;
+  sort_order: number;
+  created_at_ms: number;
+}
+
+export interface GimEntryRecord {
+  id: number;
+  project_id: number;
+  entry_path: string;
+  file_name: string;
+  entry_type: string;
+  file_size: number;
+  local_cache_path: string | null;
+  created_at_ms: number;
+}
+
+export interface FileDevEntryRecord {
+  source_design_file?: string | null;
+  id: number;
+  project_id: number;
+  model_id: string;
+  ifc_name: string;
+  ifc_file: string;
+  device_count: number;
+  device_cbm: string;
+  sort_order: number;
+  created_at_ms: number;
+}
+
+export interface GetGimIndexResult {
+  capability_summary_json?: string | null;
+  entries: Array<GimEntryRecord>;
+  cbm_nodes: Array<CbmNodeRecord>;
+  ifc_models: Array<IfcModelRecord>;
+  file_dev_entries: Array<FileDevEntryRecord>;
+  fam_properties: Array<FamPropertyRecord>;
+  dev_properties: Array<DevPropertyRecord>;
+}
+
+export interface DevSolidModelPayload {
+  dev_path: string;
+  solid_model_path: string;
+  transform_matrix: string | null;
+  sort_order: number;
+}
+
+export interface DevSubDevicePayload {
+  dev_path: string;
+  child_dev_path: string;
+  transform_matrix: string | null;
+  sort_order: number;
+}
+
+export interface PhmSolidModelPayload {
+  phm_path: string;
+  solid_model_path: string;
+  transform_matrix: string | null;
+  color: string | null;
+  phm_color_max_a?: number | null;
+  sort_order: number;
+}
+
+export interface GeometryRefsPayload {
+  project_id: number;
+  source_sha256?: string | null;
+  dev_solid_models: Array<DevSolidModelPayload>;
+  dev_sub_devices: Array<DevSubDevicePayload>;
+  phm_solid_models: Array<PhmSolidModelPayload>;
+}
+
+export interface SubstationSemanticRestPayload {
+  properties_mode: PropertyWriteMode;
+  project_id: number;
+  source_sha256: string | null;
+  refs: GeometryRefsPayload;
+  fam_properties: Array<FamPropertyPayload>;
+  dev_properties: Array<DevPropertyPayload>;
+  capability_summary_json: string | null;
+}
+
+export interface LineCbmNodePayload {
+  path: string;
+  name: string | null;
+  entity_name: string | null;
+  classify_name: string | null;
+  raw_props_json: string;
+  sort_order: number | null;
+}
+
+export interface LineCbmChildPayload {
+  parent_path: string;
+  child_path: string;
+  sort_order: number | null;
+  ref_type: string;
+  extra: string | null;
+}
+
+export interface LineCbmRefPayload {
+  node_path: string;
+  ref_kind: string;
+  ref_key: string | null;
+  ref_value: string;
+  sort_order: number | null;
+  normalized_ref_value: string | null;
+  file_name_lower: string | null;
+}
+
+export interface LineFileStatPayload {
+  file_type: string;
+  count: number;
+}
+
+export interface LineGraphPayload {
+  project_id: number;
+  project_type: string;
+  source_sha256?: string | null;
+  nodes: Array<LineCbmNodePayload>;
+  children: Array<LineCbmChildPayload>;
+  refs: Array<LineCbmRefPayload>;
+  file_stats: Array<LineFileStatPayload>;
+}
+
+export interface LineCbmNodeRecord {
+  path: string;
+  name: string | null;
+  entity_name: string | null;
+  classify_name: string | null;
+  raw_props_json: string;
+  sort_order: number | null;
+}
+
+export interface LineCbmChildRecord {
+  parent_path: string;
+  child_path: string;
+  sort_order: number | null;
+  ref_type: string;
+  extra: string | null;
+}
+
+export interface LineCbmRefRecord {
+  node_path: string;
+  ref_kind: string;
+  ref_key: string | null;
+  ref_value: string;
+  sort_order: number | null;
+  normalized_ref_value: string | null;
+  file_name_lower: string | null;
+}
+
+export interface LineFileStatRecord {
+  file_type: string;
+  count: number;
+}
+
+export interface LineGraphResult {
+  project_type: string | null;
+  nodes: Array<LineCbmNodeRecord>;
+  children: Array<LineCbmChildRecord>;
+  refs: Array<LineCbmRefRecord>;
+  file_stats: Array<LineFileStatRecord>;
+}
+
+export interface LineAttributeResult {
+  fam_properties: Array<LineFamPropertyRecord>;
+  dev_properties: Array<LineDevPropertyRecord>;
+}
+
+export interface GeometryCacheManifestEntry {
+  diagnostic?: string;
+  entry_path: string;
+  status: GeometryCacheManifestStatus;
+  size: number;
+}
+
+export interface GeometryCacheManifest {
+  source_sha256: string;
+  entries: Array<GeometryCacheManifestEntry>;
+}
+
+export interface DeviceLodWriteTiming {
+  resolveMs: number;
+  writeMs: number;
+}
+
+export interface GimCacheValidation {
+  project_id: number;
+  has_index: boolean;
+  ifc_models_count: number;
+  ifc_entry_count: number;
+  cached_ifc_count: number;
+  cbm_nodes_count: number;
+  file_dev_entries_count: number;
+  missing_cache_paths: Array<string>;
+  stored_parser_version: string | null;
+  current_parser_version: string;
+  parser_version_match: boolean;
+  stored_line_parser_version: string | null;
+  current_line_parser_version: string;
+  line_parser_version_match: boolean;
+  stored_substation_parser_version: string | null;
+  current_substation_parser_version: string;
+  substation_parser_version_match: boolean;
+  cache_miss_reason: string | null;
+  valid: boolean;
+  project_type: string | null;
+  validated_project_type: string;
+  line_cbm_node_count: number;
+  line_fam_source_count: number;
+  line_dev_source_count: number;
+  line_expected_fam_ref_count: number;
+  line_expected_dev_ref_count: number;
+  missing_line_fam_sources: Array<string>;
+  missing_line_dev_sources: Array<string>;
+  line_semantic_pack_status: string;
+  line_semantic_pack_error: string | null;
+  geometry_cache_version_match: boolean;
+  current_geometry_cache_version: string;
+  geometry_cache_version_file_match: boolean;
+  geometry_cache_manifest_valid: boolean;
+  substation_semantic_cache_valid: boolean;
+  substation_properties_complete: boolean;
+  geometry_cache_valid: boolean;
+}
+
+export interface IfcCacheFileDiagnostic {
+  entry_path: string;
+  local_cache_path: string | null;
+  exists: boolean;
+  file_size: number | null;
+}
+
+export interface ProjectCacheDiagnostic {
+  project_id: number;
+  path: string;
+  name: string;
+  size: number;
+  modified_ms: number;
+  sha256: string;
+  entries_count: number;
+  cbm_nodes_count: number;
+  ifc_models_count: number;
+  file_dev_entries_count: number;
+  fam_properties_count: number;
+  dev_properties_count: number;
+  ifc_entry_count: number;
+  cached_ifc_count: number;
+  missing_cache_paths: Array<string>;
+  stored_parser_version: string | null;
+  current_parser_version: string;
+  parser_version_match: boolean;
+  stored_line_parser_version: string | null;
+  current_line_parser_version: string;
+  line_parser_version_match: boolean;
+  stored_substation_parser_version: string | null;
+  current_substation_parser_version: string;
+  substation_parser_version_match: boolean;
+  cache_miss_reason: string | null;
+  line_semantic_pack_status: string;
+  line_semantic_pack_error: string | null;
+  geometry_cache_version_match: boolean;
+  current_geometry_cache_version: string;
+  geometry_cache_version_file_match: boolean;
+  geometry_cache_manifest_valid: boolean;
+  substation_semantic_cache_valid: boolean;
+  geometry_cache_valid: boolean;
+  valid: boolean;
+  ifc_cache_files: Array<IfcCacheFileDiagnostic>;
+  project_type: string | null;
+  line_cbm_node_count: number;
+  line_cbm_child_count: number;
+  line_cbm_ref_count: number;
+  line_file_stat_count: number;
+  line_fam_property_count: number;
+  line_dev_property_count: number;
+  line_fam_source_count: number;
+  line_dev_source_count: number;
+  line_expected_fam_ref_count: number;
+  line_expected_dev_ref_count: number;
+  missing_line_fam_sources: Array<string>;
+  missing_line_dev_sources: Array<string>;
+}
+
+export interface CachedProjectSummary {
+  id: number;
+  name: string;
+  path: string;
+  project_type: string | null;
+  parser_version: string | null;
+  size: number;
+  modified_ms: number;
+  updated_at_ms: number;
+  last_opened_at_ms: number;
+}
+
+export interface BinaryCacheWriteMeta {
+  project_id: number;
+  entry_path: string;
+  source_gim_sha256: string | null;
+}
+
+export interface BatchCacheFileResult {
+  entry_path: string;
+  bytes: Array<number> | null;
+}
+
+export interface ProjectMeta {
+  id: string;
+  name: string;
+  sha256: string;
+  size: number;
+  importedAt: number;
+  lastOpenedAt: number;
+  parserVersion: string;
+  counts: Record<string, number>;
+}
+
+export interface ImportFile {
+  path: string;
+  name: string;
+  sha256: string;
+  size: number;
+}
+
+export interface Prepared<Cache = unknown> {
+  meta: ProjectMeta;
+  duplicate: boolean;
+  cache?: Cache | null;
+}
+
+export interface TextEntry {
+  path: string;
+  text: string;
+}
+
+export interface Settings {
+  tiandituKey: string;
+  baseLayer: MobileBaseLayer;
+}
+
+export interface SavedSettings {
+  version: number;
+  settings: Settings;
+}
+
+export interface ExtractedEntryMeta {
+  path: string;
+  offset: number;
+  size: number;
+  cache_path?: string;
+  semantic_pack_offset?: number;
+  packed?: boolean;
+}
+
+export interface ExtractionManifest {
+  source_sha256: string;
+  entries: Array<ExtractionManifestEntry>;
+}
+
+export interface ExtractionManifestEntry {
+  path: string;
+  size: number;
+  packed: boolean;
+  cache_path?: string;
+}
+
+export interface ExtractManifest {
+  magic: string;
+  project_id?: string;
+  project_name?: string;
+  entries: Array<ExtractedEntryMeta>;
+  semantic_pack_path?: string;
+  profile?: ExtractionProfile;
+  parse_copy?: CopyReceipt;
+  entry_trace?: Array<ExtractionEntryTiming>;
+  semantic_checkpoint?: SemanticCheckpoint;
+}
+
+export interface CopyReceipt {
+  size: number;
+  sha256: string;
+}
+
+export interface ParseCopyEntry {
+  path: string;
+  offset: number;
+  size: number;
+}
+
+export interface JobSnapshot {
+  jobId: string;
+  projectId: number;
+  sourceSha256: string;
+  status: string;
+  entries: Array<[string, number]>;
+  semanticCopy: CopyReceipt | null;
+  semanticReadyAtMs: number | null;
+  materializationCompleteAtMs: number | null;
+  materializedEntries: number;
+  error: NativeError | null;
+  profile: ExtractionProfile | null;
+  trace: Array<ExtractionEntryTiming>;
+  cacheRoot: string | null;
+}
+
+export interface SemanticCheckpoint {
+  [key: string]: number | boolean;
+  semanticInputsDecodedAt: number;
+  semanticInputsWrittenAt: number;
+  semanticBytesDecodedAt: number;
+  remainingArchiveAfterSemantic: number;
+  remainingEntriesAfterSemantic: number;
+  largeIfcDecodedBeforeSemantic: boolean;
+  physicalOrder: number;
+}
+
+export interface ExtractionProfile {
+  totalMs: number;
+  archiveMs: number;
+  headerMs: number;
+  decodeMs: number;
+  writeMs: number;
+  writeOpenMs?: number;
+  writeDataMs?: number;
+  manifestMs: number;
+  commitMs?: number;
+  writeMode?: string;
+  archiveBytes: number;
+  entryCount: number;
+  totalBytes: number;
+  semanticPackEntries?: number;
+  semanticPackBytes?: number;
+  semanticPackWriteMs?: number;
+  maxEntryWriteMs: number;
+  maxEntryWritePath?: string;
+  maxEntryDecodeMs: number;
+  maxEntryDecodePath?: string;
+}
+
+export interface ExtractionEntryTiming {
+  path: string;
+  archiveIndex: number;
+  folderIndex: number | null;
+  physicalOrder: number;
+  size: number;
+  decodeMs: number;
+  sinkWriteMs: number;
+  decodedAtMs: number;
+  sinkCompleteAtMs: number;
+  cumulativeBytes: number;
+}
+
+export type GimIndexResult = GetGimIndexResult;
+
+export type NativeExtractionProfile = ExtractionProfile;
+
+export type NativeExtractionEntryTiming = ExtractionEntryTiming;
+
+export type ParseCopyReceipt = CopyReceipt;
+
+export type ExtractManifestEntry = ExtractedEntryMeta;
+
+export type SubstationRestPayload = SubstationSemanticRestPayload;
+
+export interface ImportProgress {
+  stage: string;
+  done?: number;
+  total?: number | null;
+}
+
+export interface PickedFile {
+  path: string;
+  name: string;
+  sha256: string;
+  size: number;
+  copyMs: number;
+}
+
+export interface SubstationEarlyEligibility {
+  eligible: boolean;
+  reason: string;
+  archiveFormat: string;
+  folderCount: number;
+  coreEntryCount: number;
+  coreBytes: number;
+  streamCoreEntries: number;
+  emptyCoreEntries: number;
+  coreOnlyFolders: Array<number>;
+  semanticPhysicalOrder: number;
+  checkpointDecodedBytes: number;
+  totalDecodedBytes: number;
+}
+
+export type EarlySemanticEligibility = SubstationEarlyEligibility;

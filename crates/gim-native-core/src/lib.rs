@@ -14,7 +14,6 @@ use std::fs::File;
 use std::io::{self, Cursor, Read, Seek, SeekFrom};
 use std::path::Path;
 use std::time::Instant;
-use serde::Serialize;
 mod error;
 #[path = "../../../contracts/generated/native.rs"]
 mod native_contracts;
@@ -210,47 +209,7 @@ pub struct ExtractionMetadata {
 /// 原生解压阶段计时。该结构随 manifest 返回给 WebView，便于把冷启动中
 /// 的归档解码、逐文件写盘和 manifest 组装拆开观察；所有耗时均为 Rust
 /// 单调时钟毫秒，不包含前端 IPC 等待。
-#[derive(Debug, Clone, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ExtractionProfile {
-    /// extract_gim_archive 命令从进入阻塞线程到返回 payload 的总耗时。
-    pub total_ms: f64,
-    /// 定位归档后逐条解压/写盘的耗时（不含 header 与 manifest 组装）。
-    pub archive_ms: f64,
-    /// metadata/open/read prefix/parse header 的耗时。
-    pub header_ms: f64,
-    /// sevenz/zip 解码并读取每个条目字节的累计耗时。
-    pub decode_ms: f64,
-    /// sink（生产路径为 staging 文件写入）的累计耗时。
-    pub write_ms: f64,
-    /// staging 文件 OpenOptions/create_new 的累计耗时。
-    pub write_open_ms: f64,
-    /// staging 文件 write_all 的累计耗时；不含打开文件和目录检查。
-    pub write_data_ms: f64,
-    /// manifest JSON + envelope 组装耗时。
-    pub manifest_ms: f64,
-    /// staging 目录改名/替换正式缓存目录耗时。
-    pub commit_ms: f64,
-    /// 当前写盘策略，生产原生路径为 staging-directory。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub write_mode: Option<String>,
-    /// GIM 输入归档字节数。
-    pub archive_bytes: u64,
-    /// 成功解压并交给 sink 的文件条目数。
-    pub entry_count: usize,
-    /// 成功解压的总字节数。
-    pub total_bytes: u64,
-    /// 线路 semantic pack 中连续写入的条目/字节；非线路或未启用时为 0。
-    pub semantic_pack_entries: usize,
-    pub semantic_pack_bytes: u64,
-    pub semantic_pack_write_ms: f64,
-    /// 单条 sink 写入最大耗时及其路径，定位数万小文件中的异常项。
-    pub max_entry_write_ms: f64,
-    pub max_entry_write_path: Option<String>,
-    /// 单条解码/读取最大耗时及其路径。
-    pub max_entry_decode_ms: f64,
-    pub max_entry_decode_path: Option<String>,
-}
+
 
 fn elapsed_ms(start: Instant) -> f64 {
     start.elapsed().as_secs_f64() * 1000.0
@@ -429,20 +388,7 @@ impl Read for CancelAwareReader<'_> {
 
 /// Passive timings emitted after a complete sink write. The default/mobile API
 /// supplies no observer and retains its extraction and quota contract.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ExtractionEntryTiming {
-    pub path: String,
-    pub archive_index: usize,
-    pub folder_index: Option<usize>,
-    pub physical_order: usize,
-    pub size: u64,
-    pub decode_ms: f64,
-    pub sink_write_ms: f64,
-    pub decoded_at_ms: f64,
-    pub sink_complete_at_ms: f64,
-    pub cumulative_bytes: u64,
-}
+
 
 /// 从已定位的归档 reader 逐条解压。sink 返回后当前条目的字节立即释放，
 /// 因而原生落盘路径的内存上限约为最大单文件 + 解码器工作集。
@@ -683,22 +629,7 @@ pub fn is_core_semantic_path(path: &str) -> bool {
 }
 
 /// Capability absence is an explicit value. Safety, quota and decoder errors remain Err.
-#[derive(Clone, Debug, Default, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SubstationEarlyEligibility {
-    pub eligible: bool,
-    pub reason: String,
-    pub archive_format: String,
-    pub folder_count: usize,
-    pub core_entry_count: usize,
-    pub core_bytes: u64,
-    pub stream_core_entries: usize,
-    pub empty_core_entries: usize,
-    pub core_only_folders: Vec<usize>,
-    pub semantic_physical_order: usize,
-    pub checkpoint_decoded_bytes: u64,
-    pub total_decoded_bytes: u64,
-}
+
 pub fn inspect_substation_eligibility(path: &Path, quota: &ExtractionQuota) -> Result<SubstationEarlyEligibility, NativeError> {
     Ok(inspect_substation_preflight(path, quota)?.0)
 }

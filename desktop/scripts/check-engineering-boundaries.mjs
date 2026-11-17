@@ -2,7 +2,9 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
-import {checkPresentationSource,checkPresentationRegistry} from './presentation-boundaries.mjs';
+import {checkPresentationSource} from './presentation-boundaries.mjs';
+import {packageBoundaryError} from './package-boundaries.mjs';
+import {nativeContractCallErrors} from './native-contract-boundaries.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../src');
 const measurementCoreRoot = resolve(root, '../../packages/measurement-core/src');
@@ -16,15 +18,16 @@ function* files(dir) {
   }
 }
 const failures = [];
-const presentationBudget=JSON.parse(readFileSync(new URL('./presentation-legacy-budget.json',import.meta.url),'utf8'));
-failures.push(...checkPresentationRegistry(readFileSync(resolve(root,'services/presentationPort.ts'),'utf8'),
-  new Set(Object.values(presentationBudget).flatMap(Object.keys))));
+const sharedDependencies=JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8')).dependencies;
+for(const path of [...files(resolve(root,'..','bridge')),...files(root),...files(resolve(root,'..','..','app','src'))]) {
+  failures.push(...nativeContractCallErrors(readFileSync(path,'utf8'),relative(root,path)));
+}
 for(const path of files(resolve(root,'services'))) {
   const local=relative(root,path).replaceAll('\\','/');
   if(local==='services/presentationPort.ts')continue;
-  failures.push(...checkPresentationSource(readFileSync(path,'utf8'),local,presentationBudget[local]));
+  failures.push(...checkPresentationSource(readFileSync(path,'utf8'),local));
 }
-// The measurement core is deliberately inlined as source until SDK packaging.
+// Desktop uses the declared source export; SDK consumers keep the built default entry.
 // All desktop access goes through one facade; the core cannot import runtime layers.
 for (const path of files(measurementCoreRoot)) {
   const ast = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true);
@@ -42,7 +45,7 @@ for (const path of files(measurementCoreRoot)) {
   }
   ts.forEachChild(ast,rejectDynamic);
 }
-if (readFileSync(measurementFacade, 'utf8').trim() !== "export * from '../../../packages/measurement-core/src/index.js';") {
+if (readFileSync(measurementFacade, 'utf8').trim() !== "export * from '@gim/measurement-core/source';") {
   failures.push('measurement/core.ts: measurement source facade changed; update the explicit boundary contract');
 }
 // Existing IFC persistence adapters are outside the engineering refactor. Keep
@@ -61,6 +64,16 @@ const uiPresentationValues = new Map([
   ['gim/gimValueSemantics.ts',new Set(['isGimEmptyValue'])],
   ['gim/geometry/geometryDiagnostics.ts',new Set(['getGeometryDiagnostic','geometryReasonLabel','geometryStatusLabel'])],
   ['shared/gimParsing.ts',new Set(['getFirstNonEmptyKv','isGimEmptyValue'])],
+]);
+const viewerSourceValues=new Map([
+  ['gim/connectionEndpoints.ts',new Set(['validEndpointEvidence','normalizeConnectionPointGuid'])],
+  ['gim/ifcConnectionSubset.ts',new Set(['omitIndexedOpenings','buildEarlyConnectionInput'])],
+  ['gim/modelIdentity.ts',new Set(['createIfcModelId'])],
+  ['gim/fileLookup.ts',new Set(['getFileByPath'])],
+  ['gim/geometry/stretchedBody.ts',new Set(['stretchedBodyDisplacement'])],
+  ['gim/geometry/offsetRectangularTable.ts',new Set(['offsetRectangularTableVertices'])],
+  ['gim/geometry/xmlModParser.ts',new Set(['parseXmlMod'])],
+  ['gim/geometry/ir.ts',new Set(['DEFAULT_ANGULAR_SEGMENTS','DEFAULT_LINEAR_SEGMENTS'])],
 ]);
 for (const layer of ['engineering','gim','viewer','ui','services','app']) for (const path of files(resolve(root,layer))) {
   const ast = ts.createSourceFile(path, readFileSync(path,'utf8'), ts.ScriptTarget.Latest, true);
@@ -100,11 +113,19 @@ for (const layer of ['engineering','gim','viewer','ui','services','app']) for (c
       : ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword ? node.arguments[0] : undefined;
     if (specifier && ts.isStringLiteral(specifier)) {
       const name = specifier.text;
+      const packageError=packageBoundaryError(name,sharedDependencies);if(packageError)failures.push(`${localPath}: ${packageError}: ${name}`);
       const resolved = name.startsWith('.') ? resolve(dirname(path), name.replace(/\.js$/, '.ts')) : null;
-      if (path !== measurementFacade && (resolved?.startsWith(`${measurementCoreRoot}${sep}`) || name === '@gim/measurement-core')) {
+      if (path !== measurementFacade && (resolved?.startsWith(`${measurementCoreRoot}${sep}`) || name.startsWith('@gim/measurement-core'))) {
         failures.push(`${localPath}: import measurement core through measurement/core.ts`);
       }
       const target = name.startsWith('.') ? relative(root,resolve(dirname(path),name)).replaceAll('\\','/').split('/')[0] : name;
+      if(layer==='viewer'&&target==='gim') {
+        const module=relative(root,resolve(dirname(path),name.replace(/\.js$/,'.ts'))).replaceAll('\\','/');
+        const clause=ts.isImportDeclaration(node)?node.importClause:undefined,bindings=clause?.namedBindings;
+        const names=bindings&&ts.isNamedImports(bindings)?bindings.elements.filter(item=>!item.isTypeOnly).map(item=>(item.propertyName??item.name).text):null;
+        if(!node.isTypeOnly&&!clause?.isTypeOnly&&(!names||names.some(value=>!viewerSourceValues.get(module)?.has(value))))failures.push(`${localPath}: Viewer cannot import source semantics ${name}`);
+        if(bindings&&ts.isNamedImports(bindings)&&bindings.elements.some(item=>(item.propertyName??item.name).text==='CbmNode'))failures.push(`${localPath}: CbmNode belongs to source/application projections`);
+      }
       if (pureLineProjection && /^(?:app|ui|viewer|@desktop|@tauri-apps|three|web-ifc|maplibre)/.test(target)) {
         failures.push(`${localPath}: pure line projection imports runtime dependency ${name}`);
       }
@@ -132,7 +153,7 @@ for (const layer of ['engineering','gim','viewer','ui','services','app']) for (c
         :projection==='source'?/composition|inventory|normalize|classify|navigation/:undefined;
       if(cross?.test(name))failures.push(`${local}: projection template imports another projection ${name}`);
     }
-    if (layer === 'viewer' && ts.isPropertyAccessExpression(node) && /^engineering(?:Selection|Snapshot|Sources|Navigation)$/.test(node.name.text)) {
+    if (layer === 'viewer' && ts.isPropertyAccessExpression(node) && /^(?:engineering(?:Selection|Snapshot|Sources|Navigation)?|currentIfcEntries|ifcGuidIndex|ifcGuidToName|deviceToIfcFile)$/.test(node.name.text)) {
       failures.push(`${relative(root,path)}: renderer reads ${node.name.text}`);
     }
     ts.forEachChild(node,visit);
@@ -145,8 +166,6 @@ for (const layer of ['engineering','gim','viewer','ui','services','app']) for (c
 const runtimeFamilies = [
   ['substationRuntime', 'substationPresentation', 'substationRuntimeTelemetry', 'substationSpatialRuntime',
     'substationDocumentRuntime', 'substationIfcRuntime', 'substationDevRuntime', 'substationLoadingState'],
-  ['modAutoLoadService', 'modGeometryContracts', 'modGeometryScene', 'modGeometrySourceFiles',
-    'devGlbCacheFastPath', 'devGlbCacheRecovery', 'modRawGeometryLoader'],
   ['devLodRuntime', 'devLodTemplateStore', 'devLodArtifactWriter', 'devLodSourceWorkset',
     'devLodReadiness', 'devLodDiagnostics', 'devLodTypes'],
 ];

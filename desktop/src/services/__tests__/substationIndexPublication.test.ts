@@ -166,3 +166,10 @@ describe('two-phase semantic publication', () => {
     expect(deps.saveRest).not.toHaveBeenCalled();
   });
 });
+it('does not publish an empty replacement snapshot when a required DEV source read fails',async()=>{
+  const input=await fixture();
+  vi.spyOn(input.files.get('DEV/root.dev')!,'text').mockRejectedValue(Error('required source unavailable'));
+  const saveRest=vi.fn();
+  await expect(publishSubstationRest(input,{isCurrent:()=>true,saveRest})).rejects.toThrow('required source unavailable');
+  expect(saveRest).not.toHaveBeenCalled();
+});

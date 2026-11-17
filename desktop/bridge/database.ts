@@ -1,5 +1,8 @@
+import {DESKTOP_COMMANDS} from './contracts.js';
+import type {GimProjectRecord, GimIndexPayload, ProcessMemorySnapshot, GeometryCacheManifestEntry, GeometryCacheManifest, GeometryRefsPayload, GimIndexResult, GimCacheValidation, ProjectCacheDiagnostic, LineGraphPayload, LineGraphResult, LineAttributeResult, CachedProjectSummary} from './contracts.js';
+export type {GimProjectRecord, GimEntryPayload, CbmNodePayload, IfcModelPayload, FileDevEntryPayload, GimIndexPayload, IfcModelRecord, CbmNodeRecord, ProcessMemorySnapshot, GeometryCacheManifestStatus, GeometryCacheManifestEntry, GeometryCacheManifest, DevSolidModelPayload, DevSubDevicePayload, PhmSolidModelPayload, GeometryRefsPayload, GimEntryRecord, FileDevEntryRecord, GimIndexResult, GimCacheValidation, IfcCacheFileDiagnostic, ProjectCacheDiagnostic, LineCbmNodePayload, LineCbmChildPayload, LineCbmRefPayload, LineFileStatPayload, LineGraphPayload, LineCbmNodeRecord, LineCbmChildRecord, LineCbmRefRecord, LineFileStatRecord, LineGraphResult, LineAttributeResult, CachedProjectSummary} from './contracts.js';
 import {GimError, nativeError, hasErrorCode} from './contracts.js';
-import type {FamPropertyPayload, DevPropertyPayload, FamPropertyRecord, DevPropertyRecord, LineFamPropertyPayload, LineDevPropertyPayload, LineFamPropertyRecord, LineDevPropertyRecord} from './contracts.js';
+import type {LineFamPropertyPayload, LineDevPropertyPayload} from './contracts.js';
 export type {FamPropertyPayload, DevPropertyPayload, FamPropertyRecord, DevPropertyRecord, LineFamPropertyPayload, LineDevPropertyPayload, LineFamPropertyRecord, LineDevPropertyRecord} from './contracts.js';
 import type { FileInfo } from './fileReader.js';
 import { invokeTimed } from './invokeTimed.js';
@@ -8,133 +11,50 @@ import { perfCurrentSession, perfRecordBatchRead } from '../src/utils/perfTiming
 const utf8Encoder = new TextEncoder();
 
 /** 数据库中的 GIM 项目完整记录 */
-export interface GimProjectRecord {
-  id: number;
-  path: string;
-  name: string;
-  size: number;
-  modified_ms: number;
-  sha256: string;
-  created_at_ms: number;
-  updated_at_ms: number;
-  last_opened_at_ms: number;
-}
+
 
 /**
  * 在 Tauri 环境下 upsert GIM 项目记录到本地 SQLite。
  * 仅在 Tauri 环境可用，浏览器环境不应调用此函数。
  */
 export async function upsertGimProject(info: FileInfo): Promise<GimProjectRecord> {
-  return invokeTimed<GimProjectRecord>('upsert_gim_project', { info });
+  return invokeTimed<GimProjectRecord>(DESKTOP_COMMANDS.upsert_gim_project, { info });
 }
 
 // ===== GIM 索引入库 =====
 
-export interface GimEntryPayload {
-  entry_path: string;
-  file_name: string;
-  entry_type: string;
-  file_size: number;
-  local_cache_path?: string | null;
-}
-
-export interface CbmNodePayload {
-  raw_properties_json?: string | null;
-  node_key: string;
-  parent_key: string | null;
-  path: string;
-  name: string;
-  entity_name: string | null;
-  classify_name: string | null;
-  fam_path: string | null;
-  dev_path: string | null;
-  ifc_file: string | null;
-  ifc_guid: string | null;
-  transform_matrix: string | null;
-  sort_order: number;
-}
-
-export interface IfcModelPayload {
-  model_id: string;
-  name: string;
-  entry_path: string;
-}
-
-export interface FileDevEntryPayload {
-  source_design_file?: string | null;
-  model_id: string;
-  ifc_name: string;
-  ifc_file: string;
-  device_count: number;
-  device_cbm: string;
-  sort_order: number;
-}
 
 
 
-export interface GimIndexPayload {
-  capability_summary_json?: string | null;
-  project_id: number;
-  /** 源 GIM 内容身份；后端提交前会与 gim_project.sha256 比较。 */
-  source_sha256?: string | null;
-  entries: GimEntryPayload[];
-  cbm_nodes: CbmNodePayload[];
-  ifc_models: IfcModelPayload[];
-  file_dev_entries: FileDevEntryPayload[];
-  fam_properties: FamPropertyPayload[];
-  dev_properties: DevPropertyPayload[];
-}
+
+
+
+
+
+
+
+
 
 /**
  * 在 Tauri 环境下保存 GIM 索引（事务：先删后插）。
  */
 export async function saveGimIndex(payload: GimIndexPayload): Promise<void> {
-  await invokeTimed<void>('save_gim_index', { payload });
+  await invokeTimed<void>(DESKTOP_COMMANDS.save_gim_index, { payload });
 }
 
 /**
  * 两阶段发布第二阶段：几何引用 + FAM/DEV 属性。
  * 单事务替换并重算 receipt，成功后置 `substation_properties_complete=1`。
  */
-export async function saveSubstationSemanticRest(payload: {
-  project_id: number;
-  source_sha256: string | null;
-  refs: GeometryRefsPayload;
-  fam_properties: FamPropertyPayload[];
-  dev_properties: DevPropertyPayload[];
-}): Promise<void> {
-  await invokeTimed<void>('save_substation_semantic_rest', { payload });
+export async function saveSubstationSemanticRest(payload: import("./contracts.js").SubstationSemanticRestPayload): Promise<void> {
+  await invokeTimed<void>(DESKTOP_COMMANDS.save_substation_semantic_rest, { payload });
 }
 
 // ===== GIM 索引读取 =====
 
-export interface IfcModelRecord {
-  id: number;
-  project_id: number;
-  model_id: string;
-  name: string;
-  entry_path: string;
-  created_at_ms: number;
-}
 
-export interface CbmNodeRecord {
-  raw_properties_json?: string | null;
-  id: number;
-  project_id: number;
-  node_key: string;
-  parent_key: string | null;
-  path: string;
-  name: string;
-  entity_name: string | null;
-  classify_name: string | null;
-  fam_path: string | null;
-  dev_path: string | null;
-  ifc_file: string | null;
-  ifc_guid: string | null;
-  transform_matrix: string | null;
-  sort_order: number;
-  created_at_ms: number;
-}
+
+
 
 // ===== 缓存文件落盘 =====
 
@@ -204,7 +124,7 @@ export async function writeCacheFile(
   sourceGimSha256?: string | null,
 ): Promise<string> {
   return invokeTimed<string>(
-    'write_cache_file_binary',
+    DESKTOP_COMMANDS.write_cache_file_binary,
     packBinaryCacheWrite(projectId, entryPath, bytes, sourceGimSha256 ?? undefined),
   );
 }
@@ -213,7 +133,7 @@ export async function writeCacheFile(
  * 在 Tauri 环境下从缓存读取 IFC 文件（路径由 projectId + entryPath 计算，不接受任意路径）。
  */
 export async function readCachedIfc(projectId: number, entryPath: string): Promise<Uint8Array> {
-  const bytes = await invokeTimed<ArrayBuffer>('read_cached_ifc', { projectId, entryPath });
+  const bytes = await invokeTimed<ArrayBuffer>(DESKTOP_COMMANDS.read_cached_ifc, { projectId, entryPath });
   return toUint8Array(bytes);
 }
 
@@ -222,7 +142,7 @@ export async function readCachedIfc(projectId: number, entryPath: string): Promi
  * 路径由 Rust 侧重新计算并校验，前端不传绝对路径。
  */
 export async function readCachedEntry(projectId: number, entryPath: string): Promise<Uint8Array> {
-  const bytes = await invokeTimed<ArrayBuffer>('read_cached_entry', { projectId, entryPath });
+  const bytes = await invokeTimed<ArrayBuffer>(DESKTOP_COMMANDS.read_cached_entry, { projectId, entryPath });
   return toUint8Array(bytes);
 }
 
@@ -231,26 +151,10 @@ export async function readCachedEntry(projectId: number, entryPath: string): Pro
  * processTreeRssBytes 为 null 时必须结合 processTreeAvailable/reason 解读，
  * 不能把后端 rssBytes 当作完整桌面进程树内存。
  */
-export interface ProcessMemorySnapshot {
-  pid: number;
-  rssBytes: number | null;
-  source: string;
-  rssSource?: string;
-  processTreeRssBytes: number | null;
-  /** Windows PROCESS_MEMORY_COUNTERS_EX.PrivateUsage summed over descendants. */
-  processTreePrivateBytes?: number | null;
-  /** Root Tauri process commit, separate from the complete process tree. */
-  rootPrivateBytes?: number | null;
-  /** PID and creation FILETIME (100 ns), retained for private diagnostics. */
-  processInstances?: Array<[number, string]>;
-  processCount: number | null;
-  processTreeAvailable: boolean;
-  processTreeSource?: string;
-  processTreeReason?: string | null;
-}
+
 
 export async function getProcessMemory(): Promise<ProcessMemorySnapshot> {
-  return invokeTimed<ProcessMemorySnapshot>('get_process_memory');
+  return invokeTimed<ProcessMemorySnapshot>(DESKTOP_COMMANDS.get_process_memory);
 }
 
 /** 批量读取缓存文件的结果项 */
@@ -259,7 +163,7 @@ export interface BatchCacheFileItem {
   bytes: Uint8Array | null;
 }
 
-/** Rust GIMR v2 envelope 的内部阶段计时。 */
+/** Rust GIMR v1 envelope 的内部阶段计时。 */
 export interface BatchReadRustProfile {
   readMs: number;
   resolveMs: number;
@@ -286,7 +190,7 @@ export async function batchReadCachedFiles(
   // by invokeTimed.
   const pathBytes = entryPaths.reduce((sum, path) => sum + utf8Encoder.encode(path).byteLength, 0);
   const requestBytes = pathBytes + entryPaths.length * 6 + String(projectId).length + 32;
-  const payload = await invokeTimed<ArrayBuffer>('batch_read_cached_files', {
+  const payload = await invokeTimed<ArrayBuffer>(DESKTOP_COMMANDS.batch_read_cached_files, {
     projectId,
     entryPaths,
   }, { requestBytes });
@@ -303,7 +207,7 @@ export async function batchReadCachedFiles(
 }
 
 /**
- * 一次读取 native 线路 semantic pack。响应仍使用 GIMR v2 envelope，
+ * 一次读取 native 线路 semantic pack。响应仍使用 GIMR v1 envelope，
  * 因而 Rust 内部 read/resolve/encode 计时会和普通 batch 统一进入诊断。
  */
 export async function readLineSemanticPack(
@@ -315,7 +219,7 @@ export async function readLineSemanticPack(
   const requestBytes = pathBytes + entryPaths.length * 6 + String(projectId).length + 32;
   let payload: ArrayBuffer;
   try {
-    payload = await invokeTimed<ArrayBuffer>('read_line_semantic_pack', {
+    payload = await invokeTimed<ArrayBuffer>(DESKTOP_COMMANDS.read_line_semantic_pack, {
       projectId,
       entryPaths,
     }, { requestBytes });
@@ -372,7 +276,7 @@ export interface LineSemanticPackFullResult {
 export async function readLineSemanticPackAll(projectId: number): Promise<LineSemanticPackFullResult> {
   let payload: ArrayBuffer;
   try {
-    payload = await invokeTimed<ArrayBuffer>('read_line_semantic_pack_all', { projectId });
+    payload = await invokeTimed<ArrayBuffer>(DESKTOP_COMMANDS.read_line_semantic_pack_all, { projectId });
   } catch (error) {
     throw normalizeLineSemanticPackError(error);
   }
@@ -554,7 +458,7 @@ export async function writeGlbFile(
   sourceGimSha256?: string | null,
 ): Promise<string> {
   return invokeTimed<string>(
-    'write_glb_file_binary',
+    DESKTOP_COMMANDS.write_glb_file_binary,
     packBinaryCacheWrite(projectId, entryPath, bytes, sourceGimSha256 ?? undefined),
   );
 }
@@ -566,12 +470,12 @@ export async function writeGlbFile(
  * 避免 `Vec<u8>` 经 JSON 序列化为数字数组带来的 3x 体积膨胀和解析开销。
  */
 export async function readGlbFile(projectId: number, entryPath: string): Promise<Uint8Array> {
-  const buffer = await invokeTimed<ArrayBuffer>('read_glb_file', { projectId, entryPath });
+  const buffer = await invokeTimed<ArrayBuffer>(DESKTOP_COMMANDS.read_glb_file, { projectId, entryPath });
   return new Uint8Array(buffer);
 }
 
 /**
- * 批量读取 DEV GLB 缓存。Rust 返回 GIMR v2 二进制 envelope，避免旧的
+ * 批量读取 DEV GLB 缓存。Rust 返回 GIMR v1 二进制 envelope，避免旧的
  * JSON 数字数组响应；调用方负责按文件数/预计字节数切分批次。
  */
 export async function batchReadGlbFiles(
@@ -581,7 +485,7 @@ export async function batchReadGlbFiles(
   const perfSession = perfCurrentSession();
   const pathBytes = entryPaths.reduce((sum, path) => sum + utf8Encoder.encode(path).byteLength, 0);
   const requestBytes = pathBytes + entryPaths.length * 6 + String(projectId).length + 32;
-  const payload = await invokeTimed<ArrayBuffer>('batch_read_glb_files', {
+  const payload = await invokeTimed<ArrayBuffer>(DESKTOP_COMMANDS.batch_read_glb_files, {
     projectId,
     entryPaths,
   }, { requestBytes });
@@ -595,8 +499,7 @@ export async function batchReadGlbFiles(
 /**
  * 方案 C：写入 GLB 几何缓存版本标记文件。
  *
- * 在渐进式几何管线（progressiveGeometryService）完成所有 MOD/STL → .glb
- * 序列化后调用一次，把当前 GEOMETRY_CACHE_VERSION 写入
+ * 在 DEV LOD 模板编译完成 MOD/STL → .glb 序列化后调用一次，把当前 GEOMETRY_CACHE_VERSION 写入
  * glbcache/{projectId}/_version.txt。
  * 下次 validateGimCache 时读取此文件并比较；版本不匹配只使 geometry
  * domain 失效，不影响 CBM/IFC 语义缓存。
@@ -605,30 +508,21 @@ export async function writeGeometryCacheVersion(
   projectId: number,
   sourceSha256?: string | null,
 ): Promise<string> {
-  return invokeTimed<string>('write_geometry_cache_version', {
+  return invokeTimed<string>(DESKTOP_COMMANDS.write_geometry_cache_version, {
     projectId,
     sourceSha256: sourceSha256 ?? null,
   });
 }
 
-export type GeometryCacheManifestStatus = 'glb' | 'partial' | 'empty' | 'unsupported' | 'source-invalid';
 
-export interface GeometryCacheManifestEntry {
-  /** Typed source rejection; never generated from a generic error string. */
-  diagnostic?: string;
-  entry_path: string;
-  status: GeometryCacheManifestStatus;
-  size: number;
-}
 
-export interface GeometryCacheManifest {
-  source_sha256: string;
-  entries: GeometryCacheManifestEntry[];
-}
+
+
+
 
 /** 读取 DEV 粒度 GLB manifest（仅读取描述，不传输 GLB 内容）。 */
 export async function readGeometryCacheManifest(projectId: number): Promise<GeometryCacheManifest> {
-  return invokeTimed<GeometryCacheManifest>('read_geometry_cache_manifest', { projectId });
+  return invokeTimed<GeometryCacheManifest>(DESKTOP_COMMANDS.read_geometry_cache_manifest, { projectId });
 }
 
 export async function writeGeometryCacheManifest(
@@ -636,7 +530,7 @@ export async function writeGeometryCacheManifest(
   sourceSha256: string,
   entries: GeometryCacheManifestEntry[],
 ): Promise<string> {
-  return invokeTimed<string>('write_geometry_cache_manifest', {
+  return invokeTimed<string>(DESKTOP_COMMANDS.write_geometry_cache_manifest, {
     projectId,
     sourceSha256,
     entries,
@@ -654,7 +548,7 @@ export async function invalidateGlbCacheEntry(
   entryPath: string,
   sourceSha256?: string | null,
 ): Promise<void> {
-  return invokeTimed<void>('invalidate_glb_cache_entry', {
+  return invokeTimed<void>(DESKTOP_COMMANDS.invalidate_glb_cache_entry, {
     projectId,
     entryPath,
     sourceSha256: sourceSha256 ?? null,
@@ -663,145 +557,36 @@ export async function invalidateGlbCacheEntry(
 
 // ===== 几何引用链（v6） =====
 
-export interface DevSolidModelPayload {
-  dev_path: string;
-  solid_model_path: string;
-  transform_matrix: string | null;
-  sort_order: number;
-}
 
-export interface DevSubDevicePayload {
-  dev_path: string;
-  child_dev_path: string;
-  transform_matrix: string | null;
-  sort_order: number;
-}
 
-export interface PhmSolidModelPayload {
-  phm_path: string;
-  solid_model_path: string;
-  transform_matrix: string | null;
-  color: string | null;
-  phm_color_max_a?: number | null;
-  sort_order: number;
-}
 
-export interface GeometryRefsPayload {
-  project_id: number;
-  /** 源 GIM 内容身份；后端提交前会与 gim_project.sha256 比较。 */
-  source_sha256?: string | null;
-  dev_solid_models: DevSolidModelPayload[];
-  dev_sub_devices: DevSubDevicePayload[];
-  phm_solid_models: PhmSolidModelPayload[];
-}
+
+
+
+
 
 /** 批量写入 DEV/PHM 几何引用链 */
 export async function saveGeometryRefs(payload: GeometryRefsPayload): Promise<void> {
-  await invokeTimed('save_geometry_refs', { payload });
+  await invokeTimed(DESKTOP_COMMANDS.save_geometry_refs, { payload });
 }
 
 // ===== GIM 索引完整读取 + 缓存校验 =====
 
-export interface GimEntryRecord {
-  id: number;
-  project_id: number;
-  entry_path: string;
-  file_name: string;
-  entry_type: string;
-  file_size: number;
-  local_cache_path: string | null;
-  created_at_ms: number;
-}
-
-export interface FileDevEntryRecord {
-  source_design_file?: string | null;
-  id: number;
-  project_id: number;
-  model_id: string;
-  ifc_name: string;
-  ifc_file: string;
-  device_count: number;
-  device_cbm: string;
-  sort_order: number;
-  created_at_ms: number;
-}
 
 
 
-export interface GimIndexResult {
-  capability_summary_json?: string | null;
-  entries: GimEntryRecord[];
-  cbm_nodes: CbmNodeRecord[];
-  ifc_models: IfcModelRecord[];
-  file_dev_entries: FileDevEntryRecord[];
-  fam_properties: FamPropertyRecord[];
-  dev_properties: DevPropertyRecord[];
-}
 
-export interface GimCacheValidation {
-  project_id: number;
-  has_index: boolean;
-  ifc_models_count: number;
-  ifc_entry_count: number;
-  cached_ifc_count: number;
-  cbm_nodes_count: number;
-  file_dev_entries_count: number;
-  missing_cache_paths: string[];
-  stored_parser_version: string | null;
-  current_parser_version: string;
-  parser_version_match: boolean;
-  stored_line_parser_version: string | null;
-  current_line_parser_version: string;
-  line_parser_version_match: boolean;
-  stored_substation_parser_version: string | null;
-  current_substation_parser_version: string;
-  substation_parser_version_match: boolean;
-  /** 缓存无效时的可诊断原因；有效时为 null。 */
-  cache_miss_reason: string | null;
-  valid: boolean;
-  /** 旧缓存记录中的工程类型，仅用于诊断，不决定校验分支。 */
-  project_type: string | null;
-  /** 当前源 GIM magic 映射出的校验域。 */
-  validated_project_type: 'substation' | 'transmission_line' | string;
-  /** v4: line_cbm_node 表行数（transmission_line 缓存校验用） */
-  line_cbm_node_count: number;
-  /** v5: line_fam_property 不同 file_name_lower 的去重数量 */
-  line_fam_source_count: number;
-  /** v5: line_dev_property 不同 file_name_lower 的去重数量 */
-  line_dev_source_count: number;
-  /** v5: line_cbm_ref 中 ref_kind=famFiles 的 file_name_lower 去重数量 */
-  line_expected_fam_ref_count: number;
-  /** v5: line_cbm_ref 中 ref_kind=devFiles 的 file_name_lower 去重数量 */
-  line_expected_dev_ref_count: number;
-  /** v5: 图引用中存在但 line_fam_property 缺失的 file_name_lower 列表 */
-  missing_line_fam_sources: string[];
-  /** v5: 图引用中存在但 line_dev_property 缺失的 file_name_lower 列表 */
-  missing_line_dev_sources: string[];
-  /** v21: semantic source 状态：valid / missing / invalid */
-  line_semantic_pack_status: 'valid' | 'missing' | 'invalid' | string;
-  /** v21: invalid 时的可判定错误（PACK_INVALID/INDEX_INVALID/PACK_TRUNCATED） */
-  line_semantic_pack_error: string | null;
-  /** v6（方案 C）: GLB 几何缓存版本是否匹配（读取 glbcache/{projectId}/_version.txt 比较） */
-  geometry_cache_version_match: boolean;
-  /** v6（方案 C）: 当前 GEOMETRY_CACHE_VERSION（供前端诊断显示） */
-  current_geometry_cache_version: string;
-  /** 版本标记文件是否匹配；与单个 GLB 文件完整性分开。 */
-  geometry_cache_version_file_match: boolean;
-  /** manifest/source/entry 结构是否有效；单个 GLB 缺失可由 DEV fast path 隔离。 */
-  geometry_cache_manifest_valid: boolean;
-  /** 变电基础索引/IFC source cache 是否有效（不含几何域）。 */
-  substation_semantic_cache_valid: boolean;
-  /** 两阶段发布第二阶段（几何引用 + FAM/DEV 属性）是否已完成。 */
-  substation_properties_complete: boolean;
-  /** DEV GLB geometry cache 是否有效。 */
-  geometry_cache_valid: boolean;
-}
+
+
+
+
+
 
 /**
  * 完整读取 GIM 索引（只读）。
  */
 export async function getGimIndex(projectId: number): Promise<GimIndexResult> {
-  return invokeTimed<GimIndexResult>('get_gim_index', { projectId });
+  return invokeTimed<GimIndexResult>(DESKTOP_COMMANDS.get_gim_index, { projectId });
 }
 
 /**
@@ -811,7 +596,7 @@ export async function validateGimCache(
   projectId: number,
   expectedProjectType: 'substation' | 'transmission_line',
 ): Promise<GimCacheValidation> {
-  return invokeTimed<GimCacheValidation>('validate_gim_cache', {
+  return invokeTimed<GimCacheValidation>(DESKTOP_COMMANDS.validate_gim_cache, {
     projectId,
     expectedProjectType,
   });
@@ -819,137 +604,37 @@ export async function validateGimCache(
 
 // ==================== 诊断 ====================
 
-export interface IfcCacheFileDiagnostic {
-  entry_path: string;
-  local_cache_path: string | null;
-  exists: boolean;
-  file_size: number | null;
-}
 
 
-export interface ProjectCacheDiagnostic {
-  project_id: number;
-  path: string;
-  name: string;
-  size: number;
-  modified_ms: number;
-  sha256: string;
-
-  entries_count: number;
-  cbm_nodes_count: number;
-  ifc_models_count: number;
-  file_dev_entries_count: number;
-  fam_properties_count: number;
-  dev_properties_count: number;
-
-  ifc_entry_count: number;
-  cached_ifc_count: number;
-  missing_cache_paths: string[];
-  stored_parser_version: string | null;
-  current_parser_version: string;
-  parser_version_match: boolean;
-  stored_line_parser_version: string | null;
-  current_line_parser_version: string;
-  line_parser_version_match: boolean;
-  stored_substation_parser_version: string | null;
-  current_substation_parser_version: string;
-  substation_parser_version_match: boolean;
-  cache_miss_reason: string | null;
-  /** v21: semantic source 状态：valid / missing / invalid */
-  line_semantic_pack_status: 'valid' | 'missing' | 'invalid' | string;
-  /** v21: pack/index 整体损坏时的可诊断错误前缀 */
-  line_semantic_pack_error: string | null;
-  /** v6: 变电 GLB 几何缓存版本/manifest 是否匹配 */
-  geometry_cache_version_match: boolean;
-  current_geometry_cache_version: string;
-  geometry_cache_version_file_match: boolean;
-  geometry_cache_manifest_valid: boolean;
-  substation_semantic_cache_valid: boolean;
-  geometry_cache_valid: boolean;
-  valid: boolean;
-
-  ifc_cache_files: IfcCacheFileDiagnostic[];
 
 
-  // v4: 线路工程图缓存诊断
-  project_type: string | null;
-  line_cbm_node_count: number;
-  line_cbm_child_count: number;
-  line_cbm_ref_count: number;
-  line_file_stat_count: number;
-
-  // v5: 线路工程 FAM/DEV 属性缓存诊断
-  line_fam_property_count: number;
-  line_dev_property_count: number;
-  line_fam_source_count: number;
-  line_dev_source_count: number;
-  line_expected_fam_ref_count: number;
-  line_expected_dev_ref_count: number;
-  missing_line_fam_sources: string[];
-  missing_line_dev_sources: string[];
-}
 
 /** 返回当前 SQLite 文件路径 */
 export async function getDbPath(): Promise<string> {
-  return invokeTimed<string>('get_db_path');
+  return invokeTimed<string>(DESKTOP_COMMANDS.get_db_path);
 }
 
 /** 获取最近打开项目的缓存诊断 */
 export async function getLatestProjectCacheDiagnostic(): Promise<ProjectCacheDiagnostic | null> {
-  return invokeTimed<ProjectCacheDiagnostic | null>('get_latest_project_cache_diagnostic');
+  return invokeTimed<ProjectCacheDiagnostic | null>(DESKTOP_COMMANDS.get_latest_project_cache_diagnostic);
 }
 
 // ==================== 线路工程图缓存（v4） ====================
 
 /** line_cbm_node 写入 payload（对应 GimGraphNode） */
-export interface LineCbmNodePayload {
-  path: string;
-  name: string | null;
-  entity_name: string | null;
-  classify_name: string | null;
-  raw_props_json: string;
-  sort_order: number | null;
-}
+
 
 /** line_cbm_child 写入 payload（父→子关系） */
-export interface LineCbmChildPayload {
-  parent_path: string;
-  child_path: string;
-  sort_order: number | null;
-  ref_type: string;
-  extra: string | null;
-}
+
 
 /** line_cbm_ref 写入 payload（节点引用清单） */
-export interface LineCbmRefPayload {
-  node_path: string;
-  ref_kind: string;
-  ref_key: string | null;
-  ref_value: string;
-  sort_order: number | null;
-  /** v5: 归一化后的引用值（路径统一为 / 分隔，去空段），仅作存储与排查用途 */
-  normalized_ref_value: string | null;
-  /** v5: 引用值的文件名小写（如 "x.fam"），诊断时以此键空间匹配 FAM/DEV 文件 */
-  file_name_lower: string | null;
-}
+
 
 /** line_file_stat 写入 payload（文件类型统计） */
-export interface LineFileStatPayload {
-  file_type: string;
-  count: number;
-}
+
 
 /** 线路工程图完整写入 payload */
-export interface LineGraphPayload {
-  project_id: number;
-  project_type: string;
-  /** 源 GIM 内容身份；后端 begin 阶段会与 gim_project.sha256 比较。 */
-  source_sha256?: string | null;
-  nodes: LineCbmNodePayload[];
-  children: LineCbmChildPayload[];
-  refs: LineCbmRefPayload[];
-  file_stats: LineFileStatPayload[];
-}
+
 
 // ===== v5: 线路工程 FAM/DEV 属性缓存 =====
 
@@ -997,7 +682,7 @@ export async function saveLineProjectCache(
     ? globalThis.crypto.randomUUID()
     : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 
-  await invokeTimed<void>('save_line_graph_begin', {
+  await invokeTimed<void>(DESKTOP_COMMANDS.save_line_graph_begin, {
     projectId,
     sessionId,
     graphPayload,
@@ -1016,7 +701,7 @@ export async function saveLineProjectCache(
   for (let i = 0; i < maxChunks; i++) {
     const famChunk = famProps.slice(i * LINE_ATTR_CHUNK_SIZE, (i + 1) * LINE_ATTR_CHUNK_SIZE);
     const devChunk = devProps.slice(i * LINE_ATTR_CHUNK_SIZE, (i + 1) * LINE_ATTR_CHUNK_SIZE);
-    await invokeTimed<void>('save_line_attrs_chunk', {
+    await invokeTimed<void>(DESKTOP_COMMANDS.save_line_attrs_chunk, {
       projectId,
       sessionId,
       famProps: famChunk,
@@ -1026,63 +711,31 @@ export async function saveLineProjectCache(
     onProgress?.(done, total);
   }
 
-  await invokeTimed<void>('save_line_project_finish', { projectId, sessionId });
+  await invokeTimed<void>(DESKTOP_COMMANDS.save_line_project_finish, { projectId, sessionId });
 }
 
 // ===== 线路工程图读取 =====
 
 /** line_cbm_node 读取记录 */
-export interface LineCbmNodeRecord {
-  path: string;
-  name: string | null;
-  entity_name: string | null;
-  classify_name: string | null;
-  raw_props_json: string;
-  sort_order: number | null;
-}
+
 
 /** line_cbm_child 读取记录 */
-export interface LineCbmChildRecord {
-  parent_path: string;
-  child_path: string;
-  sort_order: number | null;
-  ref_type: string;
-  extra: string | null;
-}
+
 
 /** line_cbm_ref 读取记录 */
-export interface LineCbmRefRecord {
-  node_path: string;
-  ref_kind: string;
-  ref_key: string | null;
-  ref_value: string;
-  sort_order: number | null;
-  /** v5: 归一化后的引用值 */
-  normalized_ref_value: string | null;
-  /** v5: 引用值的文件名小写 */
-  file_name_lower: string | null;
-}
+
 
 /** line_file_stat 读取记录 */
-export interface LineFileStatRecord {
-  file_type: string;
-  count: number;
-}
+
 
 /** 线路工程图完整读取结果 */
-export interface LineGraphResult {
-  project_type: string | null;
-  nodes: LineCbmNodeRecord[];
-  children: LineCbmChildRecord[];
-  refs: LineCbmRefRecord[];
-  file_stats: LineFileStatRecord[];
-}
+
 
 /**
  * 完整读取线路工程图缓存（只读）。
  */
 export async function getLineGraph(projectId: number): Promise<LineGraphResult> {
-  return invokeTimed<LineGraphResult>('get_line_gim_graph', { projectId });
+  return invokeTimed<LineGraphResult>(DESKTOP_COMMANDS.get_line_gim_graph, { projectId });
 }
 
 // ===== v5: 线路工程 FAM/DEV 属性读取 =====
@@ -1092,10 +745,7 @@ export async function getLineGraph(projectId: number): Promise<LineGraphResult> 
 /** line_dev_property 读取记录 */
 
 /** 线路工程 FAM/DEV 属性读取结果 */
-export interface LineAttributeResult {
-  fam_properties: LineFamPropertyRecord[];
-  dev_properties: LineDevPropertyRecord[];
-}
+
 
 /**
  * v5: 读取线路工程 FAM/DEV 属性缓存（只读）。
@@ -1103,50 +753,40 @@ export interface LineAttributeResult {
  * 二次打开线路 GIM（缓存命中）时调用，配合 getLineGraph 恢复全部状态。
  */
 export async function getLineAttributes(projectId: number): Promise<LineAttributeResult> {
-  return invokeTimed<LineAttributeResult>('get_line_attributes', { projectId });
+  return invokeTimed<LineAttributeResult>(DESKTOP_COMMANDS.get_line_attributes, { projectId });
 }
 
 /**
  * 缓存项目摘要（list_cached_projects 返回）。
  */
-export interface CachedProjectSummary {
-  id: number;
-  name: string;
-  path: string;
-  project_type: string | null;
-  parser_version: string | null;
-  size: number;
-  modified_ms: number;
-  updated_at_ms: number;
-  last_opened_at_ms: number;
-}
+
 
 /**
  * 列出所有缓存的项目（只读，按最近打开排序）。
  * 供缓存管理 UI 使用。
  */
 export async function listCachedProjects(): Promise<CachedProjectSummary[]> {
-  return invokeTimed<CachedProjectSummary[]>('list_cached_projects');
+  return invokeTimed<CachedProjectSummary[]>(DESKTOP_COMMANDS.list_cached_projects);
 }
 
 /** 授权打开 DB 中已有的最近工程，路径不接受页面输入。 */
 export async function authorizeCachedGimProject(projectId: number): Promise<string> {
-  return invokeTimed<string>('authorize_cached_gim_project', { projectId });
+  return invokeTimed<string>(DESKTOP_COMMANDS.authorize_cached_gim_project, { projectId });
 }
 
 /** 读取应用设置（本地 SQLite app_setting 表）。 */
 export async function getAppSettings(): Promise<Record<string, string>> {
-  return invokeTimed<Record<string, string>>('get_app_settings');
+  return invokeTimed<Record<string, string>>(DESKTOP_COMMANDS.get_app_settings);
 }
 
 /** 写入单个应用设置；value 为空字符串表示清除。 */
 export async function setAppSetting(key: string, value: string): Promise<void> {
-  await invokeTimed<void>('set_app_setting', { key, value });
+  await invokeTimed<void>(DESKTOP_COMMANDS.set_app_setting, { key, value });
 }
 
 /** 打开成功后异步更新最近打开时间。 */
 export async function touchGimProjectOpened(projectId: number): Promise<void> {
-  await invokeTimed<void>('touch_gim_project_opened', { projectId });
+  await invokeTimed<void>(DESKTOP_COMMANDS.touch_gim_project_opened, { projectId });
 }
 
 /**
@@ -1154,7 +794,7 @@ export async function touchGimProjectOpened(projectId: number): Promise<void> {
  * 返回操作摘要文本。
  */
 export async function deleteProjectCache(projectId: number): Promise<string> {
-  return invokeTimed<string>('delete_project_cache', { projectId });
+  return invokeTimed<string>(DESKTOP_COMMANDS.delete_project_cache, { projectId });
 }
 
 /**
@@ -1162,5 +802,5 @@ export async function deleteProjectCache(projectId: number): Promise<string> {
  * 返回与 getLatestProjectCacheDiagnostic 相同结构的 ProjectCacheDiagnostic。
  */
 export async function getProjectDiagnostic(projectId: number): Promise<ProjectCacheDiagnostic> {
-  return invokeTimed<ProjectCacheDiagnostic>('get_project_diagnostic', { projectId });
+  return invokeTimed<ProjectCacheDiagnostic>(DESKTOP_COMMANDS.get_project_diagnostic, { projectId });
 }

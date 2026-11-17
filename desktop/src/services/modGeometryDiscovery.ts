@@ -218,6 +218,7 @@ export async function discoverGeometriesFromDevPath(
     const phmText = await phmFile.text();
     const phmDoc = (options.parsePhm ?? parsePhm)(phmText, phmFilePath);
 
+    sourceDiagnostics.push(...phmDoc.sourceDiagnostics??[]);
     if (phmDoc.isEmpty) { emptyReason ??= 'phm-no-solidmodel'; return; }
 
     for (const [ordinal, phmSolid] of phmDoc.solidModels.entries()) {

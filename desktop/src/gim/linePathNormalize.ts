@@ -1,2 +1,2 @@
-/** Shared pure parser; desktop compatibility entry. */
-export * from "../../../packages/powerline-core/src/linePathNormalize.js";
+/** Desktop source-layer entry; implementation and tests belong to @gim/powerline-core. */
+export * from "@gim/powerline-core/linePathNormalize.js";

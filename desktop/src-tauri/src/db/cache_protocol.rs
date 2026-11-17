@@ -1,7 +1,7 @@
 //! Shared binary cache request/response envelopes and transfer quotas.
 
+pub use gim_native_core::{BinaryCacheWriteMeta, BatchCacheFileResult};
 use gim_native_core::NativeError;
-use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
 // ===== 缓存文件落盘 =====
@@ -21,13 +21,7 @@ const MAX_BINARY_CACHE_METADATA_BYTES: usize = 16 * 1024;
 
 
 
-#[derive(Debug, Deserialize)]
-pub(super) struct BinaryCacheWriteMeta {
-    pub(super) project_id: i64,
-    pub(super) entry_path: String,
-    #[serde(default)]
-    pub(super) source_gim_sha256: Option<String>,
-}
+
 
 pub(super) fn decode_binary_cache_write_request(
     request: &tauri::ipc::Request<'_>,
@@ -62,12 +56,7 @@ pub(super) fn decode_binary_cache_write_request(
 }
 
 /// 批量读取缓存文件的返回项
-#[derive(Debug, Serialize)]
-pub struct BatchCacheFileResult {
-    pub entry_path: String,
-    /// 成功时包含文件字节，失败时为 null
-    pub bytes: Option<Vec<u8>>,
-}
+
 
 /// 将批量读取结果编码为 GIMR v1 envelope。线路 semantic pack 与普通批量
 /// 文件读取共享此编码器，确保 WebView 端只需维护一套 transferable 解析器。

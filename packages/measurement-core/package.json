@@ -4,7 +4,18 @@
   "private": true,
   "license": "MIT",
   "type": "module",
-  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
-  "files": ["dist"],
-  "scripts": { "build": "node ../../desktop/node_modules/typescript/bin/tsc -p tsconfig.json" }
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./source": "./src/index.ts"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "node ../../desktop/node_modules/typescript/bin/tsc -p tsconfig.json"
+  }
 }

@@ -1,5 +1,4 @@
 import {describe,it,expect,vi} from 'vitest';
-import {parseSourceDocument,sourceScalar,sourceReferenceFields} from '../sourceDocument.js';
 import {buildCbmTree} from '../cbmParser.js';
 import {extractEngineeringSourceGraph} from '../engineering/sourceGraph.js';
 import {SourceDocuments} from '../engineering/sourceDocuments.js';
@@ -14,19 +13,9 @@ describe('source spelling shared by navigation, semantics and physical placement
     const tree=await buildCbmTree(files,undefined,'root.dev');
     expect(tree?.sourceDiagnostics).toBeUndefined();expect(tree?.children[0].transformMatrix).toBe(matrix(2));
   });
-  it('retains original lines and refuses conflicting case-insensitive scalars',()=>{
-    const doc=parseSourceDocument('p.cbm','\uFEFFOBJECTMODELPOINTER=a.dev\nobjectmodelpointer=b.dev\nNOTE=x=y');
-    expect(doc.fields[0]).toMatchObject({line:1,rawLine:'\uFEFFOBJECTMODELPOINTER=a.dev'});
-    expect(sourceScalar(doc,'OBJECTMODELPOINTER')).toMatchObject({status:'ambiguous',value:''});
-    expect(sourceScalar(doc,'NOTE').value).toBe('x=y');
-  });
 
-  it('keeps repeated list edges but diagnoses conflicting numbered slots',()=>{
-    const ambiguous=vi.fn(),doc=parseSourceDocument('p.cbm','SUBSYSTEM=a.cbm\nSUBSYSTEM=b.cbm\nSUBSYSTEM0=x.cbm\nSUBSYSTEM0=y.cbm');
-    expect(sourceReferenceFields(doc,/^SUBSYSTEM\d*$/,ambiguous).map(row=>row.value)).toEqual(['a.cbm','b.cbm']);
-    expect(ambiguous).toHaveBeenCalledOnce();
-    expect(ambiguous.mock.calls[0][1].map((row:{line:number})=>row.line)).toEqual([3,4]);
-  });
+
+
 
   it('does not choose different OMP candidates in the three consumers',async()=>{
     const raw={'project.cbm':'ENTITYNAME=F1System\nOBJECTMODELPOINTER=a.dev\nOBJECTMODELPOINTER=b.dev','a.dev':'SYMBOLNAME=A','b.dev':'SYMBOLNAME=B'};

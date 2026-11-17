@@ -7,9 +7,8 @@
 | 入口 | 保留职责 | 实现位置 |
 |---|---|---|
 | `services/substationRuntime.ts` | 工程冷/暖打开、核心语义发布、各后台阶段接线 | `substation*Runtime.ts`、`substationPresentation.ts` |
-| `services/modAutoLoadService.ts` | MOD/STL 加载决策、进度与整体回退编排 | `devGlbCacheFastPath.ts`、`devGlbCacheRecovery.ts`、`modRawGeometryLoader.ts`、`modGeometry*` |
 | `services/devLodRuntime.ts` | 相机/选择、occurrence、场景提交、坐标锚点和会话关闭 | `devLodTemplateStore.ts`、`devLodArtifactWriter.ts`、`devLodSourceWorkset.ts`、`devLodReadiness.ts` |
-| `src-tauri/src/db.rs` | 数据库连接、共享版本和基础查询、命令/DTO 兼容导出 | `src-tauri/src/db/*.rs` |
+| `src-tauri/src/db.rs` | 数据库连接、共享版本和基础查询、命令/DTO 导出 | `src-tauri/src/db/*.rs` |
 
 调用方可以继续从既有入口导入公开函数和类型；内部模块直接引用实际实现和小型契约，不反向依赖入口文件。Tauri 命令名、IPC 数据结构、缓存键和版本不因文件拆分而改变。
 
@@ -30,7 +29,7 @@ flowchart TD
 
 - `substationSpatialRuntime` 负责 Spatial 恢复、重建、缓存发布与后台门控，保留捕获的工程会话检查。
 - `substationIfcRuntime` 负责 IFC 顺序队列、首个可用表示、区域批次、缓存读取和加载诊断。
-- `substationDevRuntime` 负责 IFC 后的 DEV LOD 启动与既有几何恢复路径。
+- `substationDevRuntime` 负责 IFC 后的 DEV LOD 启动。
 - `substationDocumentRuntime` 负责可选 STD/SLD 的解析与缓存恢复。
 - `substationPresentation` 负责导航 DOM、选择回调和加载提示。与 IFC 阶段共享的提示标志放在 `substationLoadingState`，IFC 加载开始时重置。
 - `substationRuntimeTelemetry` 负责会话守卫下的资源采样和 Spatial parser observer。
@@ -41,12 +40,8 @@ flowchart TD
 
 | 模块 | 负责 | 生命周期约束 |
 |---|---|---|
-| `devGlbCacheFastPath` | 有界 GLB 批量读取、完整性检查、模板池和 occurrence 放置 | 只提交当前几何上下文；失败按 DEV 返回 |
-| `devGlbCacheRecovery` | 对失败的 DEV 重编并修复缓存 | 保留已经成功的模板及表示 |
-| `modRawGeometryLoader` | 指定 DEV occurrence 的原始 MOD/STL 回退 | 保留逐边矩阵、来源身份和取消检查 |
 | `modGeometryScene` | 图层根节点、范围检查和场景放置 | 由服务层持有图层；遵守 Viewer 的资源释放契约 |
 | `modGeometrySourceFiles` | 来源文件水合及单个 MOD/STL 加载 | 仅沿真实引用链读取 |
-| `modGeometryContracts` | 加载选项、进度和捕获上下文检查 | 不创建几何或决定实体分类 |
 | `devLodTemplateStore` | 请求去重、缓存输入预算、模板校验/编译、L1 demand 和 LRU | 与一个工程会话绑定；取消时关闭 reader、拒绝排队请求；移除场景使用者后释放模板 |
 | `devLodArtifactWriter` | 缓存准备、写入准入、并发槽和写入诊断 | 取消未准入写入；已开始的原生写入继续持有预算，完成后释放 |
 | `devLodSourceWorkset` | 有界预取、部分缓存缺失后的来源恢复 | 使用当前会话及压力回调；不抢占几何计算槽 |
@@ -68,13 +63,12 @@ flowchart TD
 | `db/cache_transport.rs` | 受权的源缓存读写命令 |
 | `db/semantic_pack.rs` | 线路/变电来源包、索引和有界读取 |
 | `db/geometry_cache.rs` | DEV GLB/LOD 文件、manifest 和发布标记 |
-| `db/fragments_cache.rs` | Fragments 文件、记录和有效性 |
 | `db/cache_validation.rs` | 分域缓存有效性及来源/属性完整性检查 |
 | `db/diagnostics.rs` | 只读缓存诊断 |
 | `db/project_cache.rs` | 设置、最近工程、打开受权和缓存删除 |
 | `db/validation_profile.rs` | 调用级校验计时 |
 
-实现模块按具体依赖导入相邻模块；文件安全、二进制协议和数据库事务分别维护。内部辅助函数只在 `db` 范围可见，`db.rs` 保留既有公开命令与 DTO，`lib.rs` 继续集中注册 Tauri 命令。
+实现模块按具体依赖导入相邻模块；文件安全、二进制协议和数据库事务分别维护。内部辅助函数只在 `db` 范围可见，`db.rs` 导出公开命令与 DTO，`lib.rs` 集中注册 Tauri 命令。
 
 数据库测试位于 `db/tests.rs`；真实 SQLite 交换入口继续使用 `db::substation_sqlite_tests::substation_sqlite_exchange`。
 

@@ -17,7 +17,6 @@ import type { StdSldIndex } from '../gim/stdSldIndex.js';
 import type { SubstationSpatialIndex } from '../gim/ifcSpatialParser.js';
 import { createIfcRuntimeModelId, isCurrentProject } from '../shared/projectSession.js';
 import type { GeometryDiagnostic } from '../gim/geometry/geometryDiagnostics.js';
-import type { ViewerViewHistory } from '../viewer/viewHistory.js';
 
 import type { SubstationFineQueue } from '../shared/selectionContracts.js';
 export type { SubstationFineQueue } from '../shared/selectionContracts.js';
@@ -54,11 +53,11 @@ export class AppState {
   substationConnectionPorts: import('../gim/glConnectionPorts.js').GlConnectionPortIndex | null = null;
   substationResourceMonitor: { release(): void } | null = null;
   substationMemoryPressure: import('../utils/memoryPressure.js').MemoryPressure = 'unknown';
-  viewHistory: ViewerViewHistory | null = null;
+
   stationOverview: (() => void) | null = null;
   onlySelected = false;
   autoLocate = true;
-  cameraNavigationVersion = 0;
+
   hoverCleanup: (() => void) | null = null;
   selectionDecorationCleanup: (() => void) | null = null;
   selectionVisibility: ReturnType<typeof import('../services/selectionVisibility.js').createSelectionVisibility> | null = null;
@@ -93,7 +92,7 @@ export class AppState {
       for (const runtime of this.ifcRegionalRuntimes.values()) { runtime.clearFineSelection?.(); runtime.clearSelectionFilter?.(); }
     }
     this.selectionAbort = new AbortController();
-    const request: SelectionRequest = { id: ++this.selectionSequence, session: this.captureProjectSession(), signal: this.selectionAbort.signal, target, origin, cameraNavigationVersion: this.cameraNavigationVersion };
+    const request: SelectionRequest = { id: ++this.selectionSequence, session: this.captureProjectSession(), signal: this.selectionAbort.signal, target, origin, cameraNavigationVersion: this.viewState.cameraNavigationVersion };
     this.selectionRequest = request;
     if (!retainRange) {
       this.deviceLodRuntime?.setOnlySelected?.(this.onlySelected);
@@ -108,7 +107,7 @@ export class AppState {
     return this.selectionRequest?.id === request.id && !request.signal.aborted && this.isCurrentSession(request.session);
   }
   canAutoLocate(request: SelectionRequest): boolean {
-    return this.autoLocate && request.origin !== 'viewport' && (request.cameraNavigationVersion === undefined || request.cameraNavigationVersion === this.cameraNavigationVersion);
+    return this.autoLocate && request.origin !== 'viewport' && (request.cameraNavigationVersion === undefined || request.cameraNavigationVersion === this.viewState.cameraNavigationVersion);
   }
 
   selectionGuard(request: SelectionRequest): SelectionCommitGuard {
@@ -141,7 +140,7 @@ export class AppState {
     this.deviceLodRuntime?.setOnlySelected?.(only);
     for (const runtime of this.ifcRegionalRuntimes.values()) runtime.setOnlySelected?.(only);
     void Promise.resolve(this.selectionVisibility?.sync().catch(error => console.warn('[Selection visibility]', error))).catch(reportBackgroundError);
-    this.viewHistory?.recordVisibility();
+    this.viewState.viewHistory?.recordVisibility();
   }
   // GIM 文件相关
   currentFiles: Map<string, File> | null = null;
@@ -245,7 +244,7 @@ export class AppState {
 
   // STL Group 跟踪（key = instanceKey；同一 STL 文件可有多个放置实例）
   // 与 loadedXmlModGroups 分开管理，便于 P1 阶段单独控制 STL 渲染
-  // 由 modAutoLoadService 在自动加载时填充，projectCleanupService 在切换项目时 dispose
+  // 由 DEV LOD runtime 在按需加载时填充，projectCleanupService 在切换项目时 dispose
   loadedStlGroups = new Map<string, THREE.Group>();
 
   /**
@@ -334,7 +333,7 @@ export class AppState {
     if (preview) this.safelyRelease(() => preview.release());
     this.substationMemoryPressure = 'unknown';
     this.substationFineQueue = null; this.substationConnectionPorts = null;
-    this.safelyRelease(() => this.viewHistory?.clear());
+    this.safelyRelease(() => this.viewState.viewHistory?.clear());
     this.stationOverview = null; this.onlySelected = false;
     this.safelyRelease(() => this.invalidateSelection());
     this.releaseIfcRuntimes();
@@ -396,9 +395,9 @@ export class AppState {
   // 视图已可交互（含 DEV-only）；IFC WASM/worker 的初始化由 ifcLoader 独立管理。
   initialized = false;
   eventsRegistered = false;
-  hasFittedCamera = false;
+
   /** 用户是否手动操作过相机；为 true 时不再自动改全景。 */
-  viewerUserInteracted = false;
+
   /**
    * 首个 IFC 交互后仍在后台加载剩余 IFC。
    * DEV 几何源预取要等它结束，否则大批次 IPC 会挤占剩余 IFC 的读取/转换。
@@ -482,8 +481,8 @@ export class AppState {
     this.currentSourceSha256 = null;
     // 相机 fit 状态一并重置，确保新项目加载后 fitCameraToScene 能重新执行
     // （否则切换项目后中间只剩网格，IFC 几何不显示）
-    this.hasFittedCamera = false;
-    this.viewerUserInteracted = false;
+
+
     this.ifcBackgroundPending = false;
     this.ifcBackgroundWaiters = [];
     this.ifcSkippedLargeIfc = [];

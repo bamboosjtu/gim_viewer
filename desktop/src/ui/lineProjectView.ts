@@ -1,3 +1,4 @@
+import type {LineRenderOptions,LineProjectViewHandle} from '../services/linePresentationPort.js';
 import { renderBasemapControls, isTiandituMode } from './lineBasemapControls.js';
 import { renderLineRawProperties, renderLineAttributeRecords, renderLineRelationGroups, relationSection, renderLineSourceRefs, buildLineNodeBuckets, nodeDisplayName, pathMatchesReference, formatNumber, renderLineModSources } from '../services/lineInspectorProjection.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
@@ -55,7 +56,7 @@ import {
   loadLineModSourcesForNode,
 } from '../services/lineModRuntimeService.js';
 
-import { perfBegin, perfCurrentSession, type PerfSession } from '../utils/perfTimings.js';
+import { perfBegin, perfCurrentSession } from '../utils/perfTimings.js';
 
 /**
  * 把 LineBasemapMode 映射为成功后的 BasemapStatus。
@@ -429,12 +430,7 @@ let lineNavigationIndex: LineNavigationIndex | null = null;
 let currentLineCatenaryEnabled = ENABLE_CATENARY;
 
 /** 线路面板渲染选项；默认值保持现有生产行为，额外字段仅供性能 A/B。 */
-export interface LineRenderOptions {
-  /** 调用方捕获的性能会话；迟到的渲染 span 不得写入新工程。 */
-  perfSession?: PerfSession;
-  /** 覆盖悬链线渲染开关，便于在同一样本做 A/B；默认 ENABLE_CATENARY。 */
-  enableCatenary?: boolean;
-}
+
 
 /**
  * M4-B3A：最新悬链线参数审计导出 payload（模块级，供 Ctrl+Shift+C 复制使用）。
@@ -488,7 +484,7 @@ let currentShowMessage: ((text: string) => void) | null = null;
 let basemapLayerContext: { layerPanel: HTMLElement; mapData: LineMapData } | null = null;
 let removeBasemapSettingsListener: (() => void) | null = null;
 let lineViewGeneration = 0;
-export interface LineProjectViewHandle { destroy(): void; }
+
 
 /**
  * 销毁当前地图视图。
@@ -670,7 +666,7 @@ export function renderLineProjectPanels(
   destroyLineMapView();
   const ownedGeneration = lineViewGeneration;
   const handle = { destroy() { if (ownedGeneration === lineViewGeneration) destroyLineMapView(); } };
-  state.sessionDisposables.add(handle.destroy);
+
   // destroyLineMapView 会使上一工程的状态失效；此处在清理完成后重新
   // 绑定当前线路，保证属性来源按钮和异步 MOD 解析能拿到当前 graph。
   currentLineState = state;

@@ -4,7 +4,7 @@
 
 ## 原生命令线程边界
 
-原生命令错误采用 `contracts/native-v1.json` 生成的 `NativeError`，结构为 code、message 和可选 context。桌面、Android 应用及 SAF/定位/窗口插件共用生成模型；bridge 将其规范化为 `GimError`，只按 code 选择恢复或重试。FAM/DEV payload 与读取 record 同样由该文件生成。来源、字段 null/缺省和生成规则见 [v1 契约](../../contracts/README.md)。错误结构与生成器固定 v1，不提供旧字符串或旧开发格式迁移。
+原生命令错误采用 `contracts/native-v1.json` 生成的 `NativeError`，结构为 code、message 和可选 context。桌面、Android 应用及 SAF/定位/窗口插件共用生成模型；bridge 将其规范化为 `GimError`，只按 code 选择恢复或重试。FAM/DEV、图、几何引用/manifest、提取和平台元数据 DTO、原生命令名及共享版本常量同样由该文件生成。来源、字段 null/缺省和生成规则见 [v1 契约](../../contracts/README.md)。错误结构与生成器固定 v1，不提供旧字符串或旧开发格式迁移。
 
 桌面与 Android 注册的 Tauri 工作命令使用 async 入口。文件 I/O、路径 canonicalize/stat、SHA、解压、同步数据库锁/查询/事务和大 JSON 导出解析均在 `spawn_blocking` 内执行；桌面的 `native_command::blocking` 统一转发任务及 JoinError，已有直接 `spawn_blocking` 入口保留。工作闭包持有 AppHandle、路径、payload 等所有权，数据库锁和事务在闭包内取得并释放，不跨 await。
 
@@ -36,6 +36,8 @@
 - 发布前需核对 EXE、固定运行时、源码指纹和验收 manifest；测量构建不能混用日常缓存。
 - 修改 IFC 读取器、web-ifc/WASM 或固定运行时后，发布验收清单须保留 `test:ifc-connections-local -- --build <隔离构建清单>` 的本地报告，核对 `PASS`、`nativeWebView2Verified=true`、浏览器版本与 WASM/读取器/运行时指纹。普通 CI 的单测和构建不能代替该门禁；不将真实工程或浏览器验收加入远程 CI。
 - 桌面应用版本以 `desktop/package.json` 为准；Tauri 的 `version` 引用 `../package.json`，NSIS 和 portable manifest 使用同一版本。`npm run check:version` 校验 npm 锁文件与 Cargo 清单/锁文件的一致性；前端构建、桌面构建和 portable 组包均先检查，版本不一致时停止。Windows portable 组包还读取真实 EXE 的 ProductVersion，拒绝把旧程序标为新版本。升级版本时同步 npm 与 Cargo 的根包版本，不修改依赖包或 Android 版本。
+
+固定运行时递归 ACL 初始化前使用 symlink_metadata 检查根及全部子项，拒绝 symlink/junction/reparse point；发现链接不执行 icacls /T。该元数据检查只发生在需要初始化 ACL 时，不进入工程打开/属性读取路径。已有运行时沙箱与 marker 规则保留。
 
 ## 配置与状态
 

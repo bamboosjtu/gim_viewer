@@ -763,7 +763,10 @@ export function buildLineNodeBuckets(
     ...(node.name && node.name !== node.entityName ? [{ key: 'PARTNAME', value: node.name, definition: definitionWithDisplayLabel(component, 'PARTNAME', '名称') }] : []),
     { key: 'NUM', value: node.children.length, definition: definitionWithDisplayLabel(component, 'NUM', '子节点数') },
   ];
-  const overview = renderPropertySection('基本信息', component, overviewRows, { includeTechnical: false })
+  const warning=node.sourceDiagnostics?.length?relationSection('来源字段歧义',node.sourceDiagnostics.map(row=>[
+    `${row.field} · 行 ${row.lines.join('、')}`,row.values.join(' / '),
+  ])):'';
+  const overview = warning+renderPropertySection('基本信息', component, overviewRows, { includeTechnical: false })
     + renderPropertySection('关键业务字段', component, rawRows(component, node.rawProps, new Set(), { excludeReferences: true }).primary, { includeTechnical: false, allowReferences: false });
   const params = renderLineRawProperties(node, component)
     + renderLineAttributeRecords(node, attrs)

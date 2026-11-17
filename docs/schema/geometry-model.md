@@ -134,3 +134,5 @@ PHM 可引用 MOD、STL 或混合。没有证据表明它们固定构成某种 L
 - [变电 XML MOD](substation-mod.md)
 - [DEV 几何运行时](../architecture/dev-geometry.md)
 - [缓存域](../architecture/caches.md)
+
+PHM 的 SOLIDS 与 SOLIDMODELS 使用各自的引用、颜色和矩阵槽。相同下标不跨组配对；冲突引用不选择任一候选。缺少矩阵仍表示默认单位变换；明确给出的空、冲突或无效矩阵记录来源行诊断，不把该降级结果标为完整来源。校验限于现有来源矩阵，不增加逐顶点审计。

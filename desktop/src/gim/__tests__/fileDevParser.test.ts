@@ -126,3 +126,10 @@ describe('FileDevRelation 路径兼容', () => {
     ]);
   });
 });
+import {it as ambiguityIt,expect as ambiguityExpect} from 'vitest';
+ambiguityIt('keeps IFC candidates and refuses an association when a FileDev slot conflicts',async()=>{
+  const files=new Map([['custom/FileDevRelation.cbm',new File(['FILE.NUM=1\nFILE0.DEV.NUM=0\nFILE0.IFC=a.ifc\nFILE0.IFC=b.ifc'],'FileDevRelation.cbm')],['a.ifc',new File(['IFC'],'a.ifc')],['b.ifc',new File(['IFC'],'b.ifc')]]);
+  const entries=await parseFileDevRelation(files);
+  ambiguityExpect(entries).toHaveLength(1);ambiguityExpect(entries[0].modelId).toBe('');
+  ambiguityExpect(entries[0].sourceDiagnostics?.[0]).toMatchObject({path:'custom/FileDevRelation.cbm',field:'FILE0.IFC',lines:[3,4],values:['a.ifc','b.ifc']});
+});

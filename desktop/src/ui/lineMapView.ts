@@ -368,6 +368,7 @@ export function renderLineMap(
   }
 
   // ---- 图层开关事件 ----
+  const layerEvents = new AbortController();
   for (let i = 0; i < LAYER_ITEMS.length; i++) {
     const item = LAYER_ITEMS[i];
     const cb = layerCheckboxes[i];
@@ -379,7 +380,7 @@ export function renderLineMap(
         hideTooltip();
       }
       draw();
-    });
+    }, {signal: layerEvents.signal});
   }
 
   // ---- 绘制 ----
@@ -1242,9 +1243,7 @@ export function renderLineMap(
     canvas.removeEventListener('mouseleave', onMouseLeave);
     canvas.removeEventListener('dblclick', onDblClick);
     fitBtn.removeEventListener('click', onFitBtnClick);
-    for (const cb of layerCheckboxes) {
-      cb.onchange = null;
-    }
+    layerEvents.abort();
     if (resizeObserver) resizeObserver.disconnect();
     // WebView2 can retain the last compositor surface of a removed canvas for a
     // frame. Clear and collapse it before detaching so a line map cannot bleed

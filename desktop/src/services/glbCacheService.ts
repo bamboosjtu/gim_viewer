@@ -1,8 +1,8 @@
 /**
  * 方案 C v2：DEV 粒度 → glTF 离线预序列化缓存服务。
  *
- * serializeDevToGlb 由渐进式几何管线（progressiveGeometryService）在首次打开时
- * 逐 DEV 调用：序列化 → 落盘 → 逐 CBM 实例渲染一体化。
+ * serializeDevToGlb 由 DEV LOD 模板编译在首次打开时逐 DEV 调用：
+ * 序列化 → 落盘 → 逐 CBM 实例渲染一体化。
  * 二次打开时可直接用 GLTFLoader 加载 .glb，跳过全部 XML 解析。
  *
  * 关键设计（当前 DEV 粒度缓存契约见 docs/architecture/dev-geometry.md）：

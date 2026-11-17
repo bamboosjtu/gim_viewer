@@ -86,7 +86,7 @@ jobs:
       - name: Check engineering layer boundaries
         run: npm run check:engineering-boundaries
 
-      - name: Test presentation boundary checks
+      - name: Test architecture boundary checks
         run: npm run test:presentation-boundaries
 
       - name: Check frontend types
@@ -94,6 +94,9 @@ jobs:
 
       - name: Run frontend lint
         run: npm run lint
+
+      - name: Check adopted module formatting
+        run: npm run check:format
 
       - name: Install stable Rust toolchain
         uses: dtolnay/rust-toolchain@stable

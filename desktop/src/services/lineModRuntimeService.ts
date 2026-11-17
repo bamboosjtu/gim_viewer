@@ -165,6 +165,7 @@ export async function resolveLineModPaths(state: AppState, node: GimGraphNode): 
       let doc;
       try {
         doc = parsePhm(text, phmPath);
+        if(doc.sourceDiagnostics?.length){console.warn('[Line PHM] 来源字段或矩阵存在歧义:',doc.sourceDiagnostics);continue;}
       } catch {
         continue;
       }

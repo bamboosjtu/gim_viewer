@@ -1,10 +1,10 @@
 //! Transactional substation source/index persistence and geometry references.
 
+pub use gim_native_core::{GimIndexPayload, IfcModelRecord, CbmNodeRecord, GimEntryRecord, FileDevEntryRecord, GetGimIndexResult, GeometryRefsPayload, SubstationSemanticRestPayload};
 use gim_native_core::{NativeError, NativeErrorCode};
 pub use gim_native_core::{FamPropertyPayload, DevPropertyPayload, FamPropertyRecord, DevPropertyRecord};
 
 use rusqlite::{params, Connection};
-use serde::{Deserialize, Serialize};
 use tauri::Manager;
 use super::cache_paths::{
     CacheValidationContext,
@@ -26,64 +26,17 @@ use super::validation_profile::{ValidationSpan};
 
 // ===== GIM 索引入库 =====
 
-#[derive(Debug, Deserialize)]
-pub struct GimEntryPayload {
-    pub entry_path: String,
-    pub file_name: String,
-    pub entry_type: String,
-    pub file_size: u64,
-    pub local_cache_path: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CbmNodePayload {
-    pub raw_properties_json: Option<String>,
-    pub node_key: String,
-    pub parent_key: Option<String>,
-    pub path: String,
-    pub name: String,
-    pub entity_name: Option<String>,
-    pub classify_name: Option<String>,
-    pub fam_path: Option<String>,
-    pub dev_path: Option<String>,
-    pub ifc_file: Option<String>,
-    pub ifc_guid: Option<String>,
-    pub transform_matrix: Option<String>,
-    pub sort_order: i64,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct IfcModelPayload {
-    pub model_id: String,
-    pub name: String,
-    pub entry_path: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct FileDevEntryPayload {
-    pub source_design_file: Option<String>,
-    pub model_id: String,
-    pub ifc_name: String,
-    pub ifc_file: String,
-    pub device_count: i64,
-    pub device_cbm: String,
-    pub sort_order: i64,
-}
 
 
 
-#[derive(Debug, Deserialize)]
-pub struct GimIndexPayload {
-    pub capability_summary_json: Option<String>,
-    pub project_id: i64,
-    pub source_sha256: Option<String>,
-    pub entries: Vec<GimEntryPayload>,
-    pub cbm_nodes: Vec<CbmNodePayload>,
-    pub ifc_models: Vec<IfcModelPayload>,
-    pub file_dev_entries: Vec<FileDevEntryPayload>,
-    pub fam_properties: Vec<FamPropertyPayload>,
-    pub dev_properties: Vec<DevPropertyPayload>,
-}
+
+
+
+
+
+
+
+
 
 fn validate_index_payload(payload: &GimIndexPayload) -> Result<(), NativeError> {
     ensure_cache_project_id(payload.project_id)?;
@@ -194,7 +147,13 @@ fn validate_index_payload(payload: &GimIndexPayload) -> Result<(), NativeError> 
             return Err("文件设备关系字段无效".to_string().into());
         }
     }
-    for p in &payload.fam_properties {
+    validate_substation_properties(&payload.fam_properties,&payload.dev_properties)?;
+    Ok(())
+}
+
+fn validate_substation_properties(fam:&[FamPropertyPayload],dev:&[DevPropertyPayload])->Result<(),NativeError> {
+    if fam.len()>2_000_000 || dev.len()>2_000_000 {return Err(NativeError::new(NativeErrorCode::ResourceLimit,"属性数量超过安全上限"));}
+    for p in fam {
         validate_entry_path(&p.source_path)?;
         if p.section_name.len() > 4096
             || p.prop_key.trim().is_empty()
@@ -203,12 +162,12 @@ fn validate_index_payload(payload: &GimIndexPayload) -> Result<(), NativeError> 
                 .as_ref()
                 .map(|v| v.len() > MAX_LINE_TEXT_BYTES)
                 .unwrap_or(false)
-            || p.sort_order < 0
+            || p.sort_order < 0 || p.sort_order==i64::MAX
         {
             return Err("FAM 属性字段无效或过长".to_string().into());
         }
     }
-    for p in &payload.dev_properties {
+    for p in dev {
         validate_entry_path(&p.dev_path)?;
         if p.prop_key.trim().is_empty()
             || p.prop_key.len() > 4096
@@ -218,6 +177,11 @@ fn validate_index_payload(payload: &GimIndexPayload) -> Result<(), NativeError> 
                 .unwrap_or(false)
         {
             return Err("DEV 属性字段无效或过长".to_string().into());
+        }
+    }
+    for row in fam {
+        if row.source_line.map(|line|line<=0).unwrap_or(false) || row.raw_property_json.as_ref().map(|text|text.len()>MAX_LINE_TEXT_BYTES).unwrap_or(false) {
+            return Err(NativeError::new(NativeErrorCode::InvalidInput,"FAM 来源行号或原始属性长度无效"));
         }
     }
     Ok(())
@@ -373,36 +337,10 @@ pub(super) fn save_gim_index_connection(conn: &mut Connection, payload: GimIndex
 // ===== GIM 索引读取 =====
 
 /// substation_ifc_model 表完整记录
-#[derive(Debug, Serialize)]
-pub struct IfcModelRecord {
-    pub id: i64,
-    pub project_id: i64,
-    pub model_id: String,
-    pub name: String,
-    pub entry_path: String,
-    pub created_at_ms: u64,
-}
+
 
 /// substation_cbm_node 表完整记录
-#[derive(Debug, Serialize)]
-pub struct CbmNodeRecord {
-    pub raw_properties_json: Option<String>,
-    pub id: i64,
-    pub project_id: i64,
-    pub node_key: String,
-    pub parent_key: Option<String>,
-    pub path: String,
-    pub name: String,
-    pub entity_name: Option<String>,
-    pub classify_name: Option<String>,
-    pub fam_path: Option<String>,
-    pub dev_path: Option<String>,
-    pub ifc_file: Option<String>,
-    pub ifc_guid: Option<String>,
-    pub transform_matrix: Option<String>,
-    pub sort_order: i64,
-    pub created_at_ms: u64,
-}
+
 
 // Publication receipt belongs to the existing semantic domain. It detects
 // truncated/deleted index rows on the next open without depending on GLBs.
@@ -517,48 +455,17 @@ fn row_to_cbm_node(row: &rusqlite::Row<'_>) -> rusqlite::Result<CbmNodeRecord> {
 // ===== GIM 索引完整读取 + 缓存校验 =====
 
 /// substation_gim_entry 表完整记录
-#[derive(Debug, Serialize)]
-pub struct GimEntryRecord {
-    pub id: i64,
-    pub project_id: i64,
-    pub entry_path: String,
-    pub file_name: String,
-    pub entry_type: String,
-    pub file_size: u64,
-    pub local_cache_path: Option<String>,
-    pub created_at_ms: u64,
-}
+
 
 /// substation_file_dev_entry 表完整记录
-#[derive(Debug, Serialize)]
-pub struct FileDevEntryRecord {
-    pub source_design_file: Option<String>,
-    pub id: i64,
-    pub project_id: i64,
-    pub model_id: String,
-    pub ifc_name: String,
-    pub ifc_file: String,
-    pub device_count: i64,
-    pub device_cbm: String,
-    pub sort_order: i64,
-    pub created_at_ms: u64,
-}
+
 
 /// substation_fam_property 表完整记录
 
 /// substation_dev_property 表完整记录
 
 /// get_gim_index 返回结构
-#[derive(Debug, Serialize)]
-pub struct GetGimIndexResult {
-    pub capability_summary_json: Option<String>,
-    pub entries: Vec<GimEntryRecord>,
-    pub cbm_nodes: Vec<CbmNodeRecord>,
-    pub ifc_models: Vec<IfcModelRecord>,
-    pub file_dev_entries: Vec<FileDevEntryRecord>,
-    pub fam_properties: Vec<FamPropertyRecord>,
-    pub dev_properties: Vec<DevPropertyRecord>,
-}
+
 
 fn row_to_gim_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<GimEntryRecord> {
     Ok(GimEntryRecord {
@@ -753,43 +660,16 @@ pub(super) fn get_gim_index_connection(conn: &Connection, project_id: i64) -> Re
 // ===== 几何引用链批量写入（v6） =====
 
 /// DEV SOLIDMODEL 批量写入 payload
-#[derive(Debug, Deserialize)]
-pub struct DevSolidModelPayload {
-    pub dev_path: String,
-    pub solid_model_path: String,
-    pub transform_matrix: Option<String>,
-    pub sort_order: i64,
-}
+
 
 /// DEV SUBDEVICE 批量写入 payload
-#[derive(Debug, Deserialize)]
-pub struct DevSubDevicePayload {
-    pub dev_path: String,
-    pub child_dev_path: String,
-    pub transform_matrix: Option<String>,
-    pub sort_order: i64,
-}
+
 
 /// PHM SOLIDMODEL 批量写入 payload
-#[derive(Debug, Deserialize)]
-pub struct PhmSolidModelPayload {
-    pub phm_path: String,
-    pub solid_model_path: String,
-    pub transform_matrix: Option<String>,
-    pub color: Option<String>,
-    pub phm_color_max_a: Option<f64>,
-    pub sort_order: i64,
-}
+
 
 /// 几何引用链完整 payload（一次事务写入三张表）
-#[derive(Debug, Deserialize)]
-pub struct GeometryRefsPayload {
-    pub project_id: i64,
-    pub source_sha256: Option<String>,
-    pub dev_solid_models: Vec<DevSolidModelPayload>,
-    pub dev_sub_devices: Vec<DevSubDevicePayload>,
-    pub phm_solid_models: Vec<PhmSolidModelPayload>,
-}
+
 
 fn validate_geometry_refs_payload(payload: &GeometryRefsPayload) -> Result<(), NativeError> {
     ensure_cache_project_id(payload.project_id)?;
@@ -870,17 +750,10 @@ pub(super) fn save_geometry_refs_connection(conn: &mut Connection, payload: Geom
     Ok(())
 }
 
+pub use gim_native_core::PropertyWriteMode;
+
 /// 两阶段发布的第二阶段负载：几何引用 + FAM/DEV 属性。
-#[derive(Debug, Deserialize)]
-pub struct SubstationSemanticRestPayload {
-    pub project_id: i64,
-    pub source_sha256: Option<String>,
-    pub refs: GeometryRefsPayload,
-    pub fam_properties: Vec<FamPropertyPayload>,
-    pub dev_properties: Vec<DevPropertyPayload>,
-    #[serde(default)]
-    pub capability_summary_json: Option<String>,
-}
+
 
 /// Tauri command：补写变电索引的几何引用与 FAM/DEV 属性。
 ///
@@ -913,6 +786,13 @@ fn save_substation_semantic_rest_connection(
         return Err("索引补写与引用链的工程标识不一致".to_string().into());
     }
     validate_geometry_refs_payload(&payload.refs)?;
+    validate_substation_properties(&payload.fam_properties,&payload.dev_properties)?;
+    if payload.properties_mode==PropertyWriteMode::Preserve && (!payload.fam_properties.is_empty() || !payload.dev_properties.is_empty()) {
+        return Err(NativeError::new(NativeErrorCode::InvalidInput,"preserve 属性模式不接受属性快照"));
+    }
+    if let (Some(outer),Some(inner))=(&payload.source_sha256,&payload.refs.source_sha256) {
+        if outer!=inner {return Err(NativeError::new(NativeErrorCode::SourceChanged,"属性补写与引用链的源身份不一致"));}
+    }
     ensure_project_exists(conn, payload.project_id)?;
     ensure_project_source_sha(
         conn,
@@ -938,6 +818,7 @@ fn save_substation_semantic_rest_connection(
     let now = now_ms();
     let pid = payload.project_id;
     replace_geometry_refs(&tx, &payload.refs, now)?;
+    if payload.properties_mode==PropertyWriteMode::Replace {
     for table in ["substation_fam_property", "substation_dev_property"] {
         tx.execute(&format!("DELETE FROM {table} WHERE project_id=?1"), params![pid]).map_err(|e|e.to_string())?;
     }
@@ -975,10 +856,11 @@ fn save_substation_semantic_rest_connection(
                 .map_err(|e| format!("插入 substation_dev_property 失败: {}", e))?;
         }
     }
+    }
     let receipt = substation_index_receipt(&tx, pid)?;
     tx.execute(
-        "UPDATE gim_project SET substation_index_receipt_json = ?1, substation_properties_complete = 1, substation_capability_summary_json = COALESCE(?4, substation_capability_summary_json), updated_at_ms = ?2 WHERE id = ?3",
-        params![receipt, now, pid, payload.capability_summary_json],
+        "UPDATE gim_project SET substation_index_receipt_json = ?1, substation_properties_complete = CASE WHEN ?5 THEN 1 ELSE substation_properties_complete END, substation_capability_summary_json = COALESCE(?4, substation_capability_summary_json), updated_at_ms = ?2 WHERE id = ?3",
+        params![receipt, now, pid, payload.capability_summary_json,payload.properties_mode==PropertyWriteMode::Replace],
     )
     .map_err(|e| format!("提交索引补写凭据失败: {}", e))?;
     tx.commit()
@@ -1065,4 +947,45 @@ fn replace_geometry_refs(tx: &Connection, payload: &GeometryRefsPayload, now: u6
     }
 
     Ok(())
+}
+#[cfg(test)]
+mod property_publication_tests {
+    use super::*;
+    fn connection()->Connection {
+        let conn=Connection::open_in_memory().unwrap();super::super::initialize_schema(&conn).unwrap();
+        conn.execute("INSERT INTO gim_project(id,path,name,size,modified_ms,sha256,created_at_ms,updated_at_ms,last_opened_at_ms,substation_parser_version) VALUES(1,'fixture','fixture',0,0,'source-a',0,0,0,?1)",[SUBSTATION_PARSER_VERSION]).unwrap();
+        conn.execute("INSERT INTO substation_gim_entry(project_id,entry_path,file_name,entry_type,file_size,created_at_ms) VALUES(1,'project.cbm','project.cbm','CBM',0,0)",[]).unwrap();
+        conn.execute("INSERT INTO substation_cbm_node(project_id,node_key,path,name,sort_order,created_at_ms) VALUES(1,'project.cbm','project.cbm','project',0,0)",[]).unwrap();
+        conn.execute("INSERT INTO substation_fam_property(project_id,source_path,section_name,prop_key,prop_value,sort_order,created_at_ms,source_line) VALUES(1,'source.fam','design','name','original',0,0,1)",[]).unwrap();conn
+    }
+    fn payload(mode:&str)->serde_json::Value {
+        serde_json::json!({"project_id":1,"source_sha256":"source-a","properties_mode":mode,
+            "refs":{"project_id":1,"source_sha256":"source-a","dev_solid_models":[],"dev_sub_devices":[],"phm_solid_models":[]},"fam_properties":[],"dev_properties":[]})
+    }
+    #[test]
+    fn property_publication_requires_explicit_empty_snapshot_semantics() {
+        let mut conn=connection();let mut implicit=payload("replace");implicit.as_object_mut().unwrap().remove("properties_mode");
+        assert!(serde_json::from_value::<SubstationSemanticRestPayload>(implicit).is_err());
+        save_substation_semantic_rest_connection(&mut conn,serde_json::from_value(payload("preserve")).unwrap()).unwrap();
+        assert_eq!(conn.query_row("SELECT prop_value FROM substation_fam_property",[],|r|r.get::<_,String>(0)).unwrap(),"original");
+        assert_eq!(conn.query_row("SELECT substation_properties_complete FROM gim_project",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+        save_substation_semantic_rest_connection(&mut conn,serde_json::from_value(payload("replace")).unwrap()).unwrap();
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM substation_fam_property",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+        assert_eq!(conn.query_row("SELECT substation_properties_complete FROM gim_project",[],|r|r.get::<_,i64>(0)).unwrap(),1);
+    }
+    #[test]
+    fn invalid_properties_and_mixed_sources_leave_the_prior_snapshot_intact() {
+        let mut conn=connection();
+        for property in [serde_json::json!({"source_path":"../escape.fam","section_name":"s","prop_key":"k","sort_order":0,"prop_value":"v"}),
+                         serde_json::json!({"source_path":"valid.fam","section_name":"s","prop_key":"","sort_order":0,"prop_value":"v"}),
+                         serde_json::json!({"source_path":"valid.fam","section_name":"s","prop_key":"k","sort_order":-1,"prop_value":"v"}),
+                         serde_json::json!({"source_path":"valid.fam","section_name":"s","prop_key":"k","sort_order":0,"source_line":0,"prop_value":"v"})] {
+            let mut invalid=payload("replace");invalid["fam_properties"]=serde_json::json!([property]);
+            assert!(save_substation_semantic_rest_connection(&mut conn,serde_json::from_value(invalid).unwrap()).is_err());
+        }
+        let mut mixed=payload("replace");mixed["refs"]["source_sha256"]=serde_json::json!("another-source");
+        assert_eq!(save_substation_semantic_rest_connection(&mut conn,serde_json::from_value(mixed).unwrap()).unwrap_err().code,NativeErrorCode::SourceChanged);
+        assert_eq!(conn.query_row("SELECT prop_value FROM substation_fam_property",[],|r|r.get::<_,String>(0)).unwrap(),"original");
+        assert_eq!(conn.query_row("SELECT substation_properties_complete FROM gim_project",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+    }
 }

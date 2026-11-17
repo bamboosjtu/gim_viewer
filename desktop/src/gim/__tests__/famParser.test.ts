@@ -22,7 +22,7 @@ describe('parseFamSections vendor-neutral contract', () => {
   });
 });
 
-import {parseLineFam} from '../../../../packages/powerline-core/src/lineFamParser.js';
+import {parseLineFam} from '@gim/powerline-core/lineFamParser.js';
 it('keeps physical FAM segments while applying the documented domain projections',()=>{
  const source='[Custom]\nA=B=C\nFormula=Internal=A=B';
  const station=parseFamSectionsWithDiagnostics(source,'source.fam');

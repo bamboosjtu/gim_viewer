@@ -1,3 +1,4 @@
+import {DESKTOP_COMMANDS} from './contracts.js';
 import { isTauri } from './runtime.js';
 import { invokeTimed } from './invokeTimed.js';
 
@@ -9,7 +10,7 @@ export async function openGimFilePath(): Promise<string | null> {
   if (!isTauri()) return null;
   // 通过后端 picker 选择并登记授权路径；避免把 WebView 任意字符串直接
   // 传给 Rust 文件读取命令。
-  return invokeTimed<string | null>('pick_gim_file_path');
+  return invokeTimed<string | null>(DESKTOP_COMMANDS.pick_gim_file_path);
 }
 
 /**
@@ -18,5 +19,5 @@ export async function openGimFilePath(): Promise<string | null> {
  */
 export async function openIfcFilePaths(): Promise<string[] | null> {
   if (!isTauri()) return null;
-  return invokeTimed<string[] | null>('pick_ifc_file_paths');
+  return invokeTimed<string[] | null>(DESKTOP_COMMANDS.pick_ifc_file_paths);
 }

@@ -6,7 +6,7 @@
  */
 
 import type { GimGraph, GimGraphNode } from './gimGraphTypes.js';
-import { parseKeyValue } from './kvParser.js';
+import {parseKeyValue,keyValueDiagnostics,keyValueListFields} from './kvParser.js';
 import { DEBUG_RUNTIME_LOGS } from './diagnostics.js';
 import { debugLog } from './diagnostics.js';
 import { normalizeEntityName } from './entityName.js';
@@ -111,7 +111,7 @@ export function buildLineGimGraphFromTexts(
   const nodeBudget = { count: 0 };
 
   function parseKv(path: string): Record<string, string> | null {
-    return cache.parse('kv', path, parseKeyValue);
+    return cache.parse('kv',path,text=>parseKeyValue(text,path));
   }
 
   function resolveCrossCode(ompValue: string): string | null {
@@ -180,12 +180,11 @@ export function buildLineGimGraphFromTexts(
       }
     }
 
-    const subSystemVal = kv['SUBSYSTEM'];
-    if (subSystemVal) {
-      recordRef(subSystemVal, 'SUBSYSTEM');
-      const child = build(subSystemVal, depth + 1);
-      if (child) children.push(child);
+    for(const field of keyValueListFields(kv)) {
+      if(!field.value)continue;recordRef(field.value,'SUBSYSTEM');
+      const child=build(field.value,depth+1);if(child)children.push(child);
     }
+    for(const diagnostic of keyValueDiagnostics(kv))refs.rawRefs[diagnostic.field]=[...diagnostic.values];
     for (const key of NON_RECURSIVE_SINGLE_KEYS) {
       const v = kv[key];
       if (v) recordRef(v, key);
@@ -248,6 +247,7 @@ export function buildLineGimGraphFromTexts(
       rawProps: kv,
       children,
       refs,
+      ...(keyValueDiagnostics(kv).length?{sourceDiagnostics:[...keyValueDiagnostics(kv)]}:{}),
     };
     nodesByPath.set(actualPath, node);
     stats.total++;

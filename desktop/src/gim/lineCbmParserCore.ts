@@ -1,3 +1,3 @@
-/** Shared pure parser; desktop compatibility entry. */
+/** Desktop source-layer entry; implementation and tests belong to @gim/powerline-core. */
 import './lineCoreLogging.js';
-export * from "../../../packages/powerline-core/src/lineCbmParserCore.js";
+export * from "@gim/powerline-core/lineCbmParserCore.js";

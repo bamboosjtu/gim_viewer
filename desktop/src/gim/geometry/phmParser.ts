@@ -21,7 +21,8 @@ import {
   getFirstNonEmptyKv,
   isGimEmptyValue,
 } from '../gimValueSemantics.js';
-import { parseKeyValue } from '../kvParser.js';
+import {parseSourceDocument,sourceScalarProperties,sourceScalar,sourceDiagnostic,sourceConflicts} from '../sourceDocument.js';
+import {isUsableAffineMatrix} from './affineMatrix.js';
 
 /** 单位矩阵（列主序，长度 16） */
 const IDENTITY_MATRIX: number[] = [
@@ -38,70 +39,28 @@ const IDENTITY_MATRIX: number[] = [
  * @param phmPath PHM 文件路径（如 "PHM/abc.phm"），用于 PhmDocument.phmPath
  */
 export function parsePhm(text: string, phmPath: string): PhmDocument {
-  const kv = parseKeyValue(text);
-  const groups = ['SOLIDS', 'SOLIDMODELS'].map(key => ({
-    count: parseBoundedCount(getFirstNonEmptyKv(kv, [`${key}.NUM`]), `${key}.NUM`),
-    values: new Map<string, string>(),
-  }));
-  if (groups.every(group => group.count === 0)) {
-    return { phmPath, solidModels: [], isEmpty: true, colorMaxA: 0 };
+  const doc=parseSourceDocument(phmPath,text),kv=sourceScalarProperties(doc),sourceDiagnostics=sourceConflicts(doc);
+  const solidModels:PhmSolidModelEntry[]=[];
+  for(const [group,reference,block] of [['SOLIDS','SOLIDS','phm-solids'],['SOLIDMODELS','SOLIDMODEL','phm-models']] as const) {
+    const count=parseBoundedCount(getFirstNonEmptyKv(kv,[group+'.NUM']),group+'.NUM');
+    for(let i=0;i<count;i++) {
+      const path=sourceScalar(doc,reference+i,block);if(path.status!=='resolved'||isGimEmptyValue(path.value))continue;
+      const placement=sourceScalar(doc,'TRANSFORMMATRIX'+i,block),color=sourceScalar(doc,'COLOR'+i,block);
+      let matrix=[...IDENTITY_MATRIX];
+      if(placement.fields.length&&placement.status!=='ambiguous'){
+        const parts=placement.value.split(','),values=parts.map(value=>Number(value.trim()));
+        if(parts.every(value=>value.trim())&&isUsableAffineMatrix(values))matrix=values;
+        else sourceDiagnostics.push(sourceDiagnostic(doc,'TRANSFORMMATRIX'+i,placement.fields,'invalid-source-matrix'));
+      }
+      solidModels.push({solidModelPath:path.value,transformMatrix:matrix,color:parseColor(color.value)});
+    }
   }
-
-  // SOLIDSn and SOLIDMODELn have independent indexed matrices/colors. Both
-  // headers may precede all records, so each reference also selects its group.
-  let active = 1;
-  for (const line of text.split(/\r?\n/)) {
-    const at = line.indexOf('=');
-    if (at < 0) continue;
-    const key = line.slice(0, at).replace(/^\uFEFF/, '').trim().toUpperCase();
-    const value = line.slice(at + 1).trim();
-    if (key === 'SOLIDS.NUM') active = 0;
-    else if (key === 'SOLIDMODELS.NUM') active = 1;
-    else if (/^SOLIDS\d+$/.test(key)) { active = 0; groups[active].values.set(key, value); }
-    else if (/^SOLIDMODEL\d+$/.test(key)) { active = 1; groups[active].values.set(key, value); }
-    else if (/^(TRANSFORMMATRIX|COLOR)\d+$/.test(key)) groups[active].values.set(key, value);
-  }
-  const solidModels: PhmSolidModelEntry[] = [];
-  for (const [groupIndex, group] of groups.entries()) for (let i = 0; i < group.count; i++) {
-    const solidModelPath = group.values.get(`${groupIndex === 0 ? 'SOLIDS' : 'SOLIDMODEL'}${i}`);
-    if (!solidModelPath || isGimEmptyValue(solidModelPath)) continue;
-    solidModels.push({ solidModelPath, transformMatrix: parseTransformMatrix(group.values.get(`TRANSFORMMATRIX${i}`)),
-      color: parseColor(group.values.get(`COLOR${i}`)) });
-  }
-  const colorMaxA = solidModels.reduce((max, entry) => Math.max(max, entry.color?.a ?? 0), 0);
-
-  return {
-    phmPath,
-    solidModels,
-    isEmpty: solidModels.length === 0,
-    colorMaxA,
-  };
+  return {phmPath,solidModels,isEmpty:solidModels.length===0,colorMaxA:solidModels.reduce((max,row)=>Math.max(max,row.color?.a??0),0),
+    ...(sourceDiagnostics.length?{sourceDiagnostics}:{}),};
 }
 
-/**
- * 解析 TRANSFORMMATRIX 字段（16 浮点，逗号分隔，列主序）。
- *
- * 缺失或格式异常时回退单位矩阵。
- */
-function parseTransformMatrix(raw: string | undefined): number[] {
-  if (typeof raw !== 'string' || isGimEmptyValue(raw)) return [...IDENTITY_MATRIX];
-  const parts = raw.split(',').map((s) => s.trim());
-  if (parts.length !== 16) return [...IDENTITY_MATRIX];
-  const matrix = parts.map((p) => parseFloat(p));
-  if (matrix.some((n) => !Number.isFinite(n))) {
-    return [...IDENTITY_MATRIX];
-  }
-  return matrix;
-}
 
-/**
- * 解析 COLOR 字段（"R,G,B,A" 格式）。
- *
- * - 空字符串 → undefined（MOD 引用典型）
- * - 格式异常 → undefined
- * - A 原始值取 0-255；文件级 max(A) 决定百分制或字节制刻度
- * - R/G/B 取值 0-255
- */
+
 function parseColor(raw: string | undefined): XmlModColor | undefined {
   if (typeof raw !== 'string' || isGimEmptyValue(raw)) return undefined;
   const parts = raw.split(',').map((s) => s.trim());

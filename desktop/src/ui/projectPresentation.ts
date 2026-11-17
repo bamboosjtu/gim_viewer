@@ -3,6 +3,7 @@ import {setSelectionStatus} from './shell/statusBar.js';
 import {escHtml} from '../shared/html.js';
 
 export const projectPresentation: ProjectPresentation = {
+  async refreshDeviceBounds(state,current){const view=await import('./deviceBoundsMarker.js');if(current())view.refreshDeviceBoundsMarkers(state);},
   hideEmptyState() {const tip=document.getElementById('empty-tip');if(tip)tip.style.display='none';},
   expandedTreePaths() {
     return [...document.querySelectorAll<HTMLElement>('#cbm-tree-panel .tree-toggle.expanded')].flatMap(toggle=>{

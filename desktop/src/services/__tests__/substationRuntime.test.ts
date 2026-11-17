@@ -38,7 +38,7 @@ beforeEach(async()=>{
   m.index.mockResolvedValue({entries:[],cbm_nodes:[],ifc_models:[],file_dev_entries:[],fam_properties:[],dev_properties:[]});
   m.restore.mockImplementation((state:AppState)=>{state.currentCbmTree={path:'cached.cbm',children:[]} as unknown as CbmNode;state.currentIfcEntries=[{path:'cached.ifc',name:'cached',modelId:'cached'}];});
   const {bindProjectPresentation}=await import('../projectPresentationPort.js');
-  bindProjectPresentation({renderNavigation:m.render,resetIdentity:vi.fn(),destroyLineView:vi.fn(),clearProjectViews:vi.fn(),clearSelection:vi.fn(),hideEmptyState:vi.fn(),expandedTreePaths:vi.fn(),restoreExpandedTree:vi.fn(),removeModelRows:vi.fn(),geometryFeedback:vi.fn(),chooseEngineeringRange:vi.fn()});
+  bindProjectPresentation({renderNavigation:m.render,refreshDeviceBounds:vi.fn(),resetIdentity:vi.fn(),destroyLineView:vi.fn(),clearProjectViews:vi.fn(),clearSelection:vi.fn(),hideEmptyState:vi.fn(),expandedTreePaths:vi.fn(),restoreExpandedTree:vi.fn(),removeModelRows:vi.fn(),geometryFeedback:vi.fn(),chooseEngineeringRange:vi.fn()});
 });
 afterEach(()=>{vi.restoreAllMocks();});
 it('cold open publishes real CBM sources before IFC and defers optional work',async()=>{

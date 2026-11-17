@@ -1,10 +1,9 @@
 /**
- * GIM 解析函数的门面（facade），供 ui 层调用。
+ * GIM 只读展示选择器入口，供 UI 使用。
  *
- * ui 层不直接导入 gim/ 解析器，统一通过 shared/ 层访问，
- * 避免 ui → gim 的直接依赖。
+ * 只暴露路径查找和字段显示所需的纯选择器，
+ * 不通过 shared/ 绕过 parser 边界。
  */
 
-export { parseKeyValue } from '../gim/cbmParser.js';
 export { getFileByPath } from '../gim/fileLookup.js';
 export { getFirstNonEmptyKv, isGimEmptyValue } from '../gim/gimValueSemantics.js';

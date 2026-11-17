@@ -17,7 +17,6 @@ import { parseFamSections } from './famParser.js';
 import {readCbmSourceDocument}from'./cbmDocument.js';
 import {sourceScalarProperties, sourceScalar, sourceReferenceFields, sourceDiagnostic, parseSourceDocument, type SourceDiagnostic} from './sourceDocument.js';
 
-export { parseKeyValue } from './kvParser.js';
 
 /**
  * 判断 SYSTEMNAME 值是否为无意义占位符（应跳过，不参与名称拼接）。

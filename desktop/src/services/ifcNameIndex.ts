@@ -1,6 +1,7 @@
+import {logger} from '../utils/logger.js';
 import type { CbmNode } from '../gim/types.js';
-import type { ViewerContext } from './viewerEngine.js';
-import type { ViewerState as AppState } from '../shared/viewerState.js';
+import type { ViewerContext } from '../viewer/viewerEngine.js';
+import type {AppState} from '../app/state.js';
 import type { ProjectLoadSession } from '../shared/projectSession.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
@@ -83,7 +84,7 @@ async function enrichIfcNames(ctx: ViewerContext, state: AppState, session: Proj
       }
       completedModels.add(model);
     } catch (err) {
-      console.warn(`构建名称索引失败 (${modelId}):`, err);
+      logger.warn(`构建名称索引失败 (${modelId}):`, err);
     }
   }
   debugLog(DEBUG_IFC_LOAD, `IFC 名称索引: ${state.ifcGuidToName.size} 条记录`);

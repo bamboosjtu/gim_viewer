@@ -1,15 +1,10 @@
+pub use gim_native_core::{Settings, SavedSettings};
 use gim_native_core::{NativeError, NativeErrorCode};
-use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Settings { pub tianditu_key: String, pub base_layer: String }
-impl Default for Settings {
-    fn default() -> Self { Self { tianditu_key: String::new(), base_layer: "imagery".into() } }
-}
-#[derive(Serialize, Deserialize)]
-struct SavedSettings { version: u32, settings: Settings }
+
+
+
 
 fn decode(bytes: &[u8]) -> Settings {
     if let Ok(saved) = serde_json::from_slice::<SavedSettings>(bytes) {

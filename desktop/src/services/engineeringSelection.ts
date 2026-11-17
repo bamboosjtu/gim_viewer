@@ -2,7 +2,7 @@ import {projectPresentation} from './projectPresentationPort.js';
 import {componentDefinition} from '../engineering/catalogLabels.js';
 import {setRenderVisibility} from '../viewer/demandRendering.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
-import { loadPresentation } from './presentationPort.js';
+import {selectionPresentation} from './selectionPresentationPort.js';
 import type { AppState, EngineeringSelectionScope, SelectionRequest } from '../app/state.js';
 import type * as THREE from 'three';
 import { getEngineeringRepresentations } from './engineeringRepresentationService.js';
@@ -238,16 +238,14 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
   // A declaration without members has no isolation range. Leave a previous
   // isolation before inspecting it, so the whole scene does not disappear.
   if (groupNode && !sourceIds.size && state.onlySelected) state.setOnlySelected(false);
-  const tree = await loadPresentation('engineeringTreeView');
-  if (!guard.isCurrent()) return true;
-  if (target.kind === 'engineering-source') tree.revealEngineeringSource(state, target.key);
-  else tree.syncEngineeringTreeSelection(state);
+  await selectionPresentation().engineeringTree(state,target.kind==='engineering-source'?target.key:null,guard.isCurrent);
+  if(!guard.isCurrent())return true;
   state.deviceLodRuntime?.setOnlySelected?.(state.onlySelected); applyGeometryFilter(state);
   const selectedSources: SourceRecord[] = [...sourceIds].flatMap(id => { const source = engineeringSourceRecord(state, id); return source ? [source] : []; });
   const declaredContexts = groupNode && 'declaredContextIds' in groupNode ? groupNode.declaredContextIds : undefined;
-  const { renderEngineeringInspector } = await loadPresentation('engineeringInspector');
+
   if (!guard.isCurrent()) return true;
-  renderEngineeringInspector({ title: groupNode?.title || entity?.name || single?.name || (pending?'待归属对象':'未命名对象'), entity, pending, sources: selectedSources,
+  await selectionPresentation().engineeringInspector({ title: groupNode?.title || entity?.name || single?.name || (pending?'待归属对象':'未命名对象'), entity, pending, sources: selectedSources,
     parts:entity?[...new Set(snapshot.memberships.filter(m=>m.ownerId===entity.id&&['part','neutral_set'].includes(m.interpretation.meaning)).map(m=>componentDefinition(m.interpretation)?.label??m.interpretation.standardClass?.label??(selectedSources.find(s=>s.id===m.sourceId)?.name||'未命名部件')))]:undefined,
     group: groupNode ? { entityCount: groupNode.entityCount, pendingCount: ownerIds.size - groupNode.entityCount,
       declarations: [...new Set((declaredContexts ?? []).flatMap((id:string) => {
@@ -262,7 +260,7 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
     onSource: sourceId => { if (guard.isCurrent()) void Promise.resolve(selectEngineeringTarget(state, { kind: 'engineering-source', key: sourceId })).catch(reportBackgroundError); },
     onOwner: single && representations.index.ownerBySource.get(single.id) ? () => {
       if (!guard.isCurrent()) return;
-      state.viewState.mode = state.viewState.mode==='inventory'?'inventory':'composition'; tree.renderEngineeringTree(state);
+      state.viewState.mode = state.viewState.mode==='inventory'?'inventory':'composition'; void selectionPresentation().refreshEngineeringTree(state,guard.isCurrent).catch(reportBackgroundError);
       void Promise.resolve(selectEngineeringTarget(state, { kind: 'engineering', key: representations.index.ownerBySource.get(single.id)! })).catch(reportBackgroundError);
     } : undefined,
     onDocument: path => {
@@ -303,7 +301,7 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
       ] as [string,string]);
       return {incomplete:page.coverage.some(row=>row.materialization!=='materialized'||row.status!=='complete'),next:page.nextOffset===undefined?undefined:{revision:page.revision,offset:page.nextOffset},sections:[{title:'详细属性',rows:page.attributes.map(attribute=>[attribute.rawKey,attribute.rawValue] as [string,string])},{title:'属性适用对象',rows:assignments}]};
     } : undefined,
-  });
+  },guard.isCurrent);
   if (!state.initialized) return true;
   await updateEngineeringHighlight(state, request, false);
   if (options.load !== false) {

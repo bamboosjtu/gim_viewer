@@ -1,21 +1,32 @@
+pub use gim_native_core::{ProjectMeta, ImportFile, Prepared, TextEntry};
 use gim_native_core::{NativeError, NativeErrorCode};
-use gim_native_core::{extract_from_path_with_quota, ExtractionQuota};
+use gim_native_core::{extract_from_path_with_quota};
 use rusqlite::{params, Connection};
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{fs, io::Read, path::{Path, PathBuf}, sync::atomic::{AtomicBool, Ordering}, time::{SystemTime, UNIX_EPOCH}};
+use std::{collections::HashMap,sync::{Mutex,OnceLock}};
 
-pub const PARSER: &str = "mobile-powerline-v1";
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProjectMeta { pub id: String, pub name: String, pub sha256: String, pub size: u64, pub imported_at: u64, pub last_opened_at: u64, pub parser_version: String, pub counts: serde_json::Value }
-#[derive(Serialize, Deserialize)]
-pub struct ImportFile { pub path: String, pub name: String, pub sha256: String, pub size: u64 }
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Prepared { pub meta: ProjectMeta, pub duplicate: bool, pub cache: Option<serde_json::Value> }
-#[derive(Serialize)]
-pub struct TextEntry { pub path: String, pub text: String }
+#[derive(Clone,PartialEq,Eq)]
+struct SourceStamp {
+    length:u64,modified:Option<SystemTime>,created:Option<SystemTime>,
+    #[cfg(unix)] device:u64,
+    #[cfg(unix)] inode:u64,
+}
+fn source_stamp(metadata:&fs::Metadata)->SourceStamp {
+    #[cfg(unix)] use std::os::unix::fs::MetadataExt;
+    SourceStamp {length:metadata.len(),modified:metadata.modified().ok(),created:metadata.created().ok(),
+        #[cfg(unix)] device:metadata.dev(),#[cfg(unix)] inode:metadata.ino()}
+}
+// A private source is immutable after import. Reuse its verified SHA only while
+// filesystem identity is unchanged; a changed stamp must pass SHA validation again.
+static SOURCE_PROOFS:OnceLock<Mutex<HashMap<PathBuf,SourceStamp>>>=OnceLock::new();
+#[cfg(test)] static SOURCE_HASH_READS:OnceLock<Mutex<HashMap<PathBuf,u64>>>=OnceLock::new();
+
+pub use gim_native_core::MOBILE_PARSER_VERSION as PARSER;
+
+
+
+
 fn error<E: std::fmt::Display>(e: E) -> NativeError { NativeError::from(e.to_string()) }
 fn now() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() }
 pub fn validate_id(id: &str) -> Result<(), NativeError> { if id.len() == 64 && id.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) { Ok(()) } else { Err("无效工程 ID".into()) } }
@@ -23,18 +34,42 @@ pub fn dir(root: &Path, id: &str) -> Result<PathBuf, NativeError> { validate_id(
 fn database(root: &Path, id: &str) -> Result<Connection, NativeError> {
     let path = dir(root, id)?.join("cache/project.sqlite");
     if !path.is_file() { return Err("工程缓存不存在".into()); }
-    Connection::open(path).map_err(error)
+    let db=Connection::open(path).map_err(error)?;
+    let version:i64=db.pragma_query_value(None,"user_version",|row|row.get(0)).map_err(error)?;
+    if version!=i64::from(gim_native_core::DATABASE_SCHEMA_VERSION) {
+        return Err(NativeError::new(NativeErrorCode::SchemaUnsupported,"线路开发缓存 schema 不受支持，请删除开发缓存后重建"));
+    }
+    Ok(db)
+}
+fn initialize_cache_schema(db:&Connection)->Result<(),NativeError> {
+    db.execute_batch("PRAGMA journal_mode=DELETE; CREATE TABLE entries(key TEXT PRIMARY KEY,path TEXT NOT NULL,text TEXT NOT NULL); CREATE TABLE semantics(parser TEXT PRIMARY KEY,json TEXT NOT NULL); CREATE TABLE previews(key TEXT PRIMARY KEY,json TEXT NOT NULL);").map_err(error)?;
+    db.pragma_update(None,"user_version",gim_native_core::DATABASE_SCHEMA_VERSION).map_err(error)
 }
 pub fn read_meta(root: &Path, id: &str) -> Result<ProjectMeta, NativeError> { serde_json::from_slice(&fs::read(dir(root, id)?.join("metadata.json")).map_err(error)?).map_err(error) }
 pub fn validate_source(root: &Path, id: &str) -> Result<(), NativeError> {
     let meta = read_meta(root, id)?;
-    let mut file = fs::File::open(dir(root, id)?.join("source/original.gim")).map_err(error)?;
-    if meta.id != id || meta.sha256 != id || file.metadata().map_err(error)?.len() != meta.size { return Err(NativeError::new(NativeErrorCode::SourceChanged,"私有源包身份或大小不匹配")); }
+    let path=dir(root,id)?.join("source/original.gim");
+    let mut file = fs::File::open(&path).map_err(error)?;
+    let before=source_stamp(&file.metadata().map_err(error)?);
+    if meta.id != id || meta.sha256 != id || before.length != meta.size { return Err(NativeError::new(NativeErrorCode::SourceChanged,"私有源包身份或大小不匹配")); }
+    let proofs=SOURCE_PROOFS.get_or_init(||Mutex::new(HashMap::new()));
+    {
+        let mut verified=proofs.lock().map_err(error)?;
+        if before.modified.is_some()&&verified.get(&path)==Some(&before) {return Ok(());}
+        verified.remove(&path);
+    }
+    #[cfg(test)] {let mut reads=SOURCE_HASH_READS.get_or_init(||Mutex::new(HashMap::new())).lock().unwrap();*reads.entry(path.clone()).or_default()+=1;}
     let mut header = [0u8; 7]; file.read_exact(&mut header).map_err(error)?;
     if &header != b"GIMPKGT" { return Err(NativeError::new(NativeErrorCode::SourceChanged,"私有源包类型错误，不能使用线路缓存")); }
     let mut digest = Sha256::new(); digest.update(header); let mut buffer = [0u8; 256*1024];
     loop { let n = file.read(&mut buffer).map_err(error)?; if n == 0 { break; } digest.update(&buffer[..n]); }
     if format!("{:x}", digest.finalize()) != id { return Err(NativeError::new(NativeErrorCode::SourceChanged,"私有源包 SHA 校验失败，不能使用缓存")); }
+    if source_stamp(&file.metadata().map_err(error)?)!=before || source_stamp(&fs::metadata(&path).map_err(error)?)!=before {
+        return Err(NativeError::new(NativeErrorCode::SourceChanged,"源包在身份验证期间已被替换"));
+    }
+    let mut verified=proofs.lock().map_err(error)?;
+    if verified.len()>=256 {if let Some(old)=verified.keys().next().cloned(){verified.remove(&old);}}
+    if before.modified.is_some(){verified.insert(path,before);}
     Ok(())
 }
 /// Source identity is rechecked; only the bounded header, never the archive, crosses IPC.
@@ -60,6 +95,7 @@ pub fn list(root: &Path) -> Vec<ProjectMeta> {
 }
 pub fn source(root: &Path, id: &str, path: &str) -> Result<String, NativeError> {
     if path.len() > 4096 || !["cbm", "fam", "dev", "phm", "mod"].contains(&path.rsplit('.').next().unwrap_or("").to_lowercase().as_str()) { return Err("只允许查看业务对象关联的文本来源".into()); }
+    validate_source(root,id)?;
     database(root, id)?.query_row("SELECT text FROM entries WHERE key=?1", [normalize_entry_key(path)], |r| r.get(0)).map_err(error)
 }
 fn stored_text_entries(root: &Path, id: &str) -> Result<Vec<TextEntry>, NativeError> {
@@ -70,7 +106,11 @@ fn stored_text_entries(root: &Path, id: &str) -> Result<Vec<TextEntry>, NativeEr
 }
 pub fn text_entries(root: &Path, id: &str) -> Result<Vec<TextEntry>, NativeError> {
     validate_source(root, id)?;
-    match stored_text_entries(root, id) { Ok(v) if !v.is_empty() => Ok(v), _ => { rebuild_entries(root, id)?; stored_text_entries(root, id) } }
+    match stored_text_entries(root, id) {
+        Ok(v) if !v.is_empty()=>Ok(v),
+        Err(error) if error.code==NativeErrorCode::SchemaUnsupported=>Err(error),
+        _=>{rebuild_entries(root,id)?;stored_text_entries(root,id)}
+    }
 }
 fn rebuild_entries(root: &Path, id: &str) -> Result<(), NativeError> {
     let project = dir(root, id)?; let meta = read_meta(root, id)?; let source = project.join("source/original.gim");
@@ -83,7 +123,7 @@ fn rebuild_entries(root: &Path, id: &str) -> Result<(), NativeError> {
     let pending = project.join("cache/project.rebuilding.sqlite"); if pending.exists() { fs::remove_file(&pending).map_err(error)?; }
     let result = (|| {
         let mut db = Connection::open(&pending).map_err(error)?;
-        db.execute_batch("PRAGMA journal_mode=DELETE; CREATE TABLE entries(key TEXT PRIMARY KEY,path TEXT NOT NULL,text TEXT NOT NULL); CREATE TABLE semantics(parser TEXT PRIMARY KEY,json TEXT NOT NULL); CREATE TABLE previews(key TEXT PRIMARY KEY,json TEXT NOT NULL);").map_err(error)?;
+        initialize_cache_schema(&db)?;
         let tx = db.transaction().map_err(error)?;
         let quota = gim_native_core::extraction_limits().mobile.clone();
         let decoded = extract_from_path_with_quota(&source, &quota, |path, bytes| {
@@ -131,7 +171,11 @@ fn checked_cache(root: &Path, id: &str) -> Result<Option<(serde_json::Value,Stri
     } else { Ok(None) }
 }
 pub fn touch(root: &Path, id: &str) -> Result<(), NativeError> { let mut m = read_meta(root, id)?; m.last_opened_at = now(); write_meta(&dir(root, id)?, &m) }
-pub fn delete(root: &Path, id: &str) -> Result<(), NativeError> { let d = dir(root, id)?; if d.exists() { fs::remove_dir_all(d).map_err(error)?; } Ok(()) }
+pub fn delete(root: &Path, id: &str) -> Result<(), NativeError> {
+    let d=dir(root,id)?;
+    if let Some(proofs)=SOURCE_PROOFS.get(){if let Ok(mut verified)=proofs.lock(){verified.remove(&d.join("source/original.gim"));}}
+    if d.exists(){fs::remove_dir_all(d).map_err(error)?;}Ok(())
+}
 pub fn clean_imports(root: &Path) -> Result<(), NativeError> {
     let staging = root.join("projects/.imports"); if staging.exists() { fs::remove_dir_all(&staging).map_err(error)?; } fs::create_dir_all(staging).map_err(error)?;
     for meta in list(root).into_iter().filter(|m| m.parser_version.is_empty()) { delete(root, &meta.id)?; }
@@ -167,7 +211,7 @@ pub fn prepare(root: &Path, input: ImportFile, cancelled: &AtomicBool, mut progr
         fs::create_dir_all(staging.join("cache/semantic")).map_err(error)?;
         fs::create_dir_all(staging.join("cache/previews")).map_err(error)?;
         let mut db = Connection::open(staging.join("cache/project.sqlite")).map_err(error)?;
-        db.execute_batch("PRAGMA journal_mode=DELETE; CREATE TABLE entries(key TEXT PRIMARY KEY,path TEXT NOT NULL,text TEXT NOT NULL); CREATE TABLE semantics(parser TEXT PRIMARY KEY,json TEXT NOT NULL); CREATE TABLE previews(key TEXT PRIMARY KEY,json TEXT NOT NULL);").map_err(error)?;
+        initialize_cache_schema(&db)?;
         let tx = db.transaction().map_err(error)?; let mut count = 0u64;
         progress("解压归档", 0, None);
         let quota = gim_native_core::extraction_limits().mobile.clone();
@@ -220,6 +264,27 @@ pub fn preview(root: &Path, id: &str, key: &str, data: Option<serde_json::Value>
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn source_details_reuse_identity_proof_and_reject_same_size_replacement() {
+        let root=crate::workspace_test_temp().join(format!("source-detail-{}-{}",std::process::id(),now()));
+        let bytes=b"GIMPKGT-original";let id=format!("{:x}",Sha256::digest(bytes));let project=dir(&root,&id).unwrap();
+        fs::create_dir_all(project.join("source")).unwrap();fs::create_dir_all(project.join("cache")).unwrap();
+        let path=project.join("source/original.gim");fs::write(&path,bytes).unwrap();
+        write_meta(&project,&ProjectMeta{id:id.clone(),name:"fixture".into(),sha256:id.clone(),size:bytes.len() as u64,imported_at:0,last_opened_at:0,parser_version:PARSER.into(),counts:serde_json::json!({})}).unwrap();
+        let db=Connection::open(project.join("cache/project.sqlite")).unwrap();
+        db.execute_batch("CREATE TABLE entries(key TEXT PRIMARY KEY,path TEXT,text TEXT);INSERT INTO entries VALUES('unit.cbm','unit.cbm','original text');").unwrap();db.pragma_update(None,"user_version",gim_native_core::DATABASE_SCHEMA_VERSION).unwrap();drop(db);
+        for _ in 0..4 {assert_eq!(source(&root,&id,"unit.cbm").unwrap(),"original text");}
+        assert_eq!(SOURCE_HASH_READS.get().unwrap().lock().unwrap().get(&path),Some(&1));
+        let db=Connection::open(project.join("cache/project.sqlite")).unwrap();db.pragma_update(None,"user_version",2).unwrap();
+        assert_eq!(source(&root,&id,"unit.cbm").unwrap_err().code,NativeErrorCode::SchemaUnsupported);
+        assert_eq!(db.query_row("SELECT text FROM entries",[],|row|row.get::<_,String>(0)).unwrap(),"original text");
+        db.pragma_update(None,"user_version",gim_native_core::DATABASE_SCHEMA_VERSION).unwrap();drop(db);
+        fs::write(&path,b"GIMPKGT-replaced").unwrap();
+        fs::File::options().write(true).open(&path).unwrap().set_times(fs::FileTimes::new().set_modified(SystemTime::now()+std::time::Duration::from_secs(5))).unwrap();
+        assert_eq!(source(&root,&id,"unit.cbm").unwrap_err().code,NativeErrorCode::SourceChanged);
+        assert_eq!(SOURCE_HASH_READS.get().unwrap().lock().unwrap().get(&path),Some(&2));
+        delete(&root,&id).unwrap();assert!(!SOURCE_PROOFS.get().unwrap().lock().unwrap().contains_key(&path));fs::remove_dir_all(root).unwrap();
+    }
     fn test_payload(id: &str, size: u64, name: &str) -> serde_json::Value {
         serde_json::json!({"id":id,"sourceSha256":id,"sourceSize":size,"parserVersion":PARSER,"name":name,"objects":[{"id":"root","kind":"project"}],"rawWires":[],"tree":{"objectId":"root","children":[]},"counts":{"project":1,"line":0,"strain":0,"tower":0,"span":0,"cross":0}})
     }
@@ -251,7 +316,7 @@ mod tests {
     #[test] fn semantic_commit_checks_source_identity() {
         let root = crate::workspace_test_temp().join(format!("gim-mobile-test-{}", now())); let bytes = b"GIMPKGT"; let id = format!("{:x}", Sha256::digest(bytes)); let p = dir(&root, &id).unwrap(); fs::create_dir_all(p.join("cache")).unwrap(); fs::create_dir_all(p.join("source")).unwrap(); fs::write(p.join("source/original.gim"),bytes).unwrap();
         let m = ProjectMeta { id: id.clone(), name: "test".into(), sha256: id.clone(), size: 7, imported_at: 0, last_opened_at: 0, parser_version: String::new(), counts: serde_json::json!({}) }; write_meta(&p, &m).unwrap();
-        let db = Connection::open(p.join("cache/project.sqlite")).unwrap(); db.execute_batch("CREATE TABLE semantics(parser TEXT PRIMARY KEY,json TEXT NOT NULL);").unwrap(); drop(db);
+        let db = Connection::open(p.join("cache/project.sqlite")).unwrap(); db.execute_batch("CREATE TABLE semantics(parser TEXT PRIMARY KEY,json TEXT NOT NULL);").unwrap();db.pragma_update(None,"user_version",gim_native_core::DATABASE_SCHEMA_VERSION).unwrap();drop(db);
         let bad = serde_json::json!({"id":id,"sourceSha256":"wrong","sourceSize":7,"parserVersion":PARSER}); assert!(commit(&root, &id, bad).is_err()); assert!(cached(&root, &id).unwrap().is_none());
         let good = test_payload(&id, 7, "saved"); commit(&root, &id, good.clone()).unwrap(); assert_eq!(cached(&root, &id).unwrap(), Some(good.clone()));
         assert_eq!(serde_json::from_str::<serde_json::Value>(&cached_json(&root,&id).unwrap().unwrap()).unwrap(),good);
