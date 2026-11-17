@@ -17,3 +17,18 @@ test('standalone addresses reject semantic and host dependencies',()=>{
   for(const target of ['../engineering/types.js','../app/state.js','three'])
     assert.equal(coreBoundaryErrors(`import('${target}')`,'shared/representationAddresses.ts').length,1);
 });
+test('public SDK exports cannot bypass capability or UI/Viewer boundaries',()=>{
+  for(const source of ["import('@gim/gim-sdk/semantic')","export * from '@gim/gim-sdk/engineering/normalize.js'"])
+    assert.ok(coreBoundaryErrors(source,'gim/engineering/geometry.ts').length);
+  assert.ok(coreBoundaryErrors("import('@gim/gim-sdk/source-adapter')",'gim/engineering/projection.ts').length);
+  assert.ok(coreBoundaryErrors("export * from '@gim/gim-sdk/source'",'engineering/semantic.ts').length);
+  for(const path of ['ui/inspector.ts','viewer/highlight.ts']){
+    assert.ok(coreBoundaryErrors("import('@gim/gim-sdk/source')",path).length);
+    assert.equal(coreBoundaryErrors("import type {SourceRecord} from '@gim/gim-sdk/gim/engineering/sourceEvidence.js'",path).length,0);
+  }
+  assert.equal(coreBoundaryErrors("import {type SourceRecord} from '@gim/gim-sdk/gim/engineering/sourceEvidence.js'",'ui/inspector.ts').length,0);
+});
+test('projection selectors do not grant access to extraction through the same module',()=>{
+  assert.ok(coreBoundaryErrors("import {extractEngineeringSourceGraph} from './sourceGraph.js'",'gim/engineering/navigation.ts').length);
+  assert.equal(coreBoundaryErrors("import {engineeringSourceRecords} from './sourceGraph.js'",'gim/engineering/navigation.ts').length,0);
+});

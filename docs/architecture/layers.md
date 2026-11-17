@@ -86,7 +86,7 @@ bootstrap
 
 SDK 的实现及模块测试归 `packages/gim-sdk/src/`，IFC 运行时解析器仍在桌面；其共享对象/空间类型由 SDK 的 ifcSpatialTypes 提供。桌面与 Vitest 使用 gim-source 条件读取当前源码，默认包 import 消费构建后的 ESM。
 
-`core-boundaries.mjs` 补充职责检查：投影和绑定不得导入分类器/归一化运行值，几何入口和目录不得消费语义主归属。中立类型允许共享；负向用例纳入 `test:presentation-boundaries`。入口不意味着五个独立进程或串行执行，几何仍可先于实体完成。
+`core-boundaries.mjs` 补充职责检查：投影和绑定不得导入分类器/归一化运行值，几何入口和目录不得消费语义主归属。中立类型允许共享；SDK 的裸包出口和能力别名同样参与依赖检查，UI/Viewer 的 SDK 运行值调用经服务端口接线，展示格式器保持精确登记入口。负向用例纳入 `test:presentation-boundaries`。入口不意味着五个独立进程或串行执行，几何仍可先于实体完成。
 
 ## 边界检查
 
