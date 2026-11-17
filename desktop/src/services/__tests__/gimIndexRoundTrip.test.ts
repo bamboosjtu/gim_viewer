@@ -250,7 +250,7 @@ MANUFACTURER=某厂`, 'fam001.fam')],
     expect(state.deviceToIfcFile.get('CBM/area.cbm')).toBe('device');
 
     // --- 验证 8: cachedFamProperties 还原（分节） ---
-    const famProps = state.cachedFamProperties.get('DEV/fam001.fam');
+    const famProps = state.properties.cachedFamProperties.get('DEV/fam001.fam');
     expect(famProps).toBeDefined();
     const designSec = famProps!.get('设计参数');
     expect(designSec).toBeDefined();
@@ -260,7 +260,7 @@ MANUFACTURER=某厂`, 'fam001.fam')],
     expect(mfgSec!.get('MANUFACTURER')).toBe('某厂');
 
     // --- 验证 9: cachedDevProperties 还原 ---
-    const devProps = state.cachedDevProperties.get('DEV/device.dev');
+    const devProps = state.properties.cachedDevProperties.get('DEV/device.dev');
     expect(devProps).toBeDefined();
     expect(devProps!.SYMBOLNAME).toBe('断路器');
     expect(devProps!.TYPE).toBe('OTHERS');
@@ -281,8 +281,8 @@ MANUFACTURER=某厂`, 'fam001.fam')],
     expect(state.ifcGuidIndex.size).toBe(0);
     expect(state.cbmNodeIndex.size).toBe(0);
     expect(state.fileDevRelations).toEqual([]);
-    expect(state.cachedFamProperties.size).toBe(0);
-    expect(state.cachedDevProperties.size).toBe(0);
+    expect(state.properties.cachedFamProperties.size).toBe(0);
+    expect(state.properties.cachedDevProperties.size).toBe(0);
   });
 
   it('同级 children 按 sort_order 排序后还原', async () => {
@@ -339,9 +339,9 @@ MANUFACTURER=某厂`, 'fam001.fam')],
     const state = new AppState();
     restoreGimIndexToState(state, result);
 
-    expect(state.cachedIfcPaths.size).toBe(1);
-    expect(state.cachedIfcPaths.get('DEV/a.ifc')).toBe('/cache/DEV/a.ifc');
-    expect(state.cachedIfcPaths.has('DEV/b.ifc')).toBe(false);
+    expect(state.properties.cachedIfcPaths.size).toBe(1);
+    expect(state.properties.cachedIfcPaths.get('DEV/a.ifc')).toBe('/cache/DEV/a.ifc');
+    expect(state.properties.cachedIfcPaths.has('DEV/b.ifc')).toBe(false);
   });
 
   it('BASEFAMILYPOINTER 进入同一 FAM persistence/source-tracing 链，空 sentinel 不入库', async () => {

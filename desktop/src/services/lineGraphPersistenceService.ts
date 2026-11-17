@@ -14,7 +14,7 @@
  * 依据 Line-2 spec：v4 adds transmission_line graph cache
  */
 
-import type { GimGraph, GimGraphNode } from '../gim/gimGraphTypes.js';
+import type { GimGraph, GimGraphNode } from '@gim/powerline-core/gimGraphTypes.js';
 import type {
   LineGraphPayload,
   LineCbmNodePayload,
@@ -23,7 +23,7 @@ import type {
   LineFileStatPayload,
 } from '@desktop/database.js';
 import { LineRefKind } from '../gim/lineRefKind.js';
-import { normalizeGimPath, getFileNameLower } from '../gim/linePathNormalize.js';
+import { normalizeGimPath, getFileNameLower } from '@gim/powerline-core/linePathNormalize.js';
 import {SourceConflictError} from '../gim/sourceDocument.js';
 
 /** refs 中数组型字段名（对应 GimGraphNode.refs 的 8 个 string[] 字段，排除 rawRefs） */

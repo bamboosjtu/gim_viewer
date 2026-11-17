@@ -24,7 +24,7 @@
  * - blhaDistanceMeters 仅用于审计分类，不用于渲染
  */
 
-import type { GimGraph, GimGraphNode } from '../gim/gimGraphTypes.js';
+import type { GimGraph, GimGraphNode } from '@gim/powerline-core/gimGraphTypes.js';
 import type { LineMapData } from '../gim/lineMapData.js';
 
 /** 单类档距样本上限（整体 Top） */

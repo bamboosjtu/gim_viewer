@@ -114,6 +114,6 @@ it('warm property repair preserves the warm path and owns publication callbacks'
   const {state,context}=fixture();m.native=true;context.projectId=1;m.validate.mockResolvedValue({valid:true,substation_properties_complete:false});
   m.rest.mockImplementationOnce(async(_input,ports)=>{ports.onPublished({fam_properties:[{source_path:'unit.fam',raw_property_json:'{"key":"value"}'}]});return true;});
   await openSubstationProject(context);await vi.waitFor(()=>expect(m.rest).toHaveBeenCalledOnce());
-  expect(context.getExtracted).not.toHaveBeenCalled();expect(state.cachedFamSourceProperties.get('unit.fam')).toEqual([{key:'value'}]);
+  expect(context.getExtracted).not.toHaveBeenCalled();expect(state.properties.cachedFamSourceProperties.get('unit.fam')).toEqual([{key:'value'}]);
   expect(m.rest.mock.calls[0][1].isCurrent()).toBe(true);state.activateProject(2,'b');expect(m.rest.mock.calls[0][1].isCurrent()).toBe(false);
 });

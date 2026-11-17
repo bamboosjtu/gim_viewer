@@ -21,16 +21,16 @@ export function benchmarkProgress(state:AppState){
     (state.engineering.status==='error'||['engineering-build-failed','engineering-progress-stalled'].includes(state.engineering.failureCode??''));
   const backgroundSettled=backgroundStatus!=='pending'&&(state.currentProjectType!=='substation'||semantic);
   const engineeringTreeSettled=state.currentProjectType!=='substation'||['ready','error'].includes(state.engineering.treeStatus);
-  const baseSettled=dev?dev.baseRepresentationsSettled===true:!state.ifcBackgroundPending&&state.loadedModels.size===state.currentIfcEntries.length;
+  const baseSettled=dev?dev.baseRepresentationsSettled===true:!state.ifcLoading.pending&&state.loadedModels.size===state.currentIfcEntries.length;
   const engineeringBuildPending=state.currentProjectType==='substation'&&state.engineering.buildPending;
   return {semantic,semanticFailure,semanticStatus:state.engineering.status,engineeringBuildPending,
     automaticTimingPolicy:'semantic-base-without-cache-v1',
     geometryTimingPolicy:'in-viewport-model-draw-submitted-v1',
     engineeringTreeSettled,
     engineeringProgress:state.engineering.progress?{...state.engineering.progress}:null,engineeringFailureCode:state.engineering.failureCode,
-    automaticSettled:semantic&&!engineeringBuildPending&&!state.ifcBackgroundPending&&(line||baseSettled)&&n(dev?.pending)===0&&n(dev?.viewPendingOccurrences)===0,
+    automaticSettled:semantic&&!engineeringBuildPending&&!state.ifcLoading.pending&&(line||baseSettled)&&n(dev?.pending)===0&&n(dev?.viewPendingOccurrences)===0,
     backgroundSettled:backgroundSettled&&!engineeringBuildPending&&engineeringTreeSettled,backgroundStatus,cachePersistenceStatus,
-    cacheSettled:(state.currentProjectType!=='substation'||semantic)&&!engineeringBuildPending&&!state.sourceGeometryCachePending&&(!dev||dev.cacheWritesSettled===true)&&!['loading','saving'].includes(state.engineering.cacheStatus)&&ifcPublication.settled>=state.currentIfcEntries.length
+    cacheSettled:(state.currentProjectType!=='substation'||semantic)&&!engineeringBuildPending&&!state.sourceGeometry.cachePending&&(!dev||dev.cacheWritesSettled===true)&&!['loading','saving'].includes(state.engineering.cacheStatus)&&ifcPublication.settled>=state.currentIfcEntries.length
       &&(!line||linePersistence==='saved'||linePersistence==='failed'||linePersistence==='not-applicable'),
     workload:{cbmNodes:state.cbmNodeIndex.size,lineNodes:state.currentGimGraph?.nodesByPath.size??0,
       sources:state.engineering.snapshot?.memberships.length??0,entities:state.engineering.snapshot?.entities.length??0,
@@ -39,7 +39,7 @@ export function benchmarkProgress(state:AppState){
       occurrences:n(dev?.occurrences),devSources:n(dev?.uniqueDevSources),shown:n(dev?.shown),failed:n(dev?.failedOccurrences),empty:n(dev?.emptyOccurrences),partial:n(dev?.partialOccurrences),unsupported:n(dev?.unsupportedOccurrences),
       pending:n(dev?.pending),sourcePlacementWarnings:n(dev?.sourcePlacementWarnings)},
     cache:{engineering:state.engineering.cacheStatus,linePersistence,devCatalogHits:n(dev?.catalogHits),devLodHits:Array.isArray(dev?.lodHits)?[...dev.lodHits]:[],devLodMisses:Array.isArray(dev?.lodMisses)?[...dev.lodMisses]:[],
-      writePending:n(dev?.cacheWritePendingCount)+(state.sourceGeometryCachePending?1:0),writeFailures:n(dev?.artifactWriteFailures)+n(dev?.catalogWriteFailures)+ifcPublication.failed+(linePersistence==='failed'?1:0)+(state.sourceGeometryCacheError?1:0),readFailures:n(dev?.cacheReadErrorCount)},
+      writePending:n(dev?.cacheWritePendingCount)+(state.sourceGeometry.cachePending?1:0),writeFailures:n(dev?.artifactWriteFailures)+n(dev?.catalogWriteFailures)+ifcPublication.failed+(linePersistence==='failed'?1:0)+(state.sourceGeometry.cacheError?1:0),readFailures:n(dev?.cacheReadErrorCount)},
   };
 }
 async function hash(value:unknown){const bytes=new TextEncoder().encode(JSON.stringify(value));return [...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(v=>v.toString(16).padStart(2,'0')).join('');}
@@ -145,7 +145,7 @@ export async function benchmarkEvidence(state:AppState){
     semanticDigest=await hash(engineering.semanticRows);
   }else if(state.currentGimGraph){semanticDigest=await hash([...state.currentGimGraph.nodesByPath].map(([id,node])=>[id,node.entityName,node.children]).sort());}
   else if(state.currentCbmTree){semanticDigest=await hash([...state.cbmNodeIndex].map(([id,node])=>[id,node.entityName,node.children.map(child=>child.path)]).sort());}
-  const placementDigest=state.sourceGeometryCatalog?await hash(state.sourceGeometryCatalog.occurrences.map(row=>[row.id,row.devPath,row.placementMatrix]).sort()):null;
+  const placementDigest=state.sourceGeometry.catalog?await hash(state.sourceGeometry.catalog.occurrences.map(row=>[row.id,row.devPath,row.placementMatrix]).sort()):null;
   const geometry=await geometryEvidence(state);
   const baseRows=state.deviceLodRuntime?.baseRepresentationEvidence?.()??[];
   const quantize=(values:number[])=>values.map(v=>Math.round(v*1e6)/1e6);

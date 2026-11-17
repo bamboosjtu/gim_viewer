@@ -17,7 +17,7 @@ import { buildLineCatenaryParamAuditReport } from './lineGeometryAuditService.js
 import type { LineCatenaryParamAuditReport } from './lineGeometryAuditService.js';
 import { buildLineSpanGroupingAuditReport } from './lineSpanGroupingAuditService.js';
 import type { LineSpanGroupingAuditReport } from './lineSpanGroupingAuditService.js';
-import type { GimGraph } from '../gim/gimGraphTypes.js';
+import type { GimGraph } from '@gim/powerline-core/gimGraphTypes.js';
 import type { LineMapData } from '../gim/lineMapData.js';
 
 /** 导出 payload（JSON 复制内容） */

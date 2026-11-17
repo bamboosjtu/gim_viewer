@@ -1,6 +1,6 @@
 import type { FileDevEntry } from './types.js';
-import {parseKeyValue,keyValueDiagnostics} from './kvParser.js';
-import { parseBoundedCount } from './parserLimits.js';
+import {parseKeyValue,keyValueDiagnostics} from '@gim/powerline-core/kvParser.js';
+import { parseBoundedCount } from '@gim/powerline-core/parserLimits.js';
 import {getFileEntryResolver} from './entryResolver.js';
 import { createIfcModelId } from './modelIdentity.js';
 import { resolveIfcPath } from './gimIndexer.js';

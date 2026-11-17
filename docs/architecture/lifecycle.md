@@ -136,3 +136,5 @@ Viewer 与 UI 装配区分 idle/creating/ready/failed；并发调用共享一次
 - [表示与绑定](representations.md)
 - [IFC 运行时](ifc-runtime.md)
 - [验证](../validation.md)
+
+物理来源目录的状态由 `AppState.sourceGeometry` 持有，语义结果仍在 `engineering`；缓存写入状态不决定物理目录可读性。`SourceGeometryState.read` 在读取前及就绪后检查同一捕获会话，旧会话返回空结果；当前会话缺目录保留原诊断。`ifcLoading` 的 pending 与跳过清单随工程重置；无消费者的等待队列接口已删除。属性 Map 通过 `properties.reset()` 清空，保留 Map 实例，冷/暖恢复和只读消费者访问同一所有者。

@@ -1,4 +1,4 @@
-import type { GimGraph, GimGraphNode } from '../../gim/gimGraphTypes.js';
+import type { GimGraph, GimGraphNode } from '@gim/powerline-core/gimGraphTypes.js';
 
 
 import type { CrossMarker, LineMapData, TowerMarker, WireSegment } from '../../gim/lineMapData.js';

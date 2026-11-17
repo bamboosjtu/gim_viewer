@@ -17,7 +17,7 @@
  */
 
 import type { AppState } from '../app/state.js';
-import type { GimGraph, GimGraphNode } from '../gim/gimGraphTypes.js';
+import type { GimGraph, GimGraphNode } from '@gim/powerline-core/gimGraphTypes.js';
 import type { LineGraphResult } from '@desktop/database.js';
 import { LineRefKind, ARRAY_REF_FIELDS } from '../gim/lineRefKind.js';
 import { DEBUG_GIM_CACHE } from '../config/debug.js';

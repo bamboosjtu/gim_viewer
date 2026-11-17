@@ -203,13 +203,13 @@ function publishFamSourceRows(state: AppState, rows: readonly FamPropertyPayload
   // every persisted FAM JSON row into a second main-isolate object graph is
   // unused on that path and can overlap the engineering Worker/geometry peak.
   // Warm repair still needs the restored property cache when no source map exists.
-  if(state.currentFiles){state.cachedFamSourceProperties.clear();return;}
+  if(state.currentFiles){state.properties.cachedFamSourceProperties.clear();return;}
   const families = new Map<string, import('../gim/famParser.js').FamSourceProperty[]>();
   for (const row of rows) if (row.raw_property_json) {
     try { const list = families.get(row.source_path) ?? []; list.push(JSON.parse(row.raw_property_json)); families.set(row.source_path, list); }
     catch { /* The original database row remains available; malformed JSON is not semantic evidence. */ }
   }
-  state.cachedFamSourceProperties = families;
+  state.properties.cachedFamSourceProperties = families;
 }
 
 export async function openSubstationProject(context: GimRuntimeOpenContext): Promise<void> {
@@ -290,7 +290,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
           stateCounts: {
             currentIfcEntries: state.currentIfcEntries.length,
             currentCbmTree: state.currentCbmTree?.path || null,
-            cachedIfcPaths: state.cachedIfcPaths.size,
+            cachedIfcPaths: state.properties.cachedIfcPaths.size,
             fileDevRelations: state.fileDevRelations.length,
             cbmNodeIndex: state.cbmNodeIndex.size,
             deviceToIfcFile: state.deviceToIfcFile.size,
@@ -301,7 +301,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
           project_id: context.projectId!,
           ifc_entries: state.currentIfcEntries.length,
           cbm_root: state.currentCbmTree?.path || null,
-          cached_ifc_paths: state.cachedIfcPaths.size,
+          cached_ifc_paths: state.properties.cachedIfcPaths.size,
           file_dev_relations: state.fileDevRelations.length,
         });
 
@@ -400,7 +400,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
         // GIM 视为整体：直接加载全部 IFC + MOD + STL，不弹选择框
         // loadAllIfcFiles 内部会创建 ViewerRuntime、加载 IFC、渲染树、触发 MOD/STL
         if (cachedIfcEntries.length === 0) {
-          scope.withSession(()=>{state.endIfcBackgroundLoading();});
+          scope.withSession(()=>{(state.ifcLoading.pending = false);});
           const { startGeometryOnlyView } = await scope.read(async () => import('./equipmentRuntime.js'));
 
           await scope.read(async () => startGeometryOnlyView(context));
@@ -726,7 +726,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
       // A project represented entirely by DEV has the same semantic publication
       // contract. Rendering remains independent of background cache completion.
       void startCachePersistence().catch(reportBackgroundError);
-      scope.withSession(()=>{state.endIfcBackgroundLoading();});
+      scope.withSession(()=>{(state.ifcLoading.pending = false);});
       const { startGeometryOnlyView } = await scope.read(async () => import('./equipmentRuntime.js'));
 
       await scope.read(async () => startGeometryOnlyView(context));

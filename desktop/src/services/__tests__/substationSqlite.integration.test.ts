@@ -31,14 +31,14 @@ it('retains every physical FAM row through production SQLite save/query/restore'
   expect(state.currentIfcEntries).toEqual(ifcs);
   expect(warm.index.ifc_models.map(m => m.model_id)).toEqual(ifcs.map(m => m.modelId));
   const parsed = parseFamSectionsWithDiagnostics(text, 'DEV/raw.fam');
-  expect(state.cachedFamSourceProperties.get('DEV/raw.fam')).toEqual(parsed.properties);
+  expect(state.properties.cachedFamSourceProperties.get('DEV/raw.fam')).toEqual(parsed.properties);
   expect(warm.index.fam_properties.map((p) => p.source_line)).toEqual([2,3,4,5,7,9]);
-  expect(state.cachedFamProperties.get('DEV/raw.fam')).toEqual(parsed.sections);
-  expect(state.cachedFamProperties.get('DEV/raw.fam')?.get('设计参数')?.get('材质')).toBe('银');
+  expect(state.properties.cachedFamProperties.get('DEV/raw.fam')).toEqual(parsed.sections);
+  expect(state.properties.cachedFamProperties.get('DEV/raw.fam')?.get('设计参数')?.get('材质')).toBe('银');
   expect(warm.index.fam_properties.filter((p) => p.prop_value === '铝')).toHaveLength(2);
   expect(warm.index.entries.some((e) => e.entry_path === 'DEV/empty.fam')).toBe(true);
   expect(warm.index.fam_properties.some((p) => p.source_path === 'DEV/empty.fam')).toBe(false);
-  expect(state.cachedFamSourceProperties.get('DEV/empty.fam')).toEqual([]);
+  expect(state.properties.cachedFamSourceProperties.get('DEV/empty.fam')).toEqual([]);
   expect(warm.version).toBe('gim-substation-parser-v1');
 }, 60_000);
 

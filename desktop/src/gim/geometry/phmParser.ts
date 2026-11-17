@@ -16,7 +16,7 @@
  */
 
 import type { PhmDocument, PhmSolidModelEntry, XmlModColor } from './ir.js';
-import { parseBoundedCount } from '../parserLimits.js';
+import { parseBoundedCount } from '@gim/powerline-core/parserLimits.js';
 import {
   getFirstNonEmptyKv,
   isGimEmptyValue,

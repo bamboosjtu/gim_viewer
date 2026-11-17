@@ -9,10 +9,10 @@ import { uniqueBufferCapacity } from '../measurement/core.js';
  * 线路图构建与属性解析重复解码/解析。
  */
 
-import type { GimGraph } from '../gim/gimGraphTypes.js';
-import { createLineParserCache } from '../gim/lineAttrParserCore.js';
+import type { GimGraph } from '@gim/powerline-core/gimGraphTypes.js';
+import { createLineParserCache } from '@gim/powerline-core/lineAttrParserCore.js';
 import { buildLineGimGraphFromTexts } from '../gim/lineCbmParserCore.js';
-import { parseLineAttributesFromCache, type LineAttributePayloadsCore } from '../gim/lineAttrParserCore.js';
+import { parseLineAttributesFromCache, type LineAttributePayloadsCore } from '@gim/powerline-core/lineAttrParserCore.js';
 
 export interface LineParserWorkerSession {
   generation: number;

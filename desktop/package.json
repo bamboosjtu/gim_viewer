@@ -44,8 +44,9 @@
     "generate:native-contracts": "node ../contracts/generate-native.mjs",
     "check:native-contracts": "node ../contracts/generate-native.mjs --check",
     "test:native-contracts": "node scripts/with-workspace-temp.mjs --test ../contracts/generate-native.test.mjs",
-    "format:architecture": "node scripts/with-workspace-temp.mjs node_modules/prettier/bin/prettier.cjs --write src/utils/logger.ts src/shared/projectViewState.ts src/services/ifcSelectionProjection.ts \"src/services/*PresentationPort.ts\"",
-    "check:format": "node scripts/with-workspace-temp.mjs node_modules/prettier/bin/prettier.cjs --check src/utils/logger.ts src/shared/projectViewState.ts src/services/ifcSelectionProjection.ts \"src/services/*PresentationPort.ts\""
+    "format:architecture": "node scripts/with-workspace-temp.mjs scripts/format-architecture.mjs --write",
+    "check:format": "node scripts/with-workspace-temp.mjs scripts/format-architecture.mjs --check",
+    "test:format-config": "node scripts/with-workspace-temp.mjs --test scripts/format-architecture.test.mjs"
   },
   "author": "bamboosjtu",
   "license": "MIT",

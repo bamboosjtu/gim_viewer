@@ -8,7 +8,7 @@ import type { CbmNode } from '../gim/types.js';
 import { resolveBaseFamilyReferences } from '../gim/gimValueSemantics.js';
 import { parseFamSectionsWithDiagnostics, resolveSubstationBusinessIdentity, type FamSourceProperty } from '../gim/famParser.js';
 import { getFileByPath } from '../gim/fileLookup.js';
-import { parseKeyValue } from '../gim/kvParser.js';
+import { parseKeyValue } from '@gim/powerline-core/kvParser.js';
 import { getNodeDisplayName } from '../shared/displayName.js';
 import { readGimText } from '../shared/textDecode.js';
 import { getFileEntryResolver } from '../gim/entryResolver.js';
@@ -92,7 +92,7 @@ export async function readDevKv(state: AppState, devKey: string): Promise<Record
     const file = getFileByPath(state.currentFiles, getFileEntryResolver(state.currentFiles)(devKey) ?? devKey);
     return file ? parseKeyValue(await readGimText(file)) : null;
   }
-  return getCachedByPath(state.cachedDevProperties, devKey) ?? null;
+  return getCachedByPath(state.properties.cachedDevProperties, devKey) ?? null;
 }
 
 async function collectPropertySources(
@@ -145,7 +145,7 @@ async function collectPropertySources(
   }
 
   for (const path of famPaths) {
-    let sections = getCachedByPath(state.cachedFamProperties, path);
+    let sections = getCachedByPath(state.properties.cachedFamProperties, path);
     if (!sections && state.currentFiles) {
       const file = getFileByPath(state.currentFiles, path);
       if (file) sections = (await readInspectorFamily(state,path))?.sections;
@@ -251,9 +251,9 @@ export async function inspectNodeParameters(state:AppState,node:CbmNode) {
   const readFamily=async(path:string):Promise<InspectorFamilyData|null>=>{
     if(seen.has(path.toLowerCase()))return null;seen.add(path.toLowerCase());
     const parsed=state.currentFiles ? await readInspectorFamily(state,path) : null;
-    const records=parsed?.properties ?? (!state.currentFiles ? getCachedByPath(state.cachedFamSourceProperties,path) : undefined) ?? [];
+    const records=parsed?.properties ?? (!state.currentFiles ? getCachedByPath(state.properties.cachedFamSourceProperties,path) : undefined) ?? [];
     properties.push(...records);
-    return {path,sections:parsed?.sections ?? (!state.currentFiles ? getCachedByPath(state.cachedFamProperties,path) : undefined),properties:records};
+    return {path,sections:parsed?.sections ?? (!state.currentFiles ? getCachedByPath(state.properties.cachedFamProperties,path) : undefined),properties:records};
   };
   const cbmFamilies:InspectorFamilyData[]=[],devFamilies:InspectorFamilyData[]=[];
   const refs=resolveBaseFamilyReferences(node.rawProperties??{});

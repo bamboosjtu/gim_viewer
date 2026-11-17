@@ -17,10 +17,10 @@
  * 关联文档：docs/schema/logical-model.md
  */
 
-import {parseKeyValue,keyValueDiagnostics} from './kvParser.js';
+import {parseKeyValue,keyValueDiagnostics} from '@gim/powerline-core/kvParser.js';
 import {SourceConflictError} from './sourceDocument.js';
 import {getFileEntryResolver,getFileEntryIndex} from './entryResolver.js';
-import { parseBoundedCount } from './parserLimits.js';
+import { parseBoundedCount } from '@gim/powerline-core/parserLimits.js';
 
 /** SCH 条目类型 */
 export type SchEntryType = 'std' | 'sld' | 'unknown';

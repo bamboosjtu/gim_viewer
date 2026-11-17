@@ -24,7 +24,6 @@ for(const path of [...files(resolve(root,'..','bridge')),...files(root),...files
 }
 for(const path of files(resolve(root,'services'))) {
   const local=relative(root,path).replaceAll('\\','/');
-  if(local==='services/presentationPort.ts')continue;
   failures.push(...checkPresentationSource(readFileSync(path,'utf8'),local));
 }
 // Desktop uses the declared source export; SDK consumers keep the built default entry.
@@ -60,7 +59,6 @@ const viewerBridgeImports = new Set([
 const uiPresentationValues = new Map([
   ['engineering/catalogLabels.ts',new Set(['categoryLabel','classificationReasonLabel','catalogPathLabel'])],
   ['gim/modelIdentity.ts',new Set(['resolveIfcModelId','findIfcEntryByModelId','normalizeEntryPath','normalizedIfcBasename'])],
-  ['gim/linePathNormalize.ts',new Set(['getFileNameLower','normalizeGimPath'])],
   ['gim/gimValueSemantics.ts',new Set(['isGimEmptyValue'])],
   ['gim/geometry/geometryDiagnostics.ts',new Set(['getGeometryDiagnostic','geometryReasonLabel','geometryStatusLabel'])],
   ['shared/gimParsing.ts',new Set(['getFirstNonEmptyKv','isGimEmptyValue'])],

@@ -30,7 +30,7 @@ import { prepareLineMapGeometry, clamp, type RuntimeGeoPoint, type RuntimeWire }
  */
 
 import type { LineMapData, TowerMarker, WireSegment } from '../gim/lineMapData.js';
-import type { GimGraphNode } from '../gim/gimGraphTypes.js';
+import type { GimGraphNode } from '@gim/powerline-core/gimGraphTypes.js';
 import type { LineMapProjection } from './lineMapProjection.js';
 import { ENABLE_CATENARY } from '../config/features.js';
 import { perfBegin, perfCurrentSession, perfMark, type PerfSession } from '../utils/perfTimings.js';

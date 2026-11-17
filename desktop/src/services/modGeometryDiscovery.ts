@@ -27,7 +27,7 @@ import type { XmlModColor } from '../gim/geometry/ir.js';
 import * as THREE from 'three';
 import { parseDev } from '../gim/geometry/devParser.js';
 import { parsePhm } from '../gim/geometry/phmParser.js';
-import { PARSER_LIMITS } from '../gim/parserLimits.js';
+import { PARSER_LIMITS } from '@gim/powerline-core/parserLimits.js';
 import { getFileByPath } from '../gim/fileLookup.js';
 import { getFileEntryResolver } from '../gim/entryResolver.js';
 import { MissingDevDependencyError } from '../gim/geometry/sourceGeometryError.js';

@@ -1,6 +1,6 @@
 import type { CbmNode, FileDevEntry, IfcEntry } from './types.js';
-import { normalizeEntityName } from './entityName.js';
-import { parseKeyValue } from './kvParser.js';
+import { normalizeEntityName } from '@gim/powerline-core/entityName.js';
+import { parseKeyValue } from '@gim/powerline-core/kvParser.js';
 import { getFirstNonEmptyKv, isGimEmptyValue } from './gimValueSemantics.js';
 import { resolveIfcModelId } from './modelIdentity.js';
 

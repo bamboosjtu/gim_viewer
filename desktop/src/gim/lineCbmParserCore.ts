@@ -1,3 +1,3 @@
-/** Desktop source-layer entry; implementation and tests belong to @gim/powerline-core. */
+/** Current desktop logging adapter: initialize the parser sink before exposing shared pure parsers. */
 import './lineCoreLogging.js';
 export * from "@gim/powerline-core/lineCbmParserCore.js";

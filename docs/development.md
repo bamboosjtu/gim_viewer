@@ -38,8 +38,9 @@ npm run tauri:dev     # Tauri 开发窗口
 | `npm run build` | TypeScript 检查 + Vite 生产分包 |
 | `npm run tauri:build` | Release EXE、NSIS 与 portable ZIP |
 | `npm run lint` | ESLint（`src`、`bridge`）；已接入模块执行 recommended type-checked 规则 |
-| `npm run format:architecture` | 格式化已接入的日志、视图状态、投影与展示端口模块 |
+| `npm run format:architecture` | 格式化 scripts/format-architecture.mjs 声明的状态、缓存、日志、投影与展示端口模块 |
 | `npm run check:format` | 只检查上述模块的 Prettier 格式，不改文件 |
+| `npm run test:format-config` | 用 core.autocrlf=true 的真实 Git checkout 验证已接入模块为 LF、PowerShell 为 CRLF |
 | `npm run check:version` | npm/Cargo 版本一致性；构建前自动执行 |
 | `npm run check:types` | TypeScript 检查（含测试替身的接口完整性） |
 | `npm run check:engineering-boundaries` | 纯领域、来源与 Viewer 边界检查 |
@@ -146,3 +147,5 @@ Markdown 文档不作为 CI 测试输入；事实正确性仍需对照源码和�
 维护实体目录名称、别名和部件宿主关系时，编辑 `docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx` 并标黄修改单元格；内部角色默认值由 `recognitionPolicy.json` 维护。随后在 desktop/ 运行 `npm run sync:engineering-catalog`，同步主程序、独立工具的数据副本和目录索引；生成的 JSON 不作为下一次导入的输入。该命令不读取 PDF、不启动工程样本或性能矩阵。
 
 仅核对来源按需输入的真实 Worker 协议时，可在 desktop/ 执行 `node scripts/with-workspace-temp.mjs scripts/engineering/check-worker-browser.mjs "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" 14358 source-input`。使用自有无头浏览器及内存 DTO，检查批量输入、物理/语义复用及测量控制消息，不读取工程样本或执行性能验收；结果在 output/log/source-input-browser.json。
+
+格式与 recommended type-checked ESLint 的接入列表共用 `scripts/format-architecture.mjs`；AppState 另纳入格式检查，推荐规则按模块逐步接入。`.gitattributes` 只为该范围固定 LF，PowerShell 继续 CRLF，避免 Windows checkout 将已格式化文件转换后再判失败。

@@ -44,7 +44,7 @@ export function createIfcModelId(entryPath: string): string {
  * generation 用于区分“同一 GIM 关闭后再次打开”的两个 Viewer 会话；它不
  * 参与数据库/业务索引，只是运行时生命周期盐。
  */
-export { createIfcRuntimeModelId } from '../shared/projectSession.js';
+
 
 /** 返回路径的 basename（小写、去 IFC 后缀）。 */
 export function normalizedIfcBasename(value: string): string {

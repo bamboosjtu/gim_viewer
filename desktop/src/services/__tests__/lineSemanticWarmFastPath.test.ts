@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppState } from '../../app/state.js';
 import { buildLineGimGraphFromTexts } from '../../gim/lineCbmParserCore.js';
-import { createLineParserCache, parseLineAttributesFromCache } from '../../gim/lineAttrParserCore.js';
+import { createLineParserCache, parseLineAttributesFromCache } from '@gim/powerline-core/lineAttrParserCore.js';
 import { buildLineGraphPayload } from '../lineGraphPersistenceService.js';
 import { restoreLineGraphToState } from '../lineGraphRestoreService.js';
 import { restoreLineAttributesToState } from '../lineAttrRestoreService.js';
@@ -155,11 +155,11 @@ describe('Line Warm Fast Path v1', () => {
     expect(restored.stats.CBM).toBe(graph.stats.CBM);
     expect(restored.stats.MOD).toBe(graph.stats.MOD);
     expect(restored.stats.STL).toBe(graph.stats.STL);
-    expect(state.cachedLineFamProperties.size).toBeGreaterThan(0);
-    expect(state.cachedLineDevProperties.size).toBeGreaterThan(0);
-    expect(Array.from(state.cachedLineFamProperties.values()).flatMap((byProp) => Array.from(byProp.values()).flat()).length)
+    expect(state.properties.cachedLineFamProperties.size).toBeGreaterThan(0);
+    expect(state.properties.cachedLineDevProperties.size).toBeGreaterThan(0);
+    expect(Array.from(state.properties.cachedLineFamProperties.values()).flatMap((byProp) => Array.from(byProp.values()).flat()).length)
       .toBe(attributes.famPayloads.length);
-    expect(Array.from(state.cachedLineDevProperties.values()).flatMap((byProp) => Array.from(byProp.values()).flat()).length)
+    expect(Array.from(state.properties.cachedLineDevProperties.values()).flatMap((byProp) => Array.from(byProp.values()).flat()).length)
       .toBe(attributes.devPayloads.length);
   });
 
@@ -186,13 +186,13 @@ describe('Line Warm Fast Path v1', () => {
     const sessionB = state.activateProject(2, 'sha-b');
     expect(await commitLineParserResult(state, parsedB, new Map([['B', new File(['B'], 'B')]]), sessionB)).toBe(true);
     const graphB = state.currentGimGraph;
-    const famB = new Map(state.cachedLineFamProperties);
+    const famB = new Map(state.properties.cachedLineFamProperties);
 
     expect(await commitLineParserResult(state, parsedA, new Map([['A', new File(['A'], 'A')]]), sessionA)).toBe(false);
     expect(state.currentGimGraph).toBe(graphB);
     expect(state.currentFiles?.has('B')).toBe(true);
     expect(state.currentFiles?.has('A')).toBe(false);
-    expect(state.cachedLineFamProperties).toEqual(famB);
+    expect(state.properties.cachedLineFamProperties).toEqual(famB);
   });
 
   it('A 的 full-read 已返回但 Worker 迟到时，B 提交后 A 成功结果不能覆盖 B', async () => {

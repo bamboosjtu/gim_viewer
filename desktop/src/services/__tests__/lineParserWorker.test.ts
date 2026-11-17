@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseLineInWorker } from '../lineParserWorkerClient.js';
 import { buildLineGimGraphFromTexts } from '../../gim/lineCbmParserCore.js';
-import { createLineParserCache, parseLineAttributesFromCache } from '../../gim/lineAttrParserCore.js';
+import { createLineParserCache, parseLineAttributesFromCache } from '@gim/powerline-core/lineAttrParserCore.js';
 import type { LineParserWorkerFile } from '../lineParserWorker.js';
 
 const SESSION = { generation: 1, projectId: 11, sourceSha256: 'fixture-sha', geometryToken: 1 };

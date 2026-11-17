@@ -208,11 +208,11 @@ async function getIfcBufferForEntry(
 
   // 2. Tauri 缓存命中
   const { isTauri } = await import('@desktop/runtime.js');
-  const cachedEntryPath = findCachedPath(state.cachedIfcPaths, entry.path);
+  const cachedEntryPath = findCachedPath(state.properties.cachedIfcPaths, entry.path);
   if (isTauri() && cachedEntryPath) {
     const projectId = session.projectId;
     if (projectId != null) {
-      const cachePath = state.cachedIfcPaths.get(cachedEntryPath)!;
+      const cachePath = state.properties.cachedIfcPaths.get(cachedEntryPath)!;
       debugLog(DEBUG_IFC_LOAD, '[IFC Buffer] 使用本地 IFC 缓存:', { name: entry.name, path: entry.path, cachePath });
       const { readCachedIfc } = await import('@desktop/database.js');
       const bytes = await readCachedIfc(projectId, cachedEntryPath);

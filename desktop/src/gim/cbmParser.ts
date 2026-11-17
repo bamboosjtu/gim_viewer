@@ -5,8 +5,8 @@ import type { CbmNode, IfcEntry } from './types.js';
 import { resolveIfcModelId } from './modelIdentity.js';
 import { stripIfcExtension } from './modelIdentity.js';
 import { parseDev } from './geometry/devParser.js';
-import { normalizeEntityName } from './entityName.js';
-import { PARSER_LIMITS, parseBoundedCount } from './parserLimits.js';
+import { normalizeEntityName } from '@gim/powerline-core/entityName.js';
+import { PARSER_LIMITS, parseBoundedCount } from '@gim/powerline-core/parserLimits.js';
 import { getFileByPath } from './fileLookup.js';
 import {
   getFirstNonEmptyKv,

@@ -11,7 +11,7 @@
  * - 入参使用 unknown 类型，由本服务内部进行类型收窄，调用方无需强转
  * - 字段含义全部以"疑似 / 候选 / 待确认"措辞，不写成结论
  */
-import type { GimGraph, GimGraphNode } from '../gim/gimGraphTypes.js';
+import type { GimGraph, GimGraphNode } from '@gim/powerline-core/gimGraphTypes.js';
 import type { LineMapData } from '../gim/lineMapData.js';
 
 /** 悬链线参数审计样本上限（高于通用 MAX_SAMPLES，便于格式判断） */

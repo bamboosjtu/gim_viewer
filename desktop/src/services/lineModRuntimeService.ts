@@ -7,13 +7,13 @@
  */
 
 import type { AppState } from '../app/state.js';
-import type { GimGraphNode } from '../gim/gimGraphTypes.js';
+import type { GimGraphNode } from '@gim/powerline-core/gimGraphTypes.js';
 import type { LineTextModGeometrySource } from '../gim/geometry/ir.js';
-import { parseLineMod } from '../gim/geometry/lineModParser.js';
+import { parseLineMod } from '@gim/powerline-core/geometry/lineModParser.js';
 import { parseDev } from '../gim/geometry/devParser.js';
 import { parsePhm } from '../gim/geometry/phmParser.js';
 import { getFileByPath } from '../gim/fileLookup.js';
-import { normalizeGimPath } from '../gim/linePathNormalize.js';
+import { normalizeGimPath } from '@gim/powerline-core/linePathNormalize.js';
 
 export interface LineModRuntimeEntry {
   /** 归一化后的 MOD 路径；完整路径只用于 data 属性/事件，不作为正文显示。 */

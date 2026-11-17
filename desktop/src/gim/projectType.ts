@@ -11,7 +11,7 @@ import { GIM_LIMITS } from '../shared/gimLimits.js';
  * （如 WIREWEIGHT 包含 WIRE、CROSSSECTION 包含 CROSS）。
  */
 
-import { parseKeyValue } from './kvParser.js';
+import { parseKeyValue } from '@gim/powerline-core/kvParser.js';
 import { DEBUG_RUNTIME_LOGS } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import { findEquipmentEntry } from './equipmentModel.js';

@@ -125,7 +125,7 @@ describe('Substation source evidence and normalized projections', () => {
       file_dev_entries: [], dev_properties: [], fam_properties: payload.fam_properties,
     } as unknown as Parameters<typeof restoreGimIndexToState>[1]);
     expect(state.currentCbmTree?.rawProperties).toEqual(tree?.rawProperties);
-    const properties = [...state.cachedFamSourceProperties.values()].flat();
+    const properties = [...state.properties.cachedFamSourceProperties.values()].flat();
     expect(properties.find((p) => p.label === '设备编码')).toMatchObject({
       sourcePath: 'CBM/ids.fam', rawKey: 'deviceCode', rawValue: 'ABC', rawLine: '设备编码=deviceCode=ABC',
     });

@@ -32,8 +32,8 @@ describe('属性检查器纯 DOM 交互', () => {
     expect(document.body.textContent).toContain('冲突键');
     expect(document.body.textContent).toContain('最后一行生效');
     state.currentFiles=null;
-    state.cachedFamSourceProperties.set('CBM/raw.fam',parsed.properties);
-    state.cachedFamProperties.set('CBM/raw.fam',parsed.sections);
+    state.properties.cachedFamSourceProperties.set('CBM/raw.fam',parsed.properties);
+    state.properties.cachedFamProperties.set('CBM/raw.fam',parsed.sections);
     await drawer.showNodePropertiesBasic(state,node);
     expect(document.querySelector('#props-drawer-body')!.innerHTML).toBe(cold);
   });

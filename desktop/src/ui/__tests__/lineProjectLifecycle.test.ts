@@ -1,6 +1,6 @@
 import {expect,it,vi} from 'vitest';
 import {AppState} from '../../app/state.js';
-import type {GimGraph} from '../../gim/gimGraphTypes.js';
+import type {GimGraph} from '@gim/powerline-core/gimGraphTypes.js';
 
 it('owns project DOM and invalidates old destroy handles when the view is replaced',async()=>{
   vi.resetModules();

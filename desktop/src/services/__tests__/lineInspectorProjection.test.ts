@@ -1,9 +1,9 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import type { GimGraphNode } from '../../gim/gimGraphTypes.js';
+import type { GimGraphNode } from '@gim/powerline-core/gimGraphTypes.js';
 import type { BoltModFile, HNumModFile } from '../../gim/geometry/ir.js';
 import { buildLineNodeBuckets, renderLineModSource, renderLineTowerShapeSource } from '../lineInspectorProjection.js';
-import type { LineAttributeIndex } from '../../gim/lineAttributeTypes.js';
+import type { LineAttributeIndex } from '@gim/powerline-core/lineAttributeTypes.js';
 import type { LineFamPropertyRecord, LineDevPropertyRecord } from '@desktop/database.js';
 
 function node(overrides: Partial<GimGraphNode> = {}): GimGraphNode {

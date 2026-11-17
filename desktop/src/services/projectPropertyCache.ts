@@ -8,4 +8,13 @@ export class ProjectPropertyCache {
   cachedLineFamProperties = new Map<string, Map<string, LineFamPropertyRecord[]>>();
   cachedLineFamDisplayKeys = new Map<string, Map<string, string | null>>();
   cachedLineDevProperties = new Map<string, Map<string, LineDevPropertyRecord[]>>();
+  reset(): void {
+    this.cachedFamSourceProperties.clear();
+    this.cachedIfcPaths.clear();
+    this.cachedFamProperties.clear();
+    this.cachedDevProperties.clear();
+    this.cachedLineFamProperties.clear();
+    this.cachedLineFamDisplayKeys.clear();
+    this.cachedLineDevProperties.clear();
+  }
 }

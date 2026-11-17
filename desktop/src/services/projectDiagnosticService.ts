@@ -57,8 +57,8 @@ async function collect(state: AppState, session: ProjectLoadSession, perfId: num
       navigationVersion: state.engineering.navigation?.version ?? null,
       navigationCacheHit: state.engineering.navigationCacheHit,
       pipeline:state.engineering.pipelineMetrics,
-      physicalSourceOccurrences: state.sourceGeometryCatalog?.occurrences.length ?? 0,
-      sourcePlacementWarnings: state.sourceGeometryCatalog?.diagnostics.length ?? 0,
+      physicalSourceOccurrences: state.sourceGeometry.catalog?.occurrences.length ?? 0,
+      sourcePlacementWarnings: state.sourceGeometry.catalog?.diagnostics.length ?? 0,
     },
   };
 }

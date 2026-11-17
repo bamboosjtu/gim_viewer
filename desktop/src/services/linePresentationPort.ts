@@ -1,5 +1,5 @@
 import type { AppState } from '../app/state.js';
-import type { GimGraph } from '../gim/gimGraphTypes.js';
+import type { GimGraph } from '@gim/powerline-core/gimGraphTypes.js';
 import type { PerfSession } from '../utils/perfTimings.js';
 export interface LineRenderOptions {
   perfSession?: PerfSession;

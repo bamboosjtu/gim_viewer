@@ -5,9 +5,9 @@ import { decodeGimText } from '../shared/textDecode.js';
 /** Line Parser Worker v1 客户端与同步兼容回退。 */
 
 import type { ProjectSessionIdentity } from '../shared/projectSession.js';
-import { createLineParserCache } from '../gim/lineAttrParserCore.js';
+import { createLineParserCache } from '@gim/powerline-core/lineAttrParserCore.js';
 import { buildLineGimGraphFromTexts } from '../gim/lineCbmParserCore.js';
-import { parseLineAttributesFromCache, type LineAttributePayloadsCore } from '../gim/lineAttrParserCore.js';
+import { parseLineAttributesFromCache, type LineAttributePayloadsCore } from '@gim/powerline-core/lineAttrParserCore.js';
 import type {
   LineParserWorkerFile,
   LineParserWorkerRequest,

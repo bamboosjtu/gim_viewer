@@ -36,7 +36,7 @@ export async function openEquipmentProject(
     state.substationEntrySizes = new Map([...files].map(([path, file]) => [path, file.size]));
     state.currentCbmTree = tree;
     state.cbmNodeIndex = buildCbmNodeIndex(tree);
-    state.endIfcBackgroundLoading();
+    (state.ifcLoading.pending = false);
     scope.own(presentation.navigation({name:context.projectName || tree.name,tree,
       onSelect:createNodeClickHandler(state,showMessage),signal:scope.signal}));
     perfMarkProductMoment('coreSemanticReady', { kind: 'equipment', cbmNodes: state.cbmNodeIndex.size });

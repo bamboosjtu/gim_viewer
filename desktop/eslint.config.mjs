@@ -1,5 +1,5 @@
 import tseslint from 'typescript-eslint';
-const adopted=['src/utils/logger.ts','src/shared/projectViewState.ts','src/services/ifcSelectionProjection.ts','src/services/*PresentationPort.ts'];
+import {architectureModules as adopted} from './scripts/format-architecture.mjs';
 export default tseslint.config({
   ignores: ['node_modules/**', 'dist/**', 'public/**', '.tmp/**', '**/__tests__/**', '**/*.test.ts'],
 }, {

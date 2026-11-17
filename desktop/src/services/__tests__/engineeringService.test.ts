@@ -102,7 +102,7 @@ describe('session-owned production engineering build', () => {
     const sent=()=>port.sourceInputs.flatMap(input=>input.batches.flatMap(batch=>batch.entries.map(e=>e.path)));
     const build=beginEngineeringBuild(app,files,{createWorker:portFactory(port)});
     try{
-      await app.sourceGeometryReady;
+      await app.sourceGeometry.ready;
       expect(sent()).not.toContain('unrelated.cbm');expect(sent()).not.toContain('unrelated.dev');
       await expect.poll(()=>port.resume!==null).toBe(true);
     }finally{port.resume?.();}
@@ -120,17 +120,17 @@ describe('session-owned production engineering build', () => {
     });
     try{
       await beginEngineeringBuild(app,sourceFiles(),{createWorker:portFactory(port)});
-      expect(app.engineering.buildPending).toBe(false);expect(app.sourceGeometryCachePending).toBe(true);
+      expect(app.engineering.buildPending).toBe(false);expect(app.sourceGeometry.cachePending).toBe(true);
       expect(benchmarkProgress(app)).toMatchObject({automaticSettled:true,cacheSettled:false});
       expect(port.commands).toContain('encode-geometry-cache');
     }finally{release();}
-    await expect.poll(()=>app.sourceGeometryCachePending).toBe(false);
+    await expect.poll(()=>app.sourceGeometry.cachePending).toBe(false);
     expect(benchmarkProgress(app).cacheSettled).toBe(true);
   });
   it('publishes physical geometry while cold semantic extraction is held',async()=>{
     const app=state(),port=new LoopbackPort();port.holdExtract=true;
     const build=beginEngineeringBuild(app,sourceFiles(),{createWorker:portFactory(port)});
-    expect((await app.sourceGeometryReady)?.occurrences).toHaveLength(1);expect(app.engineering.snapshot).toBeNull();
+    expect((await app.sourceGeometry.ready)?.occurrences).toHaveLength(1);expect(app.engineering.snapshot).toBeNull();
     await expect.poll(()=>port.resume!==null).toBe(true);port.resume!();await build;
     expect(app.engineering.snapshot).not.toBeNull();
   });
@@ -139,7 +139,7 @@ describe('session-owned production engineering build', () => {
     for(const path of [...store.keys()])if(/engineering-(?:entity|navigation)-/.test(path))store.delete(path);
     const port=new LoopbackPort();port.holdRestore=true;
     const build=beginEngineeringBuild(app,files,{createWorker:portFactory(port)});
-    expect((await app.sourceGeometryReady)?.occurrences).toHaveLength(1);expect(app.engineering.snapshot).toBeNull();expect(port.commands).not.toContain('extract-geometry');
+    expect((await app.sourceGeometry.ready)?.occurrences).toHaveLength(1);expect(app.engineering.snapshot).toBeNull();expect(port.commands).not.toContain('extract-geometry');
     await expect.poll(()=>port.resumeRestore!==null).toBe(true);port.resumeRestore!();await build;
     expect(app.engineering.snapshot).not.toBeNull();
   });
@@ -166,7 +166,7 @@ describe('session-owned production engineering build', () => {
     const gate=new Promise<void>(r=>{release=r;});
     const ensure=vi.fn(async()=>{await gate;app.substationSpatialIndex=buildSubstationSpatialIndexFromTexts([{entry:{modelId:'m',path:'delivery.ifc',name:'delivery'},text:"#1=IFCWALL('w',$,'墙',$,$,$,$,$);"}],null);notifyEngineeringIfcEvidence(app);return true;});
     const pending=beginEngineeringBuild(app,sourceFiles('设备',true),{createWorker:portFactory(port),ensureIfcSemantics:ensure});
-    const catalog=await app.sourceGeometryReady;expect(catalog?.occurrences).toHaveLength(1);
+    const catalog=await app.sourceGeometry.ready;expect(catalog?.occurrences).toHaveLength(1);
     await expect.poll(()=>ensure.mock.calls.length).toBe(1);expect(port.commands).not.toContain('assemble');
     release();await pending;expect(port.commands.filter(c=>c==='assemble')).toHaveLength(1);
     expect(app.engineering.status).toBe('ready');expect(app.engineering.snapshot?.entities.map(e=>e.name)).toContain('墙');
@@ -183,7 +183,7 @@ describe('session-owned production engineering build', () => {
     const unused=new File(['[设计]\n额定电压=RATEDVOLTAGE=220 kV'],'unused.fam'),read=vi.spyOn(unused,'arrayBuffer');files.set('unused.fam',unused);app.currentFiles=files;
     let release!:(value:boolean)=>void;const gate=new Promise<boolean>(resolve=>{release=resolve;});
     const build=beginEngineeringBuild(app,files,{createWorker:portFactory(port),ensureIfcSemantics:()=>gate});
-    await app.sourceGeometryReady;
+    await app.sourceGeometry.ready;
     const inventory=await getEngineeringEvidenceSnapshot(app);
     expect(inventory.entries.find(e=>e.id==='unused.fam')?.status).toBe('not_requested');expect(read).not.toHaveBeenCalled();
     const range={entryIds:['unused.fam'],kinds:['attributes'] as const};
@@ -212,7 +212,7 @@ describe('session-owned production engineering build', () => {
     await beginEngineeringBuild(app,prepared,{createWorker:portFactory(port)});
     expect(port.commands).toContain('extract');expect(port.commands).toContain('source-files');expect(port.commands).not.toContain('files');expect(app.engineering.status).toBe('ready');
     expect(app.engineering.snapshot).toEqual(reference.engineering.snapshot);
-    expect(app.sourceGeometryCatalog).toEqual(reference.sourceGeometryCatalog);
+    expect(app.sourceGeometry.catalog).toEqual(reference.sourceGeometry.catalog);
     expect(batchReadCachedFiles).not.toHaveBeenCalled();
     expect(await prepared.get('project.cbm')?.text()).toBe(await files.get('project.cbm')?.text());
   });
@@ -221,7 +221,7 @@ describe('session-owned production engineering build', () => {
     await beginEngineeringBuild(app, files, { createWorker: portFactory(first) });
     expect(app.engineering.status).toBe('ready');
     expect(app.engineering.snapshot?.entities).toHaveLength(2);
-    expect((await app.sourceGeometryReady)?.occurrences).toHaveLength(1);
+    expect((await app.sourceGeometry.ready)?.occurrences).toHaveLength(1);
     expect(app.engineering.cacheStatus).toBe('saved');
     expect(first.commands).toContain('extract');
     expect(first.terminated).toBe(false);
@@ -232,7 +232,7 @@ describe('session-owned production engineering build', () => {
     expect(app.engineering.cacheStatus).toBe('hit');
     expect(next.commands).toEqual(['init','restore','release-model']);
     expect(app.engineering.navigationCacheHit).toBe(true);
-    expect(app.sourceGeometryCatalog?.occurrences).toHaveLength(1);
+    expect(app.sourceGeometry.catalog?.occurrences).toHaveLength(1);
   });
 
   it('does not report a full hit when only the source cache restored and entity/navigation were rebuilt', async () => {

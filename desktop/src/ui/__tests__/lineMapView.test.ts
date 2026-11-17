@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { GimGraphNode } from '../../gim/gimGraphTypes.js';
+import type { GimGraphNode } from '@gim/powerline-core/gimGraphTypes.js';
 import type { LineMapData } from '../../gim/lineMapData.js';
 import { renderLineMap, type LineMapRenderPhase } from '../lineMapView.js';
 import { perfSnapshot } from '../../utils/perfTimings.js';

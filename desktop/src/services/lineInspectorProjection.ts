@@ -1,13 +1,13 @@
 /** Pure line inspector projection: no DOM, AppState or platform IO. */
-import type { GimGraphNode } from '../gim/gimGraphTypes.js';
+import type { GimGraphNode } from '@gim/powerline-core/gimGraphTypes.js';
 import { escHtml } from '../shared/html.js';
-import { getFileNameLower, normalizeGimPath } from '../gim/linePathNormalize.js';
+import { getFileNameLower, normalizeGimPath } from '@gim/powerline-core/linePathNormalize.js';
 import { fileReferenceValue, getPropertyDefinition, getPropertyReferenceKind, renderPropertySection, renderTechnicalSection,
   type FileReferenceValue, type PropertyComponent, type PropertyDefinition, type PropertyRow } from './propertyPresentation.js';
 import type { LineModRuntimeEntry } from './lineModRuntimeService.js';
 import type { BoltModFile, HNumModFile, KeyValueModFile, PointLineModFile, RRecord, LineTextModGeometrySource, TowerDeviceModFile, UnknownKvModFile, WireModFile } from '../gim/geometry/ir.js';
-import type { LineAttributeIndex } from '../gim/lineAttributeTypes.js';
-import type { LineFamPropertyRecord, LineDevPropertyRecord } from '../gim/lineAttributeRecords.js';
+import type { LineAttributeIndex } from '@gim/powerline-core/lineAttributeTypes.js';
+import type { LineFamPropertyRecord, LineDevPropertyRecord } from '@gim/powerline-core/attributeRecords.js';
 
 export function nodeDisplayName(node: GimGraphNode): string {
   const fn = node.path.split('/').pop() || node.path;

@@ -228,8 +228,8 @@ function fail(state: AppState, job: EngineeringJob, error: unknown): void {
 export function beginEngineeringBuild(state: AppState, files: Map<string, File>, options: EngineeringBuildOptions = {}): Promise<void> {
   state.engineering.cleanup?.();
   state.engineering.buildPending=true;
-  state.sourceGeometryCachePending=false;
-  state.sourceGeometryCacheError='';
+  state.sourceGeometry.cachePending=false;
+  state.sourceGeometry.cacheError='';
   state.engineering.progress=null;
   state.engineering.failureCode=null;
   let resolveGeometry!: EngineeringJob['resolveGeometry'];
@@ -237,7 +237,7 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
   let resolveEvidence!:EngineeringJob['resolveEvidence'];
   const evidenceReady=new Promise<void>(resolve=>{resolveEvidence=resolve;});
   const projectionReady=new Promise<boolean>(resolve=>{resolveProjection=resolve;});
-  state.sourceGeometryReady = new Promise(resolve => { resolveGeometry = resolve; }); state.sourceGeometryCatalog = null;
+  state.sourceGeometry.ready = new Promise(resolve => { resolveGeometry = resolve; }); state.sourceGeometry.catalog = null;
   const session = state.captureProjectSession(), controller = new AbortController();
   if (typeof Worker === 'undefined' && !options.createWorker) {
     state.engineering.buildPending=false;
@@ -304,11 +304,11 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
     }
     if(!current(state,job))return;
     if(physical){
-      state.sourceGeometryCatalog=physical;resolveGeometry(physical);update();
+      state.sourceGeometry.catalog=physical;resolveGeometry(physical);update();
       perfMark('来源物理目录就绪',{occurrences:physical.occurrences.length,diagnostics:physical.diagnostics.length});
       if(job.identity&&physicalRebuilt&&!physical.diagnostics.some(d=>d.reason==='source-read-failed')){
         // Cache persistence is a background publication, never a render prerequisite.
-        state.sourceGeometryCachePending=true;
+        state.sourceGeometry.cachePending=true;
         void (async()=>{
           await new Promise<void>(resolve=>setTimeout(resolve,0));
           if(!current(state,job))return;
@@ -318,8 +318,8 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
           await job.beforeCacheWrite;
           if(!current(state,job))return;
           if(current(state,job))await writeCacheFile(session.projectId!,sourceGeometryCacheEntry(job.identity!.sourceSha256),bytes,job.identity!.sourceSha256);
-        })().catch(error=>{if(current(state,job)){state.sourceGeometryCacheError=String(error);perfMark('来源物理目录缓存未写入',{reason:String(error)});}})
-          .finally(()=>{if(current(state,job)){state.sourceGeometryCachePending=false;update();}});
+        })().catch(error=>{if(current(state,job)){state.sourceGeometry.cacheError=String(error);perfMark('来源物理目录缓存未写入',{reason:String(error)});}})
+          .finally(()=>{if(current(state,job)){state.sourceGeometry.cachePending=false;update();}});
       }
     }
     // Allow the independently resolved geometry consumer to dispatch work first.

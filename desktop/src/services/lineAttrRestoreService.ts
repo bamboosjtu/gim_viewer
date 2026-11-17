@@ -16,17 +16,23 @@
  * 设计参考 gimIndexRestoreService.ts（变电工程索引恢复）。
  */
 
-import type { AppState } from '../app/state.js';
+import type { ProjectPropertyCache } from './projectPropertyCache.js';
 import type {
   LineAttributeResult,
   LineFamPropertyRecord,
   LineDevPropertyRecord,
 } from '@desktop/database.js';
 // LineAttributeIndex 类型定义已移至 gim/ 层，消除 gim/lineMapData → services 的反向依赖
-import type { LineAttributeIndex } from '../gim/lineAttributeTypes.js';
+import type { LineAttributeIndex } from '@gim/powerline-core/lineAttributeTypes.js';
 import { DEBUG_GIM_CACHE } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
-export type { LineAttributeIndex } from '../gim/lineAttributeTypes.js';
+export type { LineAttributeIndex } from '@gim/powerline-core/lineAttributeTypes.js';
+interface LinePropertyState {
+  properties: Pick<
+    ProjectPropertyCache,
+    'cachedLineFamProperties' | 'cachedLineFamDisplayKeys' | 'cachedLineDevProperties'
+  >;
+}
 
 /**
  * 将 FAM/DEV 属性恢复到 AppState。
@@ -37,20 +43,20 @@ export type { LineAttributeIndex } from '../gim/lineAttributeTypes.js';
  */
 export function restoreLineAttributesToState(
   result: LineAttributeResult,
-  state: AppState,
+  state: LinePropertyState,
 ): { famCount: number; devCount: number; famSources: number; devSources: number } {
   // 1. 清空旧缓存（防御性，resetGimState 已清，这里确保干净）
-  state.cachedLineFamProperties.clear();
-  state.cachedLineFamDisplayKeys.clear();
-  state.cachedLineDevProperties.clear();
+  state.properties.cachedLineFamProperties.clear();
+  state.properties.cachedLineFamDisplayKeys.clear();
+  state.properties.cachedLineDevProperties.clear();
 
   // 2. 写入 FAM 属性：按 normalized_path 分组 → propKey → records[]
   let famCount = 0;
   for (const rec of result.fam_properties) {
-    let byProp = state.cachedLineFamProperties.get(rec.normalized_path);
+    let byProp = state.properties.cachedLineFamProperties.get(rec.normalized_path);
     if (!byProp) {
       byProp = new Map<string, LineFamPropertyRecord[]>();
-      state.cachedLineFamProperties.set(rec.normalized_path, byProp);
+      state.properties.cachedLineFamProperties.set(rec.normalized_path, byProp);
     }
     let list = byProp.get(rec.prop_key);
     if (!list) {
@@ -61,10 +67,10 @@ export function restoreLineAttributesToState(
     famCount++;
 
     // display_key 索引：取该 propKey 下第一个非 null 的 display_key
-    let displayByProp = state.cachedLineFamDisplayKeys.get(rec.normalized_path);
+    let displayByProp = state.properties.cachedLineFamDisplayKeys.get(rec.normalized_path);
     if (!displayByProp) {
       displayByProp = new Map<string, string | null>();
-      state.cachedLineFamDisplayKeys.set(rec.normalized_path, displayByProp);
+      state.properties.cachedLineFamDisplayKeys.set(rec.normalized_path, displayByProp);
     }
     if (!displayByProp.has(rec.prop_key)) {
       displayByProp.set(rec.prop_key, rec.display_key);
@@ -74,10 +80,10 @@ export function restoreLineAttributesToState(
   // 3. 写入 DEV 属性
   let devCount = 0;
   for (const rec of result.dev_properties) {
-    let byProp = state.cachedLineDevProperties.get(rec.normalized_path);
+    let byProp = state.properties.cachedLineDevProperties.get(rec.normalized_path);
     if (!byProp) {
       byProp = new Map<string, LineDevPropertyRecord[]>();
-      state.cachedLineDevProperties.set(rec.normalized_path, byProp);
+      state.properties.cachedLineDevProperties.set(rec.normalized_path, byProp);
     }
     let list = byProp.get(rec.prop_key);
     if (!list) {
@@ -91,15 +97,15 @@ export function restoreLineAttributesToState(
   debugLog(DEBUG_GIM_CACHE, '[Restore] 线路工程 FAM/DEV 属性已恢复:', {
     famCount,
     devCount,
-    famSources: state.cachedLineFamProperties.size,
-    devSources: state.cachedLineDevProperties.size,
+    famSources: state.properties.cachedLineFamProperties.size,
+    devSources: state.properties.cachedLineDevProperties.size,
   });
 
   return {
     famCount,
     devCount,
-    famSources: state.cachedLineFamProperties.size,
-    devSources: state.cachedLineDevProperties.size,
+    famSources: state.properties.cachedLineFamProperties.size,
+    devSources: state.properties.cachedLineDevProperties.size,
   };
 }
 
@@ -111,14 +117,14 @@ export function restoreLineAttributesToState(
  *
  * @param state 已恢复线路属性的应用状态
  */
-export function buildLineAttributeIndex(state: AppState): LineAttributeIndex {
+export function buildLineAttributeIndex(state: LinePropertyState): LineAttributeIndex {
   const famBySourcePath = new Map<string, Map<string, LineFamPropertyRecord[]>>();
   const famByFileNameLower = new Map<string, Map<string, LineFamPropertyRecord[]>>();
   const devBySourcePath = new Map<string, Map<string, LineDevPropertyRecord[]>>();
   const devByFileNameLower = new Map<string, Map<string, LineDevPropertyRecord[]>>();
 
   // FAM：遍历 normalized_path 索引，重新按 source_path / file_name_lower 分组
-  for (const [, byProp] of state.cachedLineFamProperties) {
+  for (const [, byProp] of state.properties.cachedLineFamProperties) {
     for (const [, records] of byProp) {
       for (const rec of records) {
         // by source_path
@@ -151,7 +157,7 @@ export function buildLineAttributeIndex(state: AppState): LineAttributeIndex {
   }
 
   // DEV
-  for (const [, byProp] of state.cachedLineDevProperties) {
+  for (const [, byProp] of state.properties.cachedLineDevProperties) {
     for (const [, records] of byProp) {
       for (const rec of records) {
         let spMap = devBySourcePath.get(rec.source_path);

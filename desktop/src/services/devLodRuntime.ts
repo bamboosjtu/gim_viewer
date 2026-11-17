@@ -302,7 +302,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
     // use the same bounded immutable File workset as freshly extracted sources.
     const seeds = await getSourceGeometryOccurrences(this.state, this.session);
     if (!this.current()) return;
-    this.diagnostics.sourcePlacementWarnings = this.state.sourceGeometryCatalog?.diagnostics.length ?? 0;
+    this.diagnostics.sourcePlacementWarnings = this.state.sourceGeometry.catalog?.diagnostics.length ?? 0;
     this.sources.sourceFiles = files;
     this.worker = createDevGeometryPreprocessor(
       this.state,

@@ -1,6 +1,6 @@
 import { GIM_LIMITS } from '../shared/gimLimits.js';
 import { decodeGimText, readGimText } from '../shared/textDecode.js';
-import { parseKeyValue,keyValueDiagnostics } from './kvParser.js';
+import { parseKeyValue,keyValueDiagnostics } from '@gim/powerline-core/kvParser.js';
 import {getFileEntryResolver} from './entryResolver.js';
 
 /** Device packages have a semantic Device entry, not an F1–F4 project tree.

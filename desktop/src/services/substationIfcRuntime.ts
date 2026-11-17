@@ -51,11 +51,11 @@ export async function getIfcBufferForEntry(
   }
 
   // 2. Tauri 缓存命中
-  const cachedEntryPath = findCachedPath(state.cachedIfcPaths, entry.path);
+  const cachedEntryPath = findCachedPath(state.properties.cachedIfcPaths, entry.path);
   if (isTauri() && cachedEntryPath) {
     const projectId = session.projectId;
     if (projectId != null) {
-      const cachePath = state.cachedIfcPaths.get(cachedEntryPath)!;
+      const cachePath = state.properties.cachedIfcPaths.get(cachedEntryPath)!;
       debugLog(DEBUG_IFC_LOAD, '[IFC Buffer] 使用本地 IFC 缓存:', {
         name: entry.name,
         path: entry.path,
@@ -174,7 +174,7 @@ export async function loadAllIfcFiles(
   state.substationFineQueue = background;
   let devGeometryQueued = false;
   background.registerRemainingIfc();
-  state.beginIfcBackgroundLoading();
+  (state.ifcLoading.pending = true);
   // 调试入口：从 localStorage 读取手动坐标偏移（GIM_COORD_OFFSET="dx,dy,dz"）
   // 仅作为调试功能，不写入数据库，不作为最终算法。
   // resetGimState 会清空 projectSourceToViewerMatrix，因此每次打开项目时重新解析。
@@ -426,12 +426,12 @@ export async function loadAllIfcFiles(
     return `冷转换 ${cold} · LOD缓存 ${lod}`;
   };
   const ifcStatus = (entry: IfcEntry, index: number, total: number, extra = '') => {
-    const skipped = state.ifcSkippedLargeIfc.length;
+    const skipped = state.ifcLoading.skippedLargeIfc.length;
     return `IFC ${index + 1}/${total} · ${entry.name} · ${ifcStages.get(entry.path) ?? '待检查'}${extra ? ` · ${extra}` : ''} · ${ifcCacheProgress()}${skipped ? ` · 已跳过 ${skipped} 个超大 IFC` : ''}`;
   };
   const ifcStageLabels: Record<string, string> = { 'checking-cache': '查询LOD缓存', 'lod-cache-hit': 'LOD缓存命中', 'cold-convert': '冷转换中', 'far-ready': '远景就绪', 'cache-write-start': '缓存写入中', 'cache-written': '缓存已写', 'cache-write-failed': '远景就绪(缓存写入失败)' };
   const publishTerminalStatus = () => {
-    if(isCurrent())publishIfcStatus(`IFC 已结束 · 已加载 ${state.loadedModels.size}/${entries.length} · ${ifcCacheProgress()}${failed.length ? ` · 失败 ${failed.length}` : ''}${state.ifcSkippedLargeIfc.length ? ` · 已跳过 ${state.ifcSkippedLargeIfc.length} 个超大 IFC` : ''}${cacheWriteFailures.size ? ` · 缓存写入失败 ${cacheWriteFailures.size}` : ''}`);
+    if(isCurrent())publishIfcStatus(`IFC 已结束 · 已加载 ${state.loadedModels.size}/${entries.length} · ${ifcCacheProgress()}${failed.length ? ` · 失败 ${failed.length}` : ''}${state.ifcLoading.skippedLargeIfc.length ? ` · 已跳过 ${state.ifcLoading.skippedLargeIfc.length} 个超大 IFC` : ''}${cacheWriteFailures.size ? ` · 缓存写入失败 ${cacheWriteFailures.size}` : ''}`);
   };
   const lifecycleTask = (async (): Promise<void> => {
     try {
@@ -486,7 +486,7 @@ expressId: 0, globalId: node.ifcGuid,
           perfMark('IFC 跳过超大文件', { skipped: skippedLargeIfc }, perfSession);
         }
       }
-      state.ifcSkippedLargeIfc = skippedLargeIfc.map((row) => row.path);
+      state.ifcLoading.skippedLargeIfc = skippedLargeIfc.map((row) => row.path);
       const connectionEntries = queue.filter(isConnectionIfc);
       queue.splice(0, queue.length, ...prioritizeIfcEntries(queue, sizes, new Set(connectionEntries.map(entry => entry.modelId))));
       if (connectionEntries.length) {
@@ -689,7 +689,7 @@ session, perfSessionId: perfSession.id, onLoadSource: (source) => { if(!isCurren
       ifcLifecycleSettled = true;
       publishTerminalStatus();
       background.completeRemainingIfc();
-      state.endIfcBackgroundLoading();
+      (state.ifcLoading.pending = false);
       enqueueDevGeometry();
       background.markAllIfcReady();
       // All IFCs may be empty/hidden. Complete source work independently of

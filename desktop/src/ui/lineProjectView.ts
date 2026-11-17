@@ -16,7 +16,7 @@ import { reportBackgroundError } from '../utils/backgroundErrors.js';
  */
 
 import type { AppState } from '../app/state.js';
-import type { GimGraph, GimGraphNode } from '../gim/gimGraphTypes.js';
+import type { GimGraph, GimGraphNode } from '@gim/powerline-core/gimGraphTypes.js';
 import type { LineMapData, WireSegment } from '../gim/lineMapData.js';
 import { escHtml } from '../shared/html.js';
 import { cbmTreePanel, fileDevPanel, modelListEl, propsDrawerBody, propsDrawer, emptyTipEl, container } from './dom.js';

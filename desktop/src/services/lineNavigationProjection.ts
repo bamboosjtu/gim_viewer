@@ -12,17 +12,17 @@
  * 通过 WIRE 端点补入对应耐张段，避免截断“塔位—档距—塔位”链。
  */
 
-import type { GimGraph, GimGraphNode } from '../gim/gimGraphTypes.js';
+import type { GimGraph, GimGraphNode } from '@gim/powerline-core/gimGraphTypes.js';
 import type {
   CrossMarker,
   LineMapData,
   TowerMarker,
   WireSegment,
 } from '../gim/lineMapData.js';
-import type { LineAttributeIndex } from '../gim/lineAttributeTypes.js';
-import { getFileNameLower, normalizeGimPath } from '../gim/linePathNormalize.js';
+import type { LineAttributeIndex } from '@gim/powerline-core/lineAttributeTypes.js';
+import { getFileNameLower, normalizeGimPath } from '@gim/powerline-core/linePathNormalize.js';
 import type { SearchItem } from '../shared/searchTypes.js';
-import { classifyCrossing } from '../gim/crossingClassification.js';
+import { classifyCrossing } from '@gim/powerline-core/crossingClassification.js';
 
 export type LineNavigationKind =
   | 'project'

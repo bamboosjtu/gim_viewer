@@ -1,6 +1,6 @@
 /** DEV references and matrices use block-local slots; source rows are never overwritten. */
 import type {DevDocument, DevSolidModelEntry, DevSubDeviceEntry} from './ir.js';
-import {parseBoundedCount} from '../parserLimits.js';
+import {parseBoundedCount} from '@gim/powerline-core/parserLimits.js';
 import {isGimEmptyValue} from '../gimValueSemantics.js';
 import {isUsableAffineMatrix} from './affineMatrix.js';
 import {parseSourceDocument, sourceScalar, sourceDiagnostic, sourceReferenceFields, type SourceDocument, type SourceDiagnostic, type SourceField} from '../sourceDocument.js';

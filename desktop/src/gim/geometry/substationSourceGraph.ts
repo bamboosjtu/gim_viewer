@@ -1,6 +1,6 @@
 import { parseDev } from './devParser.js';
 import { parsePhm } from './phmParser.js';
-import { PARSER_LIMITS } from '../parserLimits.js';
+import { PARSER_LIMITS } from '@gim/powerline-core/parserLimits.js';
 import { getFileByPath } from '../fileLookup.js';
 import { createEntryResolver, type EntryResolver } from '../entryResolver.js';
 

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import {describe,it,expect} from 'vitest';
 
-import type { LineAttributeIndex } from '../../gim/lineAttributeTypes.js';
+import type { LineAttributeIndex } from '@gim/powerline-core/lineAttributeTypes.js';
 import type { LineFamPropertyRecord } from '../../../bridge/database.js';
 
 import {node,parseFamFixture,makeLineFixture} from './lineNavigationFixture.js';

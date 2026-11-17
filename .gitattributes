@@ -1,5 +1,22 @@
 # 自动识别文本文件
 * text=auto
 
+# Formatter-adopted modules stay identical on Windows checkout.
+/desktop/src/utils/logger.ts text eol=lf
+/desktop/src/utils/backgroundErrors.ts text eol=lf
+/desktop/src/shared/projectViewState.ts text eol=lf
+/desktop/src/shared/sourceGeometryState.ts text eol=lf
+/desktop/src/shared/ifcLoadingState.ts text eol=lf
+/desktop/src/services/ifcSelectionProjection.ts text eol=lf
+/desktop/src/services/*PresentationPort.ts text eol=lf
+/desktop/src/services/sourceGeometryService.ts text eol=lf
+/desktop/src/services/projectPropertyCache.ts text eol=lf
+/desktop/src/services/lineAttrRestoreService.ts text eol=lf
+/desktop/src/app/state.ts text eol=lf
+
+# Preserve existing CRLF blobs outside the formatting scope; retain space/tab checks.
+/desktop/src/gim/substationEvidence.ts whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+/desktop/src/gim/__tests__/substationEvidence.test.ts whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+
 # PowerShell 脚本统一使用 crlf
 *.ps1 text eol=crlf

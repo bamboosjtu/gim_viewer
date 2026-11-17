@@ -26,13 +26,13 @@ export function restoreGimIndexToState(state: AppState, index: GimIndexResult): 
   state.substationEntrySizes = new Map(index.entries.map(entry => [entry.entry_path, entry.file_size]));
   try { state.substationCapabilities = index.capability_summary_json ? JSON.parse(index.capability_summary_json) : null; }
   catch { state.substationCapabilities = null; }
-  state.cachedFamSourceProperties.clear();
+  state.properties.cachedFamSourceProperties.clear();
   for (const fp of index.fam_properties) {
     if (!fp.raw_property_json) continue;
     try {
-      const list = state.cachedFamSourceProperties.get(fp.source_path) ?? [];
+      const list = state.properties.cachedFamSourceProperties.get(fp.source_path) ?? [];
       list.push(JSON.parse(fp.raw_property_json));
-      state.cachedFamSourceProperties.set(fp.source_path, list);
+      state.properties.cachedFamSourceProperties.set(fp.source_path, list);
     } catch { /* Legacy property rows remain available in the Map below. */ }
   }
 
@@ -45,10 +45,10 @@ export function restoreGimIndexToState(state: AppState, index: GimIndexResult): 
   state.currentIfcEntries = ifcEntries;
 
   // 3. 恢复 cachedIfcPaths
-  state.cachedIfcPaths.clear();
+  state.properties.cachedIfcPaths.clear();
   for (const entry of index.entries) {
     if (entry.entry_type === 'IFC' && entry.local_cache_path) {
-      state.cachedIfcPaths.set(entry.entry_path, entry.local_cache_path);
+      state.properties.cachedIfcPaths.set(entry.entry_path, entry.local_cache_path);
     }
   }
 
@@ -74,19 +74,19 @@ export function restoreGimIndexToState(state: AppState, index: GimIndexResult): 
   }
 
   // 8. 恢复 cachedFamProperties: sourcePath → sectionName → key → value
-  state.cachedFamProperties.clear();
+  state.properties.cachedFamProperties.clear();
   const populatedSources = new Set(index.fam_properties.map((fp) => fp.source_path.replace(/\\/g, '/').toLowerCase()));
   for (const entry of index.entries) {
     if (/\.fam$/i.test(entry.entry_path) && !populatedSources.has(entry.entry_path.replace(/\\/g, '/').toLowerCase())) {
-      state.cachedFamProperties.set(entry.entry_path, new Map([['默认', new Map()]]));
-      state.cachedFamSourceProperties.set(entry.entry_path, []);
+      state.properties.cachedFamProperties.set(entry.entry_path, new Map([['默认', new Map()]]));
+      state.properties.cachedFamSourceProperties.set(entry.entry_path, []);
     }
   }
   for (const fp of index.fam_properties) {
-    let bySection = state.cachedFamProperties.get(fp.source_path);
+    let bySection = state.properties.cachedFamProperties.get(fp.source_path);
     if (!bySection) {
       bySection = new Map([['默认', new Map()]]);
-      state.cachedFamProperties.set(fp.source_path, bySection);
+      state.properties.cachedFamProperties.set(fp.source_path, bySection);
     }
     let byKey = bySection.get(fp.section_name);
     if (!byKey) {
@@ -100,12 +100,12 @@ export function restoreGimIndexToState(state: AppState, index: GimIndexResult): 
   }
 
   // 9. 恢复 cachedDevProperties: devPath → key → value
-  state.cachedDevProperties.clear();
+  state.properties.cachedDevProperties.clear();
   for (const dp of index.dev_properties) {
-    let kv = state.cachedDevProperties.get(dp.dev_path);
+    let kv = state.properties.cachedDevProperties.get(dp.dev_path);
     if (!kv) {
       kv = {};
-      state.cachedDevProperties.set(dp.dev_path, kv);
+      state.properties.cachedDevProperties.set(dp.dev_path, kv);
     }
     if (!isGimEmptyValue(dp.prop_value) && typeof dp.prop_value === 'string') {
       kv[dp.prop_key] = dp.prop_value;

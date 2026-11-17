@@ -17,7 +17,7 @@ import { parseFamSectionsWithDiagnostics } from '../gim/famParser.js';
 
 /** 属性文件文本读取并发数（acc-plan P2-3） */
 const PARSE_CONCURRENCY = 32;
-import {parseKeyValue,keyValueDiagnostics} from '../gim/kvParser.js';
+import {parseKeyValue,keyValueDiagnostics} from '@gim/powerline-core/kvParser.js';
 import {SourceConflictError} from '../gim/sourceDocument.js';
 import { normalizeFilePath } from '../gim/fileLookup.js';
 import { isGimEmptyValue, resolveBaseFamilyReferences } from '../gim/gimValueSemantics.js';

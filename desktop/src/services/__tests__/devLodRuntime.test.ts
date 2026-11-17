@@ -7,6 +7,7 @@ import {ByteWorkBudget} from '../../utils/byteWorkBudget.js';
 import {DevGlbTemplate} from '../devGlbTemplateRuntime.js';
 import {InvalidDevGeometryError,MissingDevDependencyError} from '../../gim/geometry/sourceGeometryError.js';
 import {createDevWorkerMock} from './helpers/devWorker.js';
+import {SourceGeometryState} from '../../shared/sourceGeometryState.js';
 
 const ownedRuntimes = new Set<DevLodRuntime>();
 vi.mock('../geometryPresentationService.js',()=>({observeFirstGeometry:vi.fn(async()=>{})}));
@@ -19,7 +20,7 @@ afterEach(() => {
 });
 function fixture() {
   const status = vi.fn();
-  const state = { isCurrentSession: () => true, loadedXmlModGroups: new Map(), geometryDiagnostics: new Map(), deviceUnknownBounds: new Set() } as any;
+  const state = { sourceGeometry:new SourceGeometryState(),isCurrentSession: () => true, loadedXmlModGroups: new Map(), geometryDiagnostics: new Map(), deviceUnknownBounds: new Set() } as any;
   const runtime = new DevLodRuntime(state, {} as any, { sourceSha256: 'sha', generation: 1 } as any, status);
   (runtime as any).firstModelPresented=true;
   (runtime as any).catalogLookupReady=true;
@@ -52,7 +53,7 @@ it('streams cached catalog rows before later prefetch batches complete',async()=
   const {internal,runtime}=fixture();
   const scene=new THREE.Scene(),entries=Array.from({length:130},(_,i)=>({id:'root-'+i,sourceId:'root-'+i,sourceContextId:'scope',devPath:`p${i}.dev`,name:'object',placementMatrix:new THREE.Matrix4().toArray()}));
   internal.state.currentFiles=new Map(entries.map(row=>[row.devPath,new File(['TYPE=Unknown'],row.devPath)]));
-  internal.state.sourceGeometryCatalog={occurrences:entries,diagnostics:[]};
+  internal.state.sourceGeometry.catalog={occurrences:entries,diagnostics:[]};
   internal.ctx.world={scene:{three:scene},camera:{three:new THREE.PerspectiveCamera(),controls:{addEventListener:vi.fn(),removeEventListener:vi.fn()}}};
   internal.update=vi.fn();internal.schedule=vi.fn();internal.requestReady=vi.fn();internal.notifyCoordinateAnchor=vi.fn();
   const worker=await import('../devGeometryWorkerClient.js'),cache=await import('@desktop/devLodCache.js'),presentation=(await import('../projectPresentationPort.js')).projectPresentation();
