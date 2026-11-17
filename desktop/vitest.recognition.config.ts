@@ -4,6 +4,9 @@ import {defineConfig} from 'vitest/config';
 export default defineConfig({resolve:{conditions:['gim-source']},test:{environment:'node',poolOptions:{forks:{minForks:1,maxForks:2}},include:[
   '../packages/gim-sdk/src/engineering/__tests__/classification.test.ts',
   '../packages/gim-sdk/src/engineering/__tests__/normalize.test.ts',
+  '../packages/gim-sdk/src/engineering/__tests__/ownership.test.ts',
+  '../packages/gim-sdk/src/gim/engineering/__tests__/sourceComposition.test.ts',
+  '../packages/gim-sdk/src/gim/engineering/__tests__/engineeringModel.test.ts',
   '../packages/gim-sdk/src/engineering/__tests__/standardCatalog.test.ts',
   '../packages/gim-sdk/src/gim/engineering/__tests__/componentVocabulary.test.ts',
   '../packages/gim-sdk/src/gim/engineering/__tests__/sourceEvidence.test.ts',

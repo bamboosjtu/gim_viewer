@@ -2,11 +2,13 @@ import type { IfcSpatialObject } from '../ifcSpatialTypes.js';
 import { ifcSourceRecords } from './ifcSourceRecords.js';
 import type { SourceRecord } from './sourceEvidence.js';
 import {engineeringSourceRecords,type EngineeringSourceGraph} from './sourceGraph.js';
+import {sourceScalar} from '../sourceDocument.js';
 
 export interface IfcSourceMatch {
   cbmOccurrenceId: string;
   sourcePath: string;
   rawGuid: string;
+  rawGuidValues?: readonly string[];
   status: 'confirmed' | 'ambiguous' | 'not_found';
   ifcSourceIds: string[];
   /** Physical DEV and IFC are candidates, not automatically a single object. */
@@ -44,18 +46,25 @@ export function collectEngineeringSourceModel(graph: EngineeringSourceGraph, obj
     const hits = devByCbm.get(cbmId) ?? [];
     hits.push(row.id); devByCbm.set(cbmId, hits);
   }
-  const fileTargets = new Map(graph.references.filter(edge => edge.field.toUpperCase() === 'IFCFILE')
-    .map(edge => [edge.owner, edge.target]));
+  const fileTargets = new Map<string,{target:string|null;ambiguous:boolean}>();
+  for(const edge of graph.references)if(edge.field.toUpperCase()==='IFCFILE'){
+    const previous=fileTargets.get(edge.owner);
+    const ambiguous=edge.status==='ambiguous'||!!previous&&(previous.ambiguous||previous.target!==edge.target);
+    fileTargets.set(edge.owner,{target:ambiguous?null:edge.target,ambiguous});
+  }
   const ifcMatches: IfcSourceMatch[] = [];
   for (const cbm of graph.cbmOccurrences) {
     const doc = documents.get(cbm.documentPath)!;
-    const rawGuid = doc.fields.find(field => field.keys[0].toUpperCase() === 'IFCGUID')?.value ?? '';
-    if (!rawGuid) continue;
-    const file = fileTargets.get(cbm.documentPath);
+    const guid=sourceScalar(doc,'IFCGUID'),rawGuid=guid.value;
+    if(guid.status==='empty')continue;
+    const target=fileTargets.get(cbm.documentPath);
+    const ambiguous=guid.status==='ambiguous'||sourceScalar(doc,'IFCFILE').status==='ambiguous'||!!target?.ambiguous;
+    const file=ambiguous?null:target?.target;
     const hits = file ? byModelGuid.get(JSON.stringify([canonical(file), rawGuid])) ??
       (rawGuid.endsWith('$') ? byModelGuid.get(JSON.stringify([canonical(file), rawGuid.slice(0, -1)])) : undefined) ?? [] : [];
     ifcMatches.push({ cbmOccurrenceId: cbm.id, sourcePath: cbm.documentPath, rawGuid,
-      status: hits.length === 1 ? 'confirmed' : hits.length ? 'ambiguous' : 'not_found',
+      ...(guid.status==='ambiguous'?{rawGuidValues:guid.fields.map(field=>field.value)}:{}),
+      status: ambiguous?'ambiguous':hits.length === 1 ? 'confirmed' : hits.length ? 'ambiguous' : 'not_found',
       ifcSourceIds: [...hits], devSourceIds: [...aliases.get(cbm.id) ?? devByCbm.get(cbm.id) ?? []] });
   }
   return { sources, ifcMatches };

@@ -213,6 +213,8 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
     const edges=edgesFor(doc,/^(?:SUBSYSTEM\d*|SUBDEVICE\d+)$/i).filter(p=>/\.cbm$/i.test(p.value));
     prefetch(doc,[...doc.fields.filter(p=>/^OBJECTMODELPOINTER$/i.test(p.keys[0])&&/\.dev$/i.test(p.value)),...edges]);
     const entityName = scalar(doc, 'ENTITYNAME')?.trim() || undefined;
+    // GUID is a scalar association fact, not a list or a first-value hint.
+    scalar(doc,'IFCGUID');
     referencedFamilies(doc);
     const node = { id, documentPath: path, parentId, viaField, relationKind:cbmRelationKind(viaField), ...(entityName ? { entityName } : {}) };
     result.cbmOccurrences.push(node);
@@ -261,7 +263,7 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
         }
       } else result.diagnostics.push({ kind: 'missing-object-model', source: id });
     }
-    for (const field of doc.fields.filter(p => /^(?:IFCFILE|IFC\d+)$/i.test(p.keys[0]) && p.value)) resolve(path, field.keys[0], field.value);
+    for (const field of edgesFor(doc,/^(?:IFCFILE|IFC\d+)$/i).filter(p=>p.value)) resolve(path, field.keys[0], field.value);
     const next = new Set(ancestors); next.add(path);
     const edgeCounts=new Map<string,number>();
     for(const field of edges){const key=field.keys[0].toUpperCase();edgeCounts.set(key,(edgeCounts.get(key)??0)+1);}

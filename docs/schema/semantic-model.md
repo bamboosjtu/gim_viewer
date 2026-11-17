@@ -166,6 +166,8 @@ CROSS 叶对象的类型由其自身 `BASEFAMILY` 所引用的 FAM 属性键族�
 | 名称/空间位置等推断 | 带置信度的推断候选 |
 | 没有对象 GUID/无法解析 | 未关联，不能伪造确定 IFC 对象 |
 
+CBM 的 IFCFILE 与 IFCGUID 都按共享单值契约读取：相同重复值不重复建关联，冲突值保留原始行、候选与 ambiguous。不能用最后一个文件配第一个 GUID；文件或 GUID 不唯一时不发布确定对象关联。IFC 对象仍独立发现，文件级清单不代替对象级证据。
+
 IFC 空间归属、分解、host 边界与局部 placement 有独立来源。
 文件发现和对象关联不能用一个布尔值代表。详情读取与缓存策略见 [IFC 运行时](../architecture/ifc-runtime.md)；来源记录如何进入工程整体见[实体与来源模型](../engineering/entities.md)。
 
