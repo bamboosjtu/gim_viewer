@@ -20,6 +20,17 @@ async function fixture(extra: Record<string, string> = {}) {
 }
 
 describe('independent source and entity cache contracts', () => {
+  it('restores direct semantic membership parents and whole identity without geometry work',async()=>{
+    const model=await fixture({'unit.dev':'TYPE=GIS\nSUBDEVICE0=terminal.dev','terminal.dev':'TYPE=CircuitBreaker'});
+    const sourceBytes=await encodeEngineeringSources(model.sources,id);
+    const sources=await decodeEngineeringSources(sourceBytes.bytes,id);
+    const entities=await encodeEngineeringEntities(model.snapshot,sources,id);
+    const restored=await decodeEngineeringEntities(entities,sources,id);
+    expect(restored).toEqual(model.snapshot);expect(restored.entities).toHaveLength(1);
+    const member=restored.memberships.find(row=>row.parentPartId)!;
+    expect(member.interpretation).toMatchObject({meaning:'part',membershipStatus:'confirmed'});
+    expect(member.ownerId).toBe(restored.entities[0].id);
+  });
   it('invalidates navigation alone when entity-tree presentation policy changes under the v1 contract',async()=>{
     const model=await fixture(),encoded=await encodeEngineeringSources(model.sources,id),sources=await decodeEngineeringSources(encoded.bytes,id);
     const entities=await encodeEngineeringEntities(model.snapshot,sources,id);

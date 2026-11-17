@@ -13,3 +13,7 @@ test('geometry keeps neutral type contracts but cannot consume semantic runtime 
   assert.equal(coreBoundaryErrors("export * from '../../engineering/fusion.js'",path).length,1);
   assert.equal(coreBoundaryErrors("import('./physicalOccurrences.js')",path).length,0);
 });
+test('standalone addresses reject semantic and host dependencies',()=>{
+  for(const target of ['../engineering/types.js','../app/state.js','three'])
+    assert.equal(coreBoundaryErrors(`import('${target}')`,'shared/representationAddresses.ts').length,1);
+});

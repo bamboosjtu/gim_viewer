@@ -45,7 +45,9 @@ matrix          列主序累计矩阵（含 CBM/装配变换，平移按单位�
 
 ## 表示索引
 
-`EngineeringRepresentationIndex` 接收：
+`RepresentationAddressIndex` 是不依赖实体快照的纯地址索引：按来源 occurrence 保存一个或多个 DEV/IFC 地址，独立提供根/装配路径及 IFC 对象反查。Geometry 入口可以在识别完成前使用它。
+
+`EngineeringRepresentationIndex` 在该索引上融合唯一主归属，接收：
 
 - `EngineeringSnapshot` 的成员关系；
 - DEV/IFC 绑定：
@@ -61,7 +63,7 @@ matrix          列主序累计矩阵（含 CBM/装配变换，平移按单位�
 | `devRoots` / `devAssembly` / `devFiles` | DEV 根、装配路径、文件路径到来源 |
 | `ifcObjects` | `(modelId, expressId)` 到来源 |
 
-解析结果只有三种：`bound`（唯一整体）、`ambiguous`（跨多个整体）、`unassociated`（没有整体归属）。不自动选择第一个候选。
+解析结果只有三种：`bound`（全部来源都指向同一整体）、`ambiguous`（跨多个整体，或混合已归属与待归/未归属来源）、`unassociated`（没有可确认整体）。待归集合不冒充工程整体，孤立几何地址仍可独立查询。不自动选择第一个候选。
 
 ## 绑定规则
 
@@ -80,7 +82,7 @@ IFC 的 `globalId` 是否唯一由 `(modelId, globalId)` 计数决定；重复 G
 2. 按来源成员取 DEV 根和 IFC 对象；未加载的 DEV 只准备基础表示，不自动进入 L2。
 3. 高亮只对解析为同一整体的可见网格/对象提交；跨整体粗表示保留歧义。
 4. 显式“查看精细模型”才调用 DEV refine/IFC L2；替换表示后原选择身份不变。
-5. 快照更新后按当前成员重新绑定；原整体拆分/合并导致目标不唯一时撤销旧范围，提示候选。
+5. 来源/快照修订不一致时不发布绑定；快照更新后按当前成员重新绑定；原整体拆分/合并导致目标不唯一时撤销旧范围，提示候选。
 
 ## 状态
 

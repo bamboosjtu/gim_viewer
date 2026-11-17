@@ -14,6 +14,8 @@ export function coreBoundaryErrors(source, path) {
     if(specifier&&ts.isStringLiteral(specifier)) {
       const name=specifier.text;
       const target=name.startsWith('.')?posix.normalize(posix.join(posix.dirname(path),name)):name;
+      if(path==='shared/representationAddresses.ts'&&/^(?:engineering|gim|app|services|viewer|ui|@desktop|@tauri-apps|three|web-ifc)/.test(target))
+        errors.push(`${path}: address index cannot depend on semantic or host state (${name})`);
       const classifier=/(?:^|\/)(?:classify|normalize|semantic|sourceEvidence|objectEvidence)\.js$/.test(target);
       const typeOnly=node.isTypeOnly||node.importClause?.isTypeOnly;
       if(projection&&classifier&&!typeOnly)errors.push(`${path}: projection cannot classify source objects (${name})`);

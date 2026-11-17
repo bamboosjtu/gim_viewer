@@ -1,6 +1,6 @@
 import {engineeringSourceRecords} from '../gim/engineering/sourceGraph.js';
 import type { AppState } from '../app/state.js';
-import { EngineeringRepresentationIndex, type SourceRepresentation } from '../engineering/representations.js';
+import { EngineeringRepresentationIndex, type SourceRepresentation } from '../engineering/fusion.js';
 import { isIfcFeatureSourceType } from '../gim/engineering/sourceEvidence.js';
 
 export interface EngineeringRepresentationState {
@@ -16,6 +16,7 @@ const cached = new WeakMap<AppState, { sources: unknown; snapshot: unknown; valu
 export function getEngineeringRepresentations(state: AppState): EngineeringRepresentationState | null {
   const sources = state.engineering.sources, snapshot = state.engineering.snapshot;
   if (!sources || !snapshot) return null;
+  if(snapshot.evidenceBinding.scope!==snapshot.scope||snapshot.evidenceBinding.sourceRevision!==(sources.graph.revision??0))return null;
   const previous = cached.get(state);
   if (previous?.sources === sources && previous.snapshot === snapshot) return previous.value;
   const records = engineeringSourceRecords(sources.graph,sources.ifcRecords);

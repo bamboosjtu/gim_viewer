@@ -15,6 +15,22 @@ function fixture() {
 }
 
 describe('engineering representation membership', () => {
+  it('supports multiple DEV/IFC representations per source and keeps pending and orphan addresses unassociated',()=>{
+    const snapshot=normalizeEngineeringModel('p',[source('whole','断路器'),source('pending','散热器')]);
+    const index=new EngineeringRepresentationIndex(snapshot,[
+      {kind:'dev',sourceId:'whole',rootOccurrence:'r',assemblyPath:'',devPath:'a.dev'},
+      {kind:'dev',sourceId:'whole',rootOccurrence:'r2',assemblyPath:'',devPath:'b.dev'},
+      {kind:'ifc',sourceId:'whole',modelId:'ifc',expressId:1,globalId:'id'},
+      {kind:'dev',sourceId:'pending',rootOccurrence:'r',assemblyPath:'sub:0',devPath:'part.dev'},
+      {kind:'ifc',sourceId:'orphan',modelId:'ifc',expressId:2,globalId:'id2'},
+    ]);
+    expect(index.bySource.get('whole')).toHaveLength(3);
+    expect([...index.rootsForSources(new Set(['whole']))]).toEqual(['r','r2']);
+    expect(index.resolveIfc('ifc',1).status).toBe('bound');
+    expect(index.resolveIfc('ifc',2)).toMatchObject({status:'unassociated',ownerIds:[]});
+    expect(index.resolveDev('r',{assemblyPath:'sub:0'})).toMatchObject({status:'unassociated',ownerIds:[]});
+    expect(index.resolveDev('r').status).toBe('ambiguous');
+  });
   it('excludes an independent nested cabinet from the body selection', () => {
     const { index, snapshot } = fixture();
     const main = snapshot.entities.find(e => e.category === 'E01')!;

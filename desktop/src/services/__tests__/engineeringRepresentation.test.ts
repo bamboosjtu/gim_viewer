@@ -41,6 +41,14 @@ async function fixture(shared = false, declaredBuilding = false) {
 }
 
 describe('source-to-physical representation adapter and filters', () => {
+  it('rejects binding a semantic snapshot to a different source revision',async()=>{
+    const f=await fixture();
+    expect(getEngineeringRepresentations(f.state)).not.toBeNull();
+    const next=structuredClone(f.state.engineering.snapshot!);
+    next.evidenceBinding.sourceRevision++;
+    f.state.engineering.snapshot=next;
+    expect(getEngineeringRepresentations(f.state)).toBeNull();
+  });
   it('selects integrated GIS boxes with the host while keeping a standalone terminal box outside its isolated range',async()=>{
     const raw:Record<string,string>={'project.cbm':'SUBSYSTEM0=gis.cbm\nSUBSYSTEM1=free.cbm','gis.cbm':'OBJECTMODELPOINTER=gis.dev',
       'gis.dev':'TYPE=GIS\nSYMBOLNAME=组合电器GIS\nSUBDEVICE0=actuator.dev\nSUBDEVICE1=terminal.dev',

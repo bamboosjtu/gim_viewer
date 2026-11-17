@@ -15,5 +15,13 @@ export function engineeringObjectEvidence(graph: EngineeringSourceGraph, records
       .map(field=>({value:field.value,evidenceId:`${node.documentPath}:${field.line}`}))];cached.set(key,values);return values;
   }
   const composition=collectSourceComposition(graph,records);
-  return records.map(record=>({...toObjectEvidence(record),composition:composition.get(record.id),inheritedContextDesignations:record.context.flatMap(units)}));
+  return records.map(record=>{
+    const evidence=toObjectEvidence(record),edges=composition.get(record.id);
+    // When semantic and physical parents coexist, retain both as constraints.
+    // Recovery reports disagreement; it must not silently replace either edge.
+    const semanticHosts=record.parent?edges?.filter(edge=>edge.kind==='semantic_composition').flatMap(edge=>
+      edge.parentSourceIds.map(value=>({value,evidenceId:edge.evidence.join('|')})))??[]:[];
+    return {...evidence,composition:edges,declaredHostSourceIds:[...(evidence.declaredHostSourceIds??[]),...semanticHosts],
+      inheritedContextDesignations:record.context.flatMap(units)};
+  });
 }

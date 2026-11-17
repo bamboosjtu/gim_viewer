@@ -112,9 +112,10 @@ function makeScope(state: AppState, request: SelectionRequest, ownerIds: Set<str
   const byGuid = representations.ifcGuidCounts;
   const ifc: EngineeringSelectionScope['ifc'] = [];
   for (const id of sourceIds) {
-    const binding = representations.index.bySource.get(id);
+    for(const binding of representations.index.bySource.get(id)??[]) {
     if (binding?.kind === 'ifc' && !binding.nonphysical) ifc.push({ modelId: binding.modelId, expressId: binding.expressId,
       globalId: byGuid.get(JSON.stringify([binding.modelId, binding.globalId])) === 1 ? binding.globalId : '' });
+    }
   }
   return { requestId: request.id, snapshot: state.engineering.snapshot, ownerIds, sourceIds,
     devRoots: representations.index.rootsForSources(sourceIds), ifc };

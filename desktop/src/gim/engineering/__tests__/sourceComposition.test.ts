@@ -3,6 +3,8 @@ import {it,expect,vi} from 'vitest';
 import {extractEngineeringSourceGraph, engineeringSourceRecords} from '../sourceGraph.js';
 import {collectSourceComposition} from '../sourceComposition.js';
 import {collectSourceGeometryOccurrences} from '../geometryOccurrences.js';
+import {collectEngineeringSources} from '../buildSources.js';
+import {normalizeEngineeringSources} from '../semanticAdapter.js';
 
 async function read(entries:Record<string,string>) {
   const readText=vi.fn(async(path:string)=>entries[path]);
@@ -38,4 +40,20 @@ it('preserves occurrence-specific hosts for repeated semantic documents while re
   expect(graph.attributeRecords).toHaveLength(2);
   expect(new Set(graph.attributeRecords!.flatMap(row=>links.get(row.id)![0].parentSourceIds)).size).toBe(2);
   for(const path of new Set(readText.mock.calls.map(([p])=>p)))expect(readText.mock.calls.filter(([p])=>p===path)).toHaveLength(1);
+});
+it('preserves contradictory semantic and physical parents rather than silently rebinding a physical member',async()=>{
+  const {graph}=await read({'project.cbm':'SUBSYSTEM0=a.cbm\nSUBSYSTEM1=b.cbm',
+    'a.cbm':'OBJECTMODELPOINTER=a.dev','a.dev':'TYPE=GIS\nSUBDEVICE0=part.dev','part.dev':'TYPE=CircuitBreaker',
+    'b.cbm':'OBJECTMODELPOINTER=b.dev\nSUBDEVICE0=part.cbm','b.dev':'TYPE=GIS',
+    'part.cbm':'ENTITYNAME=PARTINDEX\nOBJECTMODELPOINTER=part.dev'});
+  const physical=graph.records.find(row=>row.source==='part.dev')!;
+  // Deliberately contradictory import DTO: a semantic alias claims a physical
+  // occurrence from a different whole. Both original edges remain evidence.
+  graph.aliases[0]={...graph.aliases[0],status:'confirmed',candidates:[physical.id]};
+  graph.attributeRecords=[];
+  const snapshot=normalizeEngineeringSources('scope',collectEngineeringSources(graph,[],[]));
+  const member=snapshot.memberships.find(row=>row.sourceId===physical.id)!;
+  expect(member.interpretation.conflict).toBe('composition_host_conflict');
+  expect(member.disposition).toBe('pending_whole_member');
+  expect(physical.parent).toBe(graph.records.find(row=>row.source==='a.dev')!.id);
 });
