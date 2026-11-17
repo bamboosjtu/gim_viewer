@@ -56,11 +56,11 @@ describe('source-to-physical representation adapter and filters', () => {
     const index=getEngineeringRepresentations(state)!.index;
     expect(index.resolveDev(gisRoot.userData.rootOccurrence,{assemblyPath:'sub:0'}).ownerIds).toEqual([gis.id]);
     expect(index.resolveDev(gisRoot.userData.rootOccurrence,{assemblyPath:'sub:1'}).ownerIds).toEqual([gis.id]);
-    await selectEngineeringTarget(state,{kind:'engineering',key:gis.id});state.setOnlySelected(true);
+    await selectEngineeringTarget(state,{kind:'engineering',key:gis.id});state.selection.setOnlySelected(true);
     expect([body.visible,actuator.visible,terminal.visible,freeMesh.visible]).toEqual([true,true,true,false]);
     await selectEngineeringTarget(state,{kind:'engineering',key:free.id});
     expect([body.visible,actuator.visible,terminal.visible,freeMesh.visible]).toEqual([false,false,false,true]);
-    state.setOnlySelected(false);
+    state.selection.setOnlySelected(false);
   });
   it('binds actual assembly paths independently of F labels', async () => {
     const f = await fixture(), representation = getEngineeringRepresentations(f.state)!;
@@ -78,13 +78,13 @@ describe('source-to-physical representation adapter and filters', () => {
   it('isolates body members and preserves a nested control cabinet as an independent selection', async () => {
     const f = await fixture();
     await selectEngineeringTarget(f.state, { kind: 'engineering', key: f.main.id });
-    expect(f.state.representationSelection?.isCurrent()).toBe(true);
-    expect(f.state.representationSelection?.devRoots).toEqual(f.state.engineeringSelection?.devRoots);
-    f.state.setOnlySelected(true);
+    expect(f.state.selection.representationSelection?.isCurrent()).toBe(true);
+    expect(f.state.selection.representationSelection?.devRoots).toEqual(f.state.selection.engineeringSelection?.devRoots);
+    f.state.selection.setOnlySelected(true);
     expect([f.body.visible, f.box.visible, f.radiator.visible]).toEqual([true, false, true]);
     await selectEngineeringTarget(f.state, { kind: 'engineering', key: f.terminal.id });
     expect([f.body.visible, f.box.visible, f.radiator.visible]).toEqual([false, true, false]);
-    f.state.setOnlySelected(false);
+    f.state.selection.setOnlySelected(false);
     expect([f.body.visible, f.box.visible, f.radiator.visible]).toEqual([true, true, true]);
   });
   it('restores pre-existing per-mesh visibility and does not let a stale inspector overwrite a newer whole', async () => {
@@ -92,31 +92,31 @@ describe('source-to-physical representation adapter and filters', () => {
     const previous = selectEngineeringTarget(f.state, { kind: 'engineering', key: f.main.id });
     await selectEngineeringTarget(f.state, { kind: 'engineering', key: f.terminal.id }); await previous;
     expect(document.querySelector('.props-header')?.textContent).toBe('测控柜');
-    f.state.setOnlySelected(true); f.state.setOnlySelected(false);
+    f.state.selection.setOnlySelected(true); f.state.selection.setOnlySelected(false);
     expect(f.radiator.visible).toBe(false);
-    expect(f.state.selectionRequest?.target?.key).toBe(f.terminal.id);
+    expect(f.state.selection.selectionRequest?.target?.key).toBe(f.terminal.id);
   });
   it('selects a view group as a deduplicated whole collection without inventing another entity', async () => {
     const f = await fixture(), count = f.state.engineering.snapshot!.entities.length;
     await selectEngineeringTarget(f.state, { kind: 'engineering-group', key: f.state.engineering.navigation!.composition.rootKey });
-    f.state.setOnlySelected(true);
-    expect(f.state.engineeringSelection?.ownerIds).toEqual(new Set([f.main.id, f.terminal.id]));
+    f.state.selection.setOnlySelected(true);
+    expect(f.state.selection.engineeringSelection?.ownerIds).toEqual(new Set([f.main.id, f.terminal.id]));
     expect([f.body.visible, f.box.visible, f.radiator.visible]).toEqual([true, true, true]);
     expect(f.state.engineering.snapshot!.entities).toHaveLength(count);
     expect(document.body.textContent).toContain('对象数量2');
   });
   it('restores the view when inspecting an unassigned declaration after isolation and preserves pre-existing hidden members', async () => {
     const f = await fixture(false, true); f.radiator.visible = false;
-    await selectEngineeringTarget(f.state, { kind: 'engineering', key: f.main.id }); f.state.setOnlySelected(true);
+    await selectEngineeringTarget(f.state, { kind: 'engineering', key: f.main.id }); f.state.selection.setOnlySelected(true);
     expect([f.body.visible, f.box.visible, f.radiator.visible]).toEqual([true, false, false]);
     const building = [...f.state.engineering.navigation!.composition.nodes.values()].find(node => node.title === '主控通信楼01')!;
     await selectEngineeringTarget(f.state, { kind: 'engineering-group', key: building.key });
-    expect(f.state.onlySelected).toBe(false);
+    expect(f.state.selection.onlySelected).toBe(false);
     expect([f.body.visible, f.box.visible, f.radiator.visible]).toEqual([true, true, false]);
     expect((document.getElementById('engineering-isolate') as HTMLButtonElement).disabled).toBe(true);
-    expect(f.state.engineeringSelection?.sourceIds.size).toBe(0);
-    expect(f.state.canIsolateSelection).toBe(false); f.state.setOnlySelected(true);
-    expect(f.state.onlySelected).toBe(false);
+    expect(f.state.selection.engineeringSelection?.sourceIds.size).toBe(0);
+    expect(f.state.selection.canIsolateSelection).toBe(false); f.state.selection.setOnlySelected(true);
+    expect(f.state.selection.onlySelected).toBe(false);
     expect([f.body.visible, f.box.visible, f.radiator.visible]).toEqual([true, true, false]);
   });
   it('keeps fine geometry explicit and returns only the selected representation roots to browsing', async () => {
@@ -131,31 +131,31 @@ describe('source-to-physical representation adapter and filters', () => {
     expect(releaseFine).toHaveBeenCalledTimes(1); expect(releaseFine).toHaveBeenCalledWith(f.rootId);
   });
   it('rebinds a selected whole to updated membership while keeping the same logical request', async () => {
-    const f = await fixture(); await selectEngineeringTarget(f.state, { kind: 'engineering', key: f.main.id }); f.state.setOnlySelected(true);
-    const request = f.state.selectionRequest!, next = structuredClone(f.state.engineering.snapshot!);
+    const f = await fixture(); await selectEngineeringTarget(f.state, { kind: 'engineering', key: f.main.id }); f.state.selection.setOnlySelected(true);
+    const request = f.state.selection.selectionRequest!, next = structuredClone(f.state.engineering.snapshot!);
     const source = f.graph.records.find(row => row.name === '散热器')!.id;
     next.memberships.find(member => member.sourceId === source)!.ownerId = f.terminal.id;
     next.entities.find(entity => entity.id === f.main.id)!.sourceIds = f.main.sourceIds.filter(id => id !== source);
     next.entities.find(entity => entity.id === f.terminal.id)!.sourceIds.push(source);
     f.state.engineering.snapshot = next; f.state.engineering.navigation = projectEngineeringNavigation(f.state.engineering.sources!, next);
-    expect(f.state.representationSelection?.isCurrent()).toBe(false);
+    expect(f.state.selection.representationSelection?.isCurrent()).toBe(false);
     await reconcileEngineeringSelection(f.state, request);
-    expect(f.state.selectionRequest?.id).toBe(request.id); expect(f.state.engineeringSelection?.snapshot).toBe(next);
-    expect(f.state.representationSelection?.isCurrent()).toBe(true);
+    expect(f.state.selection.selectionRequest?.id).toBe(request.id); expect(f.state.selection.engineeringSelection?.snapshot).toBe(next);
+    expect(f.state.selection.representationSelection?.isCurrent()).toBe(true);
     expect([f.body.visible, f.box.visible, f.radiator.visible]).toEqual([true, false, false]);
   });
   it('clears an obsolete member range and offers candidates when a selected whole splits', async () => {
-    const f = await fixture(); await selectEngineeringTarget(f.state, { kind: 'engineering', key: f.main.id }); f.state.setOnlySelected(true);
+    const f = await fixture(); await selectEngineeringTarget(f.state, { kind: 'engineering', key: f.main.id }); f.state.selection.setOnlySelected(true);
     const next = structuredClone(f.state.engineering.snapshot!), [body, radiator] = f.main.sourceIds;
     next.entities = next.entities.filter(entity => entity.id !== f.main.id);
     next.entities.push({ ...f.main, id: 'new:body', sourceIds: [body] }, { ...f.main, id: 'new:radiator', sourceIds: [radiator] });
     for (const member of next.memberships) if (member.ownerId === f.main.id) member.ownerId = member.sourceId === body ? 'new:body' : 'new:radiator';
     next.relationships = [];
     f.state.engineering.snapshot = next; f.state.engineering.navigation = projectEngineeringNavigation(f.state.engineering.sources!, next);
-    await reconcileEngineeringSelection(f.state, f.state.selectionRequest!);
-    expect(f.state.engineeringSelection).toBeNull(); expect(document.querySelectorAll('[data-engineering-choice]')).toHaveLength(2);
+    await reconcileEngineeringSelection(f.state, f.state.selection.selectionRequest!);
+    expect(f.state.selection.engineeringSelection).toBeNull(); expect(document.querySelectorAll('[data-engineering-choice]')).toHaveLength(2);
     expect([f.body.visible, f.box.visible, f.radiator.visible]).toEqual([false, false, false]);
     document.querySelector<HTMLButtonElement>('[data-engineering-choice="0"]')!.click();
-    await vi.waitFor(() => expect(f.state.engineeringSelection?.ownerIds.size).toBe(1));
+    await vi.waitFor(() => expect(f.state.selection.engineeringSelection?.ownerIds.size).toBe(1));
   });
 });

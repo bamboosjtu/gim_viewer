@@ -20,7 +20,7 @@ function fixture(children:CbmNode[]) {
   picked.add(new THREE.Mesh(new THREE.BoxGeometry(),new THREE.MeshStandardMaterial()));
   state.loadedXmlModGroups.set('instance',picked);
   const ctx={fragments:{resetHighlight:vi.fn(async()=>{})}} as any;
-  const request=state.beginSelection({kind:'cbm',key:'shared'});
+  const request=state.selection.beginSelection({kind:'cbm',key:'shared'});
   return {state,picked,ctx,request};
 }
 it('delegates a unique source to the ordinary guarded tree selection flow',async()=>{
@@ -39,15 +39,15 @@ it('replaces old highlight/attributes with explicit source choices and waits for
   expect(choices.map(button=>button.textContent)).toEqual(['project / left / A','project / right / B']);
   expect(document.getElementById('props-drawer')?.classList.contains('collapsed')).toBe(false);
   choices[1].click();await vi.waitFor(()=>expect(mocks.properties).toHaveBeenCalledOnce());
-  expect(mocks.properties.mock.calls[0][1]).toBe(b);expect(f.state.selectionGeometry?.status).toBe('ambiguous');
+  expect(mocks.properties.mock.calls[0][1]).toBe(b);expect(f.state.selection.selectionGeometry?.status).toBe('ambiguous');
   choices[0].click();await Promise.resolve();expect(mocks.properties).toHaveBeenCalledOnce();
 });
 it('does not let an old source choice overwrite a newer selection',async()=>{
   const f=fixture([node('shared','A'),node('shared','B')]);
   await selectViewportDev(f.ctx,f.state,'shared','instance',f.request,()=>{});
   const choice=document.querySelector<HTMLButtonElement>('.props-source-choice')!;
-  f.state.beginSelection({kind:'cbm',key:'new'});choice.click();await Promise.resolve();
-  expect(mocks.properties).not.toHaveBeenCalled();expect(f.state.selectionRequest?.target?.key).toBe('new');
+  f.state.selection.beginSelection({kind:'cbm',key:'new'});choice.click();await Promise.resolve();
+  expect(mocks.properties).not.toHaveBeenCalled();expect(f.state.selection.selectionRequest?.target?.key).toBe('new');
 });
 it('keeps the picked source highlighted but clears stale properties when no semantic node exists',async()=>{
   const f=fixture([]);
@@ -56,7 +56,7 @@ it('keeps the picked source highlighted but clears stale properties when no sema
   await selectViewportDev(f.ctx,f.state,'shared','instance',f.request,openingFeedback);
   expect(openingFeedback).not.toHaveBeenCalled();
   expect(status.textContent).toContain('没有对应');
-  expect(f.state.selectionMessage).toBe(status.textContent);
+  expect(f.state.selection.selectionMessage).toBe(status.textContent);
   expect(f.state.highlightedModState?.groups).toEqual([f.picked]);
   expect(document.getElementById('props-drawer-body')?.textContent).toContain('没有对应');
   expect(document.querySelectorAll('.props-source-choice')).toHaveLength(0);

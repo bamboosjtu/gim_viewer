@@ -1,4 +1,4 @@
-import {COMPOSITION_POLICY,componentHostCompatibility,separateInstallation,isEquipmentHost} from './compositionPolicy.js';
+import {COMPOSITION_POLICY,componentHostCompatibility,separateInstallation,isEquipmentHost,unclassifiedAssemblyCandidate,COMPOSITION_SUBTYPE_COMPONENTS,compositionSubtypeHost,compositionSubtype} from './compositionPolicy.js';
 import { ENGINEERING_RULES_VERSION, explicitMain, interpretRecognitionObject as interpretObject, categoryFromName } from './classify.js';
 import { assertEngineeringPartition } from './validate.js';
 import { categoryDefinition,publishDirectoryClassification } from './catalogLabels.js';
@@ -134,6 +134,11 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
       if(m.componentType&&m.componentType.status!=='confirmed'&&!row.objectRoles?.some(p=>p.value==='part')){bundle(sourceId,'component_type_unresolved',[sourceId]);m.membershipStatus='unresolved';}
       else if (above) {owners.set(sourceId, above);m.membershipStatus='confirmed';m.membershipEvidence=[...(row.objectRoles?.map(p=>p.evidenceId)??[]),`assembly:${row.assemblyParentId}->${sourceId}`];}
       else bundle(sourceId, 'component_whole_unresolved', [sourceId]);
+    } else if (above&&parentEquipment&&unclassifiedAssemblyCandidate(row,m)) {
+      m.meaning='part';m.independent=false;m.basis='unclassified_equipment_assembly_member';m.membershipStatus='candidate';
+      m.membershipEvidence=[`assembly:${row.assemblyParentId}->${sourceId}`,`policy:${COMPOSITION_POLICY.version}:unclassified-assembly-member`];
+      if(m.objectRole)m.objectRole={id:'part',status:'candidate',evidence:m.membershipEvidence};
+      owners.set(sourceId,above);
     } else if (m.independent) {
       associate('independent_function_identity', 'source_assembly_only');
     } else if (aboveCategory === 'U-OBJECT' && m.category !== 'U-OBJECT') {
@@ -182,6 +187,7 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
   for(const id of pending.keys())if(!usedOwners.has(id))pending.delete(id);
   for(let i=relationships.length-1;i>=0;i--)if(!entities.has(relationships[i].from)||!entities.has(relationships[i].to))relationships.splice(i,1);
 
+  const subtypeWitnesses=new Map<string,Map<string,readonly string[]>>();
   const memberships = ordered.map(row => {
     const ownerId = owners.get(row.sourceId) ?? null;
     const interpretation = meaning.get(row.sourceId)!;
@@ -190,6 +196,11 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
     if (entity) {
       entity.sourceIds.push(row.sourceId);
       if (interpretation.conflict) entity.classificationConflicts++;
+      const component=interpretation.componentType;
+      if(interpretation.meaning==='part'&&component?.status==='confirmed'&&component.id&&COMPOSITION_SUBTYPE_COMPONENTS.has(component.id)&&compositionSubtypeHost(entity.category)){
+        let witnesses=subtypeWitnesses.get(entity.id);if(!witnesses){witnesses=new Map();subtypeWitnesses.set(entity.id,witnesses);}
+        if(!witnesses.has(component.id))witnesses.set(component.id,component.evidence);
+      }
     } else if (ownerId) {
       const target = pending.get(ownerId);
       if (!target) throw new Error(`Dangling source owner: ${row.sourceId}`);
@@ -212,7 +223,11 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
     memberships, pending: [...pending.values()].sort((a, b) => compare(a.id, b.id)),
     relationships: relationships.sort((a, b) => compare(JSON.stringify(a), JSON.stringify(b))), aliases: wholeAliases, diagnostics,
   };
-  for(const entity of snapshot.entities){Object.assign(entity,publishDirectoryClassification(entity));entity.classificationState=entity.category==='U-OBJECT'?'unknown':'identified';}
+  for(const entity of snapshot.entities){
+    const subtype=compositionSubtype(entity,subtypeWitnesses.get(entity.id));
+    if(subtype){Object.assign(entity,subtype);if(entity.unknownReason==='equipment_subtype_evidence_insufficient')delete entity.unknownReason;}
+    Object.assign(entity,publishDirectoryClassification(entity));entity.classificationState=entity.category==='U-OBJECT'?'unknown':'identified';
+  }
   for(const member of snapshot.memberships){
     Object.assign(member.interpretation,publishDirectoryClassification(member.interpretation));
     if(member.interpretation.categoryStatus==='confirmed')snapshot.recognitionCoverage!.confirmed++;

@@ -73,7 +73,7 @@ def category_value(value):
     return ('E-T' if alias=='E01' else alias) if alias else 'U-OBJECT'
 def interpret(row,has_children=False,equipment_member=False):
     if not isinstance(row,EvidenceRecord):row=EvidenceRecord(row)
-    type=row['source_type'];props=values(row,'TYPE','DEVICETYPE','EQUIPMENTTYPE','设备类型','设备类别','材料类型','构件类型','MATERIALTYPE','CONSTRUCTIONTYPE','MATERIALSUBTYPE','EQUIPMENTSUBTYPE','材料子类','设备子类','SYSCLASSIFYNAME','PARTNAME','COMPONENTTYPE','部件类型')
+    type=row['source_type'];props=values(row,'TYPE','类型','模型分类名称','装置名称','DEVICETYPE','EQUIPMENTTYPE','设备类型','设备类别','材料类型','构件类型','MATERIALTYPE','CONSTRUCTIONTYPE','MATERIALSUBTYPE','EQUIPMENTSUBTYPE','材料子类','设备子类','SYSCLASSIFYNAME','PARTNAME','COMPONENTTYPE','部件类型')
     roles=set()
     for p in values(row,'OBJECTROLE','COMPONENTROLE','对象角色','组件角色'):
         if re.search(r'内部|组成|部件|component|part',p['value'],re.I):roles.add('part')
@@ -182,6 +182,16 @@ def interpret(row,has_children=False,equipment_member=False):
     if len({c for c,p in component})==1:result['componentType']={'id':component[0][0],'status':'candidate' if all(p.get('confidence')=='candidate' for c,p in component) else 'confirmed','evidence':[proof(row,p) for c,p in component]}
     return result
 
+def unclassified_assembly_candidate(row,meaning):
+    if COMPOSITION['unclassifiedAssemblyMembers']['status']!='candidate' or meaning['meaning']!='object' or meaning.get('conflict'):return False
+    if meaning['classificationStatus']=='confirmed' or meaning.get('standardClass',{}).get('status')=='confirmed':return False
+    if category_value(row['source_type'])!='U-OBJECT':return False
+    if values(row,'GRIDIDENTIFICATIONSYSTEMCODE','电网工程标识系统编码','设备编码','PROJECTNAME','工程中名称'):return False
+    if values(row,'OBJECTROLE','对象角色','COMPONENTROLE','组件角色'):return False
+    # A mapped source classification, even a candidate, is not a blank assembly fragment.
+    keys=('TYPE','类型','模型分类名称','装置名称','DEVICETYPE','EQUIPMENTTYPE','设备类型','设备类别','材料类型','构件类型','MATERIALTYPE','CONSTRUCTIONTYPE','SYSCLASSIFYNAME','PARTNAME','材料子类','MATERIALSUBTYPE','设备子类','EQUIPMENTSUBTYPE')
+    return not any(category_value(p['value'])!='U-OBJECT' for p in values(row,*keys))
+
 def normalize(rows,scope):
     rows=sorted((r if isinstance(r,EvidenceRecord) else EvidenceRecord(r) for r in rows),key=lambda r:r['id']);raw={r['id']:r for r in rows};children=collections.defaultdict(list)
     for r in rows:
@@ -219,7 +229,7 @@ def normalize(rows,scope):
         if id in visiting:raise ValueError('Source assembly cycle: '+id)
         visiting.add(id);r=raw[id];m=meanings[id];above=assign(r['parent']) if r['parent'] in raw else None;cat=entities.get(above,{}).get('category');role={p['value'].casefold() for p in values(r,'OBJECTROLE','对象角色','COMPONENTROLE','组件角色')};independent=bool(role&{'independent','独立'})
         parent_meaning=meanings.get(r['parent']);parent_equipment=equipment_contexts.get(r['parent'],False) or bool(parent_meaning and declared_equipment(parent_meaning))
-        if parent_equipment and not independent and any(p['value'].strip().casefold() in POLICY['contextualTerms'] for p in [{'value':r['source_type']},*values(r,'TYPE','DEVICETYPE','EQUIPMENTTYPE','MATERIALTYPE','SYSCLASSIFYNAME','PARTNAME','设备类型','设备类别','材料类型','材料子类','MATERIALSUBTYPE','设备子类','EQUIPMENTSUBTYPE','COMPONENTTYPE','部件类型')]):
+        if parent_equipment and not independent and any(p['value'].strip().casefold() in POLICY['contextualTerms'] for p in [{'value':r['source_type']},*values(r,'TYPE','类型','模型分类名称','装置名称','DEVICETYPE','EQUIPMENTTYPE','MATERIALTYPE','SYSCLASSIFYNAME','PARTNAME','设备类型','设备类别','材料类型','材料子类','MATERIALSUBTYPE','设备子类','EQUIPMENTSUBTYPE','COMPONENTTYPE','部件类型')]):
             m=interpret(r,id in parents,equipment_member=True);meanings[id]=m
         if m['basis']=='attribute_conflict':bundle(id,'object_attributes_conflict')
         elif m['meaning']=='neutral_set':
@@ -231,6 +241,9 @@ def normalize(rows,scope):
             else:
                 reason='component_host_'+compatibility;bundle(id,reason);m['membershipStatus']='unresolved';diagnostics.append({'kind':reason,'identity':id,'name':r['name']})
         elif m['meaning'] in ('source_only','detail','container'):owners[id]=above
+        elif above and parent_equipment and unclassified_assembly_candidate(r,m):
+            owners[id]=above;m['meaning']='part';m['membershipStatus']='candidate';m['basis']='unclassified_equipment_assembly_member'
+            m['membershipEvidence']=['assembly:'+r['parent']+'->'+id,'policy:'+COMPOSITION['version']+':unclassified-assembly-member']
         elif m['meaning']=='part':
             if m.get('componentType') and m['componentType']['status']!='confirmed' and not role&{'part','内部部件','部件'}:bundle(id,'component_type_unresolved');m['membershipStatus']='unresolved'
             elif above:owners[id]=above;m['membershipStatus']='confirmed'
@@ -285,12 +298,21 @@ def normalize(rows,scope):
             bundle(id,reason,'component-host:'+id);m['membershipStatus']='unresolved';m['membershipEvidence']=evidence
             if conflicting:m['conflict']=reason
             diagnostics.append({'kind':reason,'identity':id,'name':r['name']})
+    subtype_witnesses=collections.defaultdict(dict);wanted_components={id for rule in COMPOSITION['hostSubtypes'] for id in rule['requiresComponents']+rule['conflictsWith']}
     used=set(owners.values());entities={k:v for k,v in entities.items() if k in used};pending={k:v for k,v in pending.items() if k in used};members=[]
     for r in rows:
         id=r['id'];owner=owners.get(id);m=meanings[id];target=entities.get(owner) or pending.get(owner)
         if target:target['sourceIds'].append(id)
+        component=m.get('componentType',{})
+        if owner in entities and m['meaning']=='part' and component.get('status')=='confirmed' and component.get('id') in wanted_components:
+            subtype_witnesses[owner].setdefault(component['id'],component['evidence'])
         members.append({'sourceId':id,'ownerId':owner,'interpretation':m,'disposition':'whole_member' if owner in entities else 'pending_whole_member' if owner in pending else 'source_only'})
-    for e in entities.values():publish_category(e)
+    for e in entities.values():
+        witnesses=subtype_witnesses.get(e['id'],{})
+        matches=[rule for rule in COMPOSITION['hostSubtypes'] if e['category'] in rule['hostRecognitionCodes'] and e['classificationStatus']=='confirmed' and all(id in witnesses for id in rule['requiresComponents']) and not any(id in witnesses for id in rule['conflictsWith'])]
+        if len(matches)==1:
+            rule=matches[0];e.update(subtype=rule['id'],subtypeLabel=rule['label'],subtypeStatus='confirmed',subtypeEvidence=['policy:'+COMPOSITION['version']+':host-subtype:'+rule['id']]+[proof for id in rule['requiresComponents'] for proof in witnesses[id]])
+        publish_category(e)
     for m in members:publish_category(m['interpretation'])
     return {'scope':scope,'evidenceBinding':{'scope':scope,'sourceRevision':0},'rulesVersion':'gim-element-standard-recognition-1|'+STANDARD['version']+'|'+ALIASES['version'],'entities':sorted(entities.values(),key=lambda e:e['id']),'pending':sorted(pending.values(),key=lambda e:e['id']),'memberships':members,'relationships':[],'aliases':[],'diagnostics':diagnostics}
 
@@ -348,7 +370,7 @@ def ledger_from_standard(data):
         if pending:
             known=next((members[i]['interpretation'].get('standardClass') for i in ids if members[i]['interpretation'].get('standardClass')),None)
             if known:classification={'category':known['category'],'standardClass':known}
-        catalog=catalog_location(classification);group=catalog['group'];label=catalog['category'];sub='' if catalog['label']==label else catalog['label']
+        catalog=catalog_location(classification);group=catalog['group'];label=catalog['category'];sub=e['subtypeLabel'] if e.get('subtypeStatus')=='confirmed' and any(rule['id']==e.get('subtype') for rule in COMPOSITION['hostSubtypes']) else '' if catalog['label']==label else catalog['label']
         status='未确认' if pending or code.startswith('U') else '已确认' if e.get('classificationStatus')=='confirmed' and e.get('boundaryStatus')=='confirmed' and (e.get('standardClass') or {}).get('status')!='candidate' else '候选'
         counted=int(not pending)
         parts=[]

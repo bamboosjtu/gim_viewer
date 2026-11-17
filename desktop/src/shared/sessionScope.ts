@@ -1,16 +1,24 @@
-import type {ProjectLoadSession} from './projectSession.js';
+import type { ProjectLoadSession } from './projectSession.js';
 
 export class StaleSessionError extends Error {
-  constructor() {super('Project session no longer owns this work');this.name='StaleSessionError';}
+  constructor() {
+    super('Project session no longer owns this work');
+    this.name = 'StaleSessionError';
+  }
 }
 
 /** One project owns cancellation, synchronous publication and registered resources. */
 export class SessionScope {
   private readonly abort = new AbortController();
   private readonly disposables = new Set<() => void>();
-  constructor(readonly session: ProjectLoadSession, private readonly current: () => boolean,
-    private readonly reportError: (error: unknown) => void) {}
-  get signal(): AbortSignal { return this.abort.signal; }
+  constructor(
+    readonly session: ProjectLoadSession,
+    private readonly current: () => boolean,
+    private readonly reportError: (error: unknown) => void,
+  ) {}
+  get signal(): AbortSignal {
+    return this.abort.signal;
+  }
   isCurrent = (): boolean => !this.signal.aborted && this.current();
 
   /** Reject stale preparation. Publication still uses withSession: another
@@ -31,10 +39,17 @@ export class SessionScope {
   own(dispose: () => void): () => void {
     let released = false;
     const release = () => {
-      if (released) return; released = true; this.disposables.delete(release);
-      try { dispose(); } catch (error) { this.reportError(error); }
+      if (released) return;
+      released = true;
+      this.disposables.delete(release);
+      try {
+        dispose();
+      } catch (error) {
+        this.reportError(error);
+      }
     };
-    if (!this.isCurrent()) release(); else this.disposables.add(release);
+    if (!this.isCurrent()) release();
+    else this.disposables.add(release);
     return release;
   }
   dispose(): void {

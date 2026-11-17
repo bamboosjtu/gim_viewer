@@ -121,7 +121,7 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
     // category fact. Structured fields accept exact mappings only.
     return 'U-OBJECT';
   };
-  const typeProperties=values(['TYPE','设备类型','设备类别','材料类型','构件类型','DEVICETYPE','EQUIPMENTTYPE','MATERIALTYPE','CONSTRUCTIONTYPE','MATERIALSUBTYPE','EQUIPMENTSUBTYPE','材料子类','设备子类']);
+  const typeProperties=values(['TYPE','类型','模型分类名称','装置名称','设备类型','设备类别','材料类型','构件类型','DEVICETYPE','EQUIPMENTTYPE','MATERIALTYPE','CONSTRUCTIONTYPE','MATERIALSUBTYPE','EQUIPMENTSUBTYPE','材料子类','设备子类']);
   const predefinedCategories=values(['IFC.PredefinedType']).flatMap(p=>{
     const value=(aliases.ifcPredefined as Record<string,string>)[`${type}.${p.value.trim().toUpperCase()}`];return value?[{...p,value}]:[];
   });
@@ -245,7 +245,7 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
   };
   const result=adapt();
   const role=values(['对象角色','组件角色','OBJECTROLE','COMPONENTROLE']);
-  const contextual=[record.source_type,...values(['TYPE','DEVICETYPE','EQUIPMENTTYPE','MATERIALTYPE','SYSCLASSIFYNAME','PARTNAME','设备类型','设备类别','材料类型','材料子类','MATERIALSUBTYPE','设备子类','EQUIPMENTSUBTYPE','COMPONENTTYPE','部件类型']).map(p=>p.value)];
+  const contextual=[record.source_type,...values(['TYPE','类型','模型分类名称','装置名称','DEVICETYPE','EQUIPMENTTYPE','MATERIALTYPE','SYSCLASSIFYNAME','PARTNAME','设备类型','设备类别','材料类型','材料子类','MATERIALSUBTYPE','设备子类','EQUIPMENTSUBTYPE','COMPONENTTYPE','部件类型']).map(p=>p.value)];
   const resolvedPart=result.objectRoles?.some(p=>p.value==='part')||result.componentTypeCandidates?.some(p=>p.confidence!=='candidate');
   if(!resolvedPart&&!role.some(p=>/独立|independent/i.test(p.value))&&contextual.some(value=>contextRule(value)))result.equipmentMemberVariant=adapt(true);
   return result;

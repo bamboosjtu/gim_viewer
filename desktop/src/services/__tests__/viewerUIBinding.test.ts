@@ -20,7 +20,7 @@ it('rolls back partially bound UI and state, then binds only once on retry',asyn
   mocks.selection.mockImplementationOnce(()=>{throw Error('selection setup');});
   await expect(getViewerRuntimeWithUI(state)).rejects.toThrow('selection setup');
   expect(mocks.disposeDrawer).toHaveBeenCalledOnce();expect(mocks.historyDispose).toHaveBeenCalledOnce();expect(mocks.resetVisibility).toHaveBeenCalledOnce();
-  expect(state.viewState.viewHistory).toBeNull();expect(state.selectionVisibility).toBeNull();
+  expect(state.viewState.viewHistory).toBeNull();expect(state.selection.selectionVisibility).toBeNull();
   const [a,b]=await Promise.all([getViewerRuntimeWithUI(state),getViewerRuntimeWithUI(state)]);
   expect(a).toBe(b);expect(mocks.drawer).toHaveBeenCalledTimes(2);expect(mocks.selection).toHaveBeenCalledTimes(2);
   expect(mocks.disposeSelection).not.toHaveBeenCalled();
@@ -33,19 +33,19 @@ it('retries a failed presentation load before mutating state or attaching listen
 });
 it('a failed new binding preserves history and visibility resources it did not create',async()=>{
   const {getViewerRuntimeWithUI}=await prepare(),state=new AppState(),dispose=vi.fn(),reset=vi.fn();
-  const history={dispose} as never,visibility={reset} as never;state.viewState.viewHistory=history;state.selectionVisibility=visibility;
+  const history={dispose} as never,visibility={reset} as never;state.viewState.viewHistory=history;state.selection.selectionVisibility=visibility;
   mocks.selection.mockImplementationOnce(()=>{throw Error('setup');});
   await expect(getViewerRuntimeWithUI(state)).rejects.toThrow('setup');
-  expect(state.viewState.viewHistory).toBe(history);expect(state.selectionVisibility).toBe(visibility);expect(dispose).not.toHaveBeenCalled();expect(reset).not.toHaveBeenCalled();
+  expect(state.viewState.viewHistory).toBe(history);expect(state.selection.selectionVisibility).toBe(visibility);expect(dispose).not.toHaveBeenCalled();expect(reset).not.toHaveBeenCalled();
 });
 it('routes model and selection callbacks through the prepared view and ignores stale clearing',async()=>{
   const {port,getViewerRuntimeWithUI}=await prepare(),state=new AppState(),runtime=await getViewerRuntimeWithUI(state);
   runtime.ctx.fragments.list.set('runtime-model',{} as never);
   runtime.modelCallbacks.onModelAdded?.('model','runtime-model');runtime.modelCallbacks.onModelRemoved?.('model','runtime-model');
   expect(port.addModel).toHaveBeenCalledWith(runtime.ctx,state,'model','runtime-model');expect(port.removeModel).toHaveBeenCalledWith('model');
-  const args=mocks.selection.mock.calls[0],request=state.beginSelection({kind:'ifc-element',key:'model:1'});
+  const args=mocks.selection.mock.calls[0],request=state.selection.beginSelection({kind:'ifc-element',key:'model:1'});
   await args[3]('model',1,request);await args[5]({modelId:'model'},{expressId:1},request);
   expect(port.showElement).toHaveBeenCalledOnce();expect(port.showRegional).toHaveBeenCalledOnce();
   document.body.innerHTML='<div id="props-drawer-body">selected</div>';args[4](request);expect(document.body.textContent).toBe('尚未选择对象');
-  state.beginSelection({kind:'cbm',key:'new'});document.body.textContent='new selection';args[4](request);expect(document.body.textContent).toBe('new selection');
+  state.selection.beginSelection({kind:'cbm',key:'new'});document.body.textContent='new selection';args[4](request);expect(document.body.textContent).toBe('new selection');
 });

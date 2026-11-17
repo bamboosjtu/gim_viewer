@@ -56,12 +56,12 @@ it('raw entry transfers a dedicated input copy, preserves identity/settings and 
   expect(Array.from(worker.input!.bytes)).toEqual(Array.from(input));expect(input.byteLength).toBe(3);
   expect(worker.input!.webIfcSettings).toEqual(ctx.ifcLoader.settings.webIfc);
   worker.reply({type:'progress',progress:0.4});expect(progress).toHaveBeenCalledWith(0.4);
-  state.beginSelection({kind:'cbm',key:'B'}); // Selection cannot cancel reusable project resources.
+  state.selection.beginSelection({kind:'cbm',key:'B'}); // Selection cannot cancel reusable project resources.
   worker.reply({type:'complete',bytes:new Uint8Array([9,8]),conversionMs:123});await loading;
   expect(ctx.ifcLoader.load).not.toHaveBeenCalled();
-  expect(ctx.fragments.core.load).toHaveBeenCalledWith(new Uint8Array([9,8]).buffer,{modelId:state.getRuntimeModelId(entry.modelId,session)});
+  expect(ctx.fragments.core.load).toHaveBeenCalledWith(new Uint8Array([9,8]).buffer,{modelId:state.ifc.getRuntimeModelId(entry.modelId,session)});
   expect(ctx.fragments.core.settings.autoCoordinate).toBe(true);
-  expect(state.loadedModels.has(entry.modelId)).toBe(true);expect(scene.children).toHaveLength(1);
+  expect(state.ifc.loadedModels.has(entry.modelId)).toBe(true);expect(scene.children).toHaveLength(1);
   expect(worker.terminate).toHaveBeenCalledTimes(1);expect(input).toEqual(new Uint8Array([1,2,3]));
 });
 
@@ -76,8 +76,8 @@ it('owned raw input transfers the sole owned input buffer without a second full-
   expect(worker.input!.openingPolicy).toBe('omit-rel-voids');
   worker.reply({type:'complete',bytes:new Uint8Array([8]),conversionMs:1});
   await loading;
-  expect(state.loadedModels.has(entry.modelId)).toBe(true);
-  expect(ctx.fragments.list.get(state.getRuntimeModelId(entry.modelId,session)).object.userData.ifcOpeningPolicy).toBe('omit-rel-voids');
+  expect(state.ifc.loadedModels.has(entry.modelId)).toBe(true);
+  expect(ctx.fragments.list.get(state.ifc.getRuntimeModelId(entry.modelId,session)).object.userData.ifcOpeningPolicy).toBe('omit-rel-voids');
 });
 
 it('project cleanup terminates pending WASM and old messages cannot register into the new project',async()=>{
@@ -89,7 +89,7 @@ it('project cleanup terminates pending WASM and old messages cannot register int
   state.activateProject(2,'B');cancelIfcConversions();await settled;
   late({data:{type:'complete',bytes:new Uint8Array([9]),conversionMs:1}} as MessageEvent<IfcConversionOutput>);
   expect(ctx.fragments.core.load).not.toHaveBeenCalled();expect(scene.children).toHaveLength(0);
-  expect(state.loadedModels.size).toBe(0);
+  expect(state.ifc.loadedModels.size).toBe(0);
 });
 
 it('a conversion failure remains a failed file; the next IFC can load without a blocking fallback',async()=>{
@@ -102,7 +102,7 @@ it('a conversion failure remains a failed file; the next IFC can load without a 
   const loaded=loadIfcEntry(ctx,state,next,async()=>new Uint8Array([2]),undefined,{session,openingPolicy:'full'});
   await vi.waitFor(()=>expect(ConversionWorker.instances).toHaveLength(2));
   ConversionWorker.instances[1].reply({type:'complete',bytes:new Uint8Array([8]),conversionMs:1});await loaded;
-  expect(state.loadedModels.has(entry.modelId)).toBe(false);expect(state.loadedModels.has(next.modelId)).toBe(true);
+  expect(state.ifc.loadedModels.has(entry.modelId)).toBe(false);expect(state.ifc.loadedModels.has(next.modelId)).toBe(true);
   expect(ctx.ifcLoader.load).not.toHaveBeenCalled();
 });
 
@@ -110,7 +110,7 @@ it('worker startup failure reports failure instead of retrying synchronous conve
   vi.stubGlobal('Worker',class {constructor(){throw new Error('worker unavailable');}});
   const state=new AppState(),session=state.activateProject(1,'sha'),{ctx}=context(state);
   await expect(loadIfcEntry(ctx,state,entry,async()=>new Uint8Array([1]),undefined,{session,openingPolicy:'full'})).rejects.toThrow('worker unavailable');
-  expect(ctx.ifcLoader.load).not.toHaveBeenCalled();expect(state.loadedModels.size).toBe(0);
+  expect(ctx.ifcLoader.load).not.toHaveBeenCalled();expect(state.ifc.loadedModels.size).toBe(0);
 });
 
 it.each(['progress','regional-batch','regional-complete','complete'] as const)(

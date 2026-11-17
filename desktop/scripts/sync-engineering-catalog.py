@@ -12,7 +12,7 @@ def snake(term):return re.sub('[^a-z0-9]+','_',re.sub(r'([a-z0-9])([A-Z])',r'\1_
 def main():
  catalog=load('desktop/src/engineering/catalog.json');standard=load('desktop/src/engineering/standardCatalog.json');policy=load('desktop/src/engineering/recognitionPolicy.json')
  vocab={'version':'substation-vocabulary-1','source':standard['source'],'equipment':{},'equipmentAliases':policy['equipmentAliases'],'components':{},'objectRoles':{},
-  'keywordDictionary':{'version':'source-keywords-1','fields':['SYSCLASSIFYNAME','PARTNAME'],'namespace':'standard-model','entries':{}},
+  'keywordDictionary':{'version':'source-keywords-1','fields':['SYSCLASSIFYNAME','PARTNAME','类型','模型分类名称','装置名称'],'namespace':'standard-model','entries':{}},
   'componentDictionary':{'version':'source-components-1','namespace':'standard-component','entries':{}}}
  def insert(entries,word,id,evidence,field):
   entry=entries.setdefault(word.strip().lower(),{field:[],'evidence':evidence})

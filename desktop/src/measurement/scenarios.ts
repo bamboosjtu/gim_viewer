@@ -5,7 +5,7 @@ export function scenarioTargets(state:AppState){
   const bases=[...(state.deviceLodRuntime?.baseRepresentationEvidence?.()??[])].sort((a,b)=>a.id.localeCompare(b.id));
   const dev=bases.slice(0,8).map(row=>({id:row.id})),devBoolean=bases.filter(row=>(row.simplifiedBooleans??0)>0).slice(0,8).map(row=>({id:row.id}));
   const ifc:Array<{source:string;expressId:number;globalId:string;kind:string}>=[];
-  for(const runtime of [...state.ifcRegionalRuntimes.values()].sort((a,b)=>(state.substationEntrySizes.get(a.sourcePath)??Infinity)-(state.substationEntrySizes.get(b.sourcePath)??Infinity)||a.sourcePath.localeCompare(b.sourcePath))){
+  for(const runtime of [...state.ifc.regionalRuntimes.values()].sort((a,b)=>(state.substationEntrySizes.get(a.sourcePath)??Infinity)-(state.substationEntrySizes.get(b.sourcePath)??Infinity)||a.sourcePath.localeCompare(b.sourcePath))){
     let best:typeof runtime.index.objects[number]|undefined;
     for(const object of runtime.index.objects){
       if(object.role==='connection'||best&&object.expressId>=best.expressId||object.bounds.length!==6||!object.bounds.every(Number.isFinite))continue;
@@ -27,7 +27,7 @@ export async function runScenarioAction(state:AppState,action:{kind:'dev-fine'|'
       const count=groups.length;state.deviceLodRuntime.releaseFine?.(action.id);state.deviceLodRuntime.clearSelection();
       return {kind:action.kind,objects:count,sessionValid:state.isCurrentSession(session)};
     }
-    const runtime=[...state.ifcRegionalRuntimes.values()].find(row=>row.sourcePath===action.source);
+    const runtime=[...state.ifc.regionalRuntimes.values()].find(row=>row.sourcePath===action.source);
     const object=runtime?.index.objects.find(row=>row.expressId===action.expressId&&row.globalId===action.globalId);
     if(!runtime||!object)throw Error('ifc-action-target-unavailable');
     if(action.kind==='ifc-fine'){
@@ -54,7 +54,7 @@ export async function projectResourceState(state:AppState,measurementResources?:
   const {peekViewerRuntime}=await import('../viewer/viewerRuntime.js');const viewer=await peekViewerRuntime();
   return {sourceFiles:state.currentFiles?.size??0,cbmNodes:state.cbmNodeIndex.size,lineNodes:state.currentGimGraph?.nodesByPath.size??0,
     fragmentModels:viewer?.ctx.fragments.list.size??0,
-    ifcModels:state.loadedModels.size,ifcRuntimes:state.ifcRegionalRuntimes.size,devRuntime:Number(!!state.deviceLodRuntime),
+    ifcModels:state.ifc.loadedModels.size,ifcRuntimes:state.ifc.regionalRuntimes.size,devRuntime:Number(!!state.deviceLodRuntime),
     modGroups:state.loadedXmlModGroups.size,stlGroups:state.loadedStlGroups.size,engineeringSources:state.engineering.snapshot?.memberships.length??0,
     pendingTasks:measurement?.pendingTasks??snapshot?.activeTasks.length??0,trackedHostBuffers:measurement?.trackedHostBuffers??snapshot?.hostResources?.uniqueAllocations??0,
     activeWorkers:measurement?.activeWorkers??Object.values(snapshot?.workers??{}).filter(worker=>worker.state!=='terminated'&&worker.state!=='failed').length};

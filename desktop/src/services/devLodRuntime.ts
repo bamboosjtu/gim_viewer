@@ -503,7 +503,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
   private applyOnlySelected(): void {
     for (const [key, row] of this.rows) {
       if (row.group) {
-        setRenderVisibility(row.group,!this.onlySelected || (this.state.representationSelection?.devRoots.has(row.entry.rootOccurrence ?? key) ?? (row.entry.rootOccurrence ?? key) === this.selected));
+        setRenderVisibility(row.group,!this.onlySelected || (this.state.selection.representationSelection?.devRoots.has(row.entry.rootOccurrence ?? key) ?? (row.entry.rootOccurrence ?? key) === this.selected));
         this.state.engineeringGeometryFilter?.(row.group);
       }
     }
@@ -641,7 +641,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
         row.key = key; row.displayed = lod; row.entry.templateStatus = 'ready';
         if(import.meta.env.VITE_GIM_BENCHMARK==='1'&&lod===0)row.baseEvidence={id:row.entry.rootOccurrence,sha:template.sha,
           bounds:[...template.bounds.min.toArray(),...template.bounds.max.toArray()],matrix:this.anchor!.clone().invert().multiply(group.matrix).elements.slice(),status:template.status,simplifiedBooleans:template.diagnostics.simplifiedBooleans??0};
-        group.visible = !this.onlySelected || (this.state.representationSelection?.devRoots.has(row.entry.rootOccurrence) ?? row.entry.rootOccurrence === this.selected);
+        group.visible = !this.onlySelected || (this.state.selection.representationSelection?.devRoots.has(row.entry.rootOccurrence) ?? row.entry.rootOccurrence === this.selected);
         this.state.engineeringGeometryFilter?.(group);
         if (this.batchEnabled) {
           this.instances ??= new DevInstanceBatches(this.state.modRootGroup!);
@@ -650,7 +650,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
         row.geometryStatus = template.status; row.failedKey = undefined;
         this.updateReadiness(row);
         this.state.loadedXmlModGroups.set(row.entry.instanceKey, group);
-        if (highlighted.length && !this.state.representationSelection) {
+        if (highlighted.length && !this.state.selection.representationSelection) {
           const replacements: THREE.Object3D[] = [];
           group.traverse(object => {
             if (replacements.some(parent => belongsTo(object, parent))) return;
@@ -1039,13 +1039,13 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
 export async function startDeviceLod(state: AppState, ctx: ViewerContext, session: ProjectLoadSession, status: (text: string, detail?: string) => void): Promise<DevLodRuntime> {
   if (!state.substationResourceMonitor) startSubstationResourceMonitor(state, ctx);
   if (state.deviceLodRuntime instanceof DevLodRuntime && state.deviceLodRuntime.belongsTo(session)) {
-    state.deviceLodRuntime.setOnlySelected(state.onlySelected);
+    state.deviceLodRuntime.setOnlySelected(state.selection.onlySelected);
     state.deviceLodRuntime.notifyCoordinateAnchor(); await state.deviceLodRuntime.startup; return state.deviceLodRuntime;
   }
   state.deviceLodRuntime?.release();
   const runtime = new DevLodRuntime(state, ctx, session, status); state.deviceLodRuntime = runtime;
   runtime.setExternalMemoryPressure(state.substationMemoryPressure);
-  runtime.setOnlySelected(state.onlySelected);
+  runtime.setOnlySelected(state.selection.onlySelected);
   try { runtime.startup = runtime.start(); await runtime.startup; return runtime; }
   catch (error) { runtime.release(); if (state.deviceLodRuntime === runtime) state.deviceLodRuntime = null; throw error; }
 }

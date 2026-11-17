@@ -17,10 +17,10 @@ export async function projectNodeIfcSelection(
   emptyMessage: string;
 }> {
   const items: Record<string, number[]> = {},
-    guard = state.selectionGuard(request);
+    guard = state.selection.selectionGuard(request);
   for (const [modelId, guids] of collectIfcRefs(node, state.currentIfcEntries)) {
     if (!guard.isCurrent()) return { items: {}, emptyMessage: '' };
-    const runtimeId = state.getRuntimeModelId(modelId),
+    const runtimeId = state.ifc.getRuntimeModelId(modelId),
       model = ctx.fragments.list.get(runtimeId);
     if (!model) continue;
     try {
@@ -39,7 +39,7 @@ export async function projectNodeIfcSelection(
   if (!modelId) return { items, emptyMessage: `设备 "${label}" 无 IFC 关联` };
   const modelName =
     state.currentIfcEntries.find((entry) => entry.modelId === modelId)?.name || 'IFC 模型';
-  const detail = ctx.fragments.list.has(state.getRuntimeModelId(modelId))
+  const detail = ctx.fragments.list.has(state.ifc.getRuntimeModelId(modelId))
     ? '但无 IFCGUID 映射到具体构件'
     : '该 IFC 文件未加载';
   return { items, emptyMessage: `设备 "${label}" 属于 ${modelName}，${detail}` };

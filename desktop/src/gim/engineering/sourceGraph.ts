@@ -4,6 +4,7 @@ import {createEntryIndex,type EntryIndex} from '../entryResolver.js';
 export type {SourceDocument} from './sourceDocuments.js';
 import { parseFamSectionsWithDiagnostics } from '../famParser.js';
 import { resolveBaseFamilyReferences } from '../gimValueSemantics.js';
+import {ENGINEERING_EVIDENCE_FIELDS} from './recognitionFieldPolicy.js';
 import type { ObjectNameEvidence, SourceAlias } from '../../engineering/types.js';
 import type { SourceProperty, SourceRecord } from './sourceEvidence.js';
 
@@ -96,7 +97,8 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
   const edgesFor=(doc:SourceDocument,pattern:RegExp)=>sourceReferenceFields(doc,pattern,(key,fields)=>ambiguous(doc,key,fields));
   // Object fields are attached only to their actual OMP occurrence. Ancestor
   // organization labels never become evidence on every descendant.
-  const objectFields = (doc: SourceDocument) => doc.fields.filter(p => /^(?:TYPE|SYSCLASSIFYNAME|PARTNAME|SYMBOLNAME|NAME|OBJECTNAME|PROJECTNAME|设备名称|工程中名称|设备编码|电网工程标识系统编码|GRIDIDENTIFICATIONSYSTEMCODE|材料子类|设备子类|MATERIALSUBTYPE|EQUIPMENTSUBTYPE|相数|相别|PHASE|PHASECOUNT|PHASELABEL|设备类型|设备类别|材料类型|构件类型|用途|设备用途|EQUIPMENTTYPE|MATERIALTYPE|PURPOSE|型号|MODEL|MODELSPEC|对象角色|组件角色|OBJECTROLE|COMPONENTROLE|所属设备编码|宿主设备编码|HOSTEQUIPMENTID|HOSTEQUIPMENTCODE|PARENTEQUIPMENTID|所属设备名称|所属设备工程中名称|宿主设备名称|HOSTEQUIPMENTNAME|PARENTEQUIPMENTNAME)$/i.test(p.keys[0]));
+  const objectKeys=new Set([...ENGINEERING_EVIDENCE_FIELDS,'SYMBOLNAME','NAME','OBJECTNAME'].map(key=>key.toUpperCase()));
+  const objectFields = (doc: SourceDocument) => doc.fields.filter(p => objectKeys.has(p.keys[0].toUpperCase()));
   function updateNames(row: SourceRecord): void {
     const names: ObjectNameEvidence[] = [];
     for (const [kind, labels] of [

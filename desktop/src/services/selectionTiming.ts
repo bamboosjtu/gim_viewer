@@ -11,6 +11,6 @@ export function beginSelectionStage(state: AppState, request: SelectionRequest,
   let ended = false;
   return (): void => {
     if (ended) return; ended = true;
-    end(undefined, {...meta, current:state.isCurrentSelection(request), cancelled:request.signal.aborted});
+    end(undefined, {...meta, current:state.selection.isCurrentSelection(request), cancelled:request.signal.aborted});
   };
 }

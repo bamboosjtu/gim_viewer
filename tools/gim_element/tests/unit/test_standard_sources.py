@@ -11,10 +11,19 @@ os.environ.update(TEMP=str(_TEMP),TMP=str(_TEMP),TMPDIR=str(_TEMP),GIM_READER_LO
 tempfile.tempdir=str(_TEMP)
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 
-from standard_sources import ifc_string,split_args,read_ifc
+from standard_sources import ifc_string,split_args,read_ifc,Reader
 from unittest.mock import patch
 
 class IfcTextContracts(unittest.TestCase):
+    def test_family_pointer_aliases_share_the_document_cache(self):
+        from support import MemoryFile
+        for key in ('BASEFAMILY','BASEFAMILY1','BASEFAMILYPOINTER','BASEFAM0','FAMILYFILE0'):
+            with self.subTest(key=key):
+                files={'part.cbm':MemoryFile(key+'=part.fam'),'part.fam':MemoryFile('[设计参数]\n类型=类型=散热器')}
+                reader=Reader(_TEMP,files)
+                self.assertEqual(reader.families('part.cbm')[0]['value'],'散热器')
+                self.assertEqual(reader.families('part.cbm')[0]['path'],'part.fam')
+                self.assertTrue(all(f.reads==1 for f in files.values()))
     def test_adjacent_unicode_segments_remain_adjacent(self):
         slash=chr(92)
         field=(slash+'X2'+slash+'4E3B'+slash+'X0'+slash+slash+'X2'+slash+'53D8'+slash+'X0'+slash).encode('ascii')

@@ -18,7 +18,7 @@
 
 | 目录 | 职责 | 允许依赖 | 不应依赖 |
 |---|---|---|---|
-| `desktop/src/app/` | 启动、`AppState`、工程/选择会话、模块接线 | services、ui 入口 | 具体 parser 内部 |
+| `desktop/src/app/` | 启动、`AppState`、工程会话、模块接线 | services、ui 入口 | 具体 parser 内部 |
 | `desktop/src/engineering/` | 工程整体、成员、关系、组成模板与目录；纯领域 | 仅类型和纯函数 | GIM parser、UI、Viewer、DB、平台 IO |
 | `desktop/src/standards/` | 首批标准要求/属性定义、字段级原文证据与只读上下文查询 | 本地数据资源、纯函数 | 工程识别算法、Viewer、DB、模型校核执行 |
 | `desktop/src/gim/engineering/` | 把 CBM/DEV/FAM/IFC 来源适配成中立证据和来源图 | gim 纯 parser、engineering 契约 | Viewer、UI、DB |
@@ -75,7 +75,7 @@ bootstrap
 
 独立设备打开使用显式 `EquipmentPresentationPort`：服务提交工程身份、导航树、选择回调与会话 signal，UI 的 `equipmentProjectView` 负责工程栏、导航 DOM、搜索、空态及设备状态栏；端口返回仅属于该视图实例的释放器。旧释放器不能移除新导航。设备运行时不访问 DOM 或 `loadPresentation`，边界脚本单独禁止其退回通用 UI 模块加载器和旧 DOM 适配器。通用加载遮罩保留 `gimOpenCore` 公开入口，内部只转发加载展示端口；DOM、进度格式和计时器均属于 UI。
 
-`AppState.engineering` 持有工程事实与构建状态，`viewState` 持有导航、展开、相机意图和历史；`sourceGeometry` 独立持有物理目录、就绪 Promise 与缓存状态，读取由所有者统一做会话前后校验，不等待语义；`ifcLoading` 持有 IFC 尾部 pending 与明确跳过清单；`properties` 直接持有属性 Map 并负责 reset，AppState 不再提供旧根字段转发。应用组合根仍保留运行面协调状态。工程实体、导航、几何目录的构建由服务层启动，UI 通过订阅/回调刷新。工程切换后，旧 Worker、旧请求和旧投影必须释放或拒绝提交。
+`AppState.engineering` 持有工程事实与构建状态，`viewState` 持有导航、展开、相机意图和历史；`sourceGeometry` 独立持有物理目录、就绪 Promise 与缓存状态，读取由所有者统一做会话前后校验，不等待语义；`ifcLoading` 持有 IFC 尾部 pending 与明确跳过清单；`properties` 直接持有属性 Map 并负责 reset，AppState 不再提供旧根字段转发。选择的请求/取消、相机意图快照、反馈与装饰释放器由 `selection` 持有；IFC 会话地址、模型与区域运行时由 `ifc` 注册表持有，登记和迟到删除在注册表内统一校验。新所有者通过窄运行时端口接线，消费者不使用根字段转发。应用组合根仍保留工程源数据与运行面协调状态。工程实体、导航、几何目录的构建由服务层启动，UI 通过订阅/回调刷新。工程切换后，旧 Worker、旧请求和旧投影必须释放或拒绝提交。
 
 共享包通过 package.json 声明依赖和 package exports 访问。纯名称、KV、跨越、线路属性/图类型、资源限制及线路 MOD parser 直接引用包出口，测试属于共享实现。桌面仅保留有实际责任的入口：`lineCbmParserCore` / `lineMapData` 初始化桌面日志 sink，`geometry/ir` / `sourceDocument` 是当前来源与编译契约入口；`@gim/measurement-core/source` 是显式源码出口，SDK 默认入口仍为构建后的 dist。生产代码不允许用深相对路径绕过包边界。
 

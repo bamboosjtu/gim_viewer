@@ -14,7 +14,7 @@ export async function inspectEngineeringDocument(state: AppState, path: string, 
   if (!sources) return;
   const inventory = new Set([...state.substationEntryPaths, ...sources.graph.documents.map(doc => doc.path), ...sources.graph.ifcPaths]);
   if (!inventory.has(path)) return;
-  const request = existing ?? state.beginSelection({ kind: 'engineering-source', key: cbmOccurrenceId ?? `document:${path}` }), guard = state.selectionGuard(request);
+  const request = existing ?? state.selection.beginSelection({ kind: 'engineering-source', key: cbmOccurrenceId ?? `document:${path}` }), guard = state.selection.selectionGuard(request);
   if (!guard.isCurrent()) return;
   await selectionPresentation().sourceTree(state,guard.isCurrent);
   if (!guard.isCurrent()) return;
@@ -84,7 +84,7 @@ export async function inspectEngineeringDocument(state: AppState, path: string, 
 export async function inspectEngineeringContext(state: AppState, key: string, existing?: SelectionRequest): Promise<void> {
   const sources = state.engineering.sources, node = sources?.spatialNodes.find(node => node.key === key);
   if (!sources || !node) return;
-  const request = existing ?? state.beginSelection({ kind: 'engineering-source', key: `context:${key}` }), guard = state.selectionGuard(request);
+  const request = existing ?? state.selection.beginSelection({ kind: 'engineering-source', key: `context:${key}` }), guard = state.selection.selectionGuard(request);
   if (!guard.isCurrent()) return;
   await selectionPresentation().sourceTree(state,guard.isCurrent);
   if (!guard.isCurrent()) return;

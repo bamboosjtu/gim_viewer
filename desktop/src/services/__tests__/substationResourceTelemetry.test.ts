@@ -31,7 +31,7 @@ describe('Substation Runtime resource checkpoints', () => {
     state.currentProjectType = 'substation';
     state.currentCbmTree = makeTree() as any;
     state.currentIfcEntries = [{ name: 'a.ifc', path: 'DEV/a.ifc', modelId: 'a' }];
-    state.loadedModels.set('a', { modelId: 'a', runtimeModelId: 'runtime-a', visible: true });
+    state.ifc.loadedModels.set('a', { modelId: 'a', runtimeModelId: 'runtime-a', visible: true });
     state.fileDevRelations = [{ ifcName: 'a', ifcFile: 'a.ifc', modelId: 'a', deviceCount: 1, deviceCbms: ['device'] }];
     state.substationSpatialIndex = {
       models: [],
@@ -150,7 +150,7 @@ it('private commit alone drives pressure; old IPC cannot alter a new project and
   const state=new AppState();perfResetForState(state,'sha');
   const dev=vi.fn(),ifc=vi.fn(),releaseDev=vi.fn(),releaseIfc=vi.fn();
   state.deviceLodRuntime=createDeviceRuntimeMock({setExternalMemoryPressure:dev,release:releaseDev});
-  state.ifcRegionalRuntimes.set('ifc',{setMemoryPressure:ifc,release:releaseIfc} as any);
+  state.ifc.regionalRuntimes.set('ifc',{setMemoryPressure:ifc,release:releaseIfc} as any);
   let reply!:(value:any)=>void;
   native.read.mockImplementationOnce(()=>new Promise(resolve=>{reply=resolve;}));
   const monitor=startSubstationResourceMonitor(state,{} as any);
@@ -166,7 +166,7 @@ it('private commit alone drives pressure; old IPC cannot alter a new project and
   const reads=native.read.mock.calls.length;
   state.activateProject(2,'new');reply({processTreeAvailable:true,processTreePrivateBytes:7*1024**3});
   expect(releaseDev).toHaveBeenCalledOnce();expect(releaseIfc).toHaveBeenCalledOnce();expect(releaseMonitor).toHaveBeenCalledOnce();
-  expect(state.deviceLodRuntime).toBeNull();expect(state.ifcRegionalRuntimes.size).toBe(0);
+  expect(state.deviceLodRuntime).toBeNull();expect(state.ifc.regionalRuntimes.size).toBe(0);
   await vi.advanceTimersByTimeAsync(20000);expect(dev.mock.calls.length).toBe(calls);
   expect(native.read).toHaveBeenCalledTimes(reads);expect(vi.getTimerCount()).toBe(0);
   expect(state.substationResourceMonitor).toBeNull();monitor.release();

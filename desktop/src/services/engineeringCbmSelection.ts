@@ -6,7 +6,7 @@ const canonical = (path: string) => path.replace(/\\/g, '/').replace(/^(?:\.\/)+
 /** Legacy file/diagram links are source addresses, never an alternative entity
  * classifier. Shared document occurrences and cross-whole aliases stay explicit. */
 export async function selectEngineeringCbmSource(state: AppState, path: string, request: SelectionRequest): Promise<boolean> {
-  if (!state.isCurrentSelection(request) || !state.engineering.sources || !state.engineering.snapshot) return false;
+  if (!state.selection.isCurrentSelection(request) || !state.engineering.sources || !state.engineering.snapshot) return false;
   const sources = state.engineering.sources, wanted = canonical(path);
   const paths = [...new Set(sources.graph.cbmOccurrences.map(node => node.documentPath))];
   const exact = paths.filter(value => canonical(value) === wanted);

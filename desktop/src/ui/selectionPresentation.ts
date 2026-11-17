@@ -7,10 +7,10 @@ export const selectionPresentation: SelectionPresentation = {
     const props = await import('./propsDrawer.js');
     return {
       async show(node, ctx) {
-        if (!state.isCurrentSelection(request)) return;
+        if (!state.selection.isCurrentSelection(request)) return;
         if (ctx) {
           await props.showNodeProperties(ctx, state, node, request);
-          if (state.isCurrentSelection(request)) props.openPropsDrawer(ctx);
+          if (state.selection.isCurrentSelection(request)) props.openPropsDrawer(ctx);
         } else {
           props.openPropsDrawerUI();
           await props.showNodePropertiesBasic(state, node, request);
@@ -33,7 +33,7 @@ export const selectionPresentation: SelectionPresentation = {
     } finally {
       endImports();
     }
-    if (!state.isCurrentSelection(request)) return;
+    if (!state.selection.isCurrentSelection(request)) return;
     const endTree = beginSelectionStage(state, request, 'navigation.tree');
     try {
       views[0].syncSelectedTreeRow(state);
@@ -60,7 +60,7 @@ export const selectionPresentation: SelectionPresentation = {
   },
   async unlinkedDiagram(state, gridId, request) {
     const props = await import('./propsDrawer.js');
-    if (state.isCurrentSelection(request)) props.showUnlinkedSldProperties(state, gridId, request);
+    if (state.selection.isCurrentSelection(request)) props.showUnlinkedSldProperties(state, gridId, request);
   },
   async sourceTree(state, current) {
     const tree = await import('./engineeringTreeView.js');

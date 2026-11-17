@@ -137,9 +137,9 @@ export function setupViewerShell(state: AppState): void {
         const viewItem = document.getElementById('menu-previous-view');
         if (viewItem) viewItem.hidden = !state.viewState.viewHistory?.canGoBack;
         const onlyItem = document.getElementById('menu-only-selected');
-        if (onlyItem) onlyItem.hidden = !['substation', 'equipment'].includes(state.currentProjectType ?? '') || !state.selectionRequest?.target || state.onlySelected || !state.canIsolateSelection;
+        if (onlyItem) onlyItem.hidden = !['substation', 'equipment'].includes(state.currentProjectType ?? '') || !state.selection.selectionRequest?.target || state.selection.onlySelected || !state.selection.canIsolateSelection;
         const allItem = document.getElementById('menu-show-all');
-        if (allItem) allItem.hidden = !['substation', 'equipment'].includes(state.currentProjectType ?? '') || !state.onlySelected;
+        if (allItem) allItem.hidden = !['substation', 'equipment'].includes(state.currentProjectType ?? '') || !state.selection.onlySelected;
         const overviewItem = document.getElementById('menu-station-overview');
         if (overviewItem) overviewItem.hidden = !['substation', 'equipment'].includes(state.currentProjectType ?? '') || !state.stationOverview;
         void Promise.resolve(refreshRecent()).catch(reportBackgroundError);
@@ -166,20 +166,20 @@ export function setupViewerShell(state: AppState): void {
   document.getElementById('menu-previous-view')?.addEventListener('click', () => {
     closeMenu();
     const session = state.captureProjectSession();
-    const selection = state.selectionRequest;
+    const selection = state.selection.selectionRequest;
     void Promise.resolve(state.viewState.viewHistory?.back().catch(error => {
-      if (!state.isCurrentSession(session) || state.selectionRequest !== selection) return;
+      if (!state.isCurrentSession(session) || state.selection.selectionRequest !== selection) return;
       console.warn('[View history]', error);
       setSelectionStatus('暂时无法恢复上一视角，请重试。');
     })).catch(reportBackgroundError);
   });
   document.getElementById('menu-only-selected')?.addEventListener('click', () => {
     closeMenu();
-    state.setOnlySelected(true);
+    state.selection.setOnlySelected(true);
   });
   document.getElementById('menu-show-all')?.addEventListener('click', () => {
     closeMenu();
-    state.setOnlySelected(false);
+    state.selection.setOnlySelected(false);
   });
   document.getElementById('menu-station-overview')?.addEventListener('click', () => {
     closeMenu();

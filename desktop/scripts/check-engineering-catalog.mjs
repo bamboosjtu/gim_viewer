@@ -16,6 +16,10 @@ for(const item of standard.items)for(const word of [item.label,item.term,...item
 for(const part of catalog.components)for(const word of [part.label,part.term,...part.aliases])if(!vocabulary.componentDictionary.entries[word.trim().toLowerCase()]?.componentIds.includes(part.id))throw Error('Component vocabulary missing '+part.term+' / '+word);
 const composition=load('desktop/src/engineering/compositionPolicy.json');
 if(JSON.stringify(composition.hostKinds)!==JSON.stringify(['equipment']))throw Error('Every equipment type must support components');
+for(const rule of composition.hostSubtypes){
+  if(!rule.requiresComponents.length||rule.hostRecognitionCodes.some(code=>!roles.has(code))
+    ||[...rule.requiresComponents,...rule.conflictsWith].some(id=>!catalog.components.some(part=>part.id===id)))throw Error('Invalid composition subtype: '+rule.id);
+}
 for(const id of Object.values(policy.componentTermDefaults))if(!catalog.components.some(part=>part.id===id))throw Error('Invalid default component: '+id);
 const path='docs/engineering/catalogs/catalog-index.md';
 const doc='# 实体目录参考索引\n\n维护源为独立 JSON 目录配置；[`变电三维设计建模规范_实体索引表.xlsx`](变电三维设计建模规范_实体索引表.xlsx) 仅作参考。下列单元格与摘要保留所记录的参考版本的来源位置，不要求当前工作簿参与配置、构建或检查。目录代码稳定维护，内部用途/归属角色不参与目录排序。\n\n'+['equipment','material','construction'].map(kind=>{

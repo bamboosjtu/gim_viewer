@@ -35,3 +35,15 @@ test('formatter scope survives a Git checkout with core.autocrlf=true', () => {
   for (const path of paths) assert.equal(readFileSync(join(folder, path), 'utf8'), 'export const value = 1;\n', path);
   assert.equal(readFileSync(join(folder, powershell), 'utf8'), 'Write-Output "ok"\r\n');
 });
+
+test('adopted modules enforce type-checked rules and route logs through the shared sink', async () => {
+  const { ESLint } = await import('eslint');
+  const { architectureModules } = await import('./format-architecture.mjs');
+  const eslint = new ESLint();
+  for (const pattern of architectureModules) {
+    const path = pattern.replace('*', 'selection');
+    const config = await eslint.calculateConfigForFile(path);
+    assert.equal(config.rules['@typescript-eslint/no-unsafe-assignment'][0], 2, path);
+    if (path !== 'src/utils/logger.ts') assert.equal(config.rules['no-console'][0], 2, path);
+  }
+});

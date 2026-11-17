@@ -17,9 +17,19 @@ it.each([['GIS','Radiator'],['OilImmersedTransformer','Ladder']])('allows every 
 it('rejects material hosts and keeps unknown host kinds unresolved',()=>{
  for(const host of ['GroundingMaterial','OTHERS']){const result=build([source('host',host),source('part','Radiator',{parent:'host'})]);expect(result.pending).toHaveLength(1);}
 });
-it('never infers ownership from an accessory name or same-category parent',()=>{
- const result=build([source('host','OilImmersedTransformer'),source('part','OTHERS',{name:'1号主变_散热器',parent:'host'})]);
+it('never infers ownership from an accessory name without a real assembly',()=>{
+ const result=build([source('host','OilImmersedTransformer'),source('part','OTHERS',{name:'1号主变_散热器'})]);
  expect(result.entities).toHaveLength(2);expect(result.memberships[1].interpretation.componentType?.status).toBe('candidate');
+});
+it('retains unclassified real assembly members as candidate parts without using their names',()=>{
+ const result=build([source('host','OilImmersedTransformer'),source('part','OTHERS',{name:'未知对象',parent:'host'})]);
+ expect(result.entities).toHaveLength(1);
+ expect(result.memberships[1].interpretation).toMatchObject({meaning:'part',membershipStatus:'candidate',basis:'unclassified_equipment_assembly_member'});
+ expect(result.memberships[1].interpretation.componentType).toBeUndefined();
+ expect(result.memberships[1].interpretation.membershipEvidence).toContain('assembly:host->part');
+});
+it.each<Record<string,string>>([{TYPE:'CircuitBreaker'},{OBJECTROLE:'independent'},{GRIDIDENTIFICATIONSYSTEMCODE:'own-code'},{PROJECTNAME:'own-designation'}])('preserves independent or declared child identities: %j',values=>{
+ expect(build([source('host','GIS'),source('child','OTHERS',{parent:'host',properties:props(values)})]).entities).toHaveLength(2);
 });
 it('keeps explicit independent boxes separate even in a compatible assembly',()=>{
  const result=build([source('host','GIS'),source('box','TerminalBox',{parent:'host',properties:props({OBJECTROLE:'independent'})})]);

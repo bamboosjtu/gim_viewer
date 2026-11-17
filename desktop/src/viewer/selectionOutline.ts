@@ -28,7 +28,7 @@ function edge(mesh: THREE.Mesh, color: number, opacity: number): Outline {
 export function addSelectionOutline(state: AppState, mesh: THREE.Mesh): void {
   let rows = selected.get(state); if (!rows) { rows = new Map(); selected.set(state, rows); }
   if (!rows.has(mesh)) rows.set(mesh, edge(mesh, SELECTION_AMBER, 1));
-  state.selectionDecorationCleanup = () => { clearMeshOutlines(state); clearFragmentOutlines(state); clearHoverOutline(state); };
+  state.selection.selectionDecorationCleanup = () => { clearMeshOutlines(state); clearFragmentOutlines(state); clearHoverOutline(state); };
 }
 export function removeSelectionOutline(state: AppState, mesh: THREE.Mesh): void {
   selected.get(state)?.get(mesh)?.release(); selected.get(state)?.delete(mesh);
@@ -72,7 +72,7 @@ export function outlineSelectionRange(ctx:ViewerContext,state:AppState,box:THREE
   helper.raycast=()=>{};helper.userData.interactionDecoration=true;
   (helper.material as THREE.Material).depthTest=false;
   group.userData.interactionDecoration=true;group.add(helper);ctx.world.scene.three.add(group);groups.set(key,group);
-  state.selectionDecorationCleanup=()=>{clearMeshOutlines(state);clearFragmentOutlines(state);clearHoverOutline(state);};
+  state.selection.selectionDecorationCleanup=()=>{clearMeshOutlines(state);clearFragmentOutlines(state);clearHoverOutline(state);};
 }
 
 /** Geometry comes from the already loaded Fragments representation, with its
@@ -100,7 +100,7 @@ async function fragmentGroup(model: any, ids: number[], color: number, opacity: 
 
 export async function outlineFragmentItems(ctx: ViewerContext, state: AppState, items: Record<string, Iterable<number>>, guard: SelectionCommitGuard): Promise<void> {
   let groups = fragmentGroups.get(state); if (!groups) { groups = new Map(); fragmentGroups.set(state, groups); }
-  state.selectionDecorationCleanup = () => { clearMeshOutlines(state); clearFragmentOutlines(state); clearHoverOutline(state); };
+  state.selection.selectionDecorationCleanup = () => { clearMeshOutlines(state); clearFragmentOutlines(state); clearHoverOutline(state); };
   for (const [modelId, values] of Object.entries(items)) {
     const model = ctx.fragments.list?.get?.(modelId); if (!model) continue;
     const ids = [...values];

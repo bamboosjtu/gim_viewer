@@ -169,8 +169,8 @@ export async function cleanupBeforeOpenNewProject(
       // - state.loadedModels 可能比 ctx 多（dispose 失败的残留索引）
       // - ctx.fragments.list 可能比 state 多（state 被外部 reset 但 ctx 未清）
       const ids = new Set<string>();
-      for (const [logicalModelId, loaded] of state.loadedModels) {
-        ids.add(loaded.runtimeModelId || state.ifcRuntimeModelIds.get(logicalModelId) || logicalModelId);
+      for (const [logicalModelId, loaded] of state.ifc.loadedModels) {
+        ids.add(loaded.runtimeModelId || state.ifc.runtimeModelIds.get(logicalModelId) || logicalModelId);
       }
       // DEV-only viewers have no Fragments core yet; list also accesses core.
       // Still continue below to release their MOD/STL resources and highlights.

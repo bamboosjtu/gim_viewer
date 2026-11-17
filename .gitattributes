@@ -17,6 +17,16 @@
 # Preserve existing CRLF blobs outside the formatting scope; retain space/tab checks.
 /desktop/src/gim/substationEvidence.ts whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 /desktop/src/gim/__tests__/substationEvidence.test.ts whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+/desktop/src/services/__tests__/selectionInteraction.test.ts whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 
 # PowerShell 脚本统一使用 crlf
 *.ps1 text eol=crlf
+
+/desktop/src/shared/projectSelectionState.ts text eol=lf
+/desktop/src/shared/ifcRuntimeState.ts text eol=lf
+/desktop/src/shared/runtimeSlot.ts text eol=lf
+/desktop/src/shared/sessionScope.ts text eol=lf
+/desktop/src/shared/viewerState.ts text eol=lf
+/desktop/src/services/selectionVisibility.ts text eol=lf
+/desktop/src/services/ifcNameIndex.ts text eol=lf
+/desktop/src/shared/selectionContracts.ts text eol=lf

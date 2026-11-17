@@ -213,7 +213,7 @@ export async function loadAllIfcFiles(
   void import('./connectionOwnershipService.js').then(({ prepareConnectionOwnership }) => {
     if (isCurrent()) return prepareConnectionOwnership(state, session);
   }).catch(error => { if (isCurrent()) console.warn('[Connection source evidence]', error); });
-  void Promise.resolve(state.selectionVisibility?.sync().catch(error => console.warn('[Selection visibility]', error))).catch(reportBackgroundError);
+  void Promise.resolve(state.selection.selectionVisibility?.sync().catch(error => console.warn('[Selection visibility]', error))).catch(reportBackgroundError);
   const connectionFirstBatches = new Set<string>();
   const connectionCompletions = new Set<string>();
   const updateConnectionStatus = (): void => {
@@ -322,9 +322,9 @@ export async function loadAllIfcFiles(
     // 视角停在“只看得到一栋建筑”的近景。
     for (const delay of [1500, 5000, 12000]) {
       window.setTimeout(() => {
-        if (!isCurrent() || state.viewState.viewerUserInteracted || state.selectionRequest?.target) return;
+        if (!isCurrent() || state.viewState.viewerUserInteracted || state.selection.selectionRequest?.target) return;
         void Promise.resolve(import('../viewer/camera.js').then(({ fitCameraToStationOverview }) => {
-          if (!isCurrent() || state.viewState.viewerUserInteracted || state.selectionRequest?.target) return;
+          if (!isCurrent() || state.viewState.viewerUserInteracted || state.selection.selectionRequest?.target) return;
           fitCameraToStationOverview(ctx, state.viewState, { force: true,...stationViewPolicy(state) });
         })).catch(reportBackgroundError);
       }, delay);
@@ -348,7 +348,7 @@ export async function loadAllIfcFiles(
     const { restoreTreeState } = await import('./viewStateStore.js');
     restoreTreeState(state);
     if (!isCurrent()) return;
-    if (!state.selectionRequest?.target && !state.viewState.viewerUserInteracted) {
+    if (!state.selection.selectionRequest?.target && !state.viewState.viewerUserInteracted) {
       trackCameraInteraction();
       fitCameraToStationOverview(ctx, state.viewState, stationViewPolicy(state));
       scheduleStationOverviewRefit();
@@ -365,10 +365,10 @@ export async function loadAllIfcFiles(
       source: loadSource,
       cacheHit: loadSource === 'lod-cache',
       coordinateAnchor: state.projectSourceToViewerMatrix != null,
-      loadedModels: state.loadedModels.size,
+      loadedModels: state.ifc.loadedModels.size,
     };
     perfMarkProductMoment('firstUsableGeometryReady', firstMeta, perfSession);
-    const runtimeId=state.ifcRuntimeModelIds.get(entry.modelId)??entry.modelId;
+    const runtimeId=state.ifc.runtimeModelIds.get(entry.modelId)??entry.modelId;
     const object=ctx.fragments.list.get(runtimeId)?.object;
     let frameHandled=false;
     onIfcPresented=()=>{
@@ -431,7 +431,7 @@ export async function loadAllIfcFiles(
   };
   const ifcStageLabels: Record<string, string> = { 'checking-cache': '查询LOD缓存', 'lod-cache-hit': 'LOD缓存命中', 'cold-convert': '冷转换中', 'far-ready': '远景就绪', 'cache-write-start': '缓存写入中', 'cache-written': '缓存已写', 'cache-write-failed': '远景就绪(缓存写入失败)' };
   const publishTerminalStatus = () => {
-    if(isCurrent())publishIfcStatus(`IFC 已结束 · 已加载 ${state.loadedModels.size}/${entries.length} · ${ifcCacheProgress()}${failed.length ? ` · 失败 ${failed.length}` : ''}${state.ifcLoading.skippedLargeIfc.length ? ` · 已跳过 ${state.ifcLoading.skippedLargeIfc.length} 个超大 IFC` : ''}${cacheWriteFailures.size ? ` · 缓存写入失败 ${cacheWriteFailures.size}` : ''}`);
+    if(isCurrent())publishIfcStatus(`IFC 已结束 · 已加载 ${state.ifc.loadedModels.size}/${entries.length} · ${ifcCacheProgress()}${failed.length ? ` · 失败 ${failed.length}` : ''}${state.ifcLoading.skippedLargeIfc.length ? ` · 已跳过 ${state.ifcLoading.skippedLargeIfc.length} 个超大 IFC` : ''}${cacheWriteFailures.size ? ` · 缓存写入失败 ${cacheWriteFailures.size}` : ''}`);
   };
   const lifecycleTask = (async (): Promise<void> => {
     try {
@@ -606,7 +606,7 @@ session, perfSessionId: perfSession.id, onLoadSource: (source) => { if(!isCurren
           };
           await loadFine();
           if (!isCurrent()) return;
-          connectionPreview.markModelReady(entry.modelId, state.ifcRegionalRuntimes.get(entry.modelId)?.index.objects);
+          connectionPreview.markModelReady(entry.modelId, state.ifc.regionalRuntimes.get(entry.modelId)?.index.objects);
           updateConnectionStatus();
           if (!readEnded) {
             // 浏览 LOD 缓存命中时不会调用 getIfcBuffer；显式记录“未读取 IFC”。
@@ -626,8 +626,8 @@ session, perfSessionId: perfSession.id, onLoadSource: (source) => { if(!isCurren
           ifcStages.set(entry.path, loadSource.value === 'ifc' ? '冷转换完成' : 'LOD缓存恢复完成');
           setIfcStatus(ifcStatus(entry, queueIndex, queue.length));
           ifcBytes.value = null;
-          const runtimeModelId = state.ifcRuntimeModelIds.get(entry.modelId) ?? entry.modelId;
-          const usable = state.loadedModels.has(entry.modelId) && ctx.fragments.list.has(runtimeModelId);
+          const runtimeModelId = state.ifc.runtimeModelIds.get(entry.modelId) ?? entry.modelId;
+          const usable = state.ifc.loadedModels.has(entry.modelId) && ctx.fragments.list.has(runtimeModelId);
           if (usable && !interactiveInitialized) {
             await initializeInteractiveAfterFirstIfc(entry, loadSource.value);
             if (!isCurrent()) return;
@@ -663,11 +663,11 @@ session, perfSessionId: perfSession.id, onLoadSource: (source) => { if(!isCurren
           // 防御性清理
           try {
             const modelId = entry.modelId;
-            const runtimeModelId = state.ifcRuntimeModelIds.get(modelId) ?? modelId;
+            const runtimeModelId = state.ifc.runtimeModelIds.get(modelId) ?? modelId;
             if (ctx.fragments.list.has(runtimeModelId)) {
               void Promise.resolve(ctx.fragments.core.disposeModel(runtimeModelId)).catch(reportBackgroundError);
             }
-            state.loadedModels.delete(modelId);
+            state.ifc.loadedModels.delete(modelId);
             projectPresentation().removeModelRows([modelId,runtimeModelId]);
           } catch (cleanupErr) {
             console.warn('[GIM] cleanup failed model after load error', entry, cleanupErr);
@@ -696,10 +696,10 @@ session, perfSessionId: perfSession.id, onLoadSource: (source) => { if(!isCurren
       // presentation; this does not emit an interactive/visible-frame moment.
       afterPaintOpportunity(()=>startDeferredTasks());
       perfMarkProductMoment('allIfcReady', {
-total: entries.length, loaded: state.loadedModels.size,
+total: entries.length, loaded: state.ifc.loadedModels.size,
         failed: failed.length, firstInteractive: interactiveInitialized
 }, perfSession);
-      void Promise.resolve(sampleSubstationMemory(state, 'allIfcReady', perfSession, { total: entries.length, loaded: state.loadedModels.size, failed: failed.length }, ctx)).catch(reportBackgroundError);
+      void Promise.resolve(sampleSubstationMemory(state, 'allIfcReady', perfSession, { total: entries.length, loaded: state.ifc.loadedModels.size, failed: failed.length }, ctx)).catch(reportBackgroundError);
 
       // buildIfcNameIndex 失败不应阻断 UI 渲染
       const { buildIfcNameIndex } = await import('./ifcNameIndex.js');
@@ -711,12 +711,12 @@ total: entries.length, loaded: state.loadedModels.size,
         console.warn('[GIM] buildIfcNameIndex failed', err);
       });
       if (!isCurrent()) return;
-      endNameIndex(undefined, { models: state.loadedModels.size });
+      endNameIndex(undefined, { models: state.ifc.loadedModels.size });
 
-      if (!interactiveInitialized && state.loadedModels.size > 0) {
+      if (!interactiveInitialized && state.ifc.loadedModels.size > 0) {
         // Defensive fallback for a loader that populated state without the
         // usual first-model event.  Normal IFC paths initialize above.
-        const firstLoaded = entries.find((entry) => state.loadedModels.has(entry.modelId));
+        const firstLoaded = entries.find((entry) => state.ifc.loadedModels.has(entry.modelId));
         if (firstLoaded) await initializeInteractiveAfterFirstIfc(firstLoaded, 'unknown');
         if (!isCurrent()) return;
       }

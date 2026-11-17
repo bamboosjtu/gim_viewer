@@ -34,5 +34,28 @@
   ],
   "hostKinds": [
     "equipment"
+  ],
+  "unclassifiedAssemblyMembers": {
+    "status": "candidate",
+    "requires": "real source assembly under declared equipment; no independent/type/code/designation evidence",
+    "authority": "Unclassified sources are retained inside the actual equipment assembly without claiming their detailed type is known."
+  },
+  "hostSubtypes": [
+    {
+      "id": "main_transformer_protection_cabinet",
+      "label": "主变压器保护柜",
+      "hostRecognitionCodes": [
+        "E16",
+        "E16.panel_cabinet",
+        "E16.control_cabinet"
+      ],
+      "requiresComponents": [
+        "transformer_protection_device"
+      ],
+      "conflictsWith": [
+        "line_protection_device"
+      ],
+      "authority": "Developer-confirmed functional grouping; requires confirmed component attributes and actual ownership, not a matching display name."
+    }
   ]
 }

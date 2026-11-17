@@ -11,7 +11,7 @@ function fixture() {
   document.body.innerHTML = '<button id="menu-previous-view"></button><span id="status-selection">设备 A</span><div id="loading" hidden></div>';
   let reject!: (error: Error) => void;
   const state = {
-    currentProjectType: 'substation', selectionRequest: { id: 1 },
+    currentProjectType: 'substation', selection: { selectionRequest: { id: 1 } },
     captureProjectSession: () => ({ generation: 1 }), isCurrentSession: vi.fn(() => true),
     viewState: {viewHistory: { back: vi.fn(() => new Promise<boolean>((_, fail) => { reject = fail; })) }},
   };
@@ -31,7 +31,7 @@ it('reports a failed back action without creating project loading feedback', asy
 it.each(['project', 'selection'])('drops old failure feedback after a newer %s', async kind => {
   const { state, fail } = fixture();
   if (kind === 'project') state.isCurrentSession.mockReturnValue(false);
-  else state.selectionRequest = { id: 2 };
+  else state.selection.selectionRequest = { id: 2 };
   document.getElementById('status-selection')!.textContent = '设备 B';
   await fail();
   expect(document.getElementById('status-selection')!.textContent).toBe('设备 B');

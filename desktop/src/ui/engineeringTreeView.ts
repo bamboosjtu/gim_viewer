@@ -21,7 +21,7 @@ interface Navigation {
 const navigations = new WeakMap<AppState, Navigation>();
 
 function rowKey(state: AppState, data: EngineeringNavigationData): string {
-  const target = state.selectionRequest?.target;
+  const target = state.selection.selectionRequest?.target;
   if (!target) return '';
   if(state.viewState.mode==='inventory'){
     if(target.kind==='engineering-group')return data.inventory?.nodes.has(target.key)?target.key:'';
@@ -157,30 +157,30 @@ export function renderEngineeringTree(state: AppState): void {
       if (mode === 'composition' || mode==='inventory') {
         const node = mode==='inventory'?data.inventory!.nodes.get(key):data.composition.nodes.get(key);
         if (!node) return;
-        if('sourceId' in node && node.sourceId){const target={kind:'engineering-source' as const,key:node.sourceId},request=state.beginSelection(target);syncEngineeringTreeSelection(state);const {selectEngineeringTarget}=await import('../services/engineeringSelection.js');if(state.isCurrentSelection(request))await selectEngineeringTarget(state,target,request);return;}
+        if('sourceId' in node && node.sourceId){const target={kind:'engineering-source' as const,key:node.sourceId},request=state.selection.beginSelection(target);syncEngineeringTreeSelection(state);const {selectEngineeringTarget}=await import('../services/engineeringSelection.js');if(state.selection.isCurrentSelection(request))await selectEngineeringTarget(state,target,request);return;}
         const target = node.targetId ? { kind: 'engineering' as const, key: node.targetId } : { kind: 'engineering-group' as const, key };
-        const request = state.beginSelection(target); syncEngineeringTreeSelection(state);
+        const request = state.selection.beginSelection(target); syncEngineeringTreeSelection(state);
         const { selectEngineeringTarget } = await import('../services/engineeringSelection.js');
-        if (state.isCurrentSelection(request)) await selectEngineeringTarget(state, target, request);
+        if (state.selection.isCurrentSelection(request)) await selectEngineeringTarget(state, target, request);
       } else {
         const node = data.sourceNodes.get(key); if (!node) return;
         if (node.kind === 'spatial') {
           const contextKey = key.slice('source:spatial:'.length);
-          const request = state.beginSelection({ kind: 'engineering-source', key: `context:${contextKey}` }); syncEngineeringTreeSelection(state);
+          const request = state.selection.beginSelection({ kind: 'engineering-source', key: `context:${contextKey}` }); syncEngineeringTreeSelection(state);
           const { inspectEngineeringContext } = await import('../services/engineeringSourceInspector.js');
-          if (state.isCurrentSelection(request)) await inspectEngineeringContext(state, contextKey, request);
+          if (state.selection.isCurrentSelection(request)) await inspectEngineeringContext(state, contextKey, request);
         } else if (node.sourceId) {
-          const request = state.beginSelection({ kind: 'engineering-source', key: node.sourceId }); syncEngineeringTreeSelection(state);
+          const request = state.selection.beginSelection({ kind: 'engineering-source', key: node.sourceId }); syncEngineeringTreeSelection(state);
           const { selectEngineeringTarget } = await import('../services/engineeringSelection.js');
-          if (state.isCurrentSelection(request)) await selectEngineeringTarget(state, { kind: 'engineering-source', key: node.sourceId }, request);
+          if (state.selection.isCurrentSelection(request)) await selectEngineeringTarget(state, { kind: 'engineering-source', key: node.sourceId }, request);
         } else if (node.documentPath) {
           const occurrence = node.kind === 'cbm' ? node.key.slice('source:cbm:'.length) : undefined;
-          const request = state.beginSelection({ kind: 'engineering-source', key: occurrence ?? `document:${node.documentPath}` }); syncEngineeringTreeSelection(state);
+          const request = state.selection.beginSelection({ kind: 'engineering-source', key: occurrence ?? `document:${node.documentPath}` }); syncEngineeringTreeSelection(state);
           const { inspectEngineeringDocument } = await import('../services/engineeringSourceInspector.js');
-          if (state.isCurrentSelection(request)) await inspectEngineeringDocument(state, node.documentPath, occurrence, request);
+          if (state.selection.isCurrentSelection(request)) await inspectEngineeringDocument(state, node.documentPath, occurrence, request);
         }
       }
-    } catch (error) { if (generation === state.projectGeneration) { state.selectionMessage = String(error); quality.textContent = '该对象暂未能打开，来源仍保留'; quality.title = String(error); } }
+    } catch (error) { if (generation === state.projectGeneration) { state.selection.selectionMessage = String(error); quality.textContent = '该对象暂未能打开，来源仍保留'; quality.title = String(error); } }
     if (generation === state.projectGeneration) syncEngineeringTreeSelection(state);
   };
   const expanded = state.viewState.expanded[mode];
@@ -224,7 +224,7 @@ export function renderEngineeringTree(state: AppState): void {
   const input = cbmTreePanel.querySelector<HTMLInputElement>('.search-box-wrap input');
   if (input && nav.query[mode]) { input.value = nav.query[mode]; input.dispatchEvent(new Event('input')); }
   cbmTreePanel.scrollTop = nav.scroll[mode];
-  if (state.selectionRequest?.target) syncEngineeringTreeSelection(state);
+  if (state.selection.selectionRequest?.target) syncEngineeringTreeSelection(state);
 }
 
 export function revealEngineeringSource(state: AppState, sourceId: string): void {

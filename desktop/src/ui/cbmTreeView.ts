@@ -157,7 +157,7 @@ export function selectCbmTreeRow(path: string): void {
 export function syncSelectedTreeRow(state: AppState): void {
   if (state.currentProjectType === 'substation') { syncEngineeringTreeSelection(state); return; }
   document.querySelectorAll('#cbm-tree-panel .tree-row.selected').forEach((row) => row.classList.remove('selected'));
-  const target=state.selectionRequest?.target;
+  const target=state.selection.selectionRequest?.target;
   if (!target) return;
   selectCbmTreeRow(target.key);
 }
@@ -245,7 +245,7 @@ export function handleSubstationPropertyReference(
   }
   if (target) {
     selectCbmTreeRow(target.path);
-    const request=state.beginSelection({kind:'cbm',key:target.path});
+    const request=state.selection.beginSelection({kind:'cbm',key:target.path});
     void import('../services/nodeInteractionService.js').then(({ handleNodeClick }) =>
       handleNodeClick(state,target!,showMessage,request),
     ).catch((error) => console.warn('[属性引用] 变电节点定位失败:', error));

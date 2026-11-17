@@ -146,8 +146,8 @@ describe('Substation Loading readiness lifecycle', () => {
       }
       if (entry.modelId === 'first') expect(spatialStart).not.toHaveBeenCalled();
       if (!options.session || !state.isCurrentSession(options.session)) return;
-      const runtimeModelId = state.getRuntimeModelId(entry.modelId, options.session);
-      state.loadedModels.set(entry.modelId, { modelId: entry.modelId, runtimeModelId, visible: true });
+      const runtimeModelId = state.ifc.getRuntimeModelId(entry.modelId, options.session);
+      state.ifc.loadedModels.set(entry.modelId, { modelId: entry.modelId, runtimeModelId, visible: true });
       runtimeCtx.fragments.list.set(runtimeModelId, { object: { children: [] } });
       options.onLoadSource?.('ifc');
     });
@@ -210,7 +210,7 @@ describe('Substation Loading readiness lifecycle', () => {
 
     secondIfcGate.resolve();
     await vi.waitFor(() => expect(perfProductMomentSnapshot().allIfcReady).not.toBeNull());
-    expect(state.loadedModels.size).toBe(2);
+    expect(state.ifc.loadedModels.size).toBe(2);
     expect(perfProductMomentSnapshot().interactive!.atMs)
       .toBeLessThanOrEqual(perfProductMomentSnapshot().allIfcReady!.atMs);
     await loading;
@@ -231,8 +231,8 @@ describe('Substation Loading readiness lifecycle', () => {
     mocks.syncProjectSourceToViewerFromFragments.mockImplementation(async()=>{state.projectSourceToViewerMatrix=new THREE.Matrix4();});
     let progress!:(p:number)=>void,callbacks!:{onStage:(stage:string)=>void;onLoadSource:(source:'ifc'|'lod-cache')=>void};
     mocks.loadIfcEntry.mockImplementation(async(_ctx:any,_state:AppState,item:IfcEntry,_read:unknown,onProgress:(p:number)=>void,options:typeof callbacks)=>{
-      progress=onProgress;callbacks=options;const runtimeModelId=state.getRuntimeModelId(item.modelId,session);
-      state.loadedModels.set(item.modelId,{modelId:item.modelId,runtimeModelId,visible:true});ctx.fragments.list.set(runtimeModelId,{object:{children:[]}});options.onLoadSource('ifc');
+      progress=onProgress;callbacks=options;const runtimeModelId=state.ifc.getRuntimeModelId(item.modelId,session);
+      state.ifc.loadedModels.set(item.modelId,{modelId:item.modelId,runtimeModelId,visible:true});ctx.fragments.list.set(runtimeModelId,{object:{children:[]}});options.onLoadSource('ifc');
     });
     await loadAllIfcFiles(state,[entry],vi.fn(),{session,ifcSourceSizes:new Map([[entry.path,8]])});
     await vi.waitFor(()=>expect(mocks.setIfcStatus).toHaveBeenLastCalledWith(expect.stringContaining('IFC 已结束')));

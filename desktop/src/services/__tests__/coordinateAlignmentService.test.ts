@@ -38,7 +38,7 @@ describe('first IFC coordination readiness', () => {
     const pending=syncProjectSourceToViewerFromFragments(state,fragments,{session});
     expect(state.projectSourceToViewerMatrix).toBeNull();
     // New selections do not invalidate reusable project coordinates.
-    state.beginSelection({kind:'cbm',key:'B'});
+    state.selection.beginSelection({kind:'cbm',key:'B'});
     const base=new THREE.Matrix4().makeTranslation(-17.75,-0.73,-0.025);
     resolve(base);expect(await pending).toBe(true);
     expect(state.projectSourceToViewerMatrix!.elements).toEqual(

@@ -41,9 +41,9 @@ describe('engineering composition and provenance navigation', () => {
     expect(inventory.nodes.get(inventory.rootKey)!.children.map(key=>inventory.nodes.get(key)!.title)).toEqual(['设备','材料','构件','其他']);
     const group=[...inventory.nodes.values()].find(n=>n.title==='宿主/边界待确认')!;
     [...document.querySelectorAll<HTMLElement>('.tree-row')].find(r=>r.dataset.nodePath===group.key)!.click();
-    await vi.dynamicImportSettled();await vi.waitFor(()=>expect(state.engineeringSelection?.ownerIds).toEqual(new Set([built.snapshot.pending[0].id])));
+    await vi.dynamicImportSettled();await vi.waitFor(()=>expect(state.selection.engineeringSelection?.ownerIds).toEqual(new Set([built.snapshot.pending[0].id])));
     expect(document.querySelector('.props-header')?.textContent).toBe('宿主/边界待确认');
-    expect(state.engineeringSelection!.ownerIds.has(built.snapshot.entities[0].id)).toBe(false);
+    expect(state.selection.engineeringSelection!.ownerIds.has(built.snapshot.entities[0].id)).toBe(false);
   });
   it('renders inventory subtype groups with its own catalog search and selectable whole range',async()=>{
     const f=await fixture(),view=f.state.engineering.navigation!,inventory=view.inventory!,key=inventory.rowsByEntity.get(f.box.id)![0];
@@ -61,7 +61,7 @@ describe('engineering composition and provenance navigation', () => {
     expect(view.inventorySearch!.find(r=>r.key===f.box.id)?.subtitle).toBe(['设备材料清册','设备',...modelPath,'主变测控柜'].join(' / '));
     const item=[...document.querySelectorAll<HTMLElement>('.tree-row')].find(r=>r.dataset.nodePath===template.key)!;
     item.click();await vi.dynamicImportSettled();
-    await vi.waitFor(()=>expect(f.state.engineeringSelection?.ownerIds).toEqual(new Set([f.box.id])));
+    await vi.waitFor(()=>expect(f.state.selection.engineeringSelection?.ownerIds).toEqual(new Set([f.box.id])));
     expect(document.querySelector('.props-header')?.textContent).toBe('主变测控柜');
   });
   it('labels inferred composition rows without exposing projection basis',async()=>{
@@ -75,7 +75,7 @@ describe('engineering composition and provenance navigation', () => {
     expect(row.textContent).toContain('空间推断');row.click();
     await vi.dynamicImportSettled();
     await vi.waitFor(()=>expect(document.querySelector('.props-header')?.textContent).toBe(f.main.name));
-    expect(f.state.engineeringSelection?.ownerIds).toEqual(new Set([f.main.id]));
+    expect(f.state.selection.engineeringSelection?.ownerIds).toEqual(new Set([f.main.id]));
     expect(document.getElementById('props-drawer-body')?.textContent).not.toContain('投影依据');
   });
   it('keeps DEV F levels explicit and exposes the JSON export action', async () => {
@@ -100,7 +100,7 @@ describe('engineering composition and provenance navigation', () => {
     const target = hits.find(hit => hit.textContent?.includes('36S间隔'))!; expect(target.textContent).not.toContain('按钮'); target.click();
     await vi.dynamicImportSettled(); await vi.waitFor(() => expect(document.querySelector('.props-header')?.textContent).toBe('出线柜'));
     const occurrence = graph.cbmOccurrences.find(node => node.documentPath === '36.cbm')!.id;
-    const selected = graph.records.filter(row => state.engineeringSelection?.sourceIds.has(row.id));
+    const selected = graph.records.filter(row => state.selection.engineeringSelection?.sourceIds.has(row.id));
     expect(selected).toHaveLength(2); expect(selected.every(row => row.devOccurrence?.cbmOccurrenceId === occurrence)).toBe(true);
     expect(state.engineering.snapshot?.entities).toHaveLength(2);
   });
@@ -116,7 +116,7 @@ describe('engineering composition and provenance navigation', () => {
     const row=[...document.querySelectorAll<HTMLElement>('.tree-row')].find(row=>row.dataset.nodePath===building.key)!;
     expect(row.textContent).toContain('归属待确认');row.click();
     await vi.dynamicImportSettled();
-    await vi.waitFor(()=>expect(document.querySelector('.props-header')?.textContent, state.selectionMessage).toBe('主控通信楼01'));
+    await vi.waitFor(()=>expect(document.querySelector('.props-header')?.textContent, state.selection.selectionMessage).toBe('主控通信楼01'));
     expect(document.body.textContent).toContain('当前分组暂无可用对象');
     expect((document.getElementById('engineering-fit') as HTMLButtonElement).disabled).toBe(true);
     expect((document.getElementById('engineering-isolate') as HTMLButtonElement).disabled).toBe(true);
@@ -129,7 +129,7 @@ describe('engineering composition and provenance navigation', () => {
     document.querySelector<HTMLButtonElement>('[data-itab="source"]')!.click();
     document.querySelector<HTMLButtonElement>('[data-engineering-declaration-index]')!.click();
     await vi.waitFor(()=>expect(state.viewState.mode).toBe('source'));
-    expect(state.selectionRequest?.target?.key).toBe('document:building.cbm');
+    expect(state.selection.selectionRequest?.target?.key).toBe('document:building.cbm');
   });
   it('reveals the last of 600 whole candidates through a bounded window and keeps keyboard focus on status-only updates', async () => {
     const raw: Record<string, string> = { 'project.cbm': Array.from({ length: 600 }, (_, i) => `SUBSYSTEM${i}=item${i}.cbm`).join('\n') };
@@ -161,16 +161,16 @@ describe('engineering composition and provenance navigation', () => {
     const { buildAndRenderCbmTree } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../cbmTreeView.js'); }); f.state.viewState.mode='composition'; buildAndRenderCbmTree(f.state, vi.fn());
     search('散热器'); const hits = [...document.querySelectorAll<HTMLElement>('[role="option"]')];
     expect(hits).toHaveLength(1); expect(hits[0].textContent).toContain('主变压器'); hits[0].click();
-    expect(f.state.selectionRequest?.target).toEqual({ kind: 'engineering', key: f.main.id });
+    expect(f.state.selection.selectionRequest?.target).toEqual({ kind: 'engineering', key: f.main.id });
     await vi.dynamicImportSettled();
-    await vi.waitFor(() => expect(document.querySelector('.props-header')?.textContent, f.state.selectionMessage).toBe('1号主变压器'));
+    await vi.waitFor(() => expect(document.querySelector('.props-header')?.textContent, f.state.selection.selectionMessage).toBe('1号主变压器'));
     expect([...document.querySelectorAll('.tree-row .tree-label')].some(row => row.textContent === '散热器')).toBe(false);
     const radiator = f.graph.records.find(r => r.name === '散热器')!;
     const source = [...document.querySelectorAll<HTMLButtonElement>('[data-engineering-source-index]')].find(b => b.textContent === '散热器')!; source.click();
     await vi.waitFor(() => expect(f.state.viewState.mode).toBe('source'));
     await vi.waitFor(() => expect(document.querySelector('.tree-row.selected')?.textContent).toContain('散热器'));
     await vi.waitFor(() => expect(document.querySelector('.props-header')?.textContent).toBe('散热器'));
-    expect(f.state.selectionRequest?.target).toEqual({ kind: 'engineering-source', key: radiator.id });
+    expect(f.state.selection.selectionRequest?.target).toEqual({ kind: 'engineering-source', key: radiator.id });
     document.getElementById('engineering-owner')!.click();
     await vi.waitFor(() => expect(document.querySelector('.props-header')?.textContent).toBe('1号主变压器'));
     expect(f.state.viewState.mode).toBe('composition');
@@ -180,15 +180,15 @@ describe('engineering composition and provenance navigation', () => {
     const f = await fixture(), { renderEngineeringTree } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../engineeringTreeView.js'); }); f.state.viewState.mode='composition'; renderEngineeringTree(f.state);
     search('测控柜'); document.querySelector<HTMLElement>('[role="option"]')!.click();
     await vi.waitFor(() => expect(document.querySelector('.props-header')?.textContent).toBe('1号主变测控柜'));
-    expect(f.state.engineeringSelection?.ownerIds).toEqual(new Set([f.box.id]));
+    expect(f.state.selection.engineeringSelection?.ownerIds).toEqual(new Set([f.box.id]));
     const expanded = [...f.state.viewState.expanded.composition];
     f.state.notifyEngineeringChanged();
     expect([...f.state.viewState.expanded.composition]).toEqual(expanded);
     expect(document.querySelector('.tree-row.selected')?.textContent).toContain('测控柜');
-    const request = f.state.selectionRequest!.id;
+    const request = f.state.selection.selectionRequest!.id;
     document.querySelector<HTMLButtonElement>('[data-engineering-mode="source"]')!.click();
     document.querySelector<HTMLButtonElement>('[data-engineering-mode="composition"]')!.click();
-    expect(f.state.selectionRequest?.id).toBe(request);
+    expect(f.state.selection.selectionRequest?.id).toBe(request);
     expect(document.querySelector<HTMLInputElement>('[role="combobox"]')?.value).toBe('测控柜');
   });
   it('reads all raw source lines by pages and rejects stale document page actions', async () => {
@@ -200,10 +200,10 @@ describe('engineering composition and provenance navigation', () => {
     expect(document.querySelector('[data-itab-pane="source"]')?.textContent).toContain('原始字段0');
     const next = document.querySelector<HTMLButtonElement>('[data-itab-pane="source"] [data-source-page="1"]')!; next.click();
     expect(document.querySelector('[data-itab-pane="source"]')?.textContent).toContain('原始字段200');
-    f.state.beginSelection({ kind: 'engineering', key: f.main.id });
+    f.state.selection.beginSelection({ kind: 'engineering', key: f.main.id });
     const header = document.querySelector('.props-header')?.textContent; next.click();
     expect(document.querySelector('.props-header')?.textContent).toBe(header);
-    expect(f.state.selectionRequest?.target?.key).toBe(f.main.id);
+    expect(f.state.selection.selectionRequest?.target?.key).toBe(f.main.id);
   });
   it('inspects IFC space provenance without turning a building into an engineering entity', async () => {
     const f = await fixture(), { buildSubstationSpatialIndexFromTexts } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/ifcSpatialParser.js'); });
@@ -216,7 +216,7 @@ describe('engineering composition and provenance navigation', () => {
     const count = built.snapshot.entities.length, { renderEngineeringTree } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../engineeringTreeView.js'); });
     f.state.viewState.mode = 'source'; renderEngineeringTree(f.state); search('主控楼');
     const hit = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(row => row.firstElementChild?.textContent === '主控楼')!; hit.click();
-    expect(f.state.selectionRequest?.target?.key).toBe(`context:${spatial.nodes[0].key}`);
+    expect(f.state.selection.selectionRequest?.target?.key).toBe(`context:${spatial.nodes[0].key}`);
     await vi.dynamicImportSettled();
     expect(document.querySelector('.props-header')?.textContent).toBe('主控楼');
     expect(document.body.textContent).toContain('IFC 交付空间容器'); expect(document.body.textContent).toContain('主控楼墙');
@@ -230,7 +230,7 @@ describe('engineering composition and provenance navigation', () => {
     f.state.engineering.sources = built.sources; f.state.engineering.snapshot = built.snapshot; f.state.engineering.navigation = projectEngineeringNavigation(built.sources, built.snapshot);
     let resolve!: (value: unknown) => void;
     const properties = vi.fn(() => new Promise<any>(done => { resolve = done; }));
-    f.state.ifcRegionalRuntimes.set('m', { properties } as any);
+    f.state.ifc.regionalRuntimes.set('m', { properties } as any);
     const { selectEngineeringTarget } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../services/engineeringSelection.js'); });
     await selectEngineeringTarget(f.state, { kind: 'engineering-source', key: built.sources.ifcRecords[0].id });
     expect(properties).not.toHaveBeenCalled(); document.getElementById('engineering-details')!.click();

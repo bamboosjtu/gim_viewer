@@ -127,7 +127,7 @@ export async function commitSelectionHighlight(
   apply?: () => Promise<void> | void,
 ): Promise<void> {
   if (!guard.isCurrent()) return;
-  const meta={selectionId:state.selectionRequest?.id,selectionKind:state.selectionRequest?.target?.kind,sourcePath:state.selectionRequest?.target?.key};
+  const meta={selectionId:state.selection.selectionRequest?.id,selectionKind:state.selection.selectionRequest?.target?.kind,sourcePath:state.selection.selectionRequest?.target?.key};
   const end=perfBegin('selection.highlightCommit',meta);
   try { await enqueueHighlightCommit(state,guard,async () => {
     if (!guard.isCurrent()) return;
@@ -140,11 +140,11 @@ export async function commitSelectionHighlight(
     if (!guard.isCurrent()) return;
     resetModHighlight(state);
     clearFragmentOutlines(state);
-    for (const runtime of state.ifcRegionalRuntimes.values()) runtime.clearHighlight();
+    for (const runtime of state.ifc.regionalRuntimes.values()) runtime.clearHighlight();
     await apply?.();
     if (guard.isCurrent()) {
-      state.selectionHighlightRequestId = state.selectionRequest?.id ?? null;
-      await state.selectionVisibility?.sync(guard);
+      state.selection.selectionHighlightRequestId = state.selection.selectionRequest?.id ?? null;
+      await state.selection.selectionVisibility?.sync(guard);
     }
   }); } finally {
     requestViewerRender(ctx);end(undefined,{...meta,current:guard.isCurrent()});
@@ -158,7 +158,7 @@ export async function resetHighlight(ctx: ViewerContext, state: AppState, isCurr
 
 /** Render a resolved selection; source documents and GUID ownership stay in services. */
 export async function highlightIfcItems(ctx:ViewerContext,state:AppState,selected:Readonly<Record<string,readonly number[]>>,request:SelectionRequest):Promise<void> {
-  const guard=state.selectionGuard(request);if(!guard.isCurrent())return;
+  const guard=state.selection.selectionGuard(request);if(!guard.isCurrent())return;
   const items:OBC.ModelIdMap={},boxes:THREE.Box3[]=[];
   for(const [runtimeId,ids] of Object.entries(selected)) {
     if(!guard.isCurrent())return;if(!ids.length)continue;
@@ -169,5 +169,5 @@ export async function highlightIfcItems(ctx:ViewerContext,state:AppState,selecte
     await outlineFragmentItems(ctx,state,items as any,guard);
     if(guard.isSessionCurrent())state.highlightedItems=items as any;
   }:undefined);
-  if(guard.isCurrent()&&boxes.length&&state.canAutoLocate(request))await frameBox(ctx,boxes.reduce((box,next)=>box.union(next),boxes[0].clone()),guard);
+  if(guard.isCurrent()&&boxes.length&&state.selection.canAutoLocate(request))await frameBox(ctx,boxes.reduce((box,next)=>box.union(next),boxes[0].clone()),guard);
 }

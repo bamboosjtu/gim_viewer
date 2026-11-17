@@ -66,7 +66,7 @@ const sourceFiles = (name = '主变压器', ifc = false) => new Map([
   ['terminal.dev', new File(['SYMBOLNAME=测控柜'], 'terminal.dev')],
   ...(ifc ? [['delivery.ifc', new File(['IFC'], 'delivery.ifc')] as [string, File]] : []),
 ]);
-const state = (sha = 'a'.repeat(64)) => { const state = new AppState(); state.activateProject(7, sha); state.ifcRegionalRuntimes.set('m',{index:{objects:[1,10].map(expressId=>({expressId,bounds:[0,0,-10,10,4,0]}))},release:vi.fn()} as never);return state; };
+const state = (sha = 'a'.repeat(64)) => { const state = new AppState(); state.activateProject(7, sha); state.ifc.regionalRuntimes.set('m',{index:{objects:[1,10].map(expressId=>({expressId,bounds:[0,0,-10,10,4,0]}))},release:vi.fn()} as never);return state; };
 const portFactory = (port: LoopbackPort) => (isCurrent: () => boolean, signal: AbortSignal) => new EngineeringWorkerClient(port, isCurrent, signal);
 const store = new Map<string, Uint8Array>();
 afterEach(() => { vi.unstubAllGlobals(); });
@@ -290,7 +290,7 @@ describe('session-owned production engineering build', () => {
     ].join('\n') }], null);
     await beginEngineeringBuild(app, files, { createWorker: portFactory(new LoopbackPort()) });
     expect(app.engineering.cacheStatus).toBe('saved'); const cold = app.engineering.navigation;expect(cold?.compositionComplete).toBe(true);expect(app.engineering.treeStatus).toBe('ready');
-    app.substationSpatialIndex = null;app.ifcRegionalRuntimes.clear();
+    app.substationSpatialIndex = null;app.ifc.regionalRuntimes.clear();
     const port = new LoopbackPort(), start = vi.fn();
     await beginEngineeringBuild(app, files, { createWorker: portFactory(port), ensureIfcSemantics: start });
     expect(port.commands).toEqual(['init','restore','release-model']); expect(start).not.toHaveBeenCalled();

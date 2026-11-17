@@ -21,7 +21,7 @@ export function benchmarkProgress(state:AppState){
     (state.engineering.status==='error'||['engineering-build-failed','engineering-progress-stalled'].includes(state.engineering.failureCode??''));
   const backgroundSettled=backgroundStatus!=='pending'&&(state.currentProjectType!=='substation'||semantic);
   const engineeringTreeSettled=state.currentProjectType!=='substation'||['ready','error'].includes(state.engineering.treeStatus);
-  const baseSettled=dev?dev.baseRepresentationsSettled===true:!state.ifcLoading.pending&&state.loadedModels.size===state.currentIfcEntries.length;
+  const baseSettled=dev?dev.baseRepresentationsSettled===true:!state.ifcLoading.pending&&state.ifc.loadedModels.size===state.currentIfcEntries.length;
   const engineeringBuildPending=state.currentProjectType==='substation'&&state.engineering.buildPending;
   return {semantic,semanticFailure,semanticStatus:state.engineering.status,engineeringBuildPending,
     automaticTimingPolicy:'semantic-base-without-cache-v1',
@@ -34,7 +34,7 @@ export function benchmarkProgress(state:AppState){
       &&(!line||linePersistence==='saved'||linePersistence==='failed'||linePersistence==='not-applicable'),
     workload:{cbmNodes:state.cbmNodeIndex.size,lineNodes:state.currentGimGraph?.nodesByPath.size??0,
       sources:state.engineering.snapshot?.memberships.length??0,entities:state.engineering.snapshot?.entities.length??0,
-      ifcSources:state.currentIfcEntries.length,loadedIfcSources:state.loadedModels.size,
+      ifcSources:state.currentIfcEntries.length,loadedIfcSources:state.ifc.loadedModels.size,
       connectionObjects:n(state.substationConnectionPreview?.diagnostics?.objects),
       occurrences:n(dev?.occurrences),devSources:n(dev?.uniqueDevSources),shown:n(dev?.shown),failed:n(dev?.failedOccurrences),empty:n(dev?.emptyOccurrences),partial:n(dev?.partialOccurrences),unsupported:n(dev?.unsupportedOccurrences),
       pending:n(dev?.pending),sourcePlacementWarnings:n(dev?.sourcePlacementWarnings)},
@@ -170,9 +170,9 @@ export async function benchmarkEvidence(state:AppState){
       projectTypeCommitted:d.project_type==='transmission_line',linePersistence:state.lineCachePersistence,
       ifcEntries:d.ifc_entry_count,cachedIfc:d.cached_ifc_count,missingIfc:d.missing_cache_paths.length,parserMatches:d.parser_version_match};
   }
-  if(cache&&state.loadedModels.size){
+  if(cache&&state.ifc.loadedModels.size){
     const {peekViewerRuntime}=await import('../viewer/viewerRuntime.js');const viewer=await peekViewerRuntime();
-    cache.ifcFarHits=viewer?[...state.loadedModels.values()].filter(row=>viewer.ctx.fragments.list.get(row.runtimeModelId)?.object.userData.ifcLodCacheHit===true).length:0;
+    cache.ifcFarHits=viewer?[...state.ifc.loadedModels.values()].filter(row=>viewer.ctx.fragments.list.get(row.runtimeModelId)?.object.userData.ifcLodCacheHit===true).length:0;
   }
   checks.push({name:'session-stable',passed:state.isCurrentSession(session)},{name:'cache-source-matches',passed:cache?.sourceMatches===true});
   return {version:'gim-runtime-evidence-v1',scope:'runtime-regression-invariants-not-standard-compliance',projectType:state.currentProjectType,

@@ -20,7 +20,7 @@ afterEach(() => {
 });
 function fixture() {
   const status = vi.fn();
-  const state = { sourceGeometry:new SourceGeometryState(),isCurrentSession: () => true, loadedXmlModGroups: new Map(), geometryDiagnostics: new Map(), deviceUnknownBounds: new Set() } as any;
+  const state = { selection:{representationSelection:null}, sourceGeometry:new SourceGeometryState(),isCurrentSession: () => true, loadedXmlModGroups: new Map(), geometryDiagnostics: new Map(), deviceUnknownBounds: new Set() } as any;
   const runtime = new DevLodRuntime(state, {} as any, { sourceSha256: 'sha', generation: 1 } as any, status);
   (runtime as any).firstModelPresented=true;
   (runtime as any).catalogLookupReady=true;
@@ -74,9 +74,9 @@ it('streams cached catalog rows before later prefetch batches complete',async()=
 it('isolates all engineering member roots and restores ordinary equipment selection',()=>{
   const {runtime,internal}=fixture();const a=new THREE.Group(),b=new THREE.Group(),c=new THREE.Group();
   internal.rows=new Map([['a',{entry:{rootOccurrence:'a'},group:a}],['b',{entry:{rootOccurrence:'b'},group:b}],['c',{entry:{rootOccurrence:'c'},group:c}]]);
-  internal.state.representationSelection={devRoots:new Set(['a','c'])};runtime.setOnlySelected(true);
+  internal.state.selection.representationSelection={devRoots:new Set(['a','c'])};runtime.setOnlySelected(true);
   expect([a.visible,b.visible,c.visible]).toEqual([true,false,true]);
-  internal.state.representationSelection=null;internal.selected='b';runtime.setOnlySelected(true);
+  internal.state.selection.representationSelection=null;internal.selected='b';runtime.setOnlySelected(true);
   expect([a.visible,b.visible,c.visible]).toEqual([false,true,false]);runtime.setOnlySelected(false);
   expect([a.visible,b.visible,c.visible]).toEqual([true,true,true]);
 });

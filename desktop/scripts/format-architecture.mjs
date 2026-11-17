@@ -3,6 +3,15 @@ import { fileURLToPath } from 'node:url';
 
 // The same bounded adoption scope drives Prettier and type-checked ESLint.
 export const architectureModules = [
+  'src/app/state.ts',
+  'src/shared/projectSelectionState.ts',
+  'src/shared/ifcRuntimeState.ts',
+  'src/shared/runtimeSlot.ts',
+  'src/shared/sessionScope.ts',
+  'src/shared/viewerState.ts',
+  'src/shared/selectionContracts.ts',
+  'src/services/selectionVisibility.ts',
+  'src/services/ifcNameIndex.ts',
   'src/utils/logger.ts',
   'src/utils/backgroundErrors.ts',
   'src/shared/projectViewState.ts',
@@ -14,7 +23,7 @@ export const architectureModules = [
   'src/services/projectPropertyCache.ts',
   'src/services/lineAttrRestoreService.ts',
 ];
-export const formattedArchitectureModules = [...architectureModules, 'src/app/state.ts'];
+export const formattedArchitectureModules = [...architectureModules];
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const mode = process.argv.includes('--write') ? '--write' : '--check';

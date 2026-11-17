@@ -58,7 +58,7 @@ it('preserves nested local matrices, positive nonuniform scale and project place
   f.adapter.release();f.template.dispose();
 });
 it('excludes only a selected mesh from its batch and restores original shared materials and picking after reset',()=>{
-  const f=fixture();f.add();const state={highlightedModState:null} as any;
+  const f=fixture();f.add();const state={highlightedModState:null,selection:{selectionDecorationCleanup:null}} as any;
   highlightModGroups(state,[f.groups[1]]);
   expect(f.batch().count).toBe(2);expect(f.meshes[1].layers.mask).toBe(1);
   expect(f.meshes[1].material).not.toBe(f.material);expect(f.material.emissive.getHex()).toBe(0);

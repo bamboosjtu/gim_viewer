@@ -659,5 +659,307 @@
       ]
     ],
     "pending": 0
+  },
+  {
+    "name": "fam_ground_resistance_context",
+    "records": [
+      {
+        "id": "h",
+        "type": "GIS"
+      },
+      {
+        "id": "p",
+        "type": "OTHERS",
+        "parent": "h",
+        "props": {
+          "类型": "GroundResistance"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "h",
+        "p"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "p",
+      "category": "M06"
+    }
+  },
+  {
+    "name": "fam_terminal_box_context",
+    "records": [
+      {
+        "id": "h",
+        "type": "GIS"
+      },
+      {
+        "id": "p",
+        "type": "OTHERS",
+        "parent": "h",
+        "props": {
+          "模型分类名称": "TerminalBox"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "h",
+        "p"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "p",
+      "membershipStatus": "confirmed"
+    }
+  },
+  {
+    "name": "name_field_stays_candidate_under_real_assembly",
+    "records": [
+      {
+        "id": "h",
+        "type": "GIS"
+      },
+      {
+        "id": "p",
+        "type": "OTHERS",
+        "parent": "h",
+        "props": {
+          "DEVICENAME": "GIS"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "h",
+        "p"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "p",
+      "membershipStatus": "candidate"
+    }
+  },
+  {
+    "name": "fam_radiator_type_over_display",
+    "records": [
+      {
+        "id": "h",
+        "type": "OilImmersedTransformer"
+      },
+      {
+        "id": "p",
+        "type": "OTHERS",
+        "parent": "h",
+        "name": "arbitrary",
+        "props": {
+          "类型": "散热器"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "h",
+        "p"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "p",
+      "membershipStatus": "confirmed"
+    }
+  },
+  {
+    "name": "blank_family_real_assembly_candidate",
+    "records": [
+      {
+        "id": "h",
+        "type": "OilImmersedTransformer"
+      },
+      {
+        "id": "p",
+        "type": "OTHERS",
+        "parent": "h",
+        "name": "arbitrary"
+      }
+    ],
+    "groups": [
+      [
+        "h",
+        "p"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "p",
+      "membershipStatus": "candidate"
+    }
+  },
+  {
+    "name": "blank_family_own_identity_remains_separate",
+    "records": [
+      {
+        "id": "h",
+        "type": "GIS"
+      },
+      {
+        "id": "p",
+        "type": "OTHERS",
+        "parent": "h",
+        "props": {
+          "GRIDIDENTIFICATIONSYSTEMCODE": "own-code"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "h"
+      ],
+      [
+        "p"
+      ]
+    ],
+    "pending": 0
+  },
+  {
+    "name": "blank_family_independent_role_remains_separate",
+    "records": [
+      {
+        "id": "h",
+        "type": "GIS"
+      },
+      {
+        "id": "p",
+        "type": "OTHERS",
+        "parent": "h",
+        "props": {
+          "OBJECTROLE": "independent"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "h"
+      ],
+      [
+        "p"
+      ]
+    ],
+    "pending": 0
+  },
+  {
+    "name": "fam_transformer_protection_cabinet",
+    "records": [
+      {
+        "id": "h",
+        "type": "SecondaryCabinet",
+        "name": "arbitrary-host",
+        "props": {
+          "模型分类名称": "二次屏柜"
+        }
+      },
+      {
+        "id": "p",
+        "type": "OTHERS",
+        "parent": "h",
+        "name": "arbitrary-part",
+        "props": {
+          "装置名称": "变压器保护装置"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "h",
+        "p"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "sourceIds": [
+        "h",
+        "p"
+      ],
+      "category": "E17",
+      "subtype": "main_transformer_protection_cabinet",
+      "subtypeStatus": "confirmed"
+    }
+  },
+  {
+    "name": "protection_without_assembly_not_matched_by_name",
+    "records": [
+      {
+        "id": "h",
+        "type": "SecondaryCabinet",
+        "name": "1号主变压器保护柜"
+      },
+      {
+        "id": "p",
+        "type": "OTHERS",
+        "name": "1号主变压器保护柜",
+        "props": {
+          "装置名称": "变压器保护装置"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "h"
+      ]
+    ],
+    "pending": 1,
+    "expectedEntity": {
+      "sourceIds": [
+        "h"
+      ],
+      "category": "E17",
+      "subtype": null
+    }
+  },
+  {
+    "name": "conflicting_protection_functions_keep_generic_cabinet",
+    "records": [
+      {
+        "id": "h",
+        "type": "SecondaryCabinet"
+      },
+      {
+        "id": "p",
+        "type": "OTHERS",
+        "parent": "h",
+        "props": {
+          "装置名称": "变压器保护装置"
+        }
+      },
+      {
+        "id": "q",
+        "type": "OTHERS",
+        "parent": "h",
+        "props": {
+          "装置名称": "线路保护装置"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "h",
+        "p",
+        "q"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "sourceIds": [
+        "h",
+        "p",
+        "q"
+      ],
+      "category": "E17",
+      "subtype": null
+    }
   }
 ]

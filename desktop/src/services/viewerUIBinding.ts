@@ -60,13 +60,13 @@ export async function getViewerRuntimeWithUI(
     const { createSelectionVisibility } = await import('./selectionVisibility.js');
     const { ViewerViewHistory } = await import('../viewer/viewHistory.js');
     const {syncSelectionNavigation}=await import('./nodeInteractionService.js');
-    const previousVisibility=state.selectionVisibility, previousHistory=state.viewState.viewHistory;
-    state.selectionVisibility ??= createSelectionVisibility(state, ctx);
+    const previousVisibility=state.selection.selectionVisibility, previousHistory=state.viewState.viewHistory;
+    state.selection.selectionVisibility ??= createSelectionVisibility(state, ctx);
 
-    rollback.push(()=>{if(!previousVisibility){state.selectionVisibility?.reset();state.selectionVisibility=null;}if(!previousHistory){state.viewState.viewHistory?.dispose();state.viewState.viewHistory=null;}});
+    rollback.push(()=>{if(!previousVisibility){state.selection.selectionVisibility?.reset();state.selection.selectionVisibility=null;}if(!previousHistory){state.viewState.viewHistory?.dispose();state.viewState.viewHistory=null;}});
     state.viewState.viewHistory ??= new ViewerViewHistory(ctx, 20, {
-      getVisibility: () => state.onlySelected ? 'only-selected' : 'all',
-      setVisibility: (value) => state.setOnlySelected(value === 'only-selected'),
+      getVisibility: () => state.selection.onlySelected ? 'only-selected' : 'all',
+      setVisibility: (value) => state.selection.setOnlySelected(value === 'only-selected'),
     });
 
     // 装配属性抽屉按钮事件
@@ -78,7 +78,7 @@ export async function getViewerRuntimeWithUI(
       if (state.currentProjectType === 'substation' || state.engineering.snapshot) {
         const { selectEngineeringFragmentPick } = await import('./engineeringViewportSelection.js');
         const model = ctx.fragments.list.get(modelId);
-        if (!state.isCurrentSelection(request)) return true;
+        if (!state.selection.isCurrentSelection(request)) return true;
         if (model && await selectEngineeringFragmentPick(state, modelId, localId, request, model)) return true;
       }
       void Promise.resolve(syncSelectionNavigation(state,request)).catch(reportBackgroundError);
@@ -86,13 +86,13 @@ export async function getViewerRuntimeWithUI(
       return false;
     },(request) => {
       void Promise.resolve(syncSelectionNavigation(state,request)).catch(reportBackgroundError);
-      if (state.isCurrentSelection(request)) {
+      if (state.selection.isCurrentSelection(request)) {
         projectPresentation().clearSelection();
       }
     },async(regional,object,request)=>{
       if (state.currentProjectType === 'substation' || state.engineering.snapshot) {
         const { selectEngineeringIfcPick } = await import('./engineeringViewportSelection.js');
-        if (!state.isCurrentSelection(request)) return true;
+        if (!state.selection.isCurrentSelection(request)) return true;
         if (await selectEngineeringIfcPick(state, regional.modelId, object.expressId, request)) return true;
       }
       void Promise.resolve(syncSelectionNavigation(state,request)).catch(reportBackgroundError);
@@ -110,12 +110,12 @@ export async function getViewerRuntimeWithUI(
     const modelCallbacks: ModelEventCallbacks = {
       onModelAdded: (modelId, runtimeModelId) => {
         const model = ctx.fragments.list.get(runtimeModelId);
-        if (model) state.selectionVisibility?.registerModel(modelId, model);
+        if (model) state.selection.selectionVisibility?.registerModel(modelId, model);
         presentation.addModel(ctx,state,modelId,runtimeModelId);
-        if (state.engineeringSelection?.ifc.some(ref => ref.modelId === modelId)) state.engineeringRepresentationChanged?.();
+        if (state.selection.engineeringSelection?.ifc.some(ref => ref.modelId === modelId)) state.engineeringRepresentationChanged?.();
       },
       onModelRemoved: (modelId, runtimeModelId) => {
-        state.selectionVisibility?.removeModel(modelId, runtimeModelId);
+        state.selection.selectionVisibility?.removeModel(modelId, runtimeModelId);
         presentation.removeModel(modelId);
       },
     };

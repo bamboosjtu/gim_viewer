@@ -41,18 +41,20 @@ export function projectInventoryTemplate(snapshot:EngineeringSnapshot,records:re
   const bySource=new Map(records.map(r=>[r.id,r])),owners=new Map(snapshot.memberships.map(m=>[m.sourceId,m.ownerId]));
   const interpretations=new Map(snapshot.memberships.map(m=>[m.sourceId,m.interpretation]));
   for(const title of INVENTORY_TEMPLATE.groups)group(rootKey,title,title);
-  const catalogParent=(entity:Parameters<typeof catalogLocation>[0])=>{
+  const catalogParent=(entity:Parameters<typeof catalogLocation>[0],functionalSubtype=false)=>{
     const row=catalogLocation(entity);let parent=group(rootKey,row.group,row.group);
     parent=group(parent,`catalog:${encodeURIComponent(row.category)}`,row.category);
     order.set(parent,directoryOrder.get(`${row.kind}:${row.category}`)??999);
-    if(row.label!==row.category){parent=group(parent,`model:${encodeURIComponent(row.id)}`,row.label);order.set(parent,row.order);}
+    if(row.label!==row.category&&!(functionalSubtype&&row.label==='类型待确认')){parent=group(parent,`model:${encodeURIComponent(row.id)}`,row.label);order.set(parent,row.order);}
     return parent;
   };
   for(const entity of snapshot.entities){
-    let parent=catalogParent(entity);
+    const subtype=entity.subtypeStatus==='confirmed'&&entity.subtype&&entity.subtypeLabel?{id:entity.subtype,label:entity.subtypeLabel}:undefined;
+    let parent=catalogParent(entity,!!subtype);
+    if(subtype)parent=group(parent,`subtype:${subtype.id}`,subtype.label);
     const template=inventoryNameTemplate(entity.name||categoryLabel(entity.category));
     const location=catalogLocation(entity);
-    if(template!==inventoryNameTemplate(location.label)&&template!==inventoryNameTemplate(location.category)){
+    if(template!==inventoryNameTemplate(location.label)&&template!==inventoryNameTemplate(location.category)&&(!subtype||template!==inventoryNameTemplate(subtype.label))){
       parent=group(parent,`template:${encodeURIComponent(template)}`,template);
       nodes.get(parent)!.kind='template';nodes.get(parent)!.template=template;
     }

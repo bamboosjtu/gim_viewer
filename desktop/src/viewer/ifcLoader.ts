@@ -191,7 +191,7 @@ export function registerModelEvents(
     // Fragments 事件可能在 IFC load() 的 await 之后才到达。只有当前会话
     // 登记过的 runtime ID 才能进入 scene；旧工程迟到的模型直接销毁，
     // 不更新 loadedModels/UI。
-    if (!state.isCurrentRuntimeModel(runtimeModelId)) {
+    if (!state.ifc.isCurrentRuntimeModel(runtimeModelId)) {
       debugWarn(DEBUG_FRAGMENTS, `[Fragments] 拒绝过期/未知模型: ${runtimeModelId}`);
       queueMicrotask(() => {
         try { void Promise.resolve(ctx.fragments.core.disposeModel(runtimeModelId)).catch(reportBackgroundError); } catch { /* 模型可能尚未完全登记 */ }
@@ -199,7 +199,7 @@ export function registerModelEvents(
       finishModelAdded(true);
       return;
     }
-    const logicalModelId = state.resolveLogicalModelId(runtimeModelId) ?? runtimeModelId;
+    const logicalModelId = state.ifc.resolveLogicalModelId(runtimeModelId) ?? runtimeModelId;
     // 顺序：先加入 scene + state + UI（模型生命周期状态可见），再触发 fragments update
     // 即使 update 报错（如 "Malformed tile"），模型生命周期状态也要可见，便于后续清理
     // 不让 state 与 ctx.fragments.list 继续不同步
@@ -208,7 +208,7 @@ export function registerModelEvents(
       model.useCamera((ctx.world.camera as any).three);
       (ctx.world.scene as any).three.add(model.object);
 
-      state.loadedModels.set(logicalModelId, {
+      state.ifc.loadedModels.set(logicalModelId, {
         modelId: logicalModelId,
         runtimeModelId,
         visible: true,
@@ -229,21 +229,8 @@ export function registerModelEvents(
     (ctx.world.scene as any).three.remove(model.object);
   });
   ctx.fragments.list.onItemDeleted.add((runtimeModelId) => {
-    const logicalModelId = state.resolveLogicalModelId(runtimeModelId)
-      ?? Array.from(state.loadedModels.values()).find((item) => item.runtimeModelId === runtimeModelId)?.modelId
-      ?? runtimeModelId;
-    // 旧会话的迟到删除事件不能把同一 logical ID 的新会话模型/UI 行删掉。
-    // 只有当前 loadedModels 行仍指向这一个 runtime ID 时，才触发 UI 删除。
-    const currentLoaded = state.loadedModels.get(logicalModelId);
-    if (!currentLoaded || currentLoaded.runtimeModelId === runtimeModelId) {
-      callbacks.onModelRemoved(logicalModelId, runtimeModelId);
-      state.loadedModels.delete(logicalModelId);
-      if (state.ifcRuntimeModelIds.get(logicalModelId) === runtimeModelId) {
-        state.ifcRuntimeModelIds.delete(logicalModelId);
-      }
-    }
-    state.ifcLogicalModelIds.delete(runtimeModelId);
-    state.ifcRuntimeModelOwners.delete(runtimeModelId);
+    const { logicalModelId, removed } = state.ifc.remove(runtimeModelId);
+    if (removed) callbacks.onModelRemoved(logicalModelId, runtimeModelId);
   });
   ctx.fragments.core.models.materials.list.onItemSet.add(({ value: material }) => {
     if (!('isLodMaterial' in material && material.isLodMaterial)) {
@@ -284,14 +271,14 @@ export async function loadIfcBuffer(
   const session = options.session ?? state.captureProjectSession();
   const isCurrent = () => state.isCurrentSession(session);
   if (!isCurrent()) return;
-  const runtimeModelId = state.getRuntimeModelId(modelId, session);
+  const runtimeModelId = state.ifc.getRuntimeModelId(modelId, session);
 
-  if (state.loadedModels.has(modelId)) {
+  if (state.ifc.loadedModels.has(modelId)) {
     debugLog(DEBUG_IFC_LOAD, `[IFC Loader] 模型已加载，跳过: ${modelId}`);
     return;
   }
 
-  state.registerIfcRuntimeModel(modelId, runtimeModelId, session);
+  state.ifc.registerIfcRuntimeModel(modelId, runtimeModelId, session);
   registerIfcLoadDiagnostic(runtimeModelId, {
     entryPath: identityPath || name,
     source: 'ifc',

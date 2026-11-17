@@ -44,8 +44,8 @@ import {
  * may carry an opening callback, but it must never receive browsing messages. */
 export function selectionMessage(state: AppState, request: SelectionRequest) {
   return (text: string): void => {
-    if (!state.isCurrentSelection(request)) return;
-    state.selectionMessage=text;
+    if (!state.selection.isCurrentSelection(request)) return;
+    state.selection.selectionMessage=text;
     setSelectionStatus(text);
   };
 }
@@ -78,12 +78,12 @@ function hasRenderableGeometry(group: THREE.Object3D): boolean {
 
 /** Clear selection effects without creating a viewer just for an empty object. */
 export async function clearSelectionHighlight(state: AppState, request: SelectionRequest, showMessage: (text: string) => void): Promise<void> {
-  if (!state.isCurrentSelection(request)) return;
+  if (!state.selection.isCurrentSelection(request)) return;
   if (!state.initialized && !state.highlightedItems && !state.highlightedModState) return;
   const { getViewerRuntimeWithUI }=await import('./viewerUIBinding.js');
   const { ctx }=await getViewerRuntimeWithUI(state,showMessage);
   const { commitSelectionHighlight }=await import('../viewer/highlight.js');
-  await commitSelectionHighlight(ctx,state,state.selectionGuard(request));
+  await commitSelectionHighlight(ctx,state,state.selection.selectionGuard(request));
 }
 
 /** UI projections follow the request; rendering a tree never starts a selection. */
@@ -97,17 +97,17 @@ export async function syncSelectionNavigation(state:AppState,request:SelectionRe
 
 export async function handleNodeClick(
   state: AppState, node: CbmNode, showMessage: (text: string) => void,
-  request: SelectionRequest = state.beginSelection({kind:'cbm',key:node.path}),
+  request: SelectionRequest = state.selection.beginSelection({kind:'cbm',key:node.path}),
 ): Promise<void> {
   const session=request.session;
   const isSessionCurrent=() => state.isCurrentSession(session);
-  const isSelected=() => state.isCurrentSelection(request);
+  const isSelected=() => state.selection.isCurrentSelection(request);
   if (!isSessionCurrent()) return;
   const message=selectionMessage(state,request);
   const inspector=await selectionPresentation().nodeInspector(state,request);
   if(!isSessionCurrent())return;
   if (isSelected()) {
-    state.selectionGeometry=describeNodeSelectionGeometry(state,node);
+    state.selection.selectionGeometry=describeNodeSelectionGeometry(state,node);
 
   }
   const basic=inspector.show(node);
@@ -133,10 +133,10 @@ export async function handleNodeClick(
       if (isSelected()) await inspector.show(node);
       return;
     }
-    const modelsToLoad=new Set([...refs.keys()].filter((id) => !state.loadedModels.has(id)));
-    if (ifcModelId && !state.loadedModels.has(ifcModelId)) modelsToLoad.add(ifcModelId);
+    const modelsToLoad=new Set([...refs.keys()].filter((id) => !state.ifc.loadedModels.has(id)));
+    if (ifcModelId && !state.ifc.loadedModels.has(ifcModelId)) modelsToLoad.add(ifcModelId);
     if (modelsToLoad.size===0 && refs.size===0) {
-      if (isSelected()) { state.selectionGeometry=describeNodeSelectionGeometry(state,node,true); message(state.selectionGeometry.detail); }
+      if (isSelected()) { state.selection.selectionGeometry=describeNodeSelectionGeometry(state,node,true); message(state.selection.selectionGeometry.detail); }
       return;
     }
     const {getViewerRuntimeWithUI}=await import('./viewerUIBinding.js');
@@ -175,7 +175,7 @@ export async function handleNodeClick(
     await highlightIfcItems(ctx,state,projected.items,request);
     if(isSelected()&&!Object.keys(projected.items).length)message(projected.emptyMessage);
     if (!isSelected()) return;
-    state.selectionGeometry=refs.size>0 && state.highlightedItems
+    state.selection.selectionGeometry=refs.size>0 && state.highlightedItems
       ? ifcFailure ? {status:'partial',detail:`已定位当前可用的直接 GUID 构件；${ifcFailure}`} : {status:'available',detail:'已定位直接 GUID 关联的 IFC 构件。'}
       : ifcFailure ? {status:'failed',detail:ifcFailure} : describeNodeSelectionGeometry(state,node,true);
     await basic;
@@ -339,8 +339,8 @@ export async function frameAndHighlightDevice(
   request?: SelectionRequest,
 ): Promise<void> {
   if (!state.isCurrentSession(session)) return;
-  request ??= state.beginSelection({kind:'cbm',key:scope.rootOccurrence});
-  const guard=state.selectionGuard(request);
+  request ??= state.selection.beginSelection({kind:'cbm',key:scope.rootOccurrence});
+  const guard=state.selection.selectionGuard(request);
   if (!state.isCurrentSession(session) || !guard.isCurrent()) return;
   if (state.deviceLodRuntime) {
     const ensureBase = state.deviceLodRuntime.ensureBase ?? state.deviceLodRuntime.select;
@@ -353,13 +353,13 @@ export async function frameAndHighlightDevice(
   finally { endCollect(); }
   const {commitSelectionHighlight,highlightModGroups}=await import('../viewer/highlight.js');
   await commitSelectionHighlight(ctx,state,guard,() => highlightModGroups(state,groups));
-  if (!guard.isCurrent() || groups.length===0 || !state.canAutoLocate(request)) return;
+  if (!guard.isCurrent() || groups.length===0 || !state.selection.canAutoLocate(request)) return;
   const box=new THREE.Box3(); groups.forEach((g) => box.expandByObject(g));
   if (state.currentProjectType === 'substation' && state.currentFiles && !box.isEmpty() && [box.min.x,box.min.y,box.min.z,box.max.x,box.max.y,box.max.z].every(Number.isFinite)) {
     perfMarkProductMoment('coldSelectedDeviceGeometryReady',{selectionKey:request.target?.key,devPath,rootOccurrence:scope.rootOccurrence,groups:groups.length});
   }
   const {frameBox}=await import('../viewer/camera.js');
-  if (!state.canAutoLocate(request)) return;
+  if (!state.selection.canAutoLocate(request)) return;
   const owned=state.highlightedModState;
   const {resetModHighlight}=await import('../viewer/highlight.js');
   const clearOwned=() => { if (state.highlightedModState===owned) resetModHighlight(state); };
@@ -394,7 +394,7 @@ export async function loadModStlForNode(
   request?: SelectionRequest,
 ): Promise<void> {
   if (!state.isCurrentSession(session)) return;
-  request ??= state.beginSelection({kind:'cbm',key:node.path});
+  request ??= state.selection.beginSelection({kind:'cbm',key:node.path});
   const root=resolveGeometryLoadNode(state.currentCbmTree,node);
   const scope=deviceOccurrenceScope(state.currentCbmTree,node);
   const message=selectionMessage(state,request);
@@ -403,10 +403,10 @@ export async function loadModStlForNode(
       const ensureBase = state.deviceLodRuntime.ensureBase ?? state.deviceLodRuntime.select;
       await ensureBase.call(state.deviceLodRuntime, root.path);
     }
-    catch (error) { if (state.isCurrentSelection(request)) message(`设备几何加载失败: ${String(error)}`); }
-    if (!state.isCurrentSelection(request)) return;
-    state.selectionGeometry=describeNodeSelectionGeometry(state,node,true);
-    message(state.selectionGeometry.detail);
+    catch (error) { if (state.selection.isCurrentSelection(request)) message(`设备几何加载失败: ${String(error)}`); }
+    if (!state.selection.isCurrentSelection(request)) return;
+    state.selection.selectionGeometry=describeNodeSelectionGeometry(state,node,true);
+    message(state.selection.selectionGeometry.detail);
     const {getViewerRuntimeWithUI}=await import('./viewerUIBinding.js');
     const {ctx}=await getViewerRuntimeWithUI(state,message);
     await frameAndHighlightDevice(ctx,state,node.devPath,scope,session,request);
@@ -430,9 +430,9 @@ export async function loadModStlForNode(
     }
     try { await task; } finally { if (pending.get(key)===task) pending.delete(key); }
   }
-  if (!state.isCurrentSelection(request)) return;
-  state.selectionGeometry=describeNodeSelectionGeometry(state,node,true);
-  message(state.selectionGeometry.detail);
+  if (!state.selection.isCurrentSelection(request)) return;
+  state.selection.selectionGeometry=describeNodeSelectionGeometry(state,node,true);
+  message(state.selection.selectionGeometry.detail);
   const {getViewerRuntimeWithUI}=await import('./viewerUIBinding.js');
   const {ctx}=await getViewerRuntimeWithUI(state,message);
   await frameAndHighlightDevice(ctx,state,node.devPath,scope,session,request);

@@ -212,7 +212,7 @@ export async function loadBimIfc(
     void Promise.resolve(ctx.fragments.core.disposeModel(runtimeId)).catch(reportBackgroundError);
     return;
   }
-  state.ifcRegionalRuntimes.get(logicalId)?.release();
+  state.ifc.regionalRuntimes.get(logicalId)?.release();
   const runtime = new IfcRegionalRuntime(logicalId, path, artifact!.index, {
     ctx,
     model,
@@ -221,15 +221,15 @@ export async function loadBimIfc(
     isCurrent: current,
     sourceToViewer: base.clone(),
     fineQueue: state.substationFineQueue,
-    visibility: state.selectionVisibility?.registerModel(logicalId, model),
+    visibility: state.selection.selectionVisibility?.registerModel(logicalId, model),
     onBeforeDisposeGroup:group=>removeModHighlightGroup(state,group),
     onRepresentationChanged:(object,group,localId,isCurrent,prepareHighlight)=>syncIfcRepresentationHighlight(
       ctx,state,runtimeId,logicalId,object,group,localId,isCurrent,prepareHighlight),
   });
   runtime.setMemoryPressure?.(state.substationMemoryPressure);
-  runtime.setOnlySelected?.(state.onlySelected);
-  state.ifcRegionalRuntimes.set(logicalId, runtime);
+  runtime.setOnlySelected?.(state.selection.onlySelected);
+  state.ifc.regionalRuntimes.set(logicalId, runtime);
   state.engineeringGeometryEvidenceChanged?.();
-  void Promise.resolve(state.selectionVisibility?.sync().catch(error => console.warn('[Selection visibility]', error))).catch(reportBackgroundError);
+  void Promise.resolve(state.selection.selectionVisibility?.sync().catch(error => console.warn('[Selection visibility]', error))).catch(reportBackgroundError);
   return model;
 }

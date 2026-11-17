@@ -11,21 +11,21 @@ import {perfMarkProductMoment} from '../utils/perfTimings.js';
 
 /** Reconcile view targets without changing the entity snapshot or loading L2. */
 export async function reconcileProjectionSelection(state: AppState): Promise<void> {
-  const request = state.selectionRequest, target = request?.target;
-  if (!request || !target || !state.isCurrentSelection(request)) return;
+  const request = state.selection.selectionRequest, target = request?.target;
+  if (!request || !target || !state.selection.isCurrentSelection(request)) return;
   if (target.kind === 'engineering-group'
     && !state.engineering.navigation?.composition.nodes.has(target.key)
     && !state.engineering.navigation?.inventory?.nodes.has(target.key)) {
-    state.setOnlySelected(false);
-    const cleared = state.beginSelection(null);
-    state.selectionMessage = '空间细化后原分组已更新，请重新选择。';
+    state.selection.setOnlySelected(false);
+    const cleared = state.selection.beginSelection(null);
+    state.selection.selectionMessage = '空间细化后原分组已更新，请重新选择。';
     const { clearEngineeringHighlight } = await import('./engineeringSelection.js');
     await clearEngineeringHighlight(state, cleared);
-    if (!state.isCurrentSelection(cleared)) return;
-    await selectionPresentation().projectionChanged(state.selectionMessage,()=>state.isCurrentSelection(cleared));
+    if (!state.selection.isCurrentSelection(cleared)) return;
+    await selectionPresentation().projectionChanged(state.selection.selectionMessage,()=>state.selection.isCurrentSelection(cleared));
   } else if (target.kind === 'engineering' || target.kind === 'engineering-source' || target.kind === 'engineering-group') {
     const { selectEngineeringTarget } = await import('./engineeringSelection.js');
-    if (state.isCurrentSelection(request)) await selectEngineeringTarget(state, { kind: target.kind, key: target.key }, request, { fit: false, load: false });
+    if (state.selection.isCurrentSelection(request)) await selectEngineeringTarget(state, { kind: target.kind, key: target.key }, request, { fit: false, load: false });
   }
 }
 
@@ -65,7 +65,7 @@ export function installCompositionProjection(state: AppState, onReady?: (complet
       state.notifyEngineeringChanged();onReady?.(false);
       return;
     }
-    const missing=models.filter(model=>!state.ifcRegionalRuntimes.has(model.modelId));
+    const missing=models.filter(model=>!state.ifc.regionalRuntimes.has(model.modelId));
     if(missing.length&&!state.engineering.ifcGeometryFinished)return;
     const complete=missing.length===0;
     // Start from semantic paths/search strings, rather than accumulating earlier
@@ -79,7 +79,7 @@ export function installCompositionProjection(state: AppState, onReady?: (complet
       state.notifyEngineeringChanged(); reconcile();
     };
     const owners = new Map(snapshot.memberships.map(m => [m.sourceId, m.ownerId])), bounds: CompositionBounds[] = [];
-    for (const [model, runtime] of state.ifcRegionalRuntimes) for (const object of runtime.index.objects) {
+    for (const [model, runtime] of state.ifc.regionalRuntimes) for (const object of runtime.index.objects) {
       const sourceId = `ifc:${JSON.stringify([model, object.expressId])}`, owner = owners.get(sourceId), sourceBounds = fromIfcYUpBounds(object.bounds);
       if (owner && sourceBounds) bounds.push({ entityId: owner, bounds: sourceBounds });
     }

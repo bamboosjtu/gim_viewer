@@ -14,23 +14,23 @@ const contains = (ids: Iterable<number> | undefined, id: number): boolean =>
 export async function syncIfcRepresentationHighlight(ctx: ViewerContext, state: AppState,
   runtimeId: string, modelId: string, object: RegionalObject, group: THREE.Group | undefined,
   localId: number | undefined, representationCurrent: () => boolean, prepareHighlight?: () => void): Promise<void> {
-  const request = state.selectionRequest;
-  if (!request || !state.isCurrentSelection(request) || !representationCurrent()) return;
+  const request = state.selection.selectionRequest;
+  if (!request || !state.selection.isCurrentSelection(request) || !representationCurrent()) return;
   const target = request.target;
   const regional = target?.kind === 'ifc-object'
     && target.key === `ifc:${modelId.toLowerCase()}:object:${object.expressId}`;
-  const scope = state.representationSelection;
+  const scope = state.selection.representationSelection;
   if (scope?.requestId === request.id && !scope.isCurrent()) return;
   const selected = scope?.requestId === request.id && scope.isCurrent() &&
     scope.ifc.some(ref => ref.modelId === modelId && ref.expressId === object.expressId);
   const far = localId !== undefined && (target?.kind === 'ifc-element' && target.key === `${runtimeId}:${localId}`
-    || state.selectionHighlightRequestId === request.id && contains(state.highlightedItems?.[runtimeId],localId));
+    || state.selection.selectionHighlightRequestId === request.id && contains(state.highlightedItems?.[runtimeId],localId));
   if (!regional && !far && !selected) return;
-  const selection = state.selectionGuard(request);
+  const selection = state.selection.selectionGuard(request);
   const guard = {...selection, isCurrent: () => selection.isCurrent() && representationCurrent()
-    && (!selected || state.representationSelection === scope && scope.isCurrent())};
+    && (!selected || state.selection.representationSelection === scope && scope.isCurrent())};
   await enqueueHighlightCommit(state, guard, async () => {
-    if (state.selectionHighlightRequestId !== request.id) return;
+    if (state.selection.selectionHighlightRequestId !== request.id) return;
     if (group) {
       if (!state.highlightedModState?.groups.includes(group)) prepareHighlight?.();
       addModHighlightGroup(state, group); return;

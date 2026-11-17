@@ -10,7 +10,7 @@ it('enriches models once, shares concurrent work and rejects stale names', async
   state.ifcGuidIndex.set('guid', node);
   const model = { getLocalIdsByGuids: vi.fn(async () => [1]),
     getItemsData: vi.fn(async () => [{ Name: { value: 'IFC' } }]) };
-  const models = new Map([[state.getRuntimeModelId('ifc-a', session), model]]);
+  const models = new Map([[state.ifc.getRuntimeModelId('ifc-a', session), model]]);
   const ctx: any = { fragments: { list: models } };
   await Promise.all([buildIfcNameIndex(ctx, state, { session }), buildIfcNameIndex(ctx, state, { session })]);
   expect(node.name).toBe('IFC');
@@ -22,7 +22,7 @@ it('enriches models once, shares concurrent work and rejects stale names', async
   // A new model instance must be enriched even when the logical ID is reused.
   let finish!: (data: any) => void;
   const next = { ...model, getItemsData: vi.fn(() => new Promise<any>(resolve => { finish = resolve; })) };
-  models.set(state.getRuntimeModelId('ifc-a', session), next);
+  models.set(state.ifc.getRuntimeModelId('ifc-a', session), next);
   const pending = buildIfcNameIndex(ctx, state, { session });
   await vi.waitFor(() => expect(next.getItemsData).toHaveBeenCalledOnce());
   state.activateProject(2, 'B');

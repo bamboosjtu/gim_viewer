@@ -125,7 +125,10 @@
     "version": "source-keywords-1",
     "fields": [
       "SYSCLASSIFYNAME",
-      "PARTNAME"
+      "PARTNAME",
+      "类型",
+      "模型分类名称",
+      "装置名称"
     ],
     "namespace": "standard-model",
     "entries": {

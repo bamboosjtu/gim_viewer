@@ -11,6 +11,8 @@ export function assertEngineeringPartition(snapshot: EngineeringSnapshot, source
     Array.isArray(snapshot.relationships) && Array.isArray(snapshot.aliases), 'root');
   requireShape(snapshot.evidenceBinding?.scope===snapshot.scope&&Number.isSafeInteger(snapshot.evidenceBinding.sourceRevision)&&snapshot.evidenceBinding.sourceRevision>=0,'evidence binding');
   for (const entity of snapshot.entities) {
+    requireShape((entity.subtypeStatus===undefined||['confirmed','candidate','unresolved'].includes(entity.subtypeStatus))
+      &&(entity.subtypeEvidence===undefined||strings(entity.subtypeEvidence)),'entity composition subtype');
     requireShape(object(entity) && typeof entity.id === 'string' && entity.id && typeof entity.name === 'string' && typeof entity.category === 'string' &&
       typeof entity.boundaryEvidence === 'string' && strings(entity.sourceIds) && ['whole', 'set', 'transformer_bank'].includes(entity.kind) &&
       ['identified', 'unknown'].includes(entity.classificationState) && Number.isSafeInteger(entity.classificationConflicts) && entity.classificationConflicts >= 0, 'entity');

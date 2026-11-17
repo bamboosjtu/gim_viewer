@@ -44,9 +44,9 @@ it('does not open a previously displayed entry if the continue refresh fails', a
   expect(service.open).not.toHaveBeenCalled();
 });
 it('hides global isolation for an engineering target without a current member range and rejects a stale action', async () => {
-  const state = new AppState(); state.currentProjectType = 'substation'; state.beginSelection({ kind: 'engineering-group', key: 'declared-building' });
+  const state = new AppState(); state.currentProjectType = 'substation'; state.selection.beginSelection({ kind: 'engineering-group', key: 'declared-building' });
   const { setupViewerShell } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../shell/viewerShell.js'); }); setupViewerShell(state);
   document.getElementById('btn-more')!.click();
   expect(document.getElementById('menu-only-selected')!.hidden).toBe(true);
-  document.getElementById('menu-only-selected')!.click(); expect(state.onlySelected).toBe(false);
+  document.getElementById('menu-only-selected')!.click(); expect(state.selection.onlySelected).toBe(false);
 });

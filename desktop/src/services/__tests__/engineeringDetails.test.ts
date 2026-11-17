@@ -37,7 +37,7 @@ it('does not submit a DEV detail query after the selection changes during ensure
   evidence.ensure.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
   const state=await select(true);document.getElementById('engineering-details')!.click();
   await vi.waitFor(()=>expect(evidence.ensure).toHaveBeenCalled());
-  state.beginSelection({kind:'engineering-source',key:'newer'});finish({revision:8});
+  state.selection.beginSelection({kind:'engineering-source',key:'newer'});finish({revision:8});
   await vi.waitFor(()=>expect(document.getElementById('engineering-details-result')?.textContent).toContain('选择已变化'));
   expect(evidence.query).not.toHaveBeenCalled();
 });

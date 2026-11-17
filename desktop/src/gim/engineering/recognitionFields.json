@@ -51,5 +51,8 @@
   "设备编码",
   "COMPONENTTYPE",
   "部件类型",
-  "CONSTRUCTIONTYPE"
+  "CONSTRUCTIONTYPE",
+  "类型",
+  "模型分类名称",
+  "装置名称"
 ]

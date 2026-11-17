@@ -138,3 +138,7 @@ Viewer 与 UI 装配区分 idle/creating/ready/failed；并发调用共享一次
 - [验证](../validation.md)
 
 物理来源目录的状态由 `AppState.sourceGeometry` 持有，语义结果仍在 `engineering`；缓存写入状态不决定物理目录可读性。`SourceGeometryState.read` 在读取前及就绪后检查同一捕获会话，旧会话返回空结果；当前会话缺目录保留原诊断。`ifcLoading` 的 pending 与跳过清单随工程重置；无消费者的等待队列接口已删除。属性 Map 通过 `properties.reset()` 清空，保留 Map 实例，冷/暖恢复和只读消费者访问同一所有者。
+
+选择请求由 `AppState.selection` 持有：AbortController、请求序号、相机意图快照、隔离范围、反馈和装饰释放器属于同一所有者。`ProjectSelectionState` 通过窄端口访问会话、相机版本和渲染运行时，不依赖 AppState 或服务实现；工程批次 token 不随选择变化。工程释放先使会话失效，再按原顺序释放选择装饰与导航监听，最后取消选择并清理表示。
+
+`AppState.ifc` 持有逻辑/运行时 ID、会话归属、已加载模型与区域运行时注册表。旧会话可计算其运行时 ID，但不能登记或覆盖当前映射；迟到删除只清除对应 runtime ID，不能删除同逻辑 ID 的新模型。释放单个运行时失败继续释放其余项并记录原始 Error；reset 清空 Map 内容，保留注册表实例。源 IFC 清单与业务索引仍由工程打开流程管理，不并入渲染实例注册表。

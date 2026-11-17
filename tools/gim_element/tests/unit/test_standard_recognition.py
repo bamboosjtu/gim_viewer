@@ -46,6 +46,9 @@ class StandardTests(unittest.TestCase):
                 rows=[record(r) for r in case['records']];model=R.normalize(rows,'scope')
                 self.assertEqual(sorted(sorted(e['sourceIds']) for e in model['entities']),sorted(case['groups']))
                 self.assertEqual(len(model['pending']),case['pending'])
+                if case.get('expectedEntity'):
+                    entity=model['entities'][0]
+                    for key,value in case['expectedEntity'].items():self.assertEqual(entity.get(key),value)
                 self.assertEqual(R.normalize(list(reversed(rows)),'scope'),model)
                 self.assertEqual(len(model['memberships']),len(rows))
     def test_algorithm_runs_outside_repository_with_only_its_own_modules_and_assets(self):

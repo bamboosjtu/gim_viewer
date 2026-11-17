@@ -46,7 +46,7 @@ class Reader:
         if path in self.family_cache:return self.family_cache[path]
         result=[]
         for p in self.document(path):
-            if re.match(r'^(?:BASEFAMILY\d*|BASEFAM\d*|FAMILYFILE\d*)$',p['keys'][0],re.I):
+            if re.match(r'^(?:BASEFAMILY(?:POINTER|\d*)|BASEFAM\d*|FAMILYFILE\d*)$',p['keys'][0],re.I):
                 target=self.resolve(path,p['keys'][0],p['value'])
                 if target:result.extend(self.document(target))
         self.family_cache[path]=result;return result

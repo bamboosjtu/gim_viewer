@@ -274,7 +274,7 @@ export function collectSubstationRuntimeResourceSnapshot(
     loadedXmlModGroupCount: state.loadedXmlModGroups.size,
     loadedStlGroupCount: state.loadedStlGroups.size,
     fragmentModelCount,
-    loadedIfcModelCount: state.loadedModels.size,
+    loadedIfcModelCount: state.ifc.loadedModels.size,
     currentIfcEntryCount: state.currentIfcEntries.length,
     cbmNodeCount: collectCbmNodeCount(state.currentCbmTree),
     spatialNodeCount: spatial?.nodes.length ?? 0,
@@ -382,7 +382,7 @@ export async function sampleSubstationRuntimeResources(
   // cannot change the scheduler of a newly opened project.
   state.substationMemoryPressure = externalMemoryPressure;
   state.deviceLodRuntime?.setExternalMemoryPressure?.(externalMemoryPressure);
-  for (const runtime of state.ifcRegionalRuntimes.values()) runtime.setMemoryPressure?.(externalMemoryPressure);
+  for (const runtime of state.ifc.regionalRuntimes.values()) runtime.setMemoryPressure?.(externalMemoryPressure);
   perfRecordMemorySample(label, {
     rssBytes,
     rssSource,

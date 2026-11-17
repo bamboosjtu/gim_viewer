@@ -199,9 +199,9 @@ describe('IFC project session race', () => {
     );
     await loadingB;
 
-    const runtimeB = state.getRuntimeModelId(entryB.modelId, sessionB);
+    const runtimeB = state.ifc.getRuntimeModelId(entryB.modelId, sessionB);
     expect(models.has(runtimeB)).toBe(true);
-    expect(state.loadedModels.get(entryB.modelId)?.runtimeModelId).toBe(runtimeB);
+    expect(state.ifc.loadedModels.get(entryB.modelId)?.runtimeModelId).toBe(runtimeB);
     expect(added).toEqual([[entryB.modelId, runtimeB]]);
 
     // A 最后完成：onItemSet 先到达也必须被 owner/session 守卫拒绝。
@@ -212,8 +212,8 @@ describe('IFC project session race', () => {
     expect(models.has(runtimeA)).toBe(false);
     expect(scene.children.map((child) => child)).toHaveLength(1);
     expect(scene.children[0]).toBe(models.get(runtimeB)?.object);
-    expect(state.loadedModels.has(entryA.modelId)).toBe(false);
-    expect(state.loadedModels.get(entryB.modelId)?.runtimeModelId).toBe(runtimeB);
+    expect(state.ifc.loadedModels.has(entryA.modelId)).toBe(false);
+    expect(state.ifc.loadedModels.get(entryB.modelId)?.runtimeModelId).toBe(runtimeB);
     expect(added).toEqual([[entryB.modelId, runtimeB]]);
     expect(disposeModel).toHaveBeenCalledWith(runtimeA);
     expect(removed.some(([logicalId]) => logicalId === entryA.modelId)).toBe(false);

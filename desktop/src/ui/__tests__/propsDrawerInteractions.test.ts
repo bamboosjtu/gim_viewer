@@ -162,7 +162,7 @@ describe('属性检查器纯 DOM 交互', () => {
     state.geometryDiagnosticsByDevPath.set('dev/bad.dev',diagnostic);
     const node:CbmNode={path:'CBM/bad.cbm',name:'设备',entityName:'F4System',children:[],famPath:'',devPath:'bad.dev',ifcFile:'',ifcGuid:'',classifyName:'',transformMatrix:'',systemNames:[],devSymbolName:'',devType:'',devExpanded:false};
     state.currentCbmTree=node;
-    state.selectionGeometry={status:'failed',detail:geometryDiagnosticSummary(diagnostic)};
+    state.selection.selectionGeometry={status:'failed',detail:geometryDiagnosticSummary(diagnostic)};
     const writeText=vi.fn(async()=>{});Object.defineProperty(navigator,'clipboard',{value:{writeText},configurable:true});
     drawer.setupPropsDrawerInteractions();await drawer.showNodePropertiesBasic(state,node);
     expect(geometryDiagnosticSummary(diagnostic)).toBe('源模型几何异常，已跳过渲染。属性和来源信息仍可查看。');
@@ -171,7 +171,7 @@ describe('属性检查器纯 DOM 交互', () => {
     expect(details.open).toBe(false);expect(details.querySelector('source')).toBeNull();
     expect(details.querySelector('pre')!.textContent).toContain(raw);
     (document.querySelector('[data-itab="params"]') as HTMLButtonElement).click();details.open=true;
-    await drawer.showNodePropertiesBasic(state,node,state.selectionRequest!);
+    await drawer.showNodePropertiesBasic(state,node,state.selection.selectionRequest!);
     expect(document.querySelector('[data-itab="params"]')!.classList.contains('active')).toBe(true);
     expect((document.querySelector('[data-geometry-details] details') as HTMLDetailsElement).open).toBe(true);
     (document.querySelector('[data-copy-geometry-diagnostic]') as HTMLButtonElement).click();

@@ -1,13 +1,15 @@
+import { ProjectSelectionState } from '../shared/projectSelectionState.js';
+import { IfcRuntimeState } from '../shared/ifcRuntimeState.js';
 import { SourceGeometryState } from '../shared/sourceGeometryState.js';
 import { IfcLoadingState } from '../shared/ifcLoadingState.js';
 import { logger } from '../utils/logger.js';
-import { reportBackgroundError } from '../utils/backgroundErrors.js';
+
 import { ProjectPropertyCache } from '../services/projectPropertyCache.js';
 import { ProjectViewState } from '../shared/projectViewState.js';
 import { EngineeringSessionState } from './engineeringSessionState.js';
 import { RuntimeSlot } from '../shared/runtimeSlot.js';
 import type { DeviceRuntime } from '../shared/deviceRuntime.js';
-import type { IfcRegionalRuntime } from '../viewer/ifcRegionalRuntime.js';
+
 import type { SubstationCapabilitySummary } from '../gim/substationEvidence.js';
 import type { IfcEntry, CbmNode, FileDevEntry } from '../gim/types.js';
 import type * as OBCF from '@thatopen/fragments';
@@ -18,7 +20,7 @@ import type { StdDocument } from '../gim/stdParser.js';
 import type { SldDocument } from '../gim/sldParser.js';
 import type { StdSldIndex } from '../gim/stdSldIndex.js';
 import type { SubstationSpatialIndex } from '../gim/ifcSpatialParser.js';
-import { createIfcRuntimeModelId, isCurrentProject } from '../shared/projectSession.js';
+import { isCurrentProject } from '../shared/projectSession.js';
 import type { GeometryDiagnostic } from '../gim/geometry/geometryDiagnostics.js';
 
 import type { SubstationFineQueue } from '../shared/selectionContracts.js';
@@ -49,12 +51,6 @@ export interface SubstationConnectionPreview {
 import type { ProjectLoadSession } from '../shared/projectSession.js';
 import { SessionScope } from '../shared/sessionScope.js';
 export type { ProjectLoadSession } from '../shared/projectSession.js';
-import type {
-  SelectionRequest,
-  EngineeringSelectionScope,
-  SelectionCommitGuard,
-  SelectionGeometryState,
-} from '../shared/selectionContracts.js';
 export type {
   SelectionRequest,
   EngineeringSelectionScope,
@@ -64,6 +60,21 @@ export type {
 
 /** 应用全局状态（由 bootstrap.ts 创建唯一实例，通过参数注入各模块） */
 export class AppState {
+  readonly ifc = new IfcRuntimeState({
+    captureSession: () => this.captureProjectSession(),
+    isCurrentSession: (session) => this.isCurrentSession(session),
+    entries: () => this.currentIfcEntries,
+  });
+  readonly selection = new ProjectSelectionState({
+    captureSession: () => this.captureProjectSession(),
+    isCurrentSession: (session) => this.isCurrentSession(session),
+    cameraNavigationVersion: () => this.viewState.cameraNavigationVersion,
+    snapshot: () => this.engineering.snapshot,
+    deviceRuntime: () => this.deviceLodRuntime,
+    runtimes: () => this.ifc.regionalRuntimes.values(),
+    applyGeometryFilter: () => this.engineeringGeometryFilter?.(),
+    recordVisibility: () => this.viewState.viewHistory?.recordVisibility(),
+  });
   readonly properties = new ProjectPropertyCache();
   readonly sourceGeometry = new SourceGeometryState();
   readonly ifcLoading = new IfcLoadingState();
@@ -80,22 +91,9 @@ export class AppState {
   substationMemoryPressure: import('../utils/memoryPressure.js').MemoryPressure = 'unknown';
 
   stationOverview: (() => void) | null = null;
-  onlySelected = false;
-  autoLocate = true;
-
-  hoverCleanup: (() => void) | null = null;
-  selectionDecorationCleanup: (() => void) | null = null;
-  selectionVisibility: ReturnType<
-    typeof import('../services/selectionVisibility.js').createSelectionVisibility
-  > | null = null;
-  selectionHighlightRequestId: number | null = null;
-  engineeringSelection: EngineeringSelectionScope | null = null;
-  representationSelection:
-    import('../shared/representationSelection.js').RepresentationSelectionScope | null = null;
   engineeringGeometryFilter: ((root?: THREE.Object3D) => void) | null = null;
   engineeringRepresentationChanged: ((rootOccurrence?: string) => void) | null = null;
   engineeringGeometryEvidenceChanged: (() => void) | null = null;
-  engineeringSelectionCleanup: (() => void) | null = null;
   engineeringNavigationCleanup: (() => void) | null = null;
   private readonly deviceRuntimeSlot = new RuntimeSlot<DeviceRuntime>();
   get deviceLodRuntime(): DeviceRuntime | null {
@@ -103,117 +101,6 @@ export class AppState {
   }
   set deviceLodRuntime(runtime: DeviceRuntime | null) {
     this.deviceRuntimeSlot.value = runtime;
-  }
-  selectionRequest: SelectionRequest | null = null;
-  selectionGeometry: SelectionGeometryState | null = null;
-  selectionMessage = '';
-  private selectionSequence = 0;
-  private selectionAbort: AbortController | null = null;
-
-  beginSelection(
-    target: SelectionRequest['target'],
-    origin: SelectionRequest['origin'] = 'tree',
-  ): SelectionRequest {
-    this.hoverCleanup?.();
-    this.selectionAbort?.abort();
-    // While a new target is resolving, the previous isolated range remains
-    // visible. Its request is obsolete, so it cannot publish any late results.
-    const retainRange = this.onlySelected && target !== null;
-    if (!retainRange) {
-      this.engineeringSelection = null;
-      this.representationSelection = null;
-      this.engineeringGeometryFilter?.();
-      this.deviceLodRuntime?.clearSelection();
-      for (const runtime of this.ifcRegionalRuntimes.values()) {
-        runtime.clearFineSelection?.();
-        runtime.clearSelectionFilter?.();
-      }
-    }
-    this.selectionAbort = new AbortController();
-    const request: SelectionRequest = {
-      id: ++this.selectionSequence,
-      session: this.captureProjectSession(),
-      signal: this.selectionAbort.signal,
-      target,
-      origin,
-      cameraNavigationVersion: this.viewState.cameraNavigationVersion,
-    };
-    this.selectionRequest = request;
-    if (!retainRange) {
-      this.deviceLodRuntime?.setOnlySelected?.(this.onlySelected);
-      for (const runtime of this.ifcRegionalRuntimes.values())
-        runtime.setOnlySelected?.(this.onlySelected);
-    }
-    this.selectionGeometry = null;
-    this.selectionMessage = '';
-    return request;
-  }
-
-  isCurrentSelection(request: SelectionRequest): boolean {
-    return (
-      this.selectionRequest?.id === request.id &&
-      !request.signal.aborted &&
-      this.isCurrentSession(request.session)
-    );
-  }
-  canAutoLocate(request: SelectionRequest): boolean {
-    return (
-      this.autoLocate &&
-      request.origin !== 'viewport' &&
-      (request.cameraNavigationVersion === undefined ||
-        request.cameraNavigationVersion === this.viewState.cameraNavigationVersion)
-    );
-  }
-
-  selectionGuard(request: SelectionRequest): SelectionCommitGuard {
-    return {
-      isCurrent: () => this.isCurrentSelection(request),
-      isSessionCurrent: () => this.isCurrentSession(request.session),
-      signal: request.signal,
-    };
-  }
-
-  invalidateSelection(): void {
-    this.selectionAbort?.abort();
-    for (const runtime of this.ifcRegionalRuntimes.values()) {
-      runtime.clearFineSelection?.();
-      runtime.clearSelectionFilter?.();
-    }
-    this.selectionSequence++;
-    this.selectionRequest = null;
-    this.engineeringSelection = null;
-    this.representationSelection = null;
-    this.engineeringGeometryFilter?.();
-    this.selectionGeometry = null;
-    this.selectionMessage = '';
-  }
-  /** Session-only visibility filter for focused browser inspection. */
-  get canIsolateSelection(): boolean {
-    const request = this.selectionRequest,
-      kind = request?.target?.kind;
-    if (!request?.target) return false;
-    if (kind !== 'engineering' && kind !== 'engineering-source' && kind !== 'engineering-group')
-      return true;
-    const scope = this.engineeringSelection;
-    return (
-      !!scope &&
-      scope.requestId === request!.id &&
-      scope.snapshot === this.engineering.snapshot &&
-      scope.sourceIds.size > 0
-    );
-  }
-  setOnlySelected(only: boolean): void {
-    if (only && !this.canIsolateSelection) return;
-    this.onlySelected = only;
-    this.engineeringGeometryFilter?.();
-    this.deviceLodRuntime?.setOnlySelected?.(only);
-    for (const runtime of this.ifcRegionalRuntimes.values()) runtime.setOnlySelected?.(only);
-    void Promise.resolve(
-      this.selectionVisibility
-        ?.sync()
-        .catch((error) => logger.warn('[Selection visibility]', error)),
-    ).catch(reportBackgroundError);
-    this.viewState.viewHistory?.recordVisibility();
   }
   // GIM 文件相关
   currentFiles: Map<string, File> | null = null;
@@ -237,14 +124,7 @@ export class AppState {
   // 索引
   ifcGuidIndex = new Map<string, CbmNode>(); // "logicalModelId:ifcGuid" → CbmNode
   cbmNodeIndex = new Map<string, CbmNode>(); // cbmFileName → CbmNode
-  ifcGuidToName = new Map<string, string>(); // "modelId:guid" → displayName
-
-  /** logical modelId（包内稳定身份）→ Fragments runtime modelId（会话身份）。 */
-  ifcRuntimeModelIds = new Map<string, string>();
-  /** Fragments runtime modelId → logical modelId，供拾取/生命周期回调反查。 */
-  ifcLogicalModelIds = new Map<string, string>();
-  /** 在途 IFC 的会话所有者；本地 IFC 也绑定捕获时的会话以便清理时失效。 */
-  ifcRuntimeModelOwners = new Map<string, ProjectLoadSession>();
+  ifcGuidToName = new Map<string, string>();
 
   // 文件-设备关系
   substationCapabilities: SubstationCapabilitySummary | null = null;
@@ -271,18 +151,6 @@ export class AppState {
    * 捕获的代次，避免旧工程在切换后把结果写入新工程。
    */
   projectGeneration = 0;
-
-  // 模型
-  /** 以 logical modelId 为 key，值中同时保留 Fragments runtime ID。 */
-  loadedModels = new Map<string, { modelId: string; runtimeModelId: string; visible: boolean }>();
-  ifcRegionalRuntimes = new Map<string, IfcRegionalRuntime>();
-  private releaseIfcRuntimes(): void {
-    for (const runtime of this.ifcRegionalRuntimes.values())
-      this.safelyRelease(() => runtime.release());
-    this.ifcRegionalRuntimes.clear();
-    this.safelyRelease(() => this.selectionVisibility?.reset());
-    this.selectionHighlightRequestId = null;
-  }
 
   // xml-mod Group 跟踪（key = instanceKey；同一 MOD 文件可有多个放置实例）
   // 与 IFC loadedModels 分开管理：xml-mod 不使用 OBC Fragments
@@ -383,16 +251,10 @@ export class AppState {
     const disposables = [...this.sessionDisposables];
     this.sessionDisposables.clear();
     for (const dispose of disposables) this.safelyRelease(dispose);
-    for (const key of [
-      'hoverCleanup',
-      'selectionDecorationCleanup',
-      'engineeringSelectionCleanup',
-      'engineeringNavigationCleanup',
-    ] as const) {
-      const cleanup = this[key];
-      this[key] = null;
-      if (cleanup) this.safelyRelease(cleanup);
-    }
+    this.selection.releaseDecorations();
+    const navigationCleanup = this.engineeringNavigationCleanup;
+    this.engineeringNavigationCleanup = null;
+    if (navigationCleanup) this.safelyRelease(navigationCleanup);
     this.safelyRelease(() => this.engineering.release());
     this.deviceLodRuntime = null;
     const monitor = this.substationResourceMonitor;
@@ -406,9 +268,11 @@ export class AppState {
     this.substationConnectionPorts = null;
     this.safelyRelease(() => this.viewState.viewHistory?.clear());
     this.stationOverview = null;
-    this.onlySelected = false;
-    this.safelyRelease(() => this.invalidateSelection());
-    this.releaseIfcRuntimes();
+    this.selection.onlySelected = false;
+    this.safelyRelease(() => this.selection.invalidateSelection());
+    this.ifc.releaseRuntimes();
+    this.safelyRelease(() => this.selection.selectionVisibility?.reset());
+    this.selection.selectionHighlightRequestId = null;
   }
 
   activateProject(projectId: number | null, sourceSha256?: string | null): ProjectLoadSession {
@@ -421,58 +285,6 @@ export class AppState {
   /** 检查快照是否仍代表当前工程；几何 token 可单独由后台批次递增。 */
   isCurrentSession(session: ProjectLoadSession): boolean {
     return isCurrentProject(this, session);
-  }
-
-  /** 为当前会话取得 logical → runtime 的映射，并登记反向索引。 */
-  getRuntimeModelId(
-    logicalModelId: string,
-    session: ProjectLoadSession = this.captureProjectSession(),
-  ): string {
-    const sourceIdentity =
-      session.sourceSha256?.trim() ||
-      `project:${session.projectId ?? 'none'}:generation:${session.generation}`;
-    const runtimeModelId = createIfcRuntimeModelId(
-      sourceIdentity,
-      logicalModelId,
-      session.generation,
-    );
-    this.ifcRuntimeModelIds.set(logicalModelId, runtimeModelId);
-    this.ifcLogicalModelIds.set(runtimeModelId, logicalModelId);
-    return runtimeModelId;
-  }
-
-  /** 登记一次 IFC 加载的所有者；在 onItemSet 到达时用于拒绝过期模型。 */
-  registerIfcRuntimeModel(
-    logicalModelId: string,
-    runtimeModelId: string,
-    owner: ProjectLoadSession,
-  ): void {
-    this.ifcRuntimeModelIds.set(logicalModelId, runtimeModelId);
-    this.ifcLogicalModelIds.set(runtimeModelId, logicalModelId);
-    this.ifcRuntimeModelOwners.set(runtimeModelId, owner);
-  }
-
-  /** 反查 Fragments runtime ID 对应的 logical ID。 */
-  resolveLogicalModelId(runtimeModelId: string): string | null {
-    return this.ifcLogicalModelIds.get(runtimeModelId) ?? null;
-  }
-
-  /** 判断 runtime ID 是否属于当前工程，避免旧任务迟到后进入新 scene。 */
-  isCurrentRuntimeModel(runtimeModelId: string): boolean {
-    if (this.ifcRuntimeModelOwners.has(runtimeModelId)) {
-      const owner = this.ifcRuntimeModelOwners.get(runtimeModelId);
-      return owner != null && this.isCurrentSession(owner);
-    }
-    const session = this.captureProjectSession();
-    return this.currentIfcEntries.some(
-      (entry) =>
-        createIfcRuntimeModelId(
-          session.sourceSha256?.trim() ||
-            `project:${session.projectId ?? 'none'}:generation:${session.generation}`,
-          entry.modelId,
-          session.generation,
-        ) === runtimeModelId,
-    );
   }
 
   // 视图已可交互（含 DEV-only）；IFC WASM/worker 的初始化由 ifcLoader 独立管理。
@@ -489,7 +301,7 @@ export class AppState {
    *       loadedModels / loadedXmlModGroups / loadedStlGroups / highlightedItems /
    *       hasFittedCamera / projectSourceToViewerMatrix
    *
-   * 注意：loadedModels.clear() 仅清空 state 侧索引，不 dispose Three.js 对象；
+   * 注意：ifc.reset() 仅清空 state 侧索引，不 dispose Three.js 对象；
    * ctx.fragments 中的实际模型需由 projectCleanupService 在调用本方法前显式 dispose。
    */
   resetGimState(invalidate = true) {
@@ -512,9 +324,7 @@ export class AppState {
     this.ifcGuidIndex.clear();
     this.cbmNodeIndex.clear();
     this.ifcGuidToName.clear();
-    this.ifcRuntimeModelIds.clear();
-    this.ifcLogicalModelIds.clear();
-    this.ifcRuntimeModelOwners.clear();
+    this.ifc.reset();
     this.substationCapabilities = null;
     this.substationEntryPaths = [];
     this.substationEntrySizes.clear();
@@ -541,9 +351,6 @@ export class AppState {
     this.stlRootGroup = null;
     // 清空项目级坐标转换矩阵（新项目需重新自动同步或手动设置）
     this.projectSourceToViewerMatrix = null;
-    // 清空 IFC 模型索引：若 dispose 未触发 onItemDeleted，
-    // state.loadedModels 会残留 stale modelId，导致 loadIfcEntry 误判"模型已加载，跳过"
-    this.loadedModels.clear();
     // 清空高亮索引，避免切换项目后旧高亮状态残留
     this.highlightedItems = null;
     // 清空 MOD/STL 高亮状态（clone 材质由 resetModHighlight dispose）

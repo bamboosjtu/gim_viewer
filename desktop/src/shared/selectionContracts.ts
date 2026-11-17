@@ -6,7 +6,18 @@ export interface SelectionRequest {
   id: number;
   session: ProjectLoadSession;
   signal: AbortSignal;
-  target: { kind: 'cbm' | 'spatial-node' | 'ifc-object' | 'ifc-element' | 'sld' | 'engineering' | 'engineering-source' | 'engineering-group'; key: string } | null;
+  target: {
+    kind:
+      | 'cbm'
+      | 'spatial-node'
+      | 'ifc-object'
+      | 'ifc-element'
+      | 'sld'
+      | 'engineering'
+      | 'engineering-source'
+      | 'engineering-group';
+    key: string;
+  } | null;
 }
 
 export interface EngineeringSelectionScope {
@@ -25,13 +36,38 @@ export interface SelectionCommitGuard {
 }
 
 export interface SelectionGeometryState {
-  evidence?:import('../engineering/representations.js').RepresentationEvidenceState;
-  status: 'not-loaded' | 'unknown' | 'available' | 'renderable' | 'empty' | 'unsupported' | 'partial' | 'failed' | 'unlinked' | 'ambiguous' | 'file-only' | 'unassociated';
+  evidence?: import('../engineering/representations.js').RepresentationEvidenceState;
+  status:
+    | 'not-loaded'
+    | 'unknown'
+    | 'available'
+    | 'renderable'
+    | 'empty'
+    | 'unsupported'
+    | 'partial'
+    | 'failed'
+    | 'unlinked'
+    | 'ambiguous'
+    | 'file-only'
+    | 'unassociated';
   detail: string;
 }
 
-
 export interface SubstationFineQueue {
-  enqueueUserIfcFine(key: string, run: () => Promise<void>): { promise: Promise<void>; cancel: () => boolean };
+  enqueueUserIfcFine(
+    key: string,
+    run: () => Promise<void>,
+  ): { promise: Promise<void>; cancel: () => boolean };
 }
 
+/** Renderer visibility adapter owned by the active selection session. */
+export interface SelectionVisibilityController {
+  registerModel(
+    id: string,
+    model: import('../viewer/ifcModelVisibility.js').IfcVisibilityModel,
+  ): import('../viewer/ifcModelVisibility.js').IfcModelVisibility;
+  removeModel(id: string, runtimeId: string): void;
+  setModelVisible(id: string, visible: boolean): void;
+  sync(guard?: SelectionCommitGuard): Promise<void>;
+  reset(): void;
+}

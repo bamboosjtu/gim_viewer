@@ -99,7 +99,7 @@ it('A loaded does not let B PARTINDEX skip loading; reverse aliases and repeated
   expect(state.loadedXmlModGroups.size).toBe(6);
   await loadModStlForNode(state,part);
   expect(state.loadedXmlModGroups.size).toBe(6);
-  expect(state.selectionMessage).toContain('2 条装配路径');
+  expect(state.selection.selectionMessage).toContain('2 条装配路径');
   const boxA = new THREE.Box3(), boxB = new THREE.Box3();
   collectDeviceGroups(state,a.devPath,deviceOccurrenceScope(tree,a)).forEach((g) => boxA.expandByObject(g));
   collectDeviceGroups(state,b.devPath,deviceOccurrenceScope(tree,b)).forEach((g) => boxB.expandByObject(g));

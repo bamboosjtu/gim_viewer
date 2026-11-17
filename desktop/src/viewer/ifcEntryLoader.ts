@@ -100,15 +100,15 @@ export async function loadIfcEntry(
   if (!isCurrent()) return;
 
   // 1. 防御性短路
-  if (state.loadedModels.has(modelId)) {
+  if (state.ifc.loadedModels.has(modelId)) {
     debugLog(DEBUG_IFC_LOAD, `[IFC Loader] 模型已加载，跳过: ${modelId}`);
     return;
   }
 
   // logical ID 用于业务索引/数据库；runtime ID 绑定源 GIM 和本次会话，
   // 防止工程 A 的迟到 Fragments 事件占用工程 B 的 key。
-  const runtimeModelId = state.getRuntimeModelId(modelId, session);
-  state.registerIfcRuntimeModel(modelId, runtimeModelId, session);
+  const runtimeModelId = state.ifc.getRuntimeModelId(modelId, session);
+  state.ifc.registerIfcRuntimeModel(modelId, runtimeModelId, session);
   if (ctx.fragments.list.has(runtimeModelId)) return;
 
   const openingPolicy = options.openingPolicy ?? 'bim-lod';
@@ -185,7 +185,7 @@ export async function loadIfcEntry(
   // registration directly instead of delaying each file by an animation frame.
 
   const inFragments = ctx.fragments.list.has(runtimeModelId);
-  const loaded = state.loadedModels.has(modelId);
+  const loaded = state.ifc.loadedModels.has(modelId);
   const fragModel = ctx.fragments.list.get(runtimeModelId);
   const childCount = fragModel?.object?.children?.length ?? 0;
 

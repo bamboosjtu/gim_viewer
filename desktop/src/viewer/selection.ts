@@ -27,13 +27,13 @@ export function setupSelection(
   let hoverSerial = 0, hoverTimer: ReturnType<typeof setTimeout> | undefined, hoverBusy = false;
   let hoverPoint: {x: number; y: number} | null = null;
   const clearHover = () => { hoverSerial++; hoverPoint = null; clearTimeout(hoverTimer); clearHoverOutline(state); };
-  state.hoverCleanup = clearHover;
-  const cameraIntent = () => { state.viewState.cameraNavigationVersion++; state.viewState.viewerUserInteracted = true; state.viewState.hasFittedCamera = true; pickSerial++; state.hoverCleanup?.(); };
+  state.selection.hoverCleanup = clearHover;
+  const cameraIntent = () => { state.viewState.cameraNavigationVersion++; state.viewState.viewerUserInteracted = true; state.viewState.hasFittedCamera = true; pickSerial++; state.selection.hoverCleanup?.(); };
   const dispose = () => {
     if(signal.aborted)return;
     abort.abort();pointer=null;pickSerial++;
     clearHover();
-    if(state.hoverCleanup===clearHover)state.hoverCleanup=null;
+    if(state.selection.hoverCleanup===clearHover)state.selection.hoverCleanup=null;
     (ctx.world.camera.controls as any)?.removeEventListener?.('controlstart', cameraIntent);
   };
 
@@ -43,14 +43,14 @@ export function setupSelection(
   const runHover = async () => {
     if (hoverBusy || pointer || !hoverPoint || !state.initialized) return;
     hoverBusy = true;
-    const serial = hoverSerial, point = hoverPoint, session = state.captureProjectSession(), selection = state.selectionRequest;
-    const current = () => !signal.aborted && serial === hoverSerial && state.isCurrentSession(session) && state.selectionRequest === selection;
+    const serial = hoverSerial, point = hoverPoint, session = state.captureProjectSession(), selection = state.selection.selectionRequest;
+    const current = () => !signal.aborted && serial === hoverSerial && state.isCurrentSession(session) && state.selection.selectionRequest === selection;
     try {
       const canvas = container.querySelector('canvas'), dom = canvas ?? container, rect = dom.getBoundingClientRect();
       if (!rect.width || !rect.height) return;
       if (point.x < rect.left || point.y < rect.top || point.x > rect.left+rect.width || point.y > rect.top+rect.height) { clearHoverOutline(state); return; }
       const ray = new THREE.Raycaster(); ray.setFromCamera(new THREE.Vector2((point.x-rect.left)/rect.width*2-1,-(point.y-rect.top)/rect.height*2+1),(ctx.world.camera as any).three);
-      const dev = state.deviceLodRuntime?.pick?.(ray), near = [...state.ifcRegionalRuntimes.values()].flatMap(runtime => {const hit=runtime.pick(ray);return hit?[{runtime,...hit}]:[];}).sort((a,b)=>a.distance-b.distance)[0];
+      const dev = state.deviceLodRuntime?.pick?.(ray), near = [...state.ifc.regionalRuntimes.values()].flatMap(runtime => {const hit=runtime.pick(ray);return hit?[{runtime,...hit}]:[];}).sort((a,b)=>a.distance-b.distance)[0];
       const far = await raycastVisibleIfc(ctx,{camera:(ctx.world.camera as any).three,mouse:new THREE.Vector2(point.x,point.y),dom:dom as HTMLCanvasElement});
       if (!current()) return;
       const farDistance = far?.rayDistance ?? far?.distance ?? Infinity;
@@ -72,7 +72,7 @@ export function setupSelection(
     if (!canvasTarget(event.target) || pointer || event.buttons) return;
     hoverPoint={x:event.clientX,y:event.clientY};hoverSerial++;clearTimeout(hoverTimer);hoverTimer=setTimeout(runHover,100);
   }, {signal});
-  container.addEventListener('pointerleave', () => state.hoverCleanup?.(), {signal});
+  container.addEventListener('pointerleave', () => state.selection.hoverCleanup?.(), {signal});
   const canvasTarget = (target: EventTarget | null) => target === container || target === container.querySelector('canvas');
   container.addEventListener('pointerdown', event => {
     if (!canvasTarget(event.target)) { suppressClick = true; return; }
@@ -92,14 +92,14 @@ export function setupSelection(
     if (!state.initialized || e.button !== 0 || suppressClick || e.ctrlKey || e.shiftKey || e.altKey) return;
     const canvas=container.querySelector('canvas');
     if (e.target!==container && e.target!==canvas) return;
-    const serial = ++pickSerial, session = state.captureProjectSession(), previous = state.selectionRequest;
+    const serial = ++pickSerial, session = state.captureProjectSession(), previous = state.selection.selectionRequest;
     try {
       const regional:Array<{runtime:IfcRegionalRuntime;object:RegionalObject;distance:number}>=[];
       let devHit: ReturnType<NonNullable<NonNullable<AppState['deviceLodRuntime']>['pick']>> = null;
-      if(state.ifcRegionalRuntimes.size || state.deviceLodRuntime?.pick){const rect=(canvas||container).getBoundingClientRect();
+      if(state.ifc.regionalRuntimes.size || state.deviceLodRuntime?.pick){const rect=(canvas||container).getBoundingClientRect();
         if(rect.width>0&&rect.height>0){const ray=new THREE.Raycaster();ray.setFromCamera(new THREE.Vector2((e.clientX-rect.left)/rect.width*2-1,-(e.clientY-rect.top)/rect.height*2+1),(ctx.world.camera as any).three);
           devHit=state.deviceLodRuntime?.pick?.(ray)??null;
-          for(const runtime of state.ifcRegionalRuntimes.values()){const hit=runtime.pick(ray);if(hit)regional.push({runtime,...hit});}regional.sort((a,b)=>a.distance-b.distance);}}
+          for(const runtime of state.ifc.regionalRuntimes.values()){const hit=runtime.pick(ray);if(hit)regional.push({runtime,...hit});}regional.sort((a,b)=>a.distance-b.distance);}}
       // Pick the visible browser representation before beginSelection clears
       // the previous visibility filter or releases its fine representation.
       // The new request still owns every asynchronous result below.
@@ -108,13 +108,13 @@ export function setupSelection(
         dom:canvas as HTMLCanvasElement || container,
       });
       const result=await picking;
-      if (signal.aborted || serial !== pickSerial || !state.isCurrentSession(session) || state.selectionRequest !== previous) return;
+      if (signal.aborted || serial !== pickSerial || !state.isCurrentSession(session) || state.selection.selectionRequest !== previous) return;
       const near=regional[0];
       // A miss during isolation preserves the logical selection and its filter.
       // Camera gestures never start a request or clear a fine representation.
-      if (!result && !near && !devHit && state.onlySelected) return;
-      const request=state.beginSelection({kind:'ifc-element',key:''}, 'viewport');
-      const owner=state.selectionGuard(request);
+      if (!result && !near && !devHit && state.selection.onlySelected) return;
+      const request=state.selection.beginSelection({kind:'ifc-element',key:''}, 'viewport');
+      const owner=state.selection.selectionGuard(request);
       const guard={...owner,isCurrent:()=>!signal.aborted&&owner.isCurrent(),isSessionCurrent:()=>!signal.aborted&&owner.isSessionCurrent()};
       const ifcDistance=result ? (result.rayDistance??result.distance??Infinity) : Infinity;
       if(onDevSelected && devHit && devHit.distance<Math.min(near?.distance??Infinity,ifcDistance)) {

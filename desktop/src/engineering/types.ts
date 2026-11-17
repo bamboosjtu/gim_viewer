@@ -85,6 +85,9 @@ export interface VocabularyObservation {
 }
 
 export interface EngineeringEntity {
+  /** Functional equipment subtype inferred from confirmed members, not catalog facts. */
+  subtypeStatus?:'confirmed'|'candidate'|'unresolved';
+  subtypeEvidence?:readonly string[];
   /** Identity/assembly role; category is exclusively the workbook directory code. */
   recognitionCode?:string;
   standardClass?:ObjectInterpretation['standardClass'];
