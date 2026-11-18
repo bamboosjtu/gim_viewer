@@ -116,14 +116,6 @@ for (const [layer,sourceRoot] of [...['engineering','gim','viewer','ui','service
       : ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword ? node.arguments[0] : undefined;
     if (specifier && ts.isStringLiteral(specifier)) {
       const name = specifier.text;
-      if (sourceRoot === root && /^@gim\/gim-sdk\/(?:engineering|gim|shared)\//.test(name)) {
-        if (!sdkInternalImports[localPath]?.includes(name)) {
-          failures.push(`${localPath}: use the SDK capability export instead of adding an internal import ${name}`);
-        }
-        const observed = observedSdkInternalImports.get(localPath) ?? new Set();
-        observed.add(name);
-        observedSdkInternalImports.set(localPath, observed);
-      }
       if(sourceRoot===sdkRoot&&!name.startsWith('.')&&!name.startsWith('@gim/powerline-core/'))failures.push(`${localPath}: SDK runtime dependency is not declared portable core: ${name}`);
       const packageError=packageBoundaryError(name,sourceRoot===sdkRoot?{'@gim/powerline-core':true}:sharedDependencies);if(packageError)failures.push(`${localPath}: ${packageError}: ${name}`);
       const resolved = name.startsWith('.') ? resolve(dirname(path), name.replace(/\.js$/, '.ts')) : null;
@@ -216,17 +208,9 @@ for (const family of runtimeFamilies) {
   paths.forEach(visit);
 }
 
-for (const [file, imports] of Object.entries(sdkInternalImports)) {
-  for (const name of imports) {
-    if (!observedSdkInternalImports.get(file)?.has(name)) {
-      failures.push(`${file}: remove unused SDK internal-import exception ${name}`);
-    }
-  }
-}
-
 // Whole-source static value graph. Dynamic and type dependencies are counted,
 // but cannot create an eager module-initialization cycle by themselves.
-const all=[...files(root),...files(sdkRoot)], graph=new Map(all.map(path=>[path,new Set()]));
+const all=[...files(root),...files(resolve(root,'../bridge')),...files(sdkRoot)], graph=new Map(all.map(path=>[path,new Set()]));
 let typeEdges=0,dynamicEdges=0;
 for(const path of all){
  const ast=ts.createSourceFile(path,readFileSync(path,'utf8'),ts.ScriptTarget.Latest,true);
@@ -234,6 +218,20 @@ for(const path of all){
   const dynamic=ts.isCallExpression(node)&&node.expression.kind===ts.SyntaxKind.ImportKeyword;
   const declaration=ts.isImportDeclaration(node)||ts.isExportDeclaration(node);
   const specifier=declaration?node.moduleSpecifier:dynamic?node.arguments[0]:undefined;
+  const internal = ts.isImportTypeNode(node)&&ts.isLiteralTypeNode(node.argument)
+    ? node.argument.literal : specifier;
+  if (internal && ts.isStringLiteral(internal) && !path.startsWith(sdkRoot + sep)) {
+    const name = internal.text;
+    const localPath = relative(root, path).replaceAll('\\', '/');
+    if (/^@gim\/gim-sdk\/(?:engineering|gim|shared)\//.test(name)) {
+      if (!sdkInternalImports[localPath]?.includes(name)) {
+        failures.push(`${localPath}: use the SDK capability export instead of adding an internal import ${name}`);
+      }
+      const observed = observedSdkInternalImports.get(localPath) ?? new Set();
+      observed.add(name);
+      observedSdkInternalImports.set(localPath, observed);
+    }
+  }
   if(specifier&&ts.isStringLiteral(specifier)&&specifier.text.startsWith('.')){
    const target=resolve(dirname(path),specifier.text.replace(/\.js$/,'.ts'));
    const clause=ts.isImportDeclaration(node)?node.importClause:undefined;
@@ -244,6 +242,14 @@ for(const path of all){
   ts.forEachChild(node,scan);
  };scan(ast);
 }
+for (const [file, imports] of Object.entries(sdkInternalImports)) {
+  for (const name of imports) {
+    if (!observedSdkInternalImports.get(file)?.has(name)) {
+      failures.push(`${file}: remove unused SDK internal-import exception ${name}`);
+    }
+  }
+}
+
 const visiting=new Set(),visited=new Set();
 function checkCycle(path,trail=[]){
  if(visiting.has(path)){failures.push(`Static value cycle: ${[...trail,path].map(p=>relative(root,p)).join(' -> ')}`);return;}
