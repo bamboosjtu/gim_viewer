@@ -35,7 +35,7 @@
 | E09 | 中性点成套设备 | 接地电阻成套装置 | GroundResistance | 电气设备模型索引表!B28:D28 |  |
 | E09 | 中性点成套设备 | 中性点成套设备 | OpenGroundingEquipment/NeutralPointEquipment | 电气设备模型索引表!B29:D29 |  |
 | E09 | 中性点成套设备 | 隔直装置 | DCBlockingDevice | 电气设备模型索引表!B30:D30 |  |
-| E10 | 电容器 | 框架式电容器组 | FrameCapacitor | 电气设备模型索引表!B31:D31 |  |
+| E10 | 电容器 | 电容器组 | FrameCapacitor | 电气设备模型索引表!B31:D31 |  |
 | E10 | 电容器 | 集合式电容器组 | CollectiveCapacitor | 电气设备模型索引表!B32:D32 |  |
 | E10 | 电容器 | 串补电容器成套装置 | SeriesCompensation | 电气设备模型索引表!B33:D33 |  |
 | E10 | 电容器 | 降压式 SVG | BuckSVG | 电气设备模型索引表!B34:D34 |  |
@@ -100,18 +100,19 @@
 | M05 | 照明及动力 | 开关 | Switch | 材料模型索引表!B28:D28 |  |
 | M05 | 照明及动力 | 插座 | Plug | 材料模型索引表!B29:D29 |  |
 | M06 | 接地材料 | 接地材料 | GroundingMaterial | 材料模型索引表!B30:D30 |  |
-| M07 | 电缆及其附件 | 电缆 | Cable | 材料模型索引表!B31:D31 |  |
-| M07 | 电缆及其附件 | 电缆终端 | CableTermination | 材料模型索引表!B32:D32 |  |
-| M07 | 电缆及其附件 | 电缆辅助设施/电缆桥架/桥架 | CableAuxiliaryFacilities | 材料模型索引表!B33:D33 |  |
-| M08 | 防火材料 | 电缆沟防火墙 | CableDitchFireWall | 材料模型索引表!B34:D34 |  |
-| M09 | 安装材料 | 槽钢 | USteel | 材料模型索引表!B35:D35 |  |
-| M09 | 安装材料 | 角钢 | AngleSteel | 材料模型索引表!B36:D36 |  |
-| M09 | 安装材料 | 工字钢 | IBeam | 材料模型索引表!B37:D37 |  |
-| M09 | 安装材料 | 钢板 | SteelSheet | 材料模型索引表!B38:D38 |  |
-| M09 | 安装材料 | 金属围栏 | MetalFence | 材料模型索引表!B39:D39 |  |
-| M09 | 安装材料 | 电气埋管 | ElectricBuriedPipe | 材料模型索引表!B40:D40 |  |
-| M10 | 水暖材料 | 风管 | Airduct | 材料模型索引表!B41:D41 |  |
-| M10 | 水暖材料 | 水管 | Plumbing | 材料模型索引表!B42:D42 |  |
+| M06 | 接地材料 | 接地电阻 | GroundResistance | 材料模型索引表!B31:D31 | 是 |
+| M07 | 电缆及其附件 | 电缆 | Cable | 材料模型索引表!B32:D32 |  |
+| M07 | 电缆及其附件 | 电缆终端 | CableTermination | 材料模型索引表!B33:D33 |  |
+| M07 | 电缆及其附件 | 电缆辅助设施/电缆桥架/桥架 | CableAuxiliaryFacilities | 材料模型索引表!B34:D34 |  |
+| M08 | 防火材料 | 电缆沟防火墙 | CableDitchFireWall | 材料模型索引表!B35:D35 |  |
+| M09 | 安装材料 | 槽钢 | USteel | 材料模型索引表!B36:D36 |  |
+| M09 | 安装材料 | 角钢 | AngleSteel | 材料模型索引表!B37:D37 |  |
+| M09 | 安装材料 | 工字钢 | IBeam | 材料模型索引表!B38:D38 |  |
+| M09 | 安装材料 | 钢板 | SteelSheet | 材料模型索引表!B39:D39 |  |
+| M09 | 安装材料 | 金属围栏 | MetalFence | 材料模型索引表!B40:D40 |  |
+| M09 | 安装材料 | 电气埋管 | ElectricBuriedPipe | 材料模型索引表!B41:D41 |  |
+| M10 | 水暖材料 | 风管 | Airduct | 材料模型索引表!B42:D42 |  |
+| M10 | 水暖材料 | 水管 | Plumbing | 材料模型索引表!B43:D43 |  |
 
 ## 构件
 

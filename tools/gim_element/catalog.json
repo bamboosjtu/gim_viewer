@@ -372,7 +372,8 @@
       "label": "接地材料",
       "order": 27,
       "items": [
-        "material:groundingmaterial"
+        "material:groundingmaterial",
+        "material:groundresistance"
       ]
     },
     {
@@ -1264,12 +1265,15 @@
       "id": "protective_device",
       "label": "保护设备",
       "term": "ProtectiveDevice",
-      "aliases": [],
+      "aliases": [
+        "ProtectionEquipment",
+        "ProtectiveDevice/ProtectionEquipment"
+      ],
       "order": 43,
       "evidence": {
         "sourceKind": "workbook",
         "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-        "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+        "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
         "sheet": "设备模型部件名称对照表",
         "cell": "C45",
         "cellRange": "B45:C45",

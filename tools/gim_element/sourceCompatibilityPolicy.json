@@ -49,7 +49,6 @@
     "lightningarrester": "E15",
     "lightningprotector": "E15",
     "secondarycabinet": "E16",
-    "screencabinetsandinstallations": "E16",
     "terminalbox": "E16.terminal_box",
     "powerbox/lightingbox/maintenancebox": "E17",
     "flexiblecircuitconductor": "M01",
@@ -160,5 +159,8 @@
   "description": "Format-specific source enums. Exact model declarations take precedence; collisions are observable, not extra classifications.",
   "structured": {
     "道路": "C-C5"
+  },
+  "cabinetTypeWithFamilyName": {
+    "screencabinetsandinstallations": "SecondaryCabinet"
   }
 }

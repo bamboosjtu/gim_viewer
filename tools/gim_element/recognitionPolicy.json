@@ -1286,7 +1286,15 @@
     },
     "equipment:groundresistance": {
       "materialRecognitionCode": "M06",
-      "componentId": "ground_resistance"
+      "componentId": "ground_resistance",
+      "materialCatalogId": "material:groundresistance",
+      "materialTerms": [
+        "接地电阻"
+      ]
     }
-  }
+  },
+  "catalogRoles": {
+    "material:groundresistance": "M06"
+  },
+  "neutralAttachmentCatalogId": "equipment:opengroundingequipment/neutralpointequipment"
 }

@@ -2,11 +2,12 @@ import catalog from './standardCatalog.json';
 import policy from './recognitionPolicy.json';
 export const STANDARD_CATALOG_VERSION=catalog.version;
 /** The catalog supplies facts; the product policy supplies private semantic roles. */
-export const STANDARD_CATALOG=catalog.items.map(item=>({...item,recognitionCode:(policy.terms as Record<string,string>)[item.term.toLowerCase()]}));
+export const STANDARD_CATALOG=catalog.items.map(item=>({...item,recognitionCode:(policy.catalogRoles as Record<string,string>)[item.id]??(policy.terms as Record<string,string>)[item.term.toLowerCase()]}));
 const normalize=(value:string)=>value.normalize('NFKC').replace(/\s+/g,'').toLowerCase();
 type Item=typeof STANDARD_CATALOG[number];
 const terms=new Map<string,Item[]>();
 const byId = new Map(STANDARD_CATALOG.map(item => [item.id,item]));
+export const standardCatalogItem=(id:string)=>byId.get(id);
 const contextualTerms:Readonly<Record<string,string>> = policy.contextualTerms;
 for(const item of STANDARD_CATALOG)for(const name of [item.label,...item.label.split('/'),item.term,...item.term.split('/'),...item.aliases]){
   const key=normalize(name),rows=terms.get(key)??[];if(!rows.some(row=>row.id===item.id))rows.push(item);terms.set(key,rows);

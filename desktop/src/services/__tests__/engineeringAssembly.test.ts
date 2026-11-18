@@ -34,6 +34,18 @@ it.each(['composition','source','inventory','inventory-search'] as const)('trans
   await expect(decodeEngineeringWorkerResult(await encodeEngineeringWorkerResultAsync(restored),()=>true)).rejects.toThrow('child edge');
 });
 async function graph(){const files:Record<string,string>={'project.cbm':'OBJECTMODELPOINTER=a.dev','a.dev':'TYPE=GIS'};return extractEngineeringSourceGraph({paths:Object.keys(files),readText:async p=>files[p]});}
+it('publishes the merged capacitor group through the Viewer assembly and inventory',async()=>{
+  const files:Record<string,string>={
+    'project.cbm':'OBJECTMODELPOINTER=unit.dev\nBASEFAMILY=unit.fam',
+    'unit.dev':'TYPE=AssembledCapacitorBank;SeriesCapacitorSet\nSYMBOLNAME=35kV装置',
+    'unit.fam':'[设计参数]\n设备类型=设备类型=并联电容器组',
+  };
+  const source=await extractEngineeringSourceGraph({paths:Object.keys(files),readText:async path=>files[path]});
+  const {snapshot,navigation}=assembleEngineeringView('scope',source,[],[]);
+  expect(snapshot.entities).toHaveLength(1);
+  expect(snapshot.entities[0]).toMatchObject({category:'E10',standardClass:{id:'equipment:framecapacitor',label:'电容器组'}});
+  expect([...navigation.inventory!.nodes.values()].some(node=>node.title==='电容器组'&&node.entityCount===1)).toBe(true);
+});
 it('publishes the independent source tree after recognition fails, including source-cache restoration',async()=>{
   const g=await graph(),fail=()=>{throw Error('recognition failure');};
   const first=assembleEngineeringView('scope',g,[],[],[],fail);

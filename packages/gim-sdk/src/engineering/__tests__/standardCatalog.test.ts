@@ -11,17 +11,18 @@ const build=(rows:SourceRecord[])=>normalizeEngineeringModel('scope',rows.map(to
 
 it('covers every verified index row, using the maintained workbook hierarchy and highlighted additions',()=>{
   expect(STANDARD_CATALOG.filter(i=>i.kind==='equipment')).toHaveLength(60);
-  expect(STANDARD_CATALOG.filter(i=>i.kind==='material')).toHaveLength(41);
+  expect(STANDARD_CATALOG.filter(i=>i.kind==='material')).toHaveLength(42);
   expect(STANDARD_CATALOG.filter(i=>i.kind==='construction')).toHaveLength(40);
-  expect(standardTerms('MetalFence')[0].evidence.termCells).toEqual(['D39']);
+  expect(standardTerms('MetalFence')[0].evidence.termCells).toEqual(['D40']);
   expect(standardTerms('Airduct')[0].evidence.sheet).toBe('材料模型索引表');
   expect(STANDARD_CATALOG.filter(i=>i.label==='均压屏蔽装置')).toHaveLength(2);
 });
 it.each(STANDARD_CATALOG.flatMap(item=>[item.term,item.label].map(name=>({item,name}))))('recognizes $name from structured source declarations',({item,name})=>{
   const result=interpretObject(toObjectEvidence(source('x','OTHERS',{properties:[field(item.kind==='equipment'?'EQUIPMENTTYPE':item.kind==='material'?'MATERIALTYPE':'构件类型',name)]})));
-  if(standardTerms(name).length===1)expect(result.category).toBe(standardTerms(name)[0].category);
+  const expected=standardTerms(name).length>1?undefined:item.id==='material:groundresistance'?item:standardTerms(name)[0];
+  if(expected)expect(result.category).toBe(expected.category);
   else expect(result.category).toBe('U-OBJECT');
-  if(standardTerms(name).length===1)expect(result.standardClass).toMatchObject({id:standardTerms(name)[0].id,kind:item.kind,status:'confirmed'});
+  if(expected)expect(result.standardClass).toMatchObject({id:expected.id,kind:item.kind,status:'confirmed'});
   expect(result.classificationEvidence?.length||result.standardClass?.evidence.length).toBeGreaterThan(0);
 });
 it.each([['IFCCABLESEGMENT','M07'],['IFCLIGHTFIXTURE','M05'],['IFCOUTLET','M05'],['IFCTRANSFORMER','E01'],['IFCRAMPFLIGHT','C02'],['IFCREINFORCINGBAR','C02'],['IFCCHILLER','C02']])('maps common outward IFC type %s', (type,category)=>{

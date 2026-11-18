@@ -15,7 +15,7 @@ it.each([['TerminalBox','M04','terminal_box'],['GroundResistance','E09','ground_
  const model=interpretObject(toObjectEvidence(record(term,'unknown',{OBJECTROLE:'independent'})));
  expect(model.category).toBe(category);expect(model.componentType).toBeUndefined();
  const component=interpretObject(toObjectEvidence(record(term,'unknown',{OBJECTROLE:'part'})));
- expect(component).toMatchObject({meaning:'part',componentType:{id:part,status:'confirmed'}});expect(component.standardClass).toBeUndefined();expect(component.equipmentType).toBeUndefined();
+ expect(component).toMatchObject({meaning:'part',componentType:{id:part,status:'confirmed'}});if(part==='ground_resistance')expect(component.standardClass?.id).toBe('material:groundresistance');else expect(component.standardClass).toBeUndefined();expect(component.equipmentType).toBeUndefined();
 });
 it('retains both original locations for an ambiguous standard declaration',()=>{
  const result=interpretObject(toObjectEvidence(record('OTHERS','unknown',{SYSCLASSIFYNAME:'均压屏蔽装置'})));

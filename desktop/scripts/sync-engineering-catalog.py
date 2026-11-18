@@ -26,14 +26,14 @@ def main():
   eq=({'oilimmersedtransformer':'oil_immersed_transformer','gis':'gis','hgis':'hgis','acporcelaincircuitbreaker':'ac_porcelain_circuit_breaker'}.get(item['term'].lower()) or snake(item['term'])) if item['kind']=='equipment' else None
   e=item['evidence'];base={k:e[k] for k in ['sourceKind','workbookSha256','sheet','cellRange','verification','sourceLocation']}
   for word in [item['label'],*item['label'].split('/'),item['term'],*item['term'].split('/'),*item['aliases']]:
-   cell=e['termCells'][0] if word in [item['term'],*item['term'].split('/')] else e['nameCell']
+   cell=e['termCells'][0] if not re.search('[\u3400-\u9fff]',word) else e['nameCell']
    entry=insert(entries,word,item['id'],{**base,'cell':cell},'catalogIds')
    if eq:entry['equipmentType']=eq
   if eq:
    for word in [item['term'],*item['term'].split('/')]:vocab['equipment'][word.lower()]=eq
  for part in catalog['components']:
   for word in [part['label'],*part['label'].split('/'),part['term'],*part['term'].split('/'),*part['aliases']]:
-   e=part['evidence'];cell=e['cell'] if word in [part['term'],*part['term'].split('/')] else e['cellRange'].split(':')[0]
+   e=part['evidence'];cell=e['cell'] if not re.search('[\u3400-\u9fff]',word) else e['cellRange'].split(':')[0]
    entry=insert(vocab['componentDictionary']['entries'],word,part['id'],{**e,'cell':cell},'componentIds')
    if word==part['term'] and len({p['label'] for p in catalog['components'] if p['term'].lower()==word.lower()})>1:entry['evidence']={**entry['evidence'],'verification':'ambiguous'}
    if len(entry['componentIds'])==1:entry['componentType']=part['id']

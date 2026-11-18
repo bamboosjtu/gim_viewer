@@ -22,8 +22,9 @@ export function recoverComponentMembership(rows:readonly ObjectEvidence[],meanin
   }
   const attach=(row:ObjectEvidence,to:string,proof:string[],status:'confirmed'|'candidate'|'unresolved',previous=owners.get(row.sourceId))=>{
     const m=meaning.get(row.sourceId)!;owners.set(row.sourceId,to);
-    m.meaning='part';m.independent=false;m.membershipEvidence=proof;m.membershipStatus=status;m.basis='declared_component_host';
-    if(m.objectRole)m.objectRole={id:'part',status,evidence:proof};
+    if(m.meaning!=='neutral_set'){m.meaning='part';m.basis='declared_component_host';}
+    m.independent=false;m.membershipEvidence=proof;m.membershipStatus=status;
+    if(m.objectRole)m.objectRole={id:m.meaning,status,evidence:proof};
     const visited=new Set<string>();
     const visit=(id:string)=>{if(visited.has(id))return;visited.add(id);for(const child of children.get(id)??[]){
       const cm=meaning.get(child.sourceId)!;
@@ -36,22 +37,29 @@ export function recoverComponentMembership(rows:readonly ObjectEvidence[],meanin
     const prior=owners.get(row.sourceId);
     const reason=prior?pending.get(prior)?.reason:undefined;
     // Host declarations can fill absent ownership, not erase contrary source evidence.
-    if(reason && reason!=='component_whole_unresolved')continue;
-    if(m.basis==='attribute_conflict'||row.objectRoles?.some(p=>p.value==='independent')||!(m.meaning==='part'||m.componentType?.status==='confirmed'))continue;
+    const neutral=m.meaning==='neutral_set';
+    if(reason && reason!=='component_whole_unresolved' && !(neutral&&reason==='neutral_set_main_unresolved'))continue;
+    if(m.basis==='attribute_conflict'||row.objectRoles?.some(p=>p.value==='independent')||!(neutral||m.meaning==='part'||m.componentType?.status==='confirmed'))continue;
     const direct=row.declaredHostSourceIds??[];
     const declared=!!(direct.length||row.hostCodes?.length||row.hostDesignations?.length);
     const explicit=[...direct,...(row.hostCodes??[]),...(row.hostDesignations??[])];
     const designations=row.hostDesignations??[];
     if(!explicit.length)continue;
-    const constraints=[...direct.map(p=>{const owner=owners.get(p.value),host=owner?entities.get(owner):undefined;return host&&isEquipmentHost(host)?new Set([host.id]):new Set<string>();}),...(row.hostCodes??[]).map(p=>codes.get(key(p.value))??new Set<string>()),...designations.map(p=>names.get(key(p.value))??new Set<string>())];
+    const luminaireTerminal=m.basis==='luminaire_terminal_assembly';
+    const luminaireHost=(host:EngineeringEntity)=>luminaireTerminal&&host.standardClass?.id==='material:lamps';
+    const constraints=[...direct.map(p=>{const owner=owners.get(p.value),host=owner?entities.get(owner):undefined;return host&&(isEquipmentHost(host)||luminaireHost(host))?new Set([host.id]):new Set<string>();}),...(row.hostCodes??[]).map(p=>codes.get(key(p.value))??new Set<string>()),...designations.map(p=>names.get(key(p.value))??new Set<string>())];
     if(!constraints.length)continue;
     let candidates=new Set(constraints[0]);for(const values of constraints.slice(1))candidates=new Set([...candidates].filter(id=>values.has(id)));
     const matched=[...candidates];
-    candidates=new Set(matched.filter(id=>componentHostCompatibility(m,entities.get(id)!)==='compatible'||!m.componentType&&row.objectRoles?.some(p=>p.value==='part')));
+    const accepts=(id:string)=>neutral?COMPOSITION_POLICY.transformerRoles.includes(entities.get(id)!.category)
+      :luminaireTerminal?luminaireHost(entities.get(id)!)
+      :componentHostCompatibility(m,entities.get(id)!)==='compatible'||!m.componentType&&row.objectRoles?.some(p=>p.value==='part');
+    candidates=new Set(matched.filter(accepts));
     if(!explicit.length&&m.meaning==='object'&&candidates.size===1&&candidates.has(owners.get(row.sourceId)??''))continue;
     const proof=[...direct,...(row.hostCodes??[]),...designations].map(p=>p.evidenceId).concat(m.componentType?.evidence??[],`policy:${COMPOSITION_POLICY.version}:${m.componentType?.id??'declared-role'}`);
     if(candidates.size===1){
       const target=[...candidates][0],previous=owners.get(row.sourceId);
+      if(luminaireTerminal&&previous===target)continue;
       if(previous&&entities.has(previous)&&previous!==target&&row.composition?.some(edge=>edge.status==='confirmed')){
         const reason='composition_host_conflict';
         unresolved(row.sourceId,reason);

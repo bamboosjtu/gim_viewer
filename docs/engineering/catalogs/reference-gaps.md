@@ -1,6 +1,6 @@
 # 目录解释与验收边界
 
-运行时 JSON 独立维护，工作簿只作参考。当前目录包含 60 条设备、41 条材料、40 条构件，以及 46 行部件名称。配置同步、构建和运行不读取工作簿。
+运行时 JSON 独立维护，工作簿只作参考。当前目录包含 60 条设备、42 条材料、40 条构件，以及 46 行部件名称。配置同步、构建和运行不读取工作簿。
 
 当前采用的明确规则：
 
@@ -14,11 +14,16 @@
 | TerminalBox 独立 | 端子箱材料；明确 independent 不被装配关系覆盖 |
 | GroundResistance 是单独设备 | 接地电阻成套装置 |
 | GroundResistance 不是设备整体 | 接地电阻材料；材料属性、部件角色、中文消歧及设备内实际装配提供语境 |
+| 电容器组 | 框架式电容器组、并联电容器组与完整来源值 `AssembledCapacitorBank;SeriesCapacitorSet` 指向同一个目录项。各实例按来源身份计数，分号保留在原始值中。集合式与串补成套装置各有目录项 |
+| 油浸式变压器、绝缘子串 | `OilFilledTransformer`、`ChainInsulation` 分别作为来源别名，规范英文保留 `OilImmersedTransformer`、`InsulatorsSring` |
+| ScreenCabinetsAndInstallations | 对象自身的屏柜名称提供柜体证据时，可解释为二次屏柜；明确部件角色优先 |
+| LED | 灯具分类依赖对象自身证据。带 LED 声明的端子板在真实灯具装配下保留为候选部件。独立边界或细类证据不足时保留待确认 |
+| 中性点成套设备 | 明确独立角色的对象归设备目录。主变附件根据实际装配或明确宿主声明归属，宿主不能确定时保留待归 |
 | 均压屏蔽装置没有更具体信息 | 默认金具；两个原目录来源继续保留，明确英文类型仍可细分 |
 | ProtectionEquipment 没有其他信息 | 默认保护设备；有明确中文分类或类型消歧信息时，区分线路保护装置和变压器保护装置 |
 | 部件宿主能力 | 所有设备都可以有部件，不按设备类别白名单拒绝；未知宿主不默认当设备，材料/构件不自动取得设备宿主身份 |
 
-已补充的六类屏柜英文名称是当前确认的应用目录词汇：ControlCabinet、ControlPanel、MeasurementAndControlCabinet、ProtectionPanel、ProtectionCabinet、RelayProtectionCabinet。工作簿只修改相应六个英文名单元格，保留其他内容与格式。
+六类屏柜英文名称为 ControlCabinet、ControlPanel、MeasurementAndControlCabinet、ProtectionPanel、ProtectionCabinet、RelayProtectionCabinet。
 
 名称仅用于兜底或消解已有类型词义，不替代 FAM/IFC 属性、明确角色和装配/宿主事实。分类与归属均保留各自证据；中文优先不改变原始值、来源 occurrence、物理父级或几何地址。
 

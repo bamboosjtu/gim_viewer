@@ -1022,5 +1022,416 @@
       ]
     ],
     "pending": 0
+  },
+  {
+    "name": "catalog-oil-alias",
+    "records": [
+      {
+        "id": "x",
+        "type": "OilFilledTransformer"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "E01",
+      "catalogId": "equipment:oilimmersedtransformer"
+    }
+  },
+  {
+    "name": "catalog-chain-alias",
+    "records": [
+      {
+        "id": "x",
+        "type": "ChainInsulation"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "M02",
+      "catalogId": "material:insulatorssring"
+    }
+  },
+  {
+    "name": "catalog-full-capacitor-type",
+    "records": [
+      {
+        "id": "x",
+        "type": "AssembledCapacitorBank;SeriesCapacitorSet"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "E10",
+      "catalogId": "equipment:framecapacitor"
+    }
+  },
+  {
+    "name": "catalog-capacitor-cn-alias",
+    "records": [
+      {
+        "id": "x",
+        "type": "OTHERS",
+        "props": {
+          "设备类型": "并联电容器组"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "E10",
+      "catalogId": "equipment:framecapacitor"
+    }
+  },
+  {
+    "name": "catalog-capacitor-fragment-unresolved",
+    "records": [
+      {
+        "id": "x",
+        "type": "SeriesCapacitorSet"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "U-OBJECT"
+    }
+  },
+  {
+    "name": "catalog-screen-alias-with-family",
+    "records": [
+      {
+        "id": "x",
+        "type": "ScreenCabinetsAndInstallations",
+        "props": {
+          "屏柜名称": "通信网关机柜"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "E17",
+      "catalogId": "equipment:secondarycabinet"
+    }
+  },
+  {
+    "name": "catalog-screen-alias-with-placeholder",
+    "records": [
+      {
+        "id": "x",
+        "type": "ScreenCabinetsAndInstallations",
+        "props": {
+          "屏柜名称": "-"
+        },
+        "name": "电动操作机构箱"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "U-OBJECT"
+    }
+  },
+  {
+    "name": "catalog-led-alone-unresolved",
+    "records": [
+      {
+        "id": "x",
+        "type": "OTHERS",
+        "props": {
+          "设备类型": "LED"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "U-OBJECT"
+    }
+  },
+  {
+    "name": "catalog-led-luminaire-declaration",
+    "records": [
+      {
+        "id": "x",
+        "type": "OTHERS",
+        "props": {
+          "设备类型": "LED",
+          "材料类型": "照明灯"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "M05",
+      "catalogId": "material:lamps"
+    }
+  },
+  {
+    "name": "catalog-ground-resistance-material",
+    "records": [
+      {
+        "id": "x",
+        "type": "GroundResistance",
+        "props": {
+          "材料类型": "GroundResistance"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "M06",
+      "catalogId": "material:groundresistance"
+    }
+  },
+  {
+    "name": "catalog-neutral-independent",
+    "records": [
+      {
+        "id": "x",
+        "type": "OpenGroundingEquipment/NeutralPointEquipment",
+        "props": {
+          "模型分类名称": "中性点成套设备",
+          "OBJECTROLE": "independent"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "E09",
+      "catalogId": "equipment:opengroundingequipment/neutralpointequipment"
+    }
+  },
+  {
+    "name": "catalog-neutral-family-does-not-erase-attachment",
+    "records": [
+      {
+        "id": "x",
+        "type": "OpenGroundingEquipment/NeutralPointEquipment",
+        "props": {
+          "模型分类名称": "中性点成套设备"
+        }
+      }
+    ],
+    "groups": [],
+    "pending": 1,
+    "expectedMember": {
+      "sourceId": "x",
+      "pendingReason": "neutral_set_main_unresolved"
+    }
+  },
+  {
+    "name": "catalog-led-terminal-under-actual-luminaire",
+    "records": [
+      {
+        "id": "lamp",
+        "type": "Lamps"
+      },
+      {
+        "id": "terminal",
+        "type": "OTHERS",
+        "parent": "lamp",
+        "name": "应急照明灯_指示灯端子板",
+        "props": {
+          "设备类型": "LED",
+          "工程中名称": "1号照明灯具"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "lamp",
+        "terminal"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "terminal",
+      "category": "U-OBJECT",
+      "membershipStatus": "candidate"
+    }
+  },
+  {
+    "name": "catalog-led-terminal-without-parent-remains-unknown",
+    "records": [
+      {
+        "id": "terminal",
+        "type": "OTHERS",
+        "name": "应急照明灯_指示灯端子板",
+        "props": {
+          "设备类型": "LED",
+          "工程中名称": "1号照明灯具"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "terminal"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "U-OBJECT"
+    }
+  },
+  {
+    "name": "catalog-neutral-attached-by-assembly",
+    "records": [
+      {
+        "id": "main",
+        "type": "OilImmersedTransformer"
+      },
+      {
+        "id": "neutral",
+        "type": "NeutralPointEquipment",
+        "parent": "main",
+        "props": {
+          "模型分类名称": "中性点成套设备"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "main",
+        "neutral"
+      ]
+    ],
+    "pending": 0
+  },
+  {
+    "name": "catalog-two-capacitor-occurrences-remain-two-entities",
+    "records": [
+      {
+        "id": "a",
+        "type": "FrameCapacitor",
+        "name": "电容器组"
+      },
+      {
+        "id": "b",
+        "type": "AssembledCapacitorBank;SeriesCapacitorSet",
+        "name": "电容器组"
+      }
+    ],
+    "groups": [
+      [
+        "a"
+      ],
+      [
+        "b"
+      ]
+    ],
+    "pending": 0
+  },
+  {
+    "name": "catalog-neutral-explicit-host-OilImmersedTransformer",
+    "records": [
+      {
+        "id": "host",
+        "type": "OilImmersedTransformer",
+        "props": {
+          "设备编码": "host-a"
+        }
+      },
+      {
+        "id": "neutral",
+        "type": "NeutralPointEquipment",
+        "props": {
+          "模型分类名称": "中性点成套设备",
+          "所属设备编码": "host-a"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "host",
+        "neutral"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "neutral",
+      "membershipStatus": "confirmed"
+    }
+  },
+  {
+    "name": "catalog-neutral-explicit-host-GIS",
+    "records": [
+      {
+        "id": "host",
+        "type": "GIS",
+        "props": {
+          "设备编码": "host-a"
+        }
+      },
+      {
+        "id": "neutral",
+        "type": "NeutralPointEquipment",
+        "props": {
+          "模型分类名称": "中性点成套设备",
+          "所属设备编码": "host-a"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "host"
+      ]
+    ],
+    "pending": 1,
+    "expectedMember": {
+      "sourceId": "neutral",
+      "pendingReason": "component_host_incompatible"
+    }
   }
 ]

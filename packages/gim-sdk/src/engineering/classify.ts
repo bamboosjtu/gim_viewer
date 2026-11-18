@@ -78,7 +78,7 @@ function interpretClassification(object:ObjectEvidence,hasChildren=false):Object
   }
   if(properties.length)evidence.push(...object.propertyCategories!.map(p=>p.evidenceId));
   if(basis!=='attribute_conflict'){
-    if(category==='U-OBJECT'){
+    if(category==='U-OBJECT'&&!object.traits.luminaireTerminal){
       const fallbackName=preferredFallbackName(object),named=categoryFromName(fallbackName);
       const identities=named==='U-OBJECT'?object.identityNames.map(p=>({category:categoryFromName(p.value),evidence:p.evidenceId})).filter(p=>p.category!=='U-OBJECT'):[];
       category=named!=='U-OBJECT'?named:identities[0]?.category??'U-OBJECT';
@@ -113,7 +113,7 @@ export function interpretRecognitionObject(object:ObjectEvidence,hasChildren=fal
       result.subtype=`standard:${item.id}`;result.subtypeLabel=item.label;
       if(['material_subtype_evidence_insufficient','equipment_subtype_evidence_insufficient'].includes(result.unknownReason??''))delete result.unknownReason;
     }
-  }else if(!classes.length&&!object.typeCategory&&!object.propertyCategories?.length&&result.meaning==='object'&&result.basis!=='attribute_conflict'){
+  }else if(!classes.length&&!object.typeCategory&&!object.propertyCategories?.length&&!object.traits.luminaireTerminal&&result.meaning==='object'&&result.basis!=='attribute_conflict'){
     const fallbackName=preferredFallbackName(object),names=standardTermsFromName(fallbackName);
     const namedCategory=categoryFromName(fallbackName);
     // A generic catalog substring (电缆) cannot replace a more specific head

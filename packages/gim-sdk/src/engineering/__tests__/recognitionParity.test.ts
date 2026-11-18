@@ -17,7 +17,14 @@ it.each(cases)('agrees with the independently implemented tool on $name',fixture
   expect(fields(JSON.parse(python.stdout) as EngineeringSnapshot)).toEqual(fields(model));
   const entities=(snapshot:EngineeringSnapshot)=>snapshot.entities.map(e=>({sourceIds:e.sourceIds,category:e.category,subtype:e.subtypeStatus==='confirmed'?e.subtype:null,subtypeStatus:e.subtypeStatus??null,subtypeLabel:e.subtypeStatus==='confirmed'?e.subtypeLabel:null}));
   expect(entities(JSON.parse(python.stdout) as EngineeringSnapshot)).toEqual(entities(model));
-  if(fixture.expectedEntity)expect(entities(model)[0]).toMatchObject(fixture.expectedEntity);
+  if(fixture.expectedEntity){
+    const {catalogId,...expected}=fixture.expectedEntity;
+    expect(entities(model)[0]).toMatchObject(expected);
+    if(catalogId!==undefined){
+      expect(model.entities[0].standardClass?.id).toBe(catalogId);
+      expect((JSON.parse(python.stdout) as EngineeringSnapshot).entities[0].standardClass?.id).toBe(catalogId);
+    }
+  }
   if(fixture.expectedMember)expect(fields(model).members.find(m=>m.sourceId===fixture.expectedMember!.sourceId)).toMatchObject(fixture.expectedMember);
   expect(model.entities.map(e=>[...e.sourceIds].sort()).sort()).toEqual(fixture.groups.map(g=>[...g].sort()).sort());expect(model.pending).toHaveLength(fixture.pending);
   expect(normalizeEngineeringModel('scope',[...rows].reverse().map(toObjectEvidence))).toEqual(model);

@@ -38,7 +38,7 @@ it('resolves ground resistance by device/material role and actual assembly, pres
  const rows=[record('host','GIS'),record('r','GroundResistance',{},'host')],result=build(rows);
  expect(result.entities).toHaveLength(1);expect(result.memberships.find(m=>m.sourceId==='r')?.interpretation).toMatchObject({category:'M06',meaning:'part'});
  expect(rows[1].parent).toBe('host');expect(rows[1].source_type).toBe('GroundResistance');
- expect(build([record('r','接地电阻')]).entities[0].category).toBe('E09');
+ expect(build([record('r','接地电阻')]).entities[0].category).toBe('M06');
  expect(build([record('r','GroundResistance',{},'','接地电阻')]).entities[0].category).toBe('M06');
  const independentMaterial=build([record('r','GroundResistance',{MATERIALTYPE:'GroundResistance',OBJECTROLE:'independent'})]);
  expect(independentMaterial.entities[0].category).toBe('M06');expect(independentMaterial.memberships[0].interpretation.meaning).toBe('object');
@@ -61,6 +61,6 @@ it('uses the confirmed defaults while retaining their underlying dictionary evid
  expect(shielding).toMatchObject({category:'M03',categoryStatus:'confirmed'});
  expect(JSON.parse(shielding.vocabularyObservations![0].dictionaryEvidence!)).toHaveLength(2);
  expect(interpretObject(toObjectEvidence(record('p','ProtectionEquipment')))).toMatchObject({componentType:{id:'protective_device',status:'confirmed'}});
- expect(interpretObject(toObjectEvidence(record('p','ProtectionEquipment',{},'','线路保护装置')))).toMatchObject({componentType:{id:'line_protection_device'}});
+ expect(interpretObject(toObjectEvidence(record('p','ProtectionEquipment',{},'','线路保护装置')))).toMatchObject({componentType:{id:'protective_device'}});
  expect(interpretObject(toObjectEvidence(record('p','ProtectionEquipment',{PARTNAME:'变压器保护装置'})))).toMatchObject({componentType:{id:'transformer_protection_device'}});
 });

@@ -118,7 +118,8 @@
     "devices": "devices",
     "protectiondevice": "devices",
     "protectivedevice": "protective_device",
-    "protectionequipment": "protective_device"
+    "protectionequipment": "protective_device",
+    "protectivedevice/protectionequipment": "protective_device"
   },
   "objectRoles": {},
   "keywordDictionary": {
@@ -138,7 +139,7 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "电气设备模型索引表",
           "cellRange": "B2:D2",
           "verification": "verified",
@@ -153,7 +154,22 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
+          "sheet": "电气设备模型索引表",
+          "cellRange": "B2:D2",
+          "verification": "verified",
+          "sourceLocation": "电气设备模型索引表!B2:D2",
+          "cell": "D2"
+        },
+        "equipmentType": "oil_immersed_transformer"
+      },
+      "oilfilledtransformer": {
+        "catalogIds": [
+          "equipment:oilimmersedtransformer"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "电气设备模型索引表",
           "cellRange": "B2:D2",
           "verification": "verified",
@@ -929,18 +945,39 @@
       },
       "groundresistance": {
         "catalogIds": [
-          "equipment:groundresistance"
+          "equipment:groundresistance",
+          "material:groundresistance"
         ],
         "evidence": {
           "sourceKind": "workbook",
           "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
           "sheet": "电气设备模型索引表",
           "cellRange": "B28:D28",
-          "verification": "verified",
+          "verification": "ambiguous",
           "sourceLocation": "电气设备模型索引表!B28:D28",
           "cell": "D28"
         },
-        "equipmentType": "ground_resistance"
+        "equipmentType": "ground_resistance",
+        "evidences": [
+          {
+            "sourceKind": "workbook",
+            "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+            "sheet": "电气设备模型索引表",
+            "cellRange": "B28:D28",
+            "verification": "verified",
+            "sourceLocation": "电气设备模型索引表!B28:D28",
+            "cell": "D28"
+          },
+          {
+            "sourceKind": "workbook",
+            "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
+            "sheet": "材料模型索引表",
+            "cellRange": "B31:D31",
+            "verification": "verified",
+            "sourceLocation": "材料模型索引表!B31:D31",
+            "cell": "D31"
+          }
+        ]
       },
       "中性点成套设备": {
         "catalogIds": [
@@ -1032,13 +1069,13 @@
         },
         "equipmentType": "dcblocking_device"
       },
-      "框架式电容器组": {
+      "电容器组": {
         "catalogIds": [
           "equipment:framecapacitor"
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "电气设备模型索引表",
           "cellRange": "B31:D31",
           "verification": "verified",
@@ -1053,7 +1090,52 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
+          "sheet": "电气设备模型索引表",
+          "cellRange": "B31:D31",
+          "verification": "verified",
+          "sourceLocation": "电气设备模型索引表!B31:D31",
+          "cell": "D31"
+        },
+        "equipmentType": "frame_capacitor"
+      },
+      "框架式电容器组": {
+        "catalogIds": [
+          "equipment:framecapacitor"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
+          "sheet": "电气设备模型索引表",
+          "cellRange": "B31:D31",
+          "verification": "verified",
+          "sourceLocation": "电气设备模型索引表!B31:D31",
+          "cell": "C31"
+        },
+        "equipmentType": "frame_capacitor"
+      },
+      "并联电容器组": {
+        "catalogIds": [
+          "equipment:framecapacitor"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
+          "sheet": "电气设备模型索引表",
+          "cellRange": "B31:D31",
+          "verification": "verified",
+          "sourceLocation": "电气设备模型索引表!B31:D31",
+          "cell": "C31"
+        },
+        "equipmentType": "frame_capacitor"
+      },
+      "assembledcapacitorbank;seriescapacitorset": {
+        "catalogIds": [
+          "equipment:framecapacitor"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "电气设备模型索引表",
           "cellRange": "B31:D31",
           "verification": "verified",
@@ -1593,7 +1675,7 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "电气设备模型索引表",
           "cellRange": "B50:D50",
           "verification": "verified",
@@ -1608,7 +1690,7 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "电气设备模型索引表",
           "cellRange": "B50:D50",
           "verification": "verified",
@@ -2065,7 +2147,7 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
           "cellRange": "B6:D6",
           "verification": "verified",
@@ -2079,7 +2161,21 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
+          "sheet": "材料模型索引表",
+          "cellRange": "B6:D6",
+          "verification": "verified",
+          "sourceLocation": "材料模型索引表!B6:D6",
+          "cell": "D6"
+        }
+      },
+      "chaininsulation": {
+        "catalogIds": [
+          "material:insulatorssring"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
           "cellRange": "B6:D6",
           "verification": "verified",
@@ -2577,7 +2673,7 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
           "cellRange": "B24:D24",
           "verification": "verified",
@@ -2591,7 +2687,7 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
           "cellRange": "B24:D24",
           "verification": "verified",
@@ -2605,7 +2701,7 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
           "cellRange": "B24:D24",
           "verification": "verified",
@@ -2619,7 +2715,7 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
           "cellRange": "B24:D24",
           "verification": "verified",
@@ -2633,7 +2729,7 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
           "cellRange": "B24:D24",
           "verification": "verified",
@@ -2647,7 +2743,7 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
           "cellRange": "B24:D24",
           "verification": "verified",
@@ -2661,7 +2757,7 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
           "cellRange": "B24:D24",
           "verification": "verified",
@@ -2675,7 +2771,7 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
           "cellRange": "B24:D24",
           "verification": "verified",
@@ -2689,7 +2785,7 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
           "cellRange": "B24:D24",
           "verification": "verified",
@@ -2703,7 +2799,7 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
           "cellRange": "B24:D24",
           "verification": "verified",
@@ -2879,18 +2975,32 @@
           "cell": "D30"
         }
       },
+      "接地电阻": {
+        "catalogIds": [
+          "material:groundresistance"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
+          "sheet": "材料模型索引表",
+          "cellRange": "B31:D31",
+          "verification": "verified",
+          "sourceLocation": "材料模型索引表!B31:D31",
+          "cell": "C31"
+        }
+      },
       "电缆": {
         "catalogIds": [
           "material:cable"
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B31:D31",
+          "cellRange": "B32:D32",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B31:D31",
-          "cell": "C31"
+          "sourceLocation": "材料模型索引表!B32:D32",
+          "cell": "C32"
         }
       },
       "cable": {
@@ -2899,12 +3009,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B31:D31",
+          "cellRange": "B32:D32",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B31:D31",
-          "cell": "D31"
+          "sourceLocation": "材料模型索引表!B32:D32",
+          "cell": "D32"
         }
       },
       "电缆终端": {
@@ -2913,12 +3023,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B32:D32",
+          "cellRange": "B33:D33",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B32:D32",
-          "cell": "C32"
+          "sourceLocation": "材料模型索引表!B33:D33",
+          "cell": "C33"
         }
       },
       "cabletermination": {
@@ -2927,12 +3037,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B32:D32",
+          "cellRange": "B33:D33",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B32:D32",
-          "cell": "D32"
+          "sourceLocation": "材料模型索引表!B33:D33",
+          "cell": "D33"
         }
       },
       "电缆辅助设施/电缆桥架/桥架": {
@@ -2941,12 +3051,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B33:D33",
+          "cellRange": "B34:D34",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B33:D33",
-          "cell": "C33"
+          "sourceLocation": "材料模型索引表!B34:D34",
+          "cell": "C34"
         }
       },
       "电缆辅助设施": {
@@ -2955,12 +3065,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B33:D33",
+          "cellRange": "B34:D34",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B33:D33",
-          "cell": "C33"
+          "sourceLocation": "材料模型索引表!B34:D34",
+          "cell": "C34"
         }
       },
       "电缆桥架": {
@@ -2969,12 +3079,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B33:D33",
+          "cellRange": "B34:D34",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B33:D33",
-          "cell": "C33"
+          "sourceLocation": "材料模型索引表!B34:D34",
+          "cell": "C34"
         }
       },
       "桥架": {
@@ -2983,12 +3093,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B33:D33",
+          "cellRange": "B34:D34",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B33:D33",
-          "cell": "C33"
+          "sourceLocation": "材料模型索引表!B34:D34",
+          "cell": "C34"
         }
       },
       "cableauxiliaryfacilities": {
@@ -2997,12 +3107,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B33:D33",
+          "cellRange": "B34:D34",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B33:D33",
-          "cell": "D33"
+          "sourceLocation": "材料模型索引表!B34:D34",
+          "cell": "D34"
         }
       },
       "电缆沟防火墙": {
@@ -3011,12 +3121,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B34:D34",
+          "cellRange": "B35:D35",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B34:D34",
-          "cell": "C34"
+          "sourceLocation": "材料模型索引表!B35:D35",
+          "cell": "C35"
         }
       },
       "cableditchfirewall": {
@@ -3025,12 +3135,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B34:D34",
+          "cellRange": "B35:D35",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B34:D34",
-          "cell": "D34"
+          "sourceLocation": "材料模型索引表!B35:D35",
+          "cell": "D35"
         }
       },
       "槽钢": {
@@ -3039,12 +3149,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B35:D35",
+          "cellRange": "B36:D36",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B35:D35",
-          "cell": "C35"
+          "sourceLocation": "材料模型索引表!B36:D36",
+          "cell": "C36"
         }
       },
       "usteel": {
@@ -3053,12 +3163,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B35:D35",
+          "cellRange": "B36:D36",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B35:D35",
-          "cell": "D35"
+          "sourceLocation": "材料模型索引表!B36:D36",
+          "cell": "D36"
         }
       },
       "角钢": {
@@ -3067,12 +3177,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B36:D36",
+          "cellRange": "B37:D37",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B36:D36",
-          "cell": "C36"
+          "sourceLocation": "材料模型索引表!B37:D37",
+          "cell": "C37"
         }
       },
       "anglesteel": {
@@ -3081,12 +3191,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B36:D36",
+          "cellRange": "B37:D37",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B36:D36",
-          "cell": "D36"
+          "sourceLocation": "材料模型索引表!B37:D37",
+          "cell": "D37"
         }
       },
       "工字钢": {
@@ -3095,12 +3205,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B37:D37",
+          "cellRange": "B38:D38",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B37:D37",
-          "cell": "C37"
+          "sourceLocation": "材料模型索引表!B38:D38",
+          "cell": "C38"
         }
       },
       "ibeam": {
@@ -3109,12 +3219,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B37:D37",
+          "cellRange": "B38:D38",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B37:D37",
-          "cell": "D37"
+          "sourceLocation": "材料模型索引表!B38:D38",
+          "cell": "D38"
         }
       },
       "钢板": {
@@ -3123,12 +3233,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B38:D38",
+          "cellRange": "B39:D39",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B38:D38",
-          "cell": "C38"
+          "sourceLocation": "材料模型索引表!B39:D39",
+          "cell": "C39"
         }
       },
       "steelsheet": {
@@ -3137,12 +3247,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B38:D38",
+          "cellRange": "B39:D39",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B38:D38",
-          "cell": "D38"
+          "sourceLocation": "材料模型索引表!B39:D39",
+          "cell": "D39"
         }
       },
       "金属围栏": {
@@ -3151,12 +3261,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B39:D39",
+          "cellRange": "B40:D40",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B39:D39",
-          "cell": "C39"
+          "sourceLocation": "材料模型索引表!B40:D40",
+          "cell": "C40"
         }
       },
       "metalfence": {
@@ -3165,12 +3275,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B39:D39",
+          "cellRange": "B40:D40",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B39:D39",
-          "cell": "D39"
+          "sourceLocation": "材料模型索引表!B40:D40",
+          "cell": "D40"
         }
       },
       "电气埋管": {
@@ -3179,12 +3289,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B40:D40",
+          "cellRange": "B41:D41",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B40:D40",
-          "cell": "C40"
+          "sourceLocation": "材料模型索引表!B41:D41",
+          "cell": "C41"
         }
       },
       "electricburiedpipe": {
@@ -3193,12 +3303,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B40:D40",
+          "cellRange": "B41:D41",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B40:D40",
-          "cell": "D40"
+          "sourceLocation": "材料模型索引表!B41:D41",
+          "cell": "D41"
         }
       },
       "风管": {
@@ -3207,12 +3317,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B41:D41",
+          "cellRange": "B42:D42",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B41:D41",
-          "cell": "C41"
+          "sourceLocation": "材料模型索引表!B42:D42",
+          "cell": "C42"
         }
       },
       "airduct": {
@@ -3221,12 +3331,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B41:D41",
+          "cellRange": "B42:D42",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B41:D41",
-          "cell": "D41"
+          "sourceLocation": "材料模型索引表!B42:D42",
+          "cell": "D42"
         }
       },
       "水管": {
@@ -3235,12 +3345,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B42:D42",
+          "cellRange": "B43:D43",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B42:D42",
-          "cell": "C42"
+          "sourceLocation": "材料模型索引表!B43:D43",
+          "cell": "C43"
         }
       },
       "plumbing": {
@@ -3249,12 +3359,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cellRange": "B42:D42",
+          "cellRange": "B43:D43",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B42:D42",
-          "cell": "D42"
+          "sourceLocation": "材料模型索引表!B43:D43",
+          "cell": "D43"
         }
       },
       "场地": {
@@ -4425,7 +4535,7 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "电气设备模型索引表",
           "cell": "B2",
           "cellRange": "B2",
@@ -4439,7 +4549,7 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "电气设备模型索引表",
           "cell": "B2",
           "cellRange": "B2",
@@ -4649,7 +4759,7 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "电气设备模型索引表",
           "cell": "B31",
           "cellRange": "B31",
@@ -4663,7 +4773,7 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "电气设备模型索引表",
           "cell": "B31",
           "cellRange": "B31",
@@ -4817,7 +4927,7 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "电气设备模型索引表",
           "cell": "B50",
           "cellRange": "B50",
@@ -4929,7 +5039,7 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
           "cell": "B6",
           "cellRange": "B6",
@@ -4985,7 +5095,7 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
           "cell": "B24",
           "cellRange": "B24",
@@ -4999,7 +5109,7 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
           "cell": "B24",
           "cellRange": "B24",
@@ -5027,12 +5137,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cell": "B31",
-          "cellRange": "B31",
+          "cell": "B32",
+          "cellRange": "B32",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B31"
+          "sourceLocation": "材料模型索引表!B32"
         }
       },
       "m07": {
@@ -5041,12 +5151,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cell": "B31",
-          "cellRange": "B31",
+          "cell": "B32",
+          "cellRange": "B32",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B31"
+          "sourceLocation": "材料模型索引表!B32"
         }
       },
       "防火材料": {
@@ -5055,12 +5165,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cell": "B34",
-          "cellRange": "B34",
+          "cell": "B35",
+          "cellRange": "B35",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B34"
+          "sourceLocation": "材料模型索引表!B35"
         }
       },
       "m08": {
@@ -5069,12 +5179,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cell": "B34",
-          "cellRange": "B34",
+          "cell": "B35",
+          "cellRange": "B35",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B34"
+          "sourceLocation": "材料模型索引表!B35"
         }
       },
       "安装材料": {
@@ -5083,12 +5193,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cell": "B35",
-          "cellRange": "B35",
+          "cell": "B36",
+          "cellRange": "B36",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B35"
+          "sourceLocation": "材料模型索引表!B36"
         }
       },
       "m09": {
@@ -5097,12 +5207,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cell": "B35",
-          "cellRange": "B35",
+          "cell": "B36",
+          "cellRange": "B36",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B35"
+          "sourceLocation": "材料模型索引表!B36"
         }
       },
       "水暖材料": {
@@ -5111,12 +5221,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cell": "B41",
-          "cellRange": "B41",
+          "cell": "B42",
+          "cellRange": "B42",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B41"
+          "sourceLocation": "材料模型索引表!B42"
         }
       },
       "m10": {
@@ -5125,12 +5235,12 @@
         ],
         "evidence": {
           "sourceKind": "workbook",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "材料模型索引表",
-          "cell": "B41",
-          "cellRange": "B41",
+          "cell": "B42",
+          "cellRange": "B42",
           "verification": "verified",
-          "sourceLocation": "材料模型索引表!B41"
+          "sourceLocation": "材料模型索引表!B42"
         }
       },
       "场地设施": {
@@ -6740,7 +6850,7 @@
         "evidence": {
           "sourceKind": "workbook",
           "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "设备模型部件名称对照表",
           "cell": "B45",
           "cellRange": "B45:C45",
@@ -6756,7 +6866,7 @@
         "evidence": {
           "sourceKind": "workbook",
           "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "设备模型部件名称对照表",
           "cell": "C45",
           "cellRange": "B45:C45",
@@ -6765,48 +6875,33 @@
         },
         "componentType": "protective_device"
       },
-      "线路保护装置": {
-        "componentIds": [
-          "line_protection_device"
-        ],
-        "evidence": {
-          "sourceKind": "workbook",
-          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
-          "sheet": "设备模型部件名称对照表",
-          "cell": "B46",
-          "cellRange": "B46:C46",
-          "verification": "verified",
-          "sourceLocation": "设备模型部件名称对照表!B46:C46"
-        },
-        "componentType": "line_protection_device"
-      },
       "protectionequipment": {
         "componentIds": [
+          "protective_device",
           "line_protection_device",
           "transformer_protection_device"
         ],
         "evidence": {
           "sourceKind": "workbook",
           "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
           "sheet": "设备模型部件名称对照表",
-          "cell": "C46",
-          "cellRange": "B46:C46",
+          "cell": "C45",
+          "cellRange": "B45:C45",
           "verification": "ambiguous",
-          "sourceLocation": "设备模型部件名称对照表!B46:C46"
+          "sourceLocation": "设备模型部件名称对照表!B45:C45"
         },
         "componentType": "protective_device",
         "evidences": [
           {
             "sourceKind": "workbook",
             "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-            "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+            "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
             "sheet": "设备模型部件名称对照表",
-            "cell": "C46",
-            "cellRange": "B46:C46",
-            "verification": "ambiguous",
-            "sourceLocation": "设备模型部件名称对照表!B46:C46"
+            "cell": "C45",
+            "cellRange": "B45:C45",
+            "verification": "verified",
+            "sourceLocation": "设备模型部件名称对照表!B45:C45"
           },
           {
             "sourceKind": "workbook",
@@ -6830,6 +6925,38 @@
           }
         ],
         "defaultComponentId": "protective_device"
+      },
+      "protectivedevice/protectionequipment": {
+        "componentIds": [
+          "protective_device"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "C45",
+          "cellRange": "B45:C45",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!B45:C45"
+        },
+        "componentType": "protective_device"
+      },
+      "线路保护装置": {
+        "componentIds": [
+          "line_protection_device"
+        ],
+        "evidence": {
+          "sourceKind": "workbook",
+          "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+          "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+          "sheet": "设备模型部件名称对照表",
+          "cell": "B46",
+          "cellRange": "B46:C46",
+          "verification": "verified",
+          "sourceLocation": "设备模型部件名称对照表!B46:C46"
+        },
+        "componentType": "line_protection_device"
       },
       "变压器保护装置": {
         "componentIds": [

@@ -146,6 +146,13 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
       bundle(sourceId,'composition_parent_unresolved',[sourceId]);m.membershipStatus='unresolved';
       m.membershipEvidence=disputed.flatMap(edge=>edge.evidence);
       diagnostics.push({kind:'composition_parent_unresolved',identity:sourceId,name:row.name});
+    } else if (above && row.traits.luminaireTerminal && !explicitIndependent(row) && !m.conflict
+      && m.meaning==='object' && m.category==='U-OBJECT'
+      && parentMeaning?.standardClass?.id==='material:lamps'
+      && row.composition?.some(edge=>edge.kind==='physical_assembly'&&edge.status==='confirmed')) {
+      m.meaning='part';m.basis='luminaire_terminal_assembly';m.membershipStatus='candidate';
+      m.membershipEvidence=[row.traits.luminaireTerminal.evidenceId,`assembly:${row.assemblyParentId}->${sourceId}`];
+      owners.set(sourceId,above);
     } else if (above && entities.has(above) && parentEquipment && !explicitIndependent(row) && !m.conflict
       && m.componentType?.status!=='confirmed' && !unclassifiedAssemblyCandidate(row,m)
       && row.composition?.some(edge=>edge.kind!=='object_decomposition'&&edge.status==='confirmed')
@@ -155,8 +162,10 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
       m.membershipEvidence=[...new Set(row.composition.flatMap(edge=>edge.evidence).concat(`policy:${COMPOSITION_POLICY.version}:whole-boundary`))];
       owners.set(sourceId,above);
     } else if (m.meaning === 'neutral_set') {
-      if (transformer(aboveCategory)&&!explicitIndependent(row)) owners.set(sourceId, above);
-      else bundle(sourceId, 'neutral_set_main_unresolved', [sourceId]);
+      if (transformer(aboveCategory)&&!explicitIndependent(row)) {
+        owners.set(sourceId, above);m.membershipStatus='confirmed';
+        m.membershipEvidence=[`assembly:${row.assemblyParentId}->${sourceId}`];
+      } else bundle(sourceId, 'neutral_set_main_unresolved', [sourceId]);
     } else if (above && entities.has(above) && m.componentType?.status==='confirmed' && !explicitIndependent(row)) {
       const compatibility=componentHostCompatibility(m,entities.get(above)!);
       m.membershipEvidence=[...(m.componentType.evidence??[]),`assembly:${row.assemblyParentId}->${sourceId}`,`policy:${COMPOSITION_POLICY.version}:${m.componentType.id}`];
@@ -209,6 +218,7 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
   const redirects = new Map<string, string>();
   for (const row of ordered) {
     if (meaning.get(row.sourceId)!.meaning !== 'neutral_set') continue;
+    if(row.hostCodes?.length||row.hostDesignations?.length||row.declaredHostSourceIds?.length)continue;
     const previous = owners.get(row.sourceId);
     if (!previous || pending.get(previous)?.reason!=='neutral_set_main_unresolved') continue;
     const candidates = mainEntities.get(`${explicitMain(row)}${reserve(row)?':reserve':''}`);

@@ -43,6 +43,8 @@ export interface ObjectEvidence {
     assemblyContainer?: boolean;
     materialType?: boolean;
     nonphysical?: boolean;
+    /** LED declaration on an occurrence named as a luminaire terminal board. */
+    luminaireTerminal?: EvidenceValue;
   };
   /** Explicit designations of this object, never inherited organization labels. */
   designations: readonly EvidenceValue[];

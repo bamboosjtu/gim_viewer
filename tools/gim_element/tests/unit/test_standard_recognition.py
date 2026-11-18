@@ -23,14 +23,17 @@ class StandardTests(unittest.TestCase):
                     if len({i['category'] for i in R.resolved_terms(name)})>1:self.assertEqual(result['category'],'U-OBJECT')
                     else:self.assertTrue(result['category'].startswith({'equipment':'E','material':'M','construction':'C'}[item['kind']]))
                     if len(R.resolved_terms(name))==1:
-                        R.publish_category(result);self.assertEqual(result['category'],R.resolved_terms(name)[0]['category'])
-        self.assertEqual(len(R.STANDARD['items']),141)
+                        expected=item if item['id']=='material:groundresistance' else R.resolved_terms(name)[0]
+                        R.publish_category(result);self.assertEqual(result['category'],expected['category'])
+        self.assertEqual(len(R.STANDARD['items']),142)
     def test_all_component_rows_and_namespace_collisions(self):
         for part in R.CATALOG['components']:
             for word in (part['label'],part['term']):
                 with self.subTest(word=word):
                     result=R.interpret(record({'id':'x','type':word,'props':{'OBJECTROLE':'part'}}))
-                    self.assertEqual(result['componentType']['id'],'protective_device' if word=='ProtectionEquipment' else part['id']);self.assertNotIn('standardClass',result)
+                    self.assertEqual(result['componentType']['id'],'protective_device' if word=='ProtectionEquipment' else part['id'])
+                    if part['id']=='ground_resistance':self.assertEqual(result['standardClass']['id'],'material:groundresistance')
+                    else:self.assertNotIn('standardClass',result)
         for word,category in [('TerminalBox','M04'),('GroundResistance','E09')]:
             result=R.interpret(record({'id':'x','type':word}));R.publish_category(result);self.assertEqual(result['category'],category);self.assertNotIn('componentType',result)
     def test_ambiguous_keyword_retains_both_locations(self):
@@ -48,14 +51,20 @@ class StandardTests(unittest.TestCase):
                 self.assertEqual(len(model['pending']),case['pending'])
                 if case.get('expectedEntity'):
                     entity=model['entities'][0]
-                    for key,value in case['expectedEntity'].items():self.assertEqual(entity.get(key),value)
+                    for key,value in case['expectedEntity'].items():
+                        actual=(entity.get('standardClass') or {}).get('id') if key=='catalogId' else entity.get(key)
+                        self.assertEqual(actual,value)
+                if (expected:=case.get('expectedMember')) and 'pendingReason' in expected:
+                    member=next(m for m in model['memberships'] if m['sourceId']==expected['sourceId'])
+                    reason=next((p['reason'] for p in model['pending'] if p['id']==member['ownerId']),None)
+                    self.assertEqual(reason,expected['pendingReason'])
                 self.assertEqual(R.normalize(list(reversed(rows)),'scope'),model)
                 self.assertEqual(len(model['memberships']),len(rows))
     def test_algorithm_runs_outside_repository_with_only_its_own_modules_and_assets(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder)
             for name in ['standard_recognition.py','standard_sources.py','catalog.json','standardCatalog.json','sourceVocabulary.json','sourceCompatibilityPolicy.json','compositionPolicy.json','recognitionPolicy.json','proxyCategories.json']:shutil.copyfile(TOOL/name,root/name)
-            code='import sys;sys.path.insert(0,sys.argv[1]);import standard_recognition as r;assert len(r.STANDARD["items"])==141;assert r.category_value("TerminalBox")=="M10"'
+            code='import sys;sys.path.insert(0,sys.argv[1]);import standard_recognition as r;assert len(r.STANDARD["items"])==142;assert r.category_value("TerminalBox")=="M10"'
             subprocess.run([sys.executable,'-I','-c',code,str(root)],cwd=root,check=True,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
 
 if __name__=='__main__':unittest.main()
