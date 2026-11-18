@@ -10,4 +10,12 @@ export default tseslint.config({
     '@typescript-eslint/no-floating-promises': ['error', { ignoreVoid: false }],
     '@typescript-eslint/no-misused-promises': ['error', { checksVoidReturn: false }],
   },
-},{files:['../packages/gim-sdk/src/**/*.ts'],rules:{'no-console':'error'}},...tseslint.configs.recommendedTypeChecked.map(config=>({...config,files:adopted})),{files:adopted,ignores:['src/utils/logger.ts'],rules:{'no-console':'error'}});
+},{
+  files: ['../packages/gim-sdk/src/**/*.ts'],
+  rules: {
+    'no-console': 'error',
+    'no-restricted-globals': ['error', ...['self', 'fetch', 'caches', 'indexedDB', 'importScripts', 'navigator', 'window', 'document']],
+    'no-restricted-properties': ['error', ...['self', 'fetch', 'caches', 'indexedDB', 'importScripts', 'navigator', 'window', 'document']
+      .map(property => ({object: 'globalThis', property, message: 'Supply host access outside the pure SDK.'}))],
+  },
+},...tseslint.configs.recommendedTypeChecked.map(config=>({...config,files:adopted})),{files:adopted,ignores:['src/utils/logger.ts'],rules:{'no-console':'error'}});

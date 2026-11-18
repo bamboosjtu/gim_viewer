@@ -1,4 +1,5 @@
 // @vitest-environment node
+import assert from 'node:assert/strict';
 import {expect,it} from 'vitest';
 import {packEngineeringSource,unpackEngineeringSourceAsync} from '../engineeringSourceCodec.js';
 import {engineeringTableChunks,parseEngineeringTable,releaseEngineeringBytes,stringifyEngineeringTable} from '../engineeringTableJson.js';
@@ -8,11 +9,12 @@ it('keeps the exact canonical bytes and shared references across bounded UTF-8 b
   const value={rows:Array.from({length:10000},(_,i)=>({i,name:`构件${i}`,shared})),shared};
   const table=packEngineeringSource(value),expected=new TextEncoder().encode(JSON.stringify(table));let writes=0,reads=0;
   const bytes=await stringifyEngineeringTable(table,64*1024*1024,()=>true,async()=>{writes++;});
-  expect(bytes).toEqual(expected);expect(writes).toBeGreaterThan(0);
+  // Compare the complete payload with native typed-array equality.
+  assert.deepStrictEqual(bytes,expected);expect(writes).toBeGreaterThan(0);
   const parsed=await parseEngineeringTable(bytes,()=>true,async()=>{reads++;});
-  expect(parsed).toEqual(table);expect(reads).toBeGreaterThan(0);
+  assert.deepStrictEqual(parsed,table);expect(reads).toBeGreaterThan(0);
   const restored=await unpackEngineeringSourceAsync(parsed,()=>true) as typeof value;
-  expect(restored).toEqual(value);expect(restored.rows[0].shared).toBe(restored.shared);
+  assert.deepStrictEqual(restored,value);expect(restored.rows[0].shared).toBe(restored.shared);
 });
 it('round trips empty collections, scalars, escape sequences and unpaired surrogates',async()=>{
   for(const value of [null,false,0,{},[],{empty:[],text:'\ud800😀\n\r\t\\\\"'}]){

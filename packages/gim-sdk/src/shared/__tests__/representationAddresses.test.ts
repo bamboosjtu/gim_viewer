@@ -12,3 +12,16 @@ it('queries addresses without a semantic model and distinguishes same-template o
   expect(index.sourcesForIfc('other',3)).toEqual([]);
   expect(index.bySource.get('first')).toHaveLength(2);
 });
+
+it('binds an explicit root address but never falls back for an unknown DEV or SUBDEVICE', () => {
+  const index = new RepresentationAddressIndex([
+    { kind: 'dev', sourceId: 'root', rootOccurrence: 'r', assemblyPath: '', devPath: '根.dev' },
+    { kind: 'dev', sourceId: 'child', rootOccurrence: 'r', assemblyPath: 'sub:0', devPath: '子.dev' },
+  ]);
+  expect(index.sourcesForDev('r', { assemblyPath: '' })).toEqual(['root']);
+  expect(index.sourcesForDev('r', { assemblyPath: 'solid:0/phm:1' })).toEqual(['root']);
+  expect(index.sourcesForDev('r', { assemblyPath: 'sub:0/mod:1' })).toEqual(['child']);
+  expect(index.sourcesForDev('r', { assemblyPath: 'sub:0/sub:3/mod:1' })).toEqual([]);
+  expect(index.sourcesForDev('r', { assemblyPath: 'sub:8/solid:0' })).toEqual([]);
+  expect(index.sourcesForDev('r', { devPath: '缺失.dev' })).toEqual([]);
+});

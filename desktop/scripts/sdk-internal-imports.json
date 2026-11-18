@@ -1,0 +1,74 @@
+{
+  "engineering/catalogLabels.ts": [
+    "@gim/gim-sdk/engineering/catalogLabels.js"
+  ],
+  "engineering/composition.ts": [
+    "@gim/gim-sdk/engineering/composition.js"
+  ],
+  "engineering/compositionTemplate.ts": [
+    "@gim/gim-sdk/engineering/compositionTemplate.js"
+  ],
+  "engineering/evidence.ts": [
+    "@gim/gim-sdk/engineering/evidence.js"
+  ],
+  "engineering/inventoryTemplate.ts": [
+    "@gim/gim-sdk/engineering/inventoryTemplate.js"
+  ],
+  "engineering/representations.ts": [
+    "@gim/gim-sdk/engineering/representations.js"
+  ],
+  "engineering/types.ts": [
+    "@gim/gim-sdk/engineering/types.js"
+  ],
+  "engineering/validate.ts": [
+    "@gim/gim-sdk/engineering/validate.js"
+  ],
+  "gim/engineering/compositionContexts.ts": [
+    "@gim/gim-sdk/gim/engineering/compositionContexts.js"
+  ],
+  "gim/engineering/evidenceProvider.ts": [
+    "@gim/gim-sdk/gim/engineering/evidenceProvider.js"
+  ],
+  "gim/engineering/navigation.ts": [
+    "@gim/gim-sdk/gim/engineering/navigation.js"
+  ],
+  "gim/engineering/recognitionFieldPolicy.ts": [
+    "@gim/gim-sdk/gim/engineering/recognitionFieldPolicy.js"
+  ],
+  "gim/engineering/sourceDocuments.ts": [
+    "@gim/gim-sdk/gim/engineering/sourceDocuments.js"
+  ],
+  "gim/engineering/sourceGraph.ts": [
+    "@gim/gim-sdk/gim/engineering/sourceGraph.js"
+  ],
+  "gim/engineering/sourceProjection.ts": [
+    "@gim/gim-sdk/gim/engineering/sourceProjection.js"
+  ],
+  "gim/entryResolver.ts": [
+    "@gim/gim-sdk/gim/entryResolver.js"
+  ],
+  "gim/famParser.ts": [
+    "@gim/gim-sdk/gim/famParser.js"
+  ],
+  "gim/fileLookup.ts": [
+    "@gim/gim-sdk/gim/path.js"
+  ],
+  "gim/geometry/affineMatrix.ts": [
+    "@gim/gim-sdk/gim/geometry/affineMatrix.js"
+  ],
+  "gim/gimValueSemantics.ts": [
+    "@gim/gim-sdk/gim/gimValueSemantics.js"
+  ],
+  "gim/ifcOutwardProduct.ts": [
+    "@gim/gim-sdk/gim/ifcOutwardProduct.js"
+  ],
+  "gim/ifcSpatialParser.ts": [
+    "@gim/gim-sdk/gim/ifcSpatialTypes.js"
+  ],
+  "gim/sourceDocument.ts": [
+    "@gim/gim-sdk/gim/sourceDocument.js"
+  ],
+  "services/substationSpatialWorkerClient.ts": [
+    "@gim/gim-sdk/shared/recognitionFields.json"
+  ]
+}

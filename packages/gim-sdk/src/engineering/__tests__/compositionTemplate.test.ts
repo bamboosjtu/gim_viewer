@@ -7,6 +7,28 @@ const entity = (id: string, category: string, name = id): EngineeringEntity => (
 const snapshot = (entities: EngineeringEntity[]): EngineeringSnapshot => ({ evidenceBinding:{scope:'test',sourceRevision:0},scope: 'test', rulesVersion: 'test', entities, memberships: [], pending: [], aliases: [], relationships: [], diagnostics: [] });
 const fact = (entityId: string, values: string[] = []): CompositionContextEvidence => ({ entityId, declarations: [{ names: values.map((value, i) => ({ value, evidenceId: `${entityId}:${i}` })) }], spaces: [], hostEntityIds: [] });
 
+it('uses the display name only for grouping an established whole and its members', () => {
+  const whole = entity('whole', 'C-A1', '电缆沟');
+  whole.sourceIds = ['whole', 'part'];
+  const model = snapshot([whole]);
+  const interpretation = {
+    category: 'C-A1', meaning: 'part', independent: false, basis: 'fixture', conflict: '',
+  } as const;
+  model.memberships.push(
+    { sourceId: 'whole', ownerId: 'whole', disposition: 'whole_member', interpretation },
+    { sourceId: 'part', ownerId: 'whole', parentPartId: 'whole', disposition: 'whole_member', interpretation },
+  );
+  const members = structuredClone(model.memberships);
+  const original = assignEngineeringComposition(model, [fact(whole.id)]);
+  expect(original[0].paths[0].some(group => group.key === 'cable-trenches')).toBe(true);
+  whole.name = '匿名构筑物';
+  const renamed = assignEngineeringComposition(model, [fact(whole.id)]);
+  expect(renamed[0].paths).not.toEqual(original[0].paths);
+  expect(renamed[0].entityId).toBe(whole.id);
+  expect(model.memberships).toEqual(members);
+  expect(whole.sourceIds).toEqual(['whole', 'part']);
+});
+
 it('separates buildings and storeys, site works and civil facilities from primary installation systems', () => {
   const model = snapshot([entity('floor1', 'C-A4'), entity('floor2', 'C-A4'), entity('road', 'C-C5'), entity('trench', 'C-C1'), entity('lamp', 'C-D1'),
     entity('hvac', 'E19', '中央空调'), entity('water', 'C-D5', '给水管'), entity('fire', 'C-D2'), entity('capacitor', 'E10'), entity('aux', 'E03'), entity('secondary', 'E16'), entity('cable', 'M05'), entity('earth', 'M06')]);

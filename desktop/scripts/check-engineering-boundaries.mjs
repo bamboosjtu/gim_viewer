@@ -20,6 +20,8 @@ function* files(dir) {
   }
 }
 const failures = [];
+const sdkInternalImports = JSON.parse(readFileSync(new URL('./sdk-internal-imports.json', import.meta.url), 'utf8'));
+const observedSdkInternalImports = new Map();
 const sharedDependencies=JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8')).dependencies;
 for(const path of [...files(resolve(root,'..','bridge')),...files(root),...files(resolve(root,'..','..','app','src'))]) {
   failures.push(...nativeContractCallErrors(readFileSync(path,'utf8'),relative(root,path)));
@@ -114,6 +116,14 @@ for (const [layer,sourceRoot] of [...['engineering','gim','viewer','ui','service
       : ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword ? node.arguments[0] : undefined;
     if (specifier && ts.isStringLiteral(specifier)) {
       const name = specifier.text;
+      if (sourceRoot === root && /^@gim\/gim-sdk\/(?:engineering|gim|shared)\//.test(name)) {
+        if (!sdkInternalImports[localPath]?.includes(name)) {
+          failures.push(`${localPath}: use the SDK capability export instead of adding an internal import ${name}`);
+        }
+        const observed = observedSdkInternalImports.get(localPath) ?? new Set();
+        observed.add(name);
+        observedSdkInternalImports.set(localPath, observed);
+      }
       if(sourceRoot===sdkRoot&&!name.startsWith('.')&&!name.startsWith('@gim/powerline-core/'))failures.push(`${localPath}: SDK runtime dependency is not declared portable core: ${name}`);
       const packageError=packageBoundaryError(name,sourceRoot===sdkRoot?{'@gim/powerline-core':true}:sharedDependencies);if(packageError)failures.push(`${localPath}: ${packageError}: ${name}`);
       const resolved = name.startsWith('.') ? resolve(dirname(path), name.replace(/\.js$/, '.ts')) : null;
@@ -204,6 +214,14 @@ for (const family of runtimeFamilies) {
     visiting.delete(path); visited.add(path);
   }
   paths.forEach(visit);
+}
+
+for (const [file, imports] of Object.entries(sdkInternalImports)) {
+  for (const name of imports) {
+    if (!observedSdkInternalImports.get(file)?.has(name)) {
+      failures.push(`${file}: remove unused SDK internal-import exception ${name}`);
+    }
+  }
 }
 
 // Whole-source static value graph. Dynamic and type dependencies are counted,

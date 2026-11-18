@@ -38,3 +38,7 @@
 /packages/gim-sdk/src/shared/representationAddresses.ts text eol=lf
 /packages/gim-sdk/src/engineering/catalogClassification.ts text eol=lf
 /packages/gim-sdk/src/engineering/query.ts text eol=lf
+/packages/gim-sdk/src/gim/engineering/sourceRecordSelectors.ts text eol=lf
+/packages/gim-sdk/src/gim/engineering/compositionContexts.ts text eol=lf
+/packages/gim-sdk/src/gim/engineering/navigation.ts text eol=lf
+/packages/gim-sdk/src/gim/engineering/sourceProjection.ts text eol=lf

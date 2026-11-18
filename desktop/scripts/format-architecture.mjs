@@ -27,6 +27,10 @@ export const architectureModules = [
   '../packages/gim-sdk/src/shared/representationAddresses.ts',
   '../packages/gim-sdk/src/engineering/catalogClassification.ts',
   '../packages/gim-sdk/src/engineering/query.ts',
+  '../packages/gim-sdk/src/gim/engineering/sourceRecordSelectors.ts',
+  '../packages/gim-sdk/src/gim/engineering/compositionContexts.ts',
+  '../packages/gim-sdk/src/gim/engineering/navigation.ts',
+  '../packages/gim-sdk/src/gim/engineering/sourceProjection.ts',
 ];
 export const formattedArchitectureModules = [...architectureModules];
 

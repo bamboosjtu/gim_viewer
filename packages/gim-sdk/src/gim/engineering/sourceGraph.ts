@@ -1,3 +1,4 @@
+import {engineeringSourceRecords} from './sourceRecordSelectors.js';
 import {parseSourceDocument,type SourceDocument} from './sourceDocuments.js';
 import {sourceScalar, sourceReferenceFields, type SourceField} from '../sourceDocument.js';
 import {createEntryIndex,sourceReferenceCandidates,type EntryIndex} from '../entryResolver.js';
@@ -52,7 +53,7 @@ export interface EngineeringSourceGraph {
 
 const ordered = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
 /** Logical attribute sources and physical sources have independent addresses. */
-export function engineeringSourceRecords(graph:EngineeringSourceGraph,extra:readonly SourceRecord[]=[]):SourceRecord[]{return [...graph.records,...graph.attributeRecords??[],...extra];}
+export {engineeringSourceRecords} from './sourceRecordSelectors.js';
 
 /** No use of CbmNode, current UI grain, F-levels or geometry seed predicates. */
 export async function extractEngineeringSourceGraph(files: SourceFileReader, options: { deferFamilies?:boolean; maxOccurrences?: number; maxDepth?: number; signal?: AbortSignal; onProgress?:(stage:'source-index'|'source-traverse'|'source-sort')=>void } = {}): Promise<EngineeringSourceGraph> {
