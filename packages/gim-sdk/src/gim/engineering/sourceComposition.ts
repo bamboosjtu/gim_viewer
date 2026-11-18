@@ -12,8 +12,12 @@ export function cbmRelationKind(field:string):'organization'|'composition'|undef
 /** Indexed by occurrence, never by template, name or navigation depth. No IO. */
 export function collectSourceComposition(graph:EngineeringSourceGraph,records:readonly SourceRecord[]):Map<string,CompositionEvidence[]> {
   const result=new Map<string,CompositionEvidence[]>();
-  const byCbm=new Map<string,string[]>();
-  const add=(cbm:string,source:string)=>{const ids=byCbm.get(cbm)??[];if(!ids.includes(source))ids.push(source);byCbm.set(cbm,ids);};
+  const byCbm=new Map<string,Set<string>>();
+  const add=(cbm:string,source:string)=>{
+    const existing=byCbm.get(cbm);
+    if(existing)existing.add(source);
+    else byCbm.set(cbm,new Set([source]));
+  };
   for(const row of records) {
     if(row.parent)result.set(row.id,[{kind:row.track==='dev'?'physical_assembly':'object_decomposition',
       parentSourceIds:[row.parent],evidence:[`assembly:${row.parent}->${row.id}`],status:'confirmed'}]);
@@ -22,29 +26,32 @@ export function collectSourceComposition(graph:EngineeringSourceGraph,records:re
   }
   for(const alias of graph.aliases)for(const candidate of alias.candidates)add(alias.sourceId,candidate);
   const nodes=new Map(graph.cbmOccurrences.map(node=>[node.id,node]));
-  const parentCache=new Map<string,string[]>();
-  function parents(node:CbmOccurrence,branch=new Set<string>()):string[] {
+  const parentCache=new Map<string,ReadonlySet<string>>();
+  const emptyParents:ReadonlySet<string>=new Set();
+  function parents(node:CbmOccurrence,branch=new Set<string>()):ReadonlySet<string> {
     const cached=parentCache.get(node.id);if(cached)return cached;
-    if(branch.has(node.id))return [];
+    if(branch.has(node.id))return emptyParents;
     branch.add(node.id);
     const direct=byCbm.get(node.id);
     const ancestor=node.parentId?nodes.get(node.parentId):undefined;
-    const ids=direct??(cbmRelationKind(node.viaField)==='composition'&&ancestor?parents(ancestor,branch):[]);
+    const ids=direct??(cbmRelationKind(node.viaField)==='composition'&&ancestor?parents(ancestor,branch):emptyParents);
     parentCache.set(node.id,ids);return ids;
   }
   for(const node of graph.cbmOccurrences) {
     if(cbmRelationKind(node.viaField)!=='composition'||!node.parentId)continue;
+    const children=byCbm.get(node.id);
+    if(!children?.size)continue;
     const ancestor=nodes.get(node.parentId);
-    const candidates=ancestor?parents(ancestor):[];
-    const children=byCbm.get(node.id)??[];
+    const candidates=ancestor?parents(ancestor):emptyParents;
+    const candidateIds=[...candidates];
+    const evidence=[JSON.stringify([node.documentPath,node.viaField,node.parentId,node.id])];
     for(const sourceId of children) {
       // A semantic alias can point at the same physical occurrence as its parent.
-      const ids=candidates.filter(id=>id!==sourceId);
-      if(candidates.length&&!ids.length)continue;
+      const ids=candidates.has(sourceId)?candidateIds.filter(id=>id!==sourceId):candidateIds;
+      if(candidates.size&&!ids.length)continue;
       const links=result.get(sourceId)??[];
       links.push({kind:'semantic_composition',parentSourceIds:ids,
-        evidence:[JSON.stringify([node.documentPath,node.viaField,node.parentId,node.id])],
-        status:ids.length===0?'unresolved':ids.length===1&&children.length===1?'confirmed':'ambiguous'});
+        evidence,status:ids.length===0?'unresolved':ids.length===1&&children.size===1?'confirmed':'ambiguous'});
       result.set(sourceId,links);
     }
   }

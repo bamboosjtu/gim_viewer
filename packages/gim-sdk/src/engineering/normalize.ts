@@ -4,7 +4,7 @@ import { assertEngineeringPartition } from './validate.js';
 import { categoryDefinition,publishDirectoryClassification } from './catalogClassification.js';
 import { classificationDetails } from './classificationDetails.js';
 import {recoverComponentMembership} from './recoverMembership.js';
-import type { EngineeringEntity, EngineeringSnapshot, ObjectEvidence, ObjectInterpretation, PendingWhole, SourceAlias } from './types.js';
+import type { CompositionEvidence, EngineeringEntity, EngineeringSnapshot, ObjectEvidence, ObjectInterpretation, PendingWhole, SourceAlias } from './types.js';
 
 /** Lossless package-local identity. No class version, tree parent or traversal counter. */
 const identity = (scope: string, kind: string, seed: string) => `${kind}:${JSON.stringify([scope, seed])}`;
@@ -22,12 +22,25 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
   if (!scope) throw new Error('Engineering scope is required');
   const disputedComposition=new Map<string,NonNullable<ObjectEvidence['composition']>>();
   const ordered = input.map(row=>{
-    const uncertain=row.composition?.filter(edge=>edge.kind==='semantic_composition'&&edge.status!=='confirmed');
-    if(uncertain?.length)disputedComposition.set(row.sourceId,uncertain);
-    if(row.assemblyParentId)return row;
-    const parents=[...new Set(row.composition?.filter(edge=>edge.kind==='semantic_composition'&&edge.status==='confirmed').flatMap(edge=>edge.parentSourceIds)??[])];
-    if(parents.length>1)disputedComposition.set(row.sourceId,row.composition!.filter(edge=>edge.kind==='semantic_composition'));
-    return parents.length===1&&!uncertain?.length?{...row,assemblyParentId:parents[0]}:row;
+    if(!row.composition?.length)return row;
+    let uncertain:CompositionEvidence[]|undefined;
+    let parent:string|undefined;
+    let multipleParents=false;
+    for(const edge of row.composition){
+      if(edge.kind!=='semantic_composition')continue;
+      if(edge.status!=='confirmed'){
+        (uncertain??=[]).push(edge);
+      }else if(!row.assemblyParentId&&!multipleParents){
+        for(const id of edge.parentSourceIds){
+          if(parent!==undefined&&parent!==id){multipleParents=true;break;}
+          parent=id;
+        }
+      }
+    }
+    if(multipleParents)disputedComposition.set(row.sourceId,row.composition.filter(edge=>edge.kind==='semantic_composition'));
+    else if(uncertain)disputedComposition.set(row.sourceId,uncertain);
+    if(row.assemblyParentId||multipleParents||uncertain||parent===undefined)return row;
+    return {...row,assemblyParentId:parent};
   }).sort((a, b) => compare(a.sourceId, b.sourceId));
   const raw = new Map(ordered.map(row => [row.sourceId, row]));
   if (raw.size !== input.length || raw.has('')) throw new Error('Source occurrence IDs must be unique and nonempty');
