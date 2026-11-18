@@ -9,7 +9,6 @@ import { getEngineeringRepresentations } from './engineeringRepresentationServic
 import { devRepresentationHint } from '../viewer/devRepresentationIdentity.js';
 import type { SourceRecord } from '../gim/engineering/sourceEvidence.js';
 import { engineeringSourceRecord } from './engineeringViewService.js';
-import { representationEvidenceState } from '../engineering/representations.js';
 import {engineeringQuery} from '../gim/engineering/projection.js';
 
 function propertyText(value:unknown):string {
@@ -110,12 +109,11 @@ export function applyGeometryFilter(state: AppState, onlyRoot?: THREE.Object3D):
 function makeScope(state: AppState, request: SelectionRequest, ownerIds: Set<string>, sourceIds: Set<string>): EngineeringSelectionScope | null {
   const representations = getEngineeringRepresentations(state);
   if (!representations || !state.engineering.snapshot) return null;
-  const byGuid = representations.ifcGuidCounts;
   const ifc: EngineeringSelectionScope['ifc'] = [];
   for (const id of sourceIds) {
     for(const binding of representations.index.bySource.get(id)??[]) {
     if (binding?.kind === 'ifc' && !binding.nonphysical) ifc.push({ modelId: binding.modelId, expressId: binding.expressId,
-      globalId: byGuid.get(JSON.stringify([binding.modelId, binding.globalId])) === 1 ? binding.globalId : '' });
+      globalId: representations.index.sourcesForIfcGuid(binding.modelId,binding.globalId).length === 1 ? binding.globalId : '' });
     }
   }
   return { requestId: request.id, snapshot: state.engineering.snapshot, ownerIds, sourceIds,
@@ -182,7 +180,6 @@ export async function updateEngineeringHighlight(state: AppState, request: Selec
     detail: ambiguousMeshes ? '部分粗表示包含多个整体，范围尚未分离。' : missingBindings ? '部分来源尚未映射到可选表示。' : available ? '按工程整体的来源成员选择可用表示。' : '当前来源尚无可用表示；来源与整体仍可查看。' };
   if(rangeOutlined&&!available)state.selection.selectionGeometry.detail='已标出所选来源的空间范围，构件表示尚在恢复。';
   projectPresentation().geometryFeedback(state.selection.selectionGeometry.detail);
-  state.selection.selectionGeometry.evidence=representationEvidenceState(scope.devRoots.size||scope.ifc.length?'physical':'unknown',state.selection.selectionGeometry.status==='available'?'available':state.selection.selectionGeometry.status==='partial'?'partial':'not_requested',representations.index.resolveSources([...scope.sourceIds]));
   if (fit && (!automatic || state.selection.canAutoLocate(request))) {
     const box = new graphics.Box3();
     for (const object of selected) if (visible(object)) box.expandByObject(object);

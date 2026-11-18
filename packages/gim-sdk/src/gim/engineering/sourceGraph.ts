@@ -1,6 +1,6 @@
 import {parseSourceDocument,type SourceDocument} from './sourceDocuments.js';
 import {sourceScalar, sourceReferenceFields, type SourceField} from '../sourceDocument.js';
-import {createEntryIndex,type EntryIndex} from '../entryResolver.js';
+import {createEntryIndex,sourceReferenceCandidates,type EntryIndex} from '../entryResolver.js';
 export type {SourceDocument} from './sourceDocuments.js';
 import { parseFamSectionsWithDiagnostics } from '../famParser.js';
 import { resolveBaseFamilyReferences } from '../gimValueSemantics.js';
@@ -68,7 +68,7 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
     }));
   };
   function resolve(owner: string, field: string, value: string): string | null {
-    const candidates=entryIndex.candidates(value.replace(/\.ifc\$$/i,'.ifc'),owner);
+    const candidates=sourceReferenceCandidates(entryIndex,value,owner);
     const target = candidates.length === 1 ? candidates[0] : null;
     result.references.push({ owner, field, value, target, candidates: [...candidates], status: target ? 'resolved' : candidates.length ? 'ambiguous' : 'missing' });
     return target;
@@ -88,7 +88,7 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
     if(seen.has(key))return;seen.add(key);ambiguousFields.set(doc,seen);
     const lines=fields.flatMap(field=>field.line==null?[]:[field.line]);
     result.diagnostics.push({kind:'ambiguous-field',source:doc.path,field:key,lines});
-    const candidates=[...new Set(fields.flatMap(field=>[...entryIndex.candidates(field.value,doc.path)]))];
+    const candidates=[...new Set(fields.flatMap(field=>[...sourceReferenceCandidates(entryIndex,field.value,doc.path)]))];
     result.references.push({owner:doc.path,field:key,value:'',values:fields.map(field=>field.value),lines,candidates,target:null,status:'ambiguous'});
   };
   const scalar = (doc: SourceDocument, key: string) => {

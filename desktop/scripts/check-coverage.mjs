@@ -23,11 +23,11 @@ if(!process.exitCode){
  for(const file of combined.files()){
   const coverage=combined.fileCoverageFor(file),path=relative(repo,file).replaceAll('\\','/');
   summaries[file]=coverage.toSummary().toJSON();
-  const group=path.startsWith('packages/gim-sdk/src/engineering/')?'semantic':path.startsWith('packages/gim-sdk/src/gim/')?'source':null;
+  const group=path.startsWith('packages/gim-sdk/src/engineering/')?'semantic':path.startsWith('packages/gim-sdk/src/gim/')?'source':path.startsWith('packages/gim-sdk/src/shared/')?'shared':null;
   if(group){groups[group]??=createCoverageMap({});groups[group].addFileCoverage(coverage);}
  }
  const gates={};let failed=false;
- for(const [name,minimum] of Object.entries({semantic:{statements:95,lines:95,functions:95,branches:90},source:{statements:90,lines:90,functions:90,branches:80}})){
+ for(const [name,minimum] of Object.entries({semantic:{statements:95,lines:95,functions:95,branches:90},source:{statements:90,lines:90,functions:90,branches:80},shared:{statements:90,lines:90,functions:90,branches:80}})){
   const summary=groups[name]?.getCoverageSummary().toJSON();
   if(!summary?.lines.total)throw Error(`Missing ${name} implementation coverage`);
   gates[name]=summary;

@@ -1,6 +1,6 @@
 import {engineeringSourceRecords} from '../gim/engineering/sourceGraph.js';
 import { ENGINEERING_SOURCE_VERSION, type EngineeringSources } from '../gim/engineering/buildSources.js';
-import { ENGINEERING_RECOGNITION_VERSION as ENGINEERING_RULES_VERSION } from '../gim/engineering/sourceEvidence.js';
+import { ENGINEERING_RECOGNITION_VERSION as ENGINEERING_RULES_VERSION } from '@gim/gim-sdk/source-adapter';
 import { assertEngineeringPartition } from '../engineering/validate.js';
 import type { EngineeringSnapshot } from '../engineering/types.js';
 import { ENGINEERING_NAVIGATION_VERSION } from '../gim/engineering/navigation.js';

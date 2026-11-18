@@ -2,12 +2,12 @@
 
 运行时配置的维护源是独立 JSON；[实体索引工作簿](变电三维设计建模规范_实体索引表.xlsx) 只作参考资料。构建、检查、运行和独立工具打包不读取工作簿，也不以当前工作簿 SHA 决定配置有效性。JSON 中的单元格和摘要是所记录的参考版本的来源证据。
 
-- `desktop/src/engineering/standardCatalog.json`：模型条目、目录身份、精确词条及参考来源。
+- `packages/gim-sdk/src/engineering/standardCatalog.json`：模型条目、目录身份、精确词条及参考来源。
 - `catalog.json`：稳定的公开目录和部件条目；内部角色到目录的映射由 `recognitionPolicy.json` 维护。
 - `recognitionPolicy.json`：GIM Viewer 内部识别角色及 grain 策略，不是标准原文。
 - `compositionPolicy.json`：所有设备的部件宿主能力、独立安装和单相主变组策略。
-- `gim/engineering/sourceCompatibilityPolicy.json`：DEV/IFC 及结构化字段的适配枚举；标准精确词条优先，冲突保留观察记录。
-- `gim/engineering/sourceVocabulary.json`：模型与部件两个独立词汇命名空间，由上述 JSON 同步。
+- `packages/gim-sdk/src/engineering/sourceCompatibilityPolicy.json`：DEV/IFC 及结构化字段的适配枚举；标准精确词条优先，冲突保留观察记录。
+- `packages/gim-sdk/src/engineering/sourceVocabulary.json`：模型与部件两个独立词汇命名空间，由上述 JSON 同步。
 
 维护 JSON 后在 `desktop/` 执行 `npm run sync:engineering-catalog`；再运行 `npm run check:engineering-catalog` 和 `npm run test:recognition`。同步命令不读取 XLSX，独立工具持有自己的配置副本；运行和打包均不读取主程序。
 

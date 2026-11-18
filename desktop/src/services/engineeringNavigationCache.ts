@@ -64,7 +64,7 @@ async function dependency(snapshot: EngineeringSnapshot, sourceDigest: string): 
 export function assertEngineeringNavigation(view: EngineeringNavigationData, sources: EngineeringSources, snapshot: EngineeringSnapshot, allowPartial=false): void {
   valid(object(view) && view.version === ENGINEERING_NAVIGATION_VERSION && object(view.composition) && view.composition.version === ENGINEERING_COMPOSITION_VERSION, 'version');
   const errors=view.projectionErrors;
-  valid(errors===undefined||object(errors)&&Object.entries(errors).every(([key,value])=>['composition','source','inventory'].includes(key)&&typeof value==='string'&&value.length>0),'projection errors');
+  valid(errors===undefined||object(errors)&&Object.entries(errors).every(([key,value])=>['composition','source','inventory','inventory-search'].includes(key)&&typeof value==='string'&&value.length>0),'projection errors');
   valid(allowPartial||!Object.keys(errors??{}).length,'partial projection');
   const failed=(key:string)=>allowPartial&&!!errors?.[key];
   valid(view.projectionVersions?.composition===ENGINEERING_COMPOSITION_VERSION&&view.projectionVersions?.inventory===INVENTORY_TEMPLATE_VERSION&&view.projectionVersions?.source===SOURCE_TREE_TEMPLATE_VERSION&&(failed('inventory')&&!view.inventory||view.inventory?.version===INVENTORY_TEMPLATE_VERSION),'projection versions');
@@ -115,7 +115,8 @@ export function assertEngineeringNavigation(view: EngineeringNavigationData, sou
     valid(inventory.rowsBySource.get(member.sourceId)===row,'inventory source owner row');
   }
   valid(inventory.rowsBySource.size===memberRows,'inventory source coverage');
-  valid(Array.isArray(view.inventorySearch)&&view.inventorySearch.length===entities.size&&new Set(view.inventorySearch.map(r=>r.key)).size===entities.size&&view.inventorySearch.every(r=>entities.has(r.key)&&typeof r.title==='string'&&typeof r.subtitle==='string'&&typeof r.searchText==='string'),'inventory search');
+  if(failed('inventory-search'))valid(Array.isArray(view.inventorySearch)&&view.inventorySearch.length===0,'failed inventory search');
+  else valid(Array.isArray(view.inventorySearch)&&view.inventorySearch.length===entities.size&&new Set(view.inventorySearch.map(r=>r.key)).size===entities.size&&view.inventorySearch.every(r=>entities.has(r.key)&&typeof r.title==='string'&&typeof r.subtitle==='string'&&typeof r.searchText==='string'),'inventory search');
   }else valid(Array.isArray(view.inventorySearch)&&view.inventorySearch.length===0,'failed inventory search');
   const pending=view.metadata?.pendingWholes,pendingIds=new Set(snapshot.pending.map(p=>p.id));
   valid(Array.isArray(pending)&&pending.length===pendingIds.size&&new Set(pending.map(p=>p.id)).size===pendingIds.size

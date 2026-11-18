@@ -19,7 +19,7 @@ test('formatter scope survives a Git checkout with core.autocrlf=true', () => {
   const template=join(folder,'empty-template');mkdirSync(template);
   git('init', '--quiet', '--template='+template);
   writeFileSync(join(folder, '.gitattributes'), readFileSync(resolve('../.gitattributes')));
-  const paths = formattedArchitectureModules.map(path => 'desktop/' + path.replace('*', 'selection'));
+  const paths = formattedArchitectureModules.map(path => (path.startsWith('../') ? path.slice(3) : 'desktop/' + path).replace('*', 'selection'));
   for (const path of paths) {
     mkdirSync(dirname(join(folder, path)), { recursive: true });
     writeFileSync(join(folder, path), 'export const value = 1;\n');
@@ -39,11 +39,11 @@ test('formatter scope survives a Git checkout with core.autocrlf=true', () => {
 test('adopted modules enforce type-checked rules and route logs through the shared sink', async () => {
   const { ESLint } = await import('eslint');
   const { architectureModules } = await import('./format-architecture.mjs');
-  const eslint = new ESLint();
+  const eslint = new ESLint({ cwd: resolve('..') });
   for (const pattern of architectureModules) {
-    const path = pattern.replace('*', 'selection');
+    const path = (pattern.startsWith('../') ? pattern.slice(3) : 'desktop/' + pattern).replace('*', 'selection');
     const config = await eslint.calculateConfigForFile(path);
     assert.equal(config.rules['@typescript-eslint/no-unsafe-assignment'][0], 2, path);
-    if (path !== 'src/utils/logger.ts') assert.equal(config.rules['no-console'][0], 2, path);
+    if (path !== 'desktop/src/utils/logger.ts') assert.equal(config.rules['no-console'][0], 2, path);
   }
 });

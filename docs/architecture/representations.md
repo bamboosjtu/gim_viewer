@@ -63,7 +63,7 @@ matrix          列主序累计矩阵（含 CBM/装配变换，平移按单位�
 | `devRoots` / `devAssembly` / `devFiles` | DEV 根、装配路径、文件路径到来源 |
 | `ifcObjects` | `(modelId, expressId)` 到来源 |
 
-解析结果只有三种：`bound`（全部来源都指向同一整体）、`ambiguous`（跨多个整体，或混合已归属与待归/未归属来源）、`unassociated`（没有可确认整体）。待归集合不冒充工程整体，孤立几何地址仍可独立查询。不自动选择第一个候选。
+解析结果只有三种：`bound`（全部来源都指向同一整体）、`ambiguous`（跨多个整体，或混合已归属与待归/未归属来源）、`unassociated`（没有可确认整体）。返回值分别携带工程整体、待归集合和未知来源地址。已知待归集合可查看其成员，混合表示需先选择候选。
 
 ## 绑定规则
 
@@ -74,7 +74,7 @@ matrix          列主序累计矩阵（含 CBM/装配变换，平移按单位�
 - 粗表示跨多个整体时，`resolveDev`/`resolveIfc` 返回 `ambiguous`，界面展示候选，不把整块网格同时算作任一整体。
 - 未绑定来源返回 `unassociated`，提示“当前表示的来源尚未可靠关联，请在来源视图查看”。
 
-IFC 的 `globalId` 是否唯一由 `(modelId, globalId)` 计数决定；重复 GUID 不用于单值反向查询。DEV 的 mesh hint 可能带 PHM/MOD 后缀，解析时沿真实装配路径向上回退到最近的 DEV occurrence，不扫描全部兄弟。
+IFC 的 `globalId` 是否唯一由 `(modelId, globalId)` 计数决定；重复 GUID 不用于单值反向查询。DEV 的 mesh hint 可能带 PHM/MOD 后缀，解析时只剥离 PHM、MOD、STL、solid 等渲染后缀。不存在的 SUBDEVICE 装配段保持未关联，明确的空装配路径匹配根。
 
 ## 选择后的表示
 

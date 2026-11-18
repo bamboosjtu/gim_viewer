@@ -1,3 +1,4 @@
+import {collectSourceGeometryOccurrences,sourceGeometryLocations} from '@gim/gim-sdk/geometry';
 import {normalizeEngineeringSources} from '../gim/engineering/semanticAdapter.js';
 import {engineeringSourceRecords} from '../gim/engineering/source.js';
 import { collectEngineeringSources, type EngineeringSources } from '../gim/engineering/buildSources.js';
@@ -5,11 +6,11 @@ import { projectEngineeringNavigation } from '../gim/engineering/projection.js';
 import type { EngineeringSourceGraph } from '../gim/engineering/source.js';
 import type { IfcSpatialObject, IfcSpatialNode, SpatialModelSummary } from '../gim/ifcSpatialParser.js';
 import type { EngineeringSnapshot } from '../engineering/types.js';
-import { ENGINEERING_RECOGNITION_VERSION as ENGINEERING_RULES_VERSION } from '../gim/engineering/sourceEvidence.js';
+import { ENGINEERING_RECOGNITION_VERSION as ENGINEERING_RULES_VERSION } from '@gim/gim-sdk/source-adapter';
 
 /** Source and physical publication survives recognition and projection failures. */
 export function assembleEngineeringView(scope:string,graph:EngineeringSourceGraph,objects:readonly IfcSpatialObject[],models:readonly SpatialModelSummary[],nodes:readonly IfcSpatialNode[]=[],normalize:(scope:string,sources:EngineeringSources)=>EngineeringSnapshot=normalizeEngineeringSources){
-  return assembleStoredEngineeringView(scope,collectEngineeringSources(graph,objects,models,nodes),normalize);
+  return assembleStoredEngineeringView(scope,collectEngineeringSources(graph,objects,models,nodes,sourceGeometryLocations(collectSourceGeometryOccurrences(graph))),normalize);
 }
 export function assembleStoredEngineeringView(scope:string,sources:EngineeringSources,normalize:(scope:string,sources:EngineeringSources)=>EngineeringSnapshot=normalizeEngineeringSources){
   const graph=sources.graph,stageErrors:Record<string,string>={};

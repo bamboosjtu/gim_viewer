@@ -58,7 +58,11 @@ export function projectEngineeringNavigation(sources: EngineeringSources, snapsh
       searchText: [entity.name, subtitle, ...names, entity.id].join('\n').toLowerCase() };
   });
   let inventory:EngineeringInventory|undefined,inventorySearch:ReturnType<typeof projectInventorySearch>=[];
-  try {inventory=projectEngineeringInventory(snapshot);inventorySearch=projectInventorySearch(inventory,snapshot,[...records.values()]);} catch(error){inventory=undefined;inventorySearch=[];projectionErrors.inventory=String(error);}
+  try { inventory=projectEngineeringInventory(snapshot); } catch(error) { projectionErrors.inventory=String(error); }
+  if(inventory) {
+    try { inventorySearch=projectInventorySearch(inventory,snapshot,[...records.values()]); }
+    catch(error) { projectionErrors['inventory-search']=String(error); }
+  }
   return { version: ENGINEERING_NAVIGATION_VERSION,
     projectionVersions:{composition:ENGINEERING_COMPOSITION_VERSION,source:SOURCE_TREE_TEMPLATE_VERSION,inventory:INVENTORY_TEMPLATE_VERSION},
     projectionErrors:Object.keys(projectionErrors).length?projectionErrors:undefined,

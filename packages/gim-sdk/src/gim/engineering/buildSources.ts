@@ -2,7 +2,6 @@ import type { IfcSpatialObject, IfcSpatialNode, SpatialModelSummary } from '../i
 import { collectEngineeringSourceModel, type IfcSourceMatch } from './engineeringModel.js';
 import { type SourceRecord } from './sourceEvidence.js';
 import {type EngineeringSourceGraph} from './sourceGraph.js';
-import { collectSourceGeometryOccurrences } from './geometryOccurrences.js';
 
 export const ENGINEERING_SOURCE_VERSION = 'engineering-source-v1';
 export type EngineeringSpatialContext = Pick<IfcSpatialNode, 'key' | 'modelId' | 'expressId' | 'ifcType' | 'kind' | 'globalId' | 'name' | 'sourcePath' | 'parentKey' | 'longName'> & { elevationMetres?: number };
@@ -21,7 +20,7 @@ export interface EngineeringSources {
 const canonical = (value: string) => value.replace(/\\/g, '/').toLowerCase();
 
 /** A parse result can be browsed without certifying a complete source snapshot. */
-export function collectEngineeringSources(graph: EngineeringSourceGraph, objects: readonly IfcSpatialObject[], models: readonly SpatialModelSummary[], nodes: readonly IfcSpatialNode[] = []): EngineeringSources {
+export function collectEngineeringSources(graph: EngineeringSourceGraph, objects: readonly IfcSpatialObject[], models: readonly SpatialModelSummary[], nodes: readonly IfcSpatialNode[] = [], locations?: EngineeringSources['locations']): EngineeringSources {
   const model = collectEngineeringSourceModel(graph, objects);
   const expected = new Set(graph.ifcPaths.map(canonical));
   const actual = new Set(models.map(m => canonical(m.entryPath)));
@@ -37,7 +36,7 @@ export function collectEngineeringSources(graph: EngineeringSourceGraph, objects
     models: models.map(m => ({ modelId: m.modelId, path: m.entryPath, ...(m.parseError ? { error: m.parseError } : {}) })),
     spatialNodes: nodes.map(({ key, modelId, expressId, ifcType, kind, globalId, name, sourcePath, parentKey, longName, elevation, placement }) => ({ key, modelId, expressId, ifcType, kind, globalId, name, sourcePath, parentKey, longName,
       ...(elevation!==undefined&&placement?.unitScaleToMetres ? {elevationMetres:elevation*placement.unitScaleToMetres}:{} ) })),
-    locations:collectSourceGeometryOccurrences(graph).occurrences.filter(o=>!o.placementMatrix.slice(12,15).every(n=>n===0)).map(o=>({sourceId:o.sourceId,position:o.placementMatrix.slice(12,15).map(n=>n/1000)})),
+    ...(locations ? { locations } : {}),
     complete: reasons.length === 0, incompleteReasons: reasons,
   };
 }

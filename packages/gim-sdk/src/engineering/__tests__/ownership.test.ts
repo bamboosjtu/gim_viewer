@@ -55,3 +55,26 @@ it('does not pregroup single-phase device members into a competing transformer w
  const result=normalizeEngineeringModel('scope',[host(),...rows]);
  expect(result.entities).toHaveLength(1);expect(result.entities[0].sourceIds).toEqual(['a','b','whole']);
 });
+
+it('keeps unresolved composition pending even when a declared host is otherwise unique',()=>{
+ const whole=declaredObject('whole','断路器',{identityCodes:[{value:'whole-code',evidenceId:'code'}]});
+ const member=declaredObject('part','散热器',{
+   hostCodes:[{value:'whole-code',evidenceId:'host-code'}],
+   composition:[{kind:'semantic_composition',parentSourceIds:['whole','other'],status:'ambiguous',evidence:['ambiguous-edge']}],
+ });
+ const snapshot=normalizeEngineeringModel('scope',[whole,member]);
+ const result=snapshot.memberships.find(row=>row.sourceId==='part')!;
+ expect(snapshot.pending.find(row=>row.id===result.ownerId)?.reason).toBe('composition_parent_unresolved');
+ expect(result.interpretation.membershipStatus).toBe('unresolved');
+ expect(result.compositionCandidates).toEqual(member.composition);
+});
+
+it('preserves uncertain semantic candidates alongside independent physical ownership',()=>{
+ const uncertain={kind:'semantic_composition',status:'ambiguous',parentSourceIds:['whole','other'],evidence:['ambiguous-edge']} as const;
+ const member=declaredObject('part','断路器',{assemblyParentId:'whole',composition:[
+   {kind:'physical_assembly',status:'confirmed',parentSourceIds:['whole'],evidence:['physical-edge']},uncertain,
+ ]});
+ const snapshot=normalizeEngineeringModel('scope',[host(),member]);
+ expect(snapshot.memberships.find(row=>row.sourceId==='part')).toMatchObject({disposition:'whole_member',parentPartId:'whole',compositionCandidates:[uncertain]});
+ expect(snapshot.diagnostics).toContainEqual(expect.objectContaining({kind:'composition_parent_unresolved',identity:'part'}));
+});

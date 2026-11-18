@@ -53,19 +53,31 @@ export function collectEngineeringSourceModel(graph: EngineeringSourceGraph, obj
     fileTargets.set(edge.owner,{target:ambiguous?null:edge.target,ambiguous});
   }
   const ifcMatches: IfcSourceMatch[] = [];
+  const linksByDocument=new Map<string,Omit<IfcSourceMatch,'cbmOccurrenceId'|'devSourceIds'>|null>();
   for (const cbm of graph.cbmOccurrences) {
-    const doc = documents.get(cbm.documentPath)!;
+    let link=linksByDocument.get(cbm.documentPath);
+    if(link===undefined){
+      link=readLink(cbm.documentPath);
+      linksByDocument.set(cbm.documentPath,link);
+    }
+    if(link)ifcMatches.push({...link,cbmOccurrenceId:cbm.id,
+      devSourceIds:[...aliases.get(cbm.id)??devByCbm.get(cbm.id)??[]]});
+  }
+  return {sources,ifcMatches};
+
+  function readLink(path:string):Omit<IfcSourceMatch,'cbmOccurrenceId'|'devSourceIds'>|null {
+    const doc=documents.get(path);
+    if(!doc)return null;
     const guid=sourceScalar(doc,'IFCGUID'),rawGuid=guid.value;
-    if(guid.status==='empty')continue;
-    const target=fileTargets.get(cbm.documentPath);
+    if(guid.status==='empty')return null;
+    const target=fileTargets.get(path);
     const ambiguous=guid.status==='ambiguous'||sourceScalar(doc,'IFCFILE').status==='ambiguous'||!!target?.ambiguous;
     const file=ambiguous?null:target?.target;
     const hits = file ? byModelGuid.get(JSON.stringify([canonical(file), rawGuid])) ??
       (rawGuid.endsWith('$') ? byModelGuid.get(JSON.stringify([canonical(file), rawGuid.slice(0, -1)])) : undefined) ?? [] : [];
-    ifcMatches.push({ cbmOccurrenceId: cbm.id, sourcePath: cbm.documentPath, rawGuid,
+    return {sourcePath:path,rawGuid,
       ...(guid.status==='ambiguous'?{rawGuidValues:guid.fields.map(field=>field.value)}:{}),
       status: ambiguous?'ambiguous':hits.length === 1 ? 'confirmed' : hits.length ? 'ambiguous' : 'not_found',
-      ifcSourceIds: [...hits], devSourceIds: [...aliases.get(cbm.id) ?? devByCbm.get(cbm.id) ?? []] });
+      ifcSourceIds:[...hits]};
   }
-  return { sources, ifcMatches };
 }

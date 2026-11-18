@@ -4,7 +4,7 @@ import {fileURLToPath} from 'node:url';
 import type {EngineeringSnapshot} from '../types.js';
 import recognitionCases from '../../../../../tools/gim_element/tests/contracts/recognition_cases.json';
 import {it,expect} from 'vitest';
-import {toObjectEvidence,type SourceRecord} from '../../gim/engineering/sourceEvidence.js';
+import {toObjectEvidence,type SourceRecord} from '../recognizeSource.js';
 import {normalizeEngineeringModel} from '../normalize.js';
 const cases=recognitionCases as Array<{name:string;records:Array<{id:string;type:string;name?:string;parent?:string;props?:Record<string,string>;attributeOnly?:boolean;relations?:SourceRecord['relations']}>;groups:string[][];pending:number;expectedMember?:Record<string,unknown>;expectedEntity?:Record<string,unknown>}>;
 it.each(cases)('agrees with the independently implemented tool on $name',fixture=>{

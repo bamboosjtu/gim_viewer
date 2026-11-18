@@ -82,7 +82,7 @@ bootstrap
 
 ## 五组能力入口
 
-桌面应用通过 `@gim/gim-sdk` 的 source / semantic / geometry / engineering / projection 五个出口连接能力。现有目录仅保留有生产消费者的转发入口：`gim/engineering/source.ts` 提供来源收集，`engineering/semantic.ts` 提供归一化，`gim/engineering/geometry.ts` 提供独立物理目录，`engineering/fusion.ts` 提供实体/表示绑定，`gim/engineering/projection.ts` 提供现有三视图投影。宿主 Worker 和工程装配通过这些入口接线；格式适配仍在 gim，纯领域仍在 engineering。
+桌面应用通过 `@gim/gim-sdk` 的 source / semantic / geometry / engineering / projection 五个能力出口及 source-adapter 接线。现有目录仅保留有生产消费者的转发入口：`gim/engineering/source.ts` 提供来源收集，`gim/engineering/semanticAdapter.ts` 将来源传入领域归一化，`gim/engineering/geometry.ts` 提供独立物理目录，`engineering/fusion.ts` 提供实体/表示绑定，`gim/engineering/projection.ts` 提供现有三视图投影。宿主 Worker 和工程装配通过这些入口接线；来源图和原始事实位于 gim，候选解释和归属位于 engineering，位置提示由几何能力显式提供。SDK 发布构建检验各入口的运行时依赖闭包。
 
 SDK 的实现及模块测试归 `packages/gim-sdk/src/`，IFC 运行时解析器仍在桌面；其共享对象/空间类型由 SDK 的 ifcSpatialTypes 提供。桌面与 Vitest 使用 gim-source 条件读取当前源码，默认包 import 消费构建后的 ESM。
 

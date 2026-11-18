@@ -72,3 +72,17 @@ it('keeps a shared equipment type as whole/member roles and ignores F labels whe
   expect(normalizeEngineeringSources('scope',collectEngineeringSources(second,[],[]))).toEqual(result);
   expect(collectSourceGeometryOccurrences(second)).toEqual(collectSourceGeometryOccurrences(first));
 });
+
+it('keeps a direct occurrence when an alias also contributes a competing host',async()=>{
+  const {graph}=await read({'project.cbm':'SUBSYSTEM0=whole.cbm\nSUBSYSTEM1=other.cbm',
+    'whole.cbm':'OBJECTMODELPOINTER=whole.dev\nSUBDEVICE0=part.cbm',
+    'whole.dev':'TYPE=GIS','other.cbm':'OBJECTMODELPOINTER=other.dev','other.dev':'TYPE=GIS',
+    'part.cbm':'ENTITYNAME=PARTINDEX\nOBJECTMODELPOINTER=part.dev','part.dev':'TYPE=CircuitBreaker'});
+  const whole=graph.records.find(row=>row.source==='whole.dev')!;
+  const other=graph.records.find(row=>row.source==='other.dev')!;
+  graph.aliases.push({sourceId:whole.devOccurrence!.cbmOccurrenceId,status:'ambiguous',candidates:[other.id]});
+  const part=graph.attributeRecords![0];
+  expect(collectSourceComposition(graph,engineeringSourceRecords(graph)).get(part.id)).toContainEqual(
+    expect.objectContaining({kind:'semantic_composition',status:'ambiguous',parentSourceIds:[whole.id,other.id]}),
+  );
+});

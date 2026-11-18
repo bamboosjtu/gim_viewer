@@ -19,3 +19,14 @@ it('derives a member forest with direct parents without crossing an independent 
  const next=structuredClone(snapshot);next.evidenceBinding.sourceRevision++;
  expect(engineeringQuery(next)).not.toBe(query);
 });
+
+it('keeps every member reachable when imported direct parents contain a cycle or a self edge',()=>{
+ const snapshot=normalizeEngineeringModel('p',[declaredObject('whole','断路器'),member('a','whole'),member('b','a'),member('c','whole')]);
+ const owner=snapshot.entities[0].id;
+ snapshot.memberships.find(row=>row.sourceId==='a')!.parentPartId='b';
+ snapshot.memberships.find(row=>row.sourceId==='c')!.parentPartId='c';
+ const tree=engineeringQuery(snapshot).tree(owner);
+ expect(tree.cyclicParentSourceIds).toEqual(['a','c']);
+ expect(tree.roots).toEqual(['a','c','whole']);
+ expect(tree.nodes.get('a')?.children).toEqual(['b']);
+});

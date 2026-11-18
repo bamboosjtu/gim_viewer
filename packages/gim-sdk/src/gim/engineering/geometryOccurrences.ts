@@ -61,3 +61,11 @@ export function collectSourceGeometryOccurrences(graph: EngineeringSourceGraph):
   }
   return { occurrences, diagnostics };
 }
+
+/** Source Z-up metres used by composition projection. */
+export function sourceGeometryLocations(catalog: SourceGeometryOccurrenceCatalog) {
+  return catalog.occurrences.flatMap(({sourceId,placementMatrix}) => {
+    const translation=placementMatrix.slice(12,15);
+    return translation.some(value=>value!==0)?[{sourceId,position:translation.map(value=>value/1000)}]:[];
+  });
+}

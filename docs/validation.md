@@ -85,7 +85,8 @@
 
 | 测试归属 | 位置与入口 |
 |---|---|
-| 桌面 TS 模块 | `desktop/src/<模块>/__tests__/*.test.ts`；子模块有自己的 `__tests__`，例如 `gim/engineering/`、`services/projections/`、`ui/shell/` |
+| 桌面 TS 模块 | `desktop/src/<模块>/__tests__/*.test.ts`；子模块有自己的 `__tests__`，例如 `services/projections/`、`ui/shell/` |
+| GIM SDK | `packages/gim-sdk/src/<模块>/__tests__/` 持有 DTO 与纯能力测试，桌面仅保留真实消费者测试 |
 | 平台桥接 | `desktop/bridge/__tests__/`；SQLite 仍使用独立配置，不进入默认单测 |
 | 共享线路核心 | `packages/powerline-core/src/__tests__/`，由 desktop/app 的 Vitest 自动发现；不再放在 Android 应用的顶层测试目录 |
 | Android 自身模块 | `app/src/<模块>/__tests__/`；真实样本在 `app/tests/local/`，只由显式本地配置发现 |
@@ -279,6 +280,7 @@ cargo test --manifest-path app/src-tauri/Cargo.toml six_native_imports -- --igno
 | 范围 | 行/语句 | 函数 | 分支 |
 |---|---|---|---|
 | `packages/gim-sdk/src/engineering/` | 95% | 95% | 90% |
+| `packages/gim-sdk/src/shared/` | 90% | 90% | 80% |
 | `gim/`（桌面与 SDK 按归属检查） | 90% | 90% | 80% |
 | `services/openGimService.ts` | 70% | 80% | 50% |
 | `services/substationRuntime.ts` | 70% | 45% | 70% |
@@ -287,7 +289,7 @@ cargo test --manifest-path app/src-tauri/Cargo.toml six_native_imports -- --igno
 | `ui/lineProjectView.ts` | 70% | 60% | 65% |
 | `ui/lineMapView.ts` | 65% | 65% | 60% |
 
-`test:coverage` 先采集 SDK 自有用例，再采集桌面消费者，合并同一源码的 Istanbul 覆盖数据后对 SDK 的领域/来源实施原门槛；桌面热点门槛仍由原配置执行。SDK 与桌面报告分别在 output/coverage/sdk 和 desktop，合并摘要在 output/coverage/coverage-summary.json。两个采集范围必须非空，防止跨目录匹配失效被当成通过；SDK 用例不在同一命令中重复执行。
+`test:coverage` 先采集 SDK 自有用例，再采集桌面消费者，合并同一源码的 Istanbul 覆盖数据后对 SDK 的领域/来源实施原门槛；桌面热点门槛仍由原配置执行。SDK 与桌面报告分别在 output/coverage/sdk 和 desktop，合并摘要在 output/coverage/coverage-summary.json。两个采集范围必须非空，防止跨目录匹配失效被当成通过；SDK 用例不在同一命令中重复执行。桌面 npm test 是工作区全量入口，包含 SDK 用例；SDK npm test 也可单独运行。
 
 热点门禁覆盖打开/取消/失败、变电冷开与暖恢复、后台发布、Viewer 重试、线路导航/地图/检查器联动及资源释放。其余层只报告覆盖率，不自动调整阈值；这些无工程样本的单元证据不代表真实工程或原生性能通过。`npm run test:presentation-boundaries` 验证展示边界检查器，`check:engineering-boundaries` 在本地与 CI 检查实际源码，包括零通用 UI loader、包导出与 Viewer 源语义限制。schema 回归验证拒绝不匹配库且不改原表；属性补写回归覆盖显式空/保留、无效属性、混合源及来源读取失败；源详情回归计数证明身份未变的连续读取只计算一次 SHA。
 

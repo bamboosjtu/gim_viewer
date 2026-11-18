@@ -10,4 +10,4 @@ export default tseslint.config({
     '@typescript-eslint/no-floating-promises': ['error', { ignoreVoid: false }],
     '@typescript-eslint/no-misused-promises': ['error', { checksVoidReturn: false }],
   },
-},...tseslint.configs.recommendedTypeChecked.map(config=>({...config,files:adopted})),{files:adopted,ignores:['src/utils/logger.ts'],rules:{'no-console':'error'}});
+},{files:['../packages/gim-sdk/src/**/*.ts'],rules:{'no-console':'error'}},...tseslint.configs.recommendedTypeChecked.map(config=>({...config,files:adopted})),{files:adopted,ignores:['src/utils/logger.ts'],rules:{'no-console':'error'}});

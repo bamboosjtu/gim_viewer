@@ -10,10 +10,13 @@ export function projectEngineeringInventory(snapshot:EngineeringSnapshot):Engine
 }
 export function projectInventorySearch(view:EngineeringInventory,snapshot:EngineeringSnapshot,records:readonly SourceRecord[]) {
   const bySource=new Map(records.map(r=>[r.id,r]));
-  return snapshot.entities.map(entity=>{
-    const row=view.nodes.get(view.rowsByEntity.get(entity.id)![0])!,path:string[]=[];
+  return snapshot.entities.flatMap(entity=>{
+    const key=view.rowsByEntity.get(entity.id)?.[0];
+    const row=key?view.nodes.get(key):undefined;
+    if(!row)return [];
+    const path:string[]=[];
     for(let cursor=row.parent;cursor;cursor=view.nodes.get(cursor)?.parent)path.unshift(view.nodes.get(cursor)!.title);
     const subtitle=path.join(' / '),names=entity.sourceIds.flatMap(id=>{const r=bySource.get(id);return r?[r.name,...r.properties.filter(p=>p.keys?.some(k=>/名称|编码|PROJECTNAME|CODE/i.test(k))).map(p=>p.value)]:[];});
-    return {key:entity.id,title:row.title,subtitle,searchText:[row.title,subtitle,entity.id,...names].join('\n').toLowerCase()};
+    return [{key:entity.id,title:row.title,subtitle,searchText:[row.title,subtitle,entity.id,...names].join('\n').toLowerCase()}];
   });
 }

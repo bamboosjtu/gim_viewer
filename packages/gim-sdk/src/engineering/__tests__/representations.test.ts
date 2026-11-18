@@ -27,8 +27,9 @@ describe('engineering representation membership', () => {
     expect(index.bySource.get('whole')).toHaveLength(3);
     expect([...index.rootsForSources(new Set(['whole']))]).toEqual(['r','r2']);
     expect(index.resolveIfc('ifc',1).status).toBe('bound');
-    expect(index.resolveIfc('ifc',2)).toMatchObject({status:'unassociated',ownerIds:[]});
-    expect(index.resolveDev('r',{assemblyPath:'sub:0'})).toMatchObject({status:'unassociated',ownerIds:[]});
+    expect(index.resolveIfc('ifc',2)).toMatchObject({status:'unassociated',ownerIds:[],unknownSourceIds:['orphan']});
+    expect(index.resolveDev('r',{assemblyPath:'sub:0'})).toMatchObject({status:'unassociated',ownerIds:[],pendingIds:[snapshot.pending[0].id]});
+    expect(index.sourcesForOwners(new Set([snapshot.pending[0].id]))).toEqual(new Set(['pending']));
     expect(index.resolveDev('r').status).toBe('ambiguous');
   });
   it('excludes an independent nested cabinet from the body selection', () => {
@@ -37,7 +38,7 @@ describe('engineering representation membership', () => {
     const selected = index.sourcesForOwners(new Set([main.id]));
     expect([...selected]).toEqual(['body', 'radiator']);
     expect(index.includesDev('physical', { assemblyPath: '' }, selected)).toBe(true);
-    expect(index.includesDev('physical', { assemblyPath: 'sub:1/sub:2' }, selected)).toBe(true);
+    expect(index.includesDev('physical', { assemblyPath: 'sub:1/solid:2' }, selected)).toBe(true);
     expect(index.includesDev('physical', { assemblyPath: 'sub:0' }, selected)).toBe(false);
     expect(index.resolveDev('physical', { assemblyPath: 'sub:0' }).ownerIds).toEqual([snapshot.entities.find(e => e.category === 'E17')!.id]);
   });
@@ -72,10 +73,10 @@ describe('engineering representation membership', () => {
       { kind: 'dev', sourceId: 'other', rootOccurrence: 'r2', assemblyPath: 'sub:2', devPath: 'Custom/Box.DEV' },
     ]);
     expect(index.resolveDev('r', { assemblyPath: 'sub:2/phm:0/mod:3' })).toMatchObject({ status: 'ambiguous', sourceIds: ['a', 'b'] });
-    expect(index.resolveDev('r', { assemblyPath: 'sub:20/phm:0' }).sourceIds).toEqual(['root']);
+    expect(index.resolveDev('r', { assemblyPath: 'sub:20/phm:0' }).sourceIds).toEqual([]);
     expect(index.resolveDev('r2', { assemblyPath: 'sub:20' }).status).toBe('unassociated');
     expect(index.resolveDev('r', { devPath: 'custom\\box.dev' }).sourceIds).toEqual(['a', 'b']);
-    expect(index.resolveDev('r', { devPath: 'missing.dev' }).sourceIds).toEqual(['a', 'b', 'root']);
-    expect(index.resolveDev('r2', { assemblyPath: 'sub:2/sub:9' }).sourceIds).toEqual(['other']);
+    expect(index.resolveDev('r', { devPath: 'missing.dev' }).sourceIds).toEqual([]);
+    expect(index.resolveDev('r2', { assemblyPath: 'sub:2/sub:9' }).sourceIds).toEqual([]);
   });
 });

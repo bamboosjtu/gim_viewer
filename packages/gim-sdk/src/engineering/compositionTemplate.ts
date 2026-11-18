@@ -1,6 +1,6 @@
 import type { EngineeringEntity, EngineeringSnapshot, EvidenceValue } from './types.js';
 import type { CompositionAssignment, CompositionGroup, CompositionDeclaration } from './composition.js';
-import { mainNumber } from './classify.js';
+import { mainNumber } from '../shared/designation.js';
 import {recognitionCategory} from './catalogLabels.js';
 
 /** Format-neutral declarations describe project context, never entity identity. */

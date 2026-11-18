@@ -14,7 +14,7 @@ import {ModelEvidenceProvider} from '@gim/gim-sdk/gim/engineering/evidenceProvid
 import {decodeEngineeringWorkerResult,encodeEngineeringWorkerResultAsync,type TransportGraphCache} from '../engineeringWorkerTransport.js';
 afterEach(()=>{vi.restoreAllMocks();});
 it.each(['composition','source','inventory','inventory-search'] as const)('transfers an explicitly failed %s projection while rejecting it as a complete cache',async failure=>{
-  const stage=failure==='inventory-search'?'inventory':failure;
+  const stage=failure;
   const g=await graph();
   const fail=()=>{throw Error('projection failure');};
   if(stage==='composition')vi.spyOn(composition,'projectEngineeringComposition').mockImplementationOnce(fail);
@@ -28,7 +28,8 @@ it.each(['composition','source','inventory','inventory-search'] as const)('trans
   expect('geometryOccurrences' in restored).toBe(false);
   expect(()=>assertEngineeringNavigation(restored.navigation,restored.sources,restored.snapshot)).toThrow('partial projection');
   if(stage!=='source')expect(restored.navigation.sourceRows.size).toBe(1);
-  if(stage!=='inventory')expect(restored.navigation.inventory?.rowsBySource.size).toBe(1);
+  if(failure!=='inventory')expect(restored.navigation.inventory?.rowsBySource.size).toBe(1);
+  if(failure==='inventory-search')expect(restored.navigation.inventorySearch).toEqual([]);
   restored.navigation.sourceNodes.get(restored.navigation.sourceRoot)!.children.push('foreign-row');
   await expect(decodeEngineeringWorkerResult(await encodeEngineeringWorkerResultAsync(restored),()=>true)).rejects.toThrow('child edge');
 });

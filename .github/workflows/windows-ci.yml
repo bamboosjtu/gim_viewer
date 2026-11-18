@@ -73,7 +73,6 @@ jobs:
 
       - name: Build and consume the standalone SDK
         run: |
-          npm run sdk:build
           npm run test:sdk
 
       - name: Check desktop release versions

@@ -1,11 +1,11 @@
 import {categoryFromName,isNumberedDesignation,mainNumber} from './classify.js';
 import {componentHostCompatibility,COMPOSITION_POLICY,isEquipmentHost} from './compositionPolicy.js';
-import type {ObjectEvidence,ObjectInterpretation,EngineeringEntity,EngineeringSnapshot} from './types.js';
+import type {ObjectEvidence,ObjectInterpretation,EngineeringEntity,EngineeringSnapshot,PendingWhole} from './types.js';
 
 /** Recover engineering composition from object-owned declarations. This never
  * edits the source parent, physical occurrence or representation address. */
 export function recoverComponentMembership(rows:readonly ObjectEvidence[],meaning:ReadonlyMap<string,ObjectInterpretation>,
-  owners:Map<string,string|null>,entities:Map<string,EngineeringEntity>,
+  owners:Map<string,string|null>,entities:Map<string,EngineeringEntity>,pending:ReadonlyMap<string,PendingWhole>,
   unresolved:(sourceId:string,reason:string)=>void,
   create:(seed:string,category:string,name:string,source:string)=>EngineeringEntity,
   diagnostics:EngineeringSnapshot['diagnostics']):void{
@@ -33,6 +33,10 @@ export function recoverComponentMembership(rows:readonly ObjectEvidence[],meanin
   };
   for(const row of rows){
     const m=meaning.get(row.sourceId)!;
+    const prior=owners.get(row.sourceId);
+    const reason=prior?pending.get(prior)?.reason:undefined;
+    // Host declarations can fill absent ownership, not erase contrary source evidence.
+    if(reason && reason!=='component_whole_unresolved')continue;
     if(m.basis==='attribute_conflict'||row.objectRoles?.some(p=>p.value==='independent')||!(m.meaning==='part'||m.componentType?.status==='confirmed'))continue;
     const direct=row.declaredHostSourceIds??[];
     const declared=!!(direct.length||row.hostCodes?.length||row.hostDesignations?.length);
@@ -48,7 +52,7 @@ export function recoverComponentMembership(rows:readonly ObjectEvidence[],meanin
     const proof=[...direct,...(row.hostCodes??[]),...designations].map(p=>p.evidenceId).concat(m.componentType?.evidence??[],`policy:${COMPOSITION_POLICY.version}:${m.componentType?.id??'declared-role'}`);
     if(candidates.size===1){
       const target=[...candidates][0],previous=owners.get(row.sourceId);
-      if(previous&&entities.has(previous)&&previous!==target&&m.membershipStatus==='confirmed'&&row.composition?.length){
+      if(previous&&entities.has(previous)&&previous!==target&&row.composition?.some(edge=>edge.status==='confirmed')){
         const reason='composition_host_conflict';
         unresolved(row.sourceId,reason);
         attach(row,owners.get(row.sourceId)!,[...(m.membershipEvidence??[]),...proof],'unresolved',previous);

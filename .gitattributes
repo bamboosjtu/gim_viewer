@@ -33,3 +33,8 @@
 /desktop/src/services/selectionVisibility.ts text eol=lf
 /desktop/src/services/ifcNameIndex.ts text eol=lf
 /desktop/src/shared/selectionContracts.ts text eol=lf
+/packages/gim-sdk/src/shared/designation.ts text eol=lf
+/packages/gim-sdk/src/shared/sourceRecord.ts text eol=lf
+/packages/gim-sdk/src/shared/representationAddresses.ts text eol=lf
+/packages/gim-sdk/src/engineering/catalogClassification.ts text eol=lf
+/packages/gim-sdk/src/engineering/query.ts text eol=lf

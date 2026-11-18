@@ -1,7 +1,7 @@
 import {COMPOSITION_POLICY,componentHostCompatibility,separateInstallation,isEquipmentHost,unclassifiedAssemblyCandidate,COMPOSITION_SUBTYPE_COMPONENTS,compositionSubtypeHost,compositionSubtype} from './compositionPolicy.js';
 import { ENGINEERING_RULES_VERSION, explicitMain, interpretRecognitionObject as interpretObject, categoryFromName } from './classify.js';
 import { assertEngineeringPartition } from './validate.js';
-import { categoryDefinition,publishDirectoryClassification } from './catalogLabels.js';
+import { categoryDefinition,publishDirectoryClassification } from './catalogClassification.js';
 import { classificationDetails } from './classificationDetails.js';
 import {recoverComponentMembership} from './recoverMembership.js';
 import type { EngineeringEntity, EngineeringSnapshot, ObjectEvidence, ObjectInterpretation, PendingWhole, SourceAlias } from './types.js';
@@ -20,10 +20,14 @@ function wholeName(row:ObjectEvidence,category:string):string {
 
 export function normalizeEngineeringModel(scope: string, input: readonly ObjectEvidence[], aliases: readonly SourceAlias[] = []): EngineeringSnapshot {
   if (!scope) throw new Error('Engineering scope is required');
+  const disputedComposition=new Map<string,NonNullable<ObjectEvidence['composition']>>();
   const ordered = input.map(row=>{
+    const uncertain=row.composition?.filter(edge=>edge.kind==='semantic_composition'&&edge.status!=='confirmed');
+    if(uncertain?.length)disputedComposition.set(row.sourceId,uncertain);
     if(row.assemblyParentId)return row;
     const parents=[...new Set(row.composition?.filter(edge=>edge.kind==='semantic_composition'&&edge.status==='confirmed').flatMap(edge=>edge.parentSourceIds)??[])];
-    return parents.length===1?{...row,assemblyParentId:parents[0]}:row;
+    if(parents.length>1)disputedComposition.set(row.sourceId,row.composition!.filter(edge=>edge.kind==='semantic_composition'));
+    return parents.length===1&&!uncertain?.length?{...row,assemblyParentId:parents[0]}:row;
   }).sort((a, b) => compare(a.sourceId, b.sourceId));
   const raw = new Map(ordered.map(row => [row.sourceId, row]));
   if (raw.size !== input.length || raw.has('')) throw new Error('Source occurrence IDs must be unique and nonempty');
@@ -118,14 +122,16 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
       const entity = addEntity(sourceId, m.category, wholeName(row,m.category), proof, [sourceId]);
       if (above) relationships.push({ from: entity.id, to: above, kind: 'associated_with', evidence });
     };
+    const disputed=disputedComposition.get(sourceId);
+    if(disputed&&row.assemblyParentId)diagnostics.push({kind:'composition_parent_unresolved',identity:sourceId,name:row.name});
     if (m.basis === 'attribute_conflict') {
       bundle(sourceId,'object_attributes_conflict',[sourceId]);
     } else if (row.assemblyParentId && !raw.has(row.assemblyParentId) && row.composition?.length && !explicitIndependent(row)) {
       bundle(sourceId,'composition_parent_missing',[sourceId]);m.membershipStatus='unresolved';
       diagnostics.push({kind:'composition_parent_missing',identity:sourceId,name:row.name});
-    } else if (!row.assemblyParentId && row.composition?.some(edge=>edge.kind==='semantic_composition'&&edge.status!=='confirmed') && !explicitIndependent(row)) {
+    } else if (!row.assemblyParentId && disputed && !explicitIndependent(row)) {
       bundle(sourceId,'composition_parent_unresolved',[sourceId]);m.membershipStatus='unresolved';
-      m.membershipEvidence=row.composition.flatMap(edge=>edge.evidence);
+      m.membershipEvidence=disputed.flatMap(edge=>edge.evidence);
       diagnostics.push({kind:'composition_parent_unresolved',identity:sourceId,name:row.name});
     } else if (above && entities.has(above) && parentEquipment && !explicitIndependent(row) && !m.conflict
       && m.componentType?.status!=='confirmed' && !unclassifiedAssemblyCandidate(row,m)
@@ -191,14 +197,14 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
   for (const row of ordered) {
     if (meaning.get(row.sourceId)!.meaning !== 'neutral_set') continue;
     const previous = owners.get(row.sourceId);
-    if (!previous || !pending.has(previous)) continue;
+    if (!previous || pending.get(previous)?.reason!=='neutral_set_main_unresolved') continue;
     const candidates = mainEntities.get(`${explicitMain(row)}${reserve(row)?':reserve':''}`);
     if (candidates?.size === 1) { redirects.set(previous, [...candidates][0]); pending.delete(previous); }
   }
   for (const [sourceId, owner] of owners) if (owner && redirects.has(owner)) owners.set(sourceId, redirects.get(owner)!);
   for (const relation of relationships) relation.to = redirects.get(relation.to) ?? relation.to;
 
-  recoverComponentMembership(ordered,meaning,owners,entities,
+  recoverComponentMembership(ordered,meaning,owners,entities,pending,
     (source,reason)=>{bundle(`component-host:${source}`,reason,[source]);},
     (seed,category,name,source)=>addEntity(seed,category,name,'declared_component_host_boundary',[source]),diagnostics);
   const usedOwners=new Set(owners.values());
@@ -225,7 +231,7 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
       if (!target) throw new Error(`Dangling source owner: ${row.sourceId}`);
       target.sourceIds.push(row.sourceId);
     }
-    return { sourceId: row.sourceId, ownerId, interpretation, ...(row.assemblyParentId&&raw.has(row.assemblyParentId)?{parentPartId:row.assemblyParentId}:{}),
+    return { sourceId: row.sourceId, ownerId, interpretation, ...(disputedComposition.has(row.sourceId)?{compositionCandidates:disputedComposition.get(row.sourceId)}:{}), ...(row.assemblyParentId&&raw.has(row.assemblyParentId)?{parentPartId:row.assemblyParentId}:{}),
       disposition: entity ? 'whole_member' as const : ownerId ? 'pending_whole_member' as const : 'source_only' as const };
   });
   const wholeAliases: EngineeringSnapshot['aliases'] = aliases.filter(a => a.status !== 'confirmed').map(alias => {

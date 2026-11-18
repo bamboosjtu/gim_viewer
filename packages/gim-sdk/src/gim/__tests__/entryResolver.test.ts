@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { createEntryResolver, getFileEntryResolver } from '../entryResolver.js';
+import { createEntryIndex, createEntryResolver, getFileEntryResolver, sourceReferenceCandidates } from '../entryResolver.js';
 
 it('resolves actual relative/global paths and refuses ambiguous or case-colliding entries', () => {
   const resolve = createEntryResolver(['assets/unit.dev', 'shared/item.phm', 'left/item.mod', 'right/item.mod', 'A.dev', 'a.dev']);
@@ -23,4 +23,11 @@ it('reuses the archive index during hydration and isolates changed inventories',
   expect(getFileEntryResolver(files)('item.mod')).toBeNull();
   expect(keys).toHaveBeenCalledTimes(2);
   expect(getFileEntryResolver(new Map([['other/item.mod', 'new source']]))('item.mod')).toBe('other/item.mod');
+});
+
+it('resolves the IFC exporter suffix only for IFC targets, preserving ambiguity',()=>{
+ const index=createEntryIndex(['A/model.IFC','B/model.IFC','A/part.dev']);
+ expect(sourceReferenceCandidates(index,'model.ifc$','A/network.cbm')).toEqual(['A/model.IFC']);
+ expect(sourceReferenceCandidates(index,'model.ifc$','project.cbm')).toHaveLength(2);
+ expect(sourceReferenceCandidates(index,'part.dev$','A/network.cbm')).toEqual([]);
 });

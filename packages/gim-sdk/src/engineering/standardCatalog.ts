@@ -6,12 +6,16 @@ export const STANDARD_CATALOG=catalog.items.map(item=>({...item,recognitionCode:
 const normalize=(value:string)=>value.normalize('NFKC').replace(/\s+/g,'').toLowerCase();
 type Item=typeof STANDARD_CATALOG[number];
 const terms=new Map<string,Item[]>();
+const byId = new Map(STANDARD_CATALOG.map(item => [item.id,item]));
+const contextualTerms:Readonly<Record<string,string>> = policy.contextualTerms;
 for(const item of STANDARD_CATALOG)for(const name of [item.label,...item.label.split('/'),item.term,...item.term.split('/'),...item.aliases]){
   const key=normalize(name),rows=terms.get(key)??[];if(!rows.some(row=>row.id===item.id))rows.push(item);terms.set(key,rows);
 }
 /** Exact aliases can be ambiguous (e.g. two distinct shielding devices). */
 export function standardTerms(value:string):readonly Item[]{
-  const found=terms.get(value.toLowerCase())??terms.get(normalize(value))??[];
+  const key=normalize(value);
+  const contextual=byId.get(contextualTerms[key]);
+  const found=contextual?[contextual]:(terms.get(value.toLowerCase())??terms.get(key)??[]);
   const preferred=(policy.standardTermDefaults as Record<string,string>)[normalize(value)];
   return preferred?found.filter(item=>item.id===preferred):found;
 }

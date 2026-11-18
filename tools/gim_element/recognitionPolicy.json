@@ -1275,25 +1275,18 @@
     "controlcabinet"
   ],
   "contextualTerms": {
-    "terminalbox": {
-      "modelId": "material:terminalbox",
+    "terminalbox": "material:terminalbox",
+    "groundresistance": "equipment:groundresistance",
+    "端子箱": "material:terminalbox",
+    "接地电阻": "equipment:groundresistance"
+  },
+  "contextualModels": {
+    "material:terminalbox": {
       "componentId": "terminal_box"
     },
-    "groundresistance": {
-      "modelId": "equipment:groundresistance",
+    "equipment:groundresistance": {
       "materialRecognitionCode": "M06",
-      "componentId": "ground_resistance",
-      "defaultKind": "equipment"
-    },
-    "端子箱": {
-      "modelId": "material:terminalbox",
-      "componentId": "terminal_box"
-    },
-    "接地电阻": {
-      "modelId": "equipment:groundresistance",
-      "materialRecognitionCode": "M06",
-      "componentId": "ground_resistance",
-      "defaultKind": "material"
+      "componentId": "ground_resistance"
     }
   }
 }

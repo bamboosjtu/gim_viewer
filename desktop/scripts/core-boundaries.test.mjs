@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {coreBoundaryErrors} from './core-boundaries.mjs';
 
 test('projections and fusion reject reclassification through imports, exports and dynamic imports',()=>{
-  for(const source of ["import {classify} from '../../engineering/classify.js'", "export * from '../../engineering/semantic.js'", "const module=import('./sourceEvidence.js')"])
+  for(const source of ["import {classify} from '../../engineering/classify.js'", "export * from '../../engineering/semantic.js'", "const module=import('../../engineering/recognizeSource.js')"])
     assert.equal(coreBoundaryErrors(source,'gim/engineering/projection.ts').length,1);
   assert.equal(coreBoundaryErrors("import('./normalize.js')",'engineering/representations.ts').length,1);
 });
@@ -31,4 +31,9 @@ test('public SDK exports cannot bypass capability or UI/Viewer boundaries',()=>{
 test('projection selectors do not grant access to extraction through the same module',()=>{
   assert.ok(coreBoundaryErrors("import {extractEngineeringSourceGraph} from './sourceGraph.js'",'gim/engineering/navigation.ts').length);
   assert.equal(coreBoundaryErrors("import {engineeringSourceRecords} from './sourceGraph.js'",'gim/engineering/navigation.ts').length,0);
+});
+
+test('source and geometry helper modules reject semantic runtime imports',()=>{
+  assert.ok(coreBoundaryErrors("import '../../engineering/classify.js'",'gim/engineering/sourceGraph.ts').length);
+  assert.ok(coreBoundaryErrors("import '@gim/gim-sdk/semantic'",'gim/geometry/affineMatrix.ts').length);
 });

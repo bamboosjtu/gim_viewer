@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
-import vocabulary from '@gim/gim-sdk/gim/engineering/sourceVocabulary.json';
+import vocabulary from '@gim/gim-sdk/engineering/sourceVocabulary.json';
 import {projectEngineeringNavigation} from '@gim/gim-sdk/gim/engineering/navigation.js';
 import {encodeEngineeringNavigation} from '../engineeringNavigationCache.js';
 import { extractEngineeringSourceGraph } from '@gim/gim-sdk/gim/engineering/sourceGraph.js';
@@ -70,13 +70,13 @@ describe('independent source and entity cache contracts', () => {
     const sources=await decodeEngineeringSources(encoded.bytes,id),entities=await encodeEngineeringEntities(model.snapshot,sources,id);
     const navigation=await encodeEngineeringNavigation(projectEngineeringNavigation(model.sources,model.snapshot),model.sources,model.snapshot,sources.digest,id);
     expect(model.snapshot.rulesVersion).toContain(vocabulary.version);
-    vi.resetModules();vi.doMock('@gim/gim-sdk/gim/engineering/sourceVocabulary.json',()=>({default:{...vocabulary,version:'substation-vocabulary-next'}}));
+    vi.resetModules();vi.doMock('@gim/gim-sdk/engineering/sourceVocabulary.json',()=>({default:{...vocabulary,version:'substation-vocabulary-next'}}));
     try{
       const next=await import('../engineeringCacheCodec.js'),nextNavigation=await import('../engineeringNavigationCache.js');
       expect((await next.decodeEngineeringSources(encoded.bytes,id)).digest).toBe(sources.digest);
       await expect(next.decodeEngineeringEntities(entities,sources,id)).rejects.toThrow('identity / version');
       await expect(nextNavigation.decodeEngineeringNavigation(navigation,model.sources,model.snapshot,sources.digest,id)).rejects.toThrow('identity / version');
-    }finally{vi.doUnmock('@gim/gim-sdk/gim/engineering/sourceVocabulary.json');vi.resetModules();}
+    }finally{vi.doUnmock('@gim/gim-sdk/engineering/sourceVocabulary.json');vi.resetModules();}
   });
   it('round trips sources and membership without relying on a CBM UI tree or geometry', async () => {
     const model = await fixture();

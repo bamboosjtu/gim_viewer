@@ -1,6 +1,6 @@
 import {expect,it} from 'vitest';
-import {interpretObject,categoryFromName} from '../../../engineering/classify.js';
-import {toObjectEvidence,type SourceRecord} from '../sourceEvidence.js';
+import {interpretObject,categoryFromName} from '../classify.js';
+import {toObjectEvidence,type SourceRecord} from '../recognizeSource.js';
 const record=(type:string,name='unknown',props:Record<string,string>={}):SourceRecord=>({id:'x',track:'dev',source:'x.dev',source_type:type,name,parent:'',properties:Object.entries(props).map(([key,value])=>({keys:[key],value,path:'x.fam'})),sources:[],context:[],guid:''});
 it.each([['MetalFence','M09'],['DryTypeReactor','E02'],['PowerBox','M05'],['LightingBox','M05'],['MaintenanceBox','M05']])('gives exact standard %s priority over source compatibility in every structured field',(term,category)=>{
  for(const field of ['TYPE','DEVICETYPE','MATERIALTYPE','EQUIPMENTTYPE','SYSCLASSIFYNAME','PARTNAME']){

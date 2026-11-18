@@ -9,6 +9,9 @@ mkdirSync(installed,{recursive:true});
 cpSync(join(root,'dist'),join(installed,'dist'),{recursive:true});
 cpSync(join(root,'package.json'),join(installed,'package.json'));
 const manifest=JSON.parse(readFileSync(join(installed,'dist/build-manifest.json'),'utf8'));
+const packageMetadata=JSON.parse(readFileSync(join(installed,'package.json'),'utf8'));
+if(manifest.version!==packageMetadata.version||Object.keys(manifest.capabilities??{}).length!==6)
+  throw Error('SDK build manifest is stale or lacks capability verification. Run the SDK build first.');
 if(manifest.runtimeExternals.length)throw Error('SDK consumer needs external runtime dependencies');
 writeFileSync(join(target,'consumer.mjs'),`
 import assert from 'node:assert/strict';

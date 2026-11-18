@@ -8,10 +8,9 @@ export default defineConfig({resolve:{conditions:['gim-source']},test:{environme
   '../packages/gim-sdk/src/gim/engineering/__tests__/sourceComposition.test.ts',
   '../packages/gim-sdk/src/gim/engineering/__tests__/engineeringModel.test.ts',
   '../packages/gim-sdk/src/engineering/__tests__/standardCatalog.test.ts',
-  '../packages/gim-sdk/src/gim/engineering/__tests__/componentVocabulary.test.ts',
-  '../packages/gim-sdk/src/gim/engineering/__tests__/sourceEvidence.test.ts',
+  '../packages/gim-sdk/src/engineering/__tests__/componentVocabulary.test.ts',
+  '../packages/gim-sdk/src/engineering/__tests__/recognizeSource.test.ts',
   '../packages/gim-sdk/src/gim/engineering/__tests__/confirmedSemantics.test.ts',
-  '../packages/gim-sdk/src/gim/engineering/__tests__/recognitionFieldIndex.test.ts',
   '../packages/gim-sdk/src/engineering/__tests__/standardRecognition.test.ts',
   '../packages/gim-sdk/src/engineering/__tests__/recognition*.test.ts',
 ]}});

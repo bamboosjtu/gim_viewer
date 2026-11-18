@@ -20,7 +20,7 @@ export function collectSourceComposition(graph:EngineeringSourceGraph,records:re
     if(row.attributeContextId)add(row.attributeContextId,row.id);
     if(row.devOccurrence&&!row.parent)add(row.devOccurrence.cbmOccurrenceId,row.id);
   }
-  for(const alias of graph.aliases)if(alias.candidates.length)byCbm.set(alias.sourceId,[...alias.candidates]);
+  for(const alias of graph.aliases)for(const candidate of alias.candidates)add(alias.sourceId,candidate);
   const nodes=new Map(graph.cbmOccurrences.map(node=>[node.id,node]));
   const parentCache=new Map<string,string[]>();
   function parents(node:CbmOccurrence,branch=new Set<string>()):string[] {
@@ -36,14 +36,15 @@ export function collectSourceComposition(graph:EngineeringSourceGraph,records:re
     if(cbmRelationKind(node.viaField)!=='composition'||!node.parentId)continue;
     const ancestor=nodes.get(node.parentId);
     const candidates=ancestor?parents(ancestor):[];
-    for(const sourceId of byCbm.get(node.id)??[]) {
+    const children=byCbm.get(node.id)??[];
+    for(const sourceId of children) {
       // A semantic alias can point at the same physical occurrence as its parent.
       const ids=candidates.filter(id=>id!==sourceId);
       if(candidates.length&&!ids.length)continue;
       const links=result.get(sourceId)??[];
       links.push({kind:'semantic_composition',parentSourceIds:ids,
         evidence:[JSON.stringify([node.documentPath,node.viaField,node.parentId,node.id])],
-        status:ids.length===1?'confirmed':ids.length?'ambiguous':'unresolved'});
+        status:ids.length===0?'unresolved':ids.length===1&&children.length===1?'confirmed':'ambiguous'});
       result.set(sourceId,links);
     }
   }

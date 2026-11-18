@@ -11,6 +11,27 @@ import {
   type IfcVisibilityModel,
   type IfcSelectionScope,
 } from '../viewer/ifcModelVisibility.js';
+import type { RegionalObject } from '../viewer/ifcRegionalData.js';
+
+const regionalGuidIndexes = new WeakMap<
+  readonly RegionalObject[],
+  ReadonlyMap<string, number | null>
+>();
+function regionalExpressId(objects: readonly RegionalObject[], guid: string): number | null {
+  let index = regionalGuidIndexes.get(objects);
+  if (!index) {
+    const next = new Map<string, number | null>();
+    for (const object of objects) {
+      if (object.globalId) {
+        next.set(object.globalId, next.has(object.globalId) ? null : object.expressId);
+      }
+    }
+    index = next;
+    regionalGuidIndexes.set(objects, index);
+  }
+  return index.get(guid) ?? null;
+}
+
 export function setSourceLayerVisibility(
   state: AppState,
   id: string,
@@ -184,8 +205,8 @@ export function createSelectionVisibility(
         const regional = state.ifc.regionalRuntimes.get(id);
         if (regional) {
           for (const guid of row.globalIds) {
-            const matches = regional.index.objects.filter((object) => object.globalId === guid);
-            if (matches.length === 1) row.expressIds.add(matches[0].expressId);
+            const expressId = regionalExpressId(regional.index.objects, guid);
+            if (expressId !== null) row.expressIds.add(expressId);
           }
           regional.setSelectionScope(state.selection.onlySelected, row.expressIds);
         }

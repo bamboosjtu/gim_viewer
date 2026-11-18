@@ -5,11 +5,11 @@ import type { DevRepresentationHint, RepresentationResolution } from '../enginee
 import { getEngineeringRepresentations } from './engineeringRepresentationService.js';
 import { selectEngineeringTarget, clearEngineeringHighlight } from './engineeringSelection.js';
 
-async function showUnboundSource(state: AppState, request: SelectionRequest): Promise<boolean> {
+async function showUnboundSource(state: AppState, request: SelectionRequest, detail?: string): Promise<boolean> {
   const guard = state.selection.selectionGuard(request);
   await clearEngineeringHighlight(state, request); if (!guard.isCurrent()) return true;
   if (!guard.isCurrent()) return true;
-  state.selection.selectionMessage = state.engineering.snapshot ? '当前表示的来源尚未可靠关联，请在来源视图查看。' : '工程来源正在解析，暂不能确认此表示对应的整体。';
+  state.selection.selectionMessage = detail ?? (state.engineering.snapshot ? '当前表示的来源尚未可靠关联，请在来源视图查看。' : '工程来源正在解析，暂不能确认此表示对应的整体。');
   state.selection.selectionGeometry = { status: 'unassociated', detail: state.selection.selectionMessage };
   await selectionPresentation().chooseSources(state.selection.selectionMessage, [], guard.isCurrent);
   return true;
@@ -18,11 +18,11 @@ async function showUnboundSource(state: AppState, request: SelectionRequest): Pr
 async function selectResolution(state: AppState, resolved: RepresentationResolution, request: SelectionRequest): Promise<boolean> {
   const guard = state.selection.selectionGuard(request);
   if (!guard.isCurrent()) return true;
-  if (resolved.ownerIds.length === 1) return selectEngineeringTarget(state, { kind: 'engineering', key: resolved.ownerIds[0] }, request, { fit: false, load: false });
-  if (resolved.ownerIds.length > 1) {
+  if (resolved.status === 'bound') return selectEngineeringTarget(state, { kind: 'engineering', key: resolved.ownerIds[0] }, request, { fit: false, load: false });
+  if (resolved.status === 'ambiguous') {
     await clearEngineeringHighlight(state, request); if (!guard.isCurrent()) return true;
     if (!guard.isCurrent()) return true;
-    state.selection.selectionGeometry = { status: 'ambiguous', detail: '当前粗表示包含多个工程整体，范围尚未分离。' };
+    state.selection.selectionGeometry = { status: 'ambiguous', detail: resolved.ownerIds.length > 1 ? '当前粗表示包含多个工程整体，范围尚未分离。' : '当前表示包含归属待确认的构件，请先选择要查看的整体。' };
     state.selection.selectionMessage = state.selection.selectionGeometry.detail;
     const snapshot = state.engineering.snapshot;
     await selectionPresentation().chooseSources(state.selection.selectionMessage, resolved.ownerIds.map(key => ({
@@ -31,8 +31,14 @@ async function selectResolution(state: AppState, resolved: RepresentationResolut
     })), guard.isCurrent);
     return true;
   }
-  if (resolved.sourceIds.length === 1) return selectEngineeringTarget(state, { kind: 'engineering-source', key: resolved.sourceIds[0] }, request, { fit: false, load: false });
-  return showUnboundSource(state, request);
+  if (resolved.pendingIds?.length === 1) {
+    const members = getEngineeringRepresentations(state)?.index.sourcesForOwners(new Set(resolved.pendingIds));
+    if (members && resolved.sourceIds.every(id => members.has(id))) {
+      return selectEngineeringTarget(state, {kind:'engineering', key:resolved.pendingIds[0]}, request, {fit:false, load:false});
+    }
+  }
+  if (resolved.sourceIds.length === 1 && !resolved.unknownSourceIds?.length) return selectEngineeringTarget(state, { kind: 'engineering-source', key: resolved.sourceIds[0] }, request, { fit: false, load: false });
+  return showUnboundSource(state, request,resolved.pendingIds?.length?'当前表示含待归构件，尚无唯一工程整体。':undefined);
 }
 
 export async function selectEngineeringDevPick(state: AppState, rootOccurrence: string, hint: DevRepresentationHint, request: SelectionRequest): Promise<boolean> {
@@ -54,7 +60,6 @@ export async function selectEngineeringFragmentPick(state: AppState, runtimeId: 
   const [guid] = await model.getGuidsByLocalIds([localId]);
   if (!state.selection.isCurrentSelection(request)) return true;
   if (!guid) return showUnboundSource(state, request);
-  const rows = state.engineering.sources.ifcRecords.filter(row => row.ifcOccurrence?.modelId === modelId && row.ifcOccurrence.globalId === guid);
   const representation = getEngineeringRepresentations(state);
-  return representation ? selectResolution(state, representation.index.resolveSources(rows.map(row => row.id)), request) : showUnboundSource(state, request);
+  return representation ? selectResolution(state, representation.index.resolveSources(representation.index.sourcesForIfcGuid(modelId,guid)), request) : showUnboundSource(state, request);
 }

@@ -2,7 +2,7 @@ import {expect,it} from 'vitest';
 import {interpretObject} from '../../../engineering/classify.js';
 import {normalizeEngineeringModel} from '../../../engineering/normalize.js';
 import {STANDARD_CATALOG} from '../../../engineering/standardCatalog.js';
-import {toObjectEvidence,type SourceRecord} from '../sourceEvidence.js';
+import {toObjectEvidence,type SourceRecord} from '../../../engineering/recognizeSource.js';
 const record=(id:string,type:string,props:Record<string,string>={},parent='',name='unknown'):SourceRecord=>({id,source:id+'.dev',source_type:type,track:'dev',name,parent,sources:[],context:[],guid:'',properties:Object.entries(props).map(([key,value],i)=>({keys:[key],value,path:'a.fam',line:i+1}))});
 const build=(rows:SourceRecord[])=>normalizeEngineeringModel('scope',rows.map(toObjectEvidence));
 it.each(STANDARD_CATALOG.filter(item=>item.kind==='equipment'))('allows equipment $term to contain a declared component',item=>{
@@ -38,7 +38,7 @@ it('resolves ground resistance by device/material role and actual assembly, pres
  const rows=[record('host','GIS'),record('r','GroundResistance',{},'host')],result=build(rows);
  expect(result.entities).toHaveLength(1);expect(result.memberships.find(m=>m.sourceId==='r')?.interpretation).toMatchObject({category:'M06',meaning:'part'});
  expect(rows[1].parent).toBe('host');expect(rows[1].source_type).toBe('GroundResistance');
- expect(build([record('r','接地电阻')]).entities[0].category).toBe('M06');
+ expect(build([record('r','接地电阻')]).entities[0].category).toBe('E09');
  expect(build([record('r','GroundResistance',{},'','接地电阻')]).entities[0].category).toBe('M06');
  const independentMaterial=build([record('r','GroundResistance',{MATERIALTYPE:'GroundResistance',OBJECTROLE:'independent'})]);
  expect(independentMaterial.entities[0].category).toBe('M06');expect(independentMaterial.memberships[0].interpretation.meaning).toBe('object');

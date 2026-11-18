@@ -49,7 +49,7 @@ export default defineConfig({
       reporter: ['text-summary', 'json-summary', 'json', 'html'],
       reportsDirectory: '../output/coverage/desktop',
       // 仅统计 src/ 下源码，排除测试文件、类型声明、入口装配
-      include: ['src/**/*.ts','../packages/gim-sdk/src/**/*.ts'].map(pattern=>resolve(__dirname,pattern).replaceAll('\\','/')),
+      include: ['src/**/*.ts', ...(process.env.GIM_SDK_COVERAGE_OWNED ? ['../packages/gim-sdk/src/**/*.ts'] : [])].map(pattern=>resolve(__dirname,pattern).replaceAll('\\','/')),
       exclude: [
         'src/**/*.test.ts',
         'src/**/__tests__/**',

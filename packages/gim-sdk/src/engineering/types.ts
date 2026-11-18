@@ -131,6 +131,8 @@ export interface PendingWhole {
 }
 
 export interface SourceMembership {
+  /** Unresolved source edges retained alongside any independently verified physical parent. */
+  compositionCandidates?: readonly CompositionEvidence[];
   /** Direct composition parent; distinct from the owning engineering whole. */
   parentPartId?: string;
   sourceId: string;

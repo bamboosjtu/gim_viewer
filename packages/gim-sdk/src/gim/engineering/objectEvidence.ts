@@ -1,6 +1,6 @@
 import type { ObjectEvidence, EvidenceValue } from '../../engineering/types.js';
 import type { EngineeringSourceGraph } from './sourceGraph.js';
-import { toObjectEvidence, type SourceRecord } from './sourceEvidence.js';
+import { toObjectEvidence, type SourceRecord } from '../../engineering/recognizeSource.js';
 import {collectSourceComposition} from './sourceComposition.js';
 
 /** Organizational labels are retained for audit, separately from object-owned
@@ -19,7 +19,7 @@ export function engineeringObjectEvidence(graph: EngineeringSourceGraph, records
     const evidence=toObjectEvidence(record),edges=composition.get(record.id);
     // When semantic and physical parents coexist, retain both as constraints.
     // Recovery reports disagreement; it must not silently replace either edge.
-    const semanticHosts=record.parent?edges?.filter(edge=>edge.kind==='semantic_composition').flatMap(edge=>
+    const semanticHosts=record.parent?edges?.filter(edge=>edge.kind==='semantic_composition'&&edge.status==='confirmed').flatMap(edge=>
       edge.parentSourceIds.map(value=>({value,evidenceId:edge.evidence.join('|')})))??[]:[];
     return {...evidence,composition:edges,declaredHostSourceIds:[...(evidence.declaredHostSourceIds??[]),...semanticHosts],
       inheritedContextDesignations:record.context.flatMap(units)};

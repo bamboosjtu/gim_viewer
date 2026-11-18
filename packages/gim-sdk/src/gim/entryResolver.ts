@@ -8,7 +8,8 @@ const fileResolvers = new WeakMap<ReadonlyMap<string, unknown>, { size: number; 
 
 /** Extracted file maps have stable entry keys; hydration only replaces values.
  * Reuse their path index across tree/DEV traversal, geometry and properties.
- * A new source map or a changed entry count builds a new index. */
+ * Key-set changes (including same-size replacements) require a new Map.
+ * A changed count is also detected for callers that append during construction. */
 export function getFileEntryResolver(files: ReadonlyMap<string, unknown>): EntryResolver {
   return getFileEntryIndex(files).resolve;
 }
@@ -46,4 +47,9 @@ export function createEntryIndex(paths:Iterable<string>):EntryIndex {
   };
   return {candidates,exactCandidates:reference=>exact.get(normalize(reference))??[],basenameCandidates:reference=>bases.get(normalize(reference).split('/').pop()!)??[],
     resolve:(reference,owner)=>{const hits=candidates(reference,owner);return hits.length===1?hits[0]:null;}};
+}
+
+/** IFC reference syntax permits a trailing exporter marker. */
+export function sourceReferenceCandidates(index:EntryIndex,value:string,owner:string):readonly string[] {
+  return index.candidates(value.replace(/\.ifc\$$/i,'.ifc'),owner);
 }

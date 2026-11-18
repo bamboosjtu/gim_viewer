@@ -21,7 +21,10 @@ for item in STANDARD['items']:
         if item not in TERMS[key]:TERMS[key].append(item)
 NAME_TERMS=sorted({norm(label) for item in STANDARD['items'] for label in [item['label'],*item['label'].split('/'),*item['aliases']] if len(label)>=2 and re.search('[\u3400-\u9fff]',label)},key=lambda label:(-len(label),label))
 NAME_EXPRESSION=re.compile('|'.join(re.escape(label) for label in NAME_TERMS))
+CONTEXTUAL_CATALOG={item['id']:item for item in STANDARD['items']}
 def resolved_terms(value):
+    contextual=CONTEXTUAL_CATALOG.get(POLICY['contextualTerms'].get(norm(value)))
+    if contextual:return [contextual]
     items=TERMS.get(norm(value),[]);preferred=POLICY['standardTermDefaults'].get(norm(value))
     return [item for item in items if item['id']==preferred] if preferred else items
 def named_catalog(text):
@@ -59,8 +62,6 @@ def numbered(value):
 @functools.lru_cache(maxsize=4096)
 def name_category(name):
     categories={item['recognitionCode'] for item in named_catalog(norm(name))}
-    contextual=POLICY['contextualTerms'].get(norm(name),{})
-    if not categories and contextual.get('defaultKind')=='material':categories={contextual['materialRecognitionCode']}
     if not categories:
         matches=[c for c in CATALOG['categories'] if c['label'] in norm(name)];longest=max((len(c['label']) for c in matches),default=0)
         categories={DIRECTORY_ROLES[c['code']] for c in matches if len(c['label'])==longest}
@@ -84,12 +85,12 @@ def interpret(row,has_children=False,equipment_member=False):
     raw_declarations=[{'keys':['source_type'],'value':type,'path':row['source'],'line':0},*props]
     chinese=[p for p in raw_declarations if re.search('[\u3400-\u9fff]',p['value']) and (resolved_terms(p['value']) or p['value'].strip().casefold() in COMPONENTS)]
     declarations=chinese or raw_declarations
-    def context_rule(value):return POLICY['contextualTerms'].get(value.strip().casefold(),{})
+    def context_rule(value):return POLICY['contextualModels'].get(POLICY['contextualTerms'].get(value.strip().casefold()),{})
     def ground_word(value):return bool(context_rule(value).get('materialRecognitionCode'))
     needs_hint=any(p['value'].strip().casefold() in COMPONENTS and (len(COMPONENTS[p['value'].strip().casefold()]['componentIds'])>1 or COMPONENTS[p['value'].strip().casefold()].get('defaultComponentId') or resolved_terms(p['value'])) for p in declarations)
     hint=next((COMPONENTS[p.strip().casefold()] for p in [*[v['value'] for v in values(row,'设备名称','DEVICENAME')],row['name']] if re.search('[\u3400-\u9fff]',p) and p.strip().casefold() in COMPONENTS),None) if needs_hint else None
     material_rule=next((context_rule(p['value']) for p in declarations if ground_word(p['value'])),None)
-    ground_material=bool(material_rule) and (material_rule.get('defaultKind')=='material' or component_context and 'independent' not in roles or any(ground_word(p['value']) for p in values(row,'MATERIALTYPE','材料类型')) or hint and material_rule['componentId'] in hint['componentIds'])
+    ground_material=bool(material_rule) and (component_context and 'independent' not in roles or any(ground_word(p['value']) for p in values(row,'MATERIALTYPE','材料类型')) or hint and material_rule['componentId'] in hint['componentIds'])
     ground_member=ground_material and component_context and 'independent' not in roles
     if ground_member:roles.add('part')
     def model_terms(value):return [] if ground_material and ground_word(value) else resolved_terms(value)
@@ -272,6 +273,8 @@ def normalize(rows,scope):
     for r in rows:
         id=r['id'];m=meanings[id];explicit_codes=values(r,'HOSTEQUIPMENTID','HOSTEQUIPMENTCODE','PARENTEQUIPMENTID','所属设备编码','宿主设备编码');explicit_names=values(r,'HOSTEQUIPMENTNAME','PARENTEQUIPMENTNAME','所属设备名称','所属设备工程中名称','宿主设备名称');explicit=explicit_codes or explicit_names
         roles={p['value'].casefold() for p in values(r,'OBJECTROLE','对象角色')}
+        prior=pending.get(owners.get(id),{}).get('reason')
+        if prior and prior!='component_whole_unresolved':continue
         if roles&{'independent','独立'} or m['basis']=='attribute_conflict':continue
         inferred_name=False
         if m['meaning']=='neutral_set':

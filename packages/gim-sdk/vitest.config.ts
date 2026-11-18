@@ -5,4 +5,5 @@ export default defineConfig({resolve:{conditions:['gim-source']},test:{environme
  include:['src/**/*.ts'],exclude:['src/**/__tests__/**','src/**/*.d.ts'],thresholds:process.env.GIM_COMBINED_COVERAGE?undefined:{
  'src/engineering/**':{statements:95,lines:95,functions:95,branches:90},
  'src/gim/**':{statements:90,lines:90,functions:90,branches:80},
+ 'src/shared/**':{statements:90,lines:90,functions:90,branches:80},
  }},poolOptions:{forks:{minForks:1,maxForks:2}}}});

@@ -35,6 +35,8 @@ jobs:
         with:
           python-version: '3.12'
           architecture: x64
+      - name: Verify the frozen Blender converter snapshot
+        run: python tools/gim_blender/verify_snapshot.py
       - name: Reject unsafe build paths and preserve previous outputs
         shell: pwsh
         # Negative fixtures intentionally invoke Python with exit 17. A child

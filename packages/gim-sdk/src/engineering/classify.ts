@@ -1,16 +1,14 @@
-import policy from './recognitionPolicy.json';
-import composition from './compositionPolicy.json';
-import standardCatalog from './standardCatalog.json';
+import {mainNumber} from '../shared/designation.js';
+export {mainNumber} from '../shared/designation.js';
+import {POLICY_CONTENT} from './policyFingerprints.js';
 import {independentRole} from './compositionPolicy.js';
 import { classificationDetails } from './classificationDetails.js';
 import type { ObjectEvidence, ObjectInterpretation } from './types.js';
 import {standardTermsFromName,standardEquipmentId,STANDARD_CATALOG_VERSION} from './standardCatalog.js';
-import {recognitionLabel as categoryLabel,publishDirectoryClassification,ENGINEERING_CATEGORIES,directoryRecognitionCode} from './catalogLabels.js';
+import {recognitionLabel as categoryLabel,publishDirectoryClassification,directoryRecognitionCode} from './catalogClassification.js';
+import {ENGINEERING_CATEGORIES} from './catalogLabels.js';
 
-// Content-based semantic invalidation, independent from physical geometry caches.
-const policyText=JSON.stringify([policy,composition,standardCatalog]);
-let policyHash=2166136261;for(let i=0;i<policyText.length;i++)policyHash=Math.imul(policyHash^policyText.charCodeAt(i),16777619);
-export const ENGINEERING_RULES_VERSION=`recognition-evidence-policy-v1|${STANDARD_CATALOG_VERSION}|${(policyHash>>>0).toString(16)}`;
+export const ENGINEERING_RULES_VERSION=`recognition-evidence-policy-v1|${STANDARD_CATALOG_VERSION}|${POLICY_CONTENT}`;
 export function normalizedObjectName(name:string):string {return name.normalize('NFKC').replace(/\s+/g,'');}
 const nameCategories=new Map<string,string>();
 /** Catalog vocabulary supplies candidates only; it never establishes membership. */
@@ -18,8 +16,6 @@ export function categoryFromName(name:string):string {
   const old=nameCategories.get(name);if(old!==undefined)return old;
   const normalized=normalizedObjectName(name);
   const roles=new Set(standardTermsFromName(normalized).map(item=>item.recognitionCode));
-  const contextual=(policy.contextualTerms as Record<string,{defaultKind?:string;materialRecognitionCode?:string}>)[normalized.toLowerCase()];
-  if(!roles.size&&contextual?.defaultKind==='material'&&contextual.materialRecognitionCode)roles.add(contextual.materialRecognitionCode);
   if(!roles.size){
     const matches=ENGINEERING_CATEGORIES.filter(row=>normalized.includes(row.label));
     const longest=Math.max(0,...matches.map(row=>row.label.length));
@@ -28,10 +24,6 @@ export function categoryFromName(name:string):string {
   const category=roles.size===1?[...roles][0]:'U-OBJECT';
   if(name.length<=128){if(nameCategories.size>=4096)nameCategories.delete(nameCategories.keys().next().value!);nameCategories.set(name,category);}
   return category;
-}
-export function mainNumber(value:string):string {
-  const match=value.match(/(?:#\s*(\d+)\s*(?:备用|预留)?主变)|(?:(\d+)\s*(?:号|#)\s*(?:备用|预留)?主变)|(?:主变(?:系统)?\s*(\d+))/);
-  return match?String(Number(match.slice(1).find(Boolean))):'';
 }
 export function explicitMain(object:ObjectEvidence):string {
   const tokens=new Set(object.designations.map(p=>mainNumber(p.value)).filter(Boolean));return tokens.size===1?[...tokens][0]:'';

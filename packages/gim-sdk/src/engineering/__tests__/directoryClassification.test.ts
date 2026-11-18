@@ -1,5 +1,5 @@
 import {expect,it} from 'vitest';
-import {toObjectEvidence,type SourceRecord} from '../../gim/engineering/sourceEvidence.js';
+import {toObjectEvidence,type SourceRecord} from '../recognizeSource.js';
 import {interpretObject} from '../classify.js';
 import {normalizeEngineeringModel} from '../normalize.js';
 import {catalogLocation,MODEL_CATALOG_CATEGORIES} from '../catalogLabels.js';

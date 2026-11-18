@@ -45,8 +45,8 @@ def main():
   item=next(i for i in standard['items'] if i['id']==category['items'][0]);e=item['evidence']
   for word in [category['label'],category['code']]:
    if word.lower() not in entries:insert(entries,word,'category:'+category['code'],{'sourceKind':'workbook','workbookSha256':e['workbookSha256'],'sheet':e['sheet'],'cell':e['categoryCell'],'cellRange':e['categoryCell'],'verification':'verified','sourceLocation':e['sheet']+'!'+e['categoryCell']},'catalogIds')
- for base in ['packages/gim-sdk/src/gim/engineering/','tools/gim_element/']:write(base+'sourceVocabulary.json',vocab)
+ for base in ['packages/gim-sdk/src/engineering/','tools/gim_element/']:write(base+'sourceVocabulary.json',vocab)
  for name in ['catalog.json','standardCatalog.json','recognitionPolicy.json','compositionPolicy.json']:write('tools/gim_element/'+name,load('packages/gim-sdk/src/engineering/'+name))
- write('tools/gim_element/sourceCompatibilityPolicy.json',load('packages/gim-sdk/src/gim/engineering/sourceCompatibilityPolicy.json'))
+ write('tools/gim_element/sourceCompatibilityPolicy.json',load('packages/gim-sdk/src/engineering/sourceCompatibilityPolicy.json'))
  print('Synchronized JSON model/component vocabularies and standalone policy copies; no workbook input.')
 if __name__=='__main__':main()

@@ -1,6 +1,6 @@
-import vocabulary from '../../gim/engineering/sourceVocabulary.json';
+import vocabulary from '../sourceVocabulary.json';
 import {expect,it} from 'vitest';
-import {toObjectEvidence,type SourceRecord} from '../../gim/engineering/sourceEvidence.js';
+import {toObjectEvidence,type SourceRecord} from '../recognizeSource.js';
 import {interpretRecognitionObject as interpretObject} from '../classify.js';
 import {normalizeEngineeringModel} from '../normalize.js';
 import {attributeFromProperty,annotateAttributeConflicts} from '../../gim/engineering/attributeEvidence.js';

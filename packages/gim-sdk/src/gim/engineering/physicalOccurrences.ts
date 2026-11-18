@@ -1,4 +1,4 @@
-import type {EntryIndex} from '../entryResolver.js';
+import {sourceReferenceCandidates,type EntryIndex} from '../entryResolver.js';
 import type {SourceDocument} from './sourceDocuments.js';
 import {sourceScalar, sourceReferenceFields, type SourceField} from '../sourceDocument.js';
 import type {SourceGeometryOccurrenceCatalog} from './geometryOccurrences.js';
@@ -21,7 +21,7 @@ export async function extractPhysicalOccurrences(input:{entryIndex:EntryIndex;re
   const ambiguous=(doc:SourceDocument,key:string,fields:readonly SourceField[],context=doc.path)=>{
     catalog.diagnostics.push({sourceContextId:context,documentPath:doc.path,reason:'ambiguous-source-reference',field:key,
       lines:fields.flatMap(field=>field.line==null?[]:[field.line]),values:fields.map(field=>field.value),
-      candidates:[...new Set(fields.flatMap(field=>[...input.entryIndex.candidates(field.value,doc.path)]))]});
+      candidates:[...new Set(fields.flatMap(field=>[...sourceReferenceCandidates(input.entryIndex,field.value,doc.path)]))]});
   };
   const scalar=(doc:SourceDocument,key:string)=>{
     const result=sourceScalar(doc,key);
@@ -37,7 +37,7 @@ export async function extractPhysicalOccurrences(input:{entryIndex:EntryIndex;re
     return false;
   };
   const resolve=(owner:string,value:string,context:string)=>{
-    const hits=input.entryIndex.candidates(value,owner);
+    const hits=sourceReferenceCandidates(input.entryIndex,value,owner);
     if(hits.length===1)return hits[0];
     catalog.diagnostics.push({sourceContextId:context,documentPath:owner,reason:hits.length?'ambiguous-source-reference':'missing-source-reference'});
     return null;

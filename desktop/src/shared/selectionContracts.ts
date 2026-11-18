@@ -36,7 +36,6 @@ export interface SelectionCommitGuard {
 }
 
 export interface SelectionGeometryState {
-  evidence?: import('../engineering/representations.js').RepresentationEvidenceState;
   status:
     | 'not-loaded'
     | 'unknown'

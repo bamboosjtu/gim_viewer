@@ -1,8 +1,8 @@
 import {expect,it} from 'vitest';
-import {COMPONENT_CATALOG} from '../../../engineering/catalogLabels.js';
-import {componentHostCompatibility} from '../../../engineering/compositionPolicy.js';
-import {interpretObject} from '../../../engineering/classify.js';
-import {toObjectEvidence} from '../sourceEvidence.js';
+import {COMPONENT_CATALOG} from '../catalogLabels.js';
+import {componentHostCompatibility} from '../compositionPolicy.js';
+import {interpretObject} from '../classify.js';
+import {toObjectEvidence} from '../recognizeSource.js';
 it.each(COMPONENT_CATALOG.flatMap(part=>[part.term,part.label].map(word=>({part,word}))))('matches component $word with its own evidence namespace',({part,word})=>{
  const result=interpretObject(toObjectEvidence({id:'x',name:'unknown',source:'a.dev',source_type:word,parent:'',track:'dev',guid:'',sources:[],context:[],properties:[{keys:['OBJECTROLE'],value:'part',path:'a.fam'}]}));
  const expectedId=word==='ProtectionEquipment'?'protective_device':part.id;

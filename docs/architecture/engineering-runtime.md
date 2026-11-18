@@ -26,8 +26,8 @@
 
 | 模块 | 职责 |
 |---|---|
-| [gim/engineering](../../desktop/src/gim/engineering/) | 来源图、DEV/FAM/IFC 证据适配、来源到中立对象证据、三视图投影 |
-| [engineering](../../desktop/src/engineering/) | 纯领域：分类、整体归一化、成员分区、关系、组成模板、目录 |
+| [SDK gim/engineering](../../packages/gim-sdk/src/gim/engineering/) | 来源图、DEV/FAM/IFC 原始证据、编排适配和三视图投影 |
+| [SDK engineering](../../packages/gim-sdk/src/engineering/) | 纯领域：从来源事实解释候选，再分类并归一化整体、成员和关系；组成模板及目录 |
 | [engineeringWorker](../../desktop/src/services/engineeringWorker.ts) | 在 Worker 内执行抽取/归一化/投影/编解码 |
 | [engineeringService](../../desktop/src/services/engineeringService.ts) | 会话、Worker 生命周期、缓存恢复/发布、IFC Spatial 补建 |
 | [engineeringSelection](../../desktop/src/services/engineeringSelection.ts) | 整体/分组/来源选择与表示绑定 |

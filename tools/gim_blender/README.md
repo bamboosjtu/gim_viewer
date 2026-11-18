@@ -2,6 +2,8 @@
 
 独立的 Windows x64 变电站漫游工具。GUI 只提供三个操作：导入 GIM、删除已导入项目、启动 HTML Demo。
 
+转换器使用 [snapshot.json](snapshot.json) 标记的工具专属冻结快照。该快照采用自己的转换契约和数据版本，不随 Viewer 或 SDK 自动同步。更新快照时须更新源文件摘要，并按工具自己的转换结果验证。
+
 ## 运行方式
 
 解压完整目录，运行 `gim_blender.exe`。导入时自动缓存原 GIM 并转换为 Blender、GLB、HTML 和导航数据。重复导入同一源 SHA 会使用已有完整结果。删除只处理工具内对应缓存，保留外部原文件。

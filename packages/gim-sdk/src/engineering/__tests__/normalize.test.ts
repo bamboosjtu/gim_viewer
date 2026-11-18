@@ -1,7 +1,7 @@
 import {expect,it} from 'vitest';
 import {normalizeEngineeringModel} from '../normalize.js';
 import {assertEngineeringPartition} from '../validate.js';
-import {toObjectEvidence,type SourceRecord} from '../../gim/engineering/sourceEvidence.js';
+import {toObjectEvidence,type SourceRecord} from '../recognizeSource.js';
 const source=(id:string,type:string,extra:Partial<SourceRecord>={}):SourceRecord=>({id,track:'dev',source:id+'.dev',source_type:type,name:id,parent:'',properties:[],sources:[],context:[],guid:'',...extra});
 const props=(values:Record<string,string>)=>Object.entries(values).map(([key,value])=>({keys:[key],value,path:'a.fam'}));
 const build=(rows:SourceRecord[])=>normalizeEngineeringModel('scope',rows.map(toObjectEvidence));

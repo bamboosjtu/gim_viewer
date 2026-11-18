@@ -1,5 +1,5 @@
 import {it,expect} from 'vitest';
-import {toObjectEvidence,type SourceRecord} from '../sourceEvidence.js';
+import {toObjectEvidence,type SourceRecord} from '../recognizeSource.js';
 it.each(['OilImmersedTransformer','TerminalBox','GroundResistance'])('scans raw attributes once even when a contextual variant is built for %s',sourceType=>{
   let reads=0;
   const hostValue=sourceType==='OilImmersedTransformer'?'unit-2':'-';
