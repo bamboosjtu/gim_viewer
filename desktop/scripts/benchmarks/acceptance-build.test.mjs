@@ -1,10 +1,10 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync} from 'node:fs';
+import {mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync,unlinkSync} from 'node:fs';
 import {workspaceTemp as tmpdir} from '../test-workspace.mjs';
 import {join, resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {ACCEPTANCE_IDENTIFIER, verifyAcceptanceDatabasePath, sourceFingerprint} from './acceptance-build.mjs';
+import {ACCEPTANCE_IDENTIFIER, verifyAcceptanceDatabasePath, sourceFingerprint,sourceSnapshot,assertSourceUnchanged,prepareTauriManifest} from './acceptance-build.mjs';
 
 test('native database verification rejects normal, sibling, traversal and relative paths', () => {
   const parent = mkdtempSync(join(tmpdir(), 'gim-acceptance-path-')), root = join(parent, ACCEPTANCE_IDENTIFIER);
@@ -24,6 +24,37 @@ test('native database verification rejects normal, sibling, traversal and relati
   } finally {
     assert.ok(parent.startsWith(join(tmpdir(), 'gim-acceptance-path-')));
     rmSync(parent, {recursive: true, force: true});
+  }
+});
+
+test('Windows checkout keeps the Tauri manifest stable when the CLI writes LF',()=>{
+  const root=mkdtempSync(join(tmpdir(),'gim-acceptance-eol-'));
+  const cargo=join(root,'desktop/src-tauri/Cargo.toml');
+  try{
+    const git=(...args)=>{const result=spawnSync('git',['-C',root,...args],{encoding:'utf8',windowsHide:true});assert.equal(result.status,0,result.stderr);};
+    git('init','--quiet');git('config','core.autocrlf','true');
+    mkdirSync(join(root,'desktop/src-tauri'),{recursive:true});
+    const attributes=readFileSync(new URL('../../../.gitattributes',import.meta.url),'utf8');
+    writeFileSync(join(root,'.gitattributes'),attributes);
+    const manifest='[package]\nname = "fixture"\nversion = "0.2.4"\n';
+    writeFileSync(cargo,manifest.replaceAll('\n','\r\n'));
+    git('add','.');unlinkSync(cargo);git('checkout-index','--force','--all');
+    assert.equal(readFileSync(cargo,'utf8'),manifest);
+    assert.equal(prepareTauriManifest(root),false);
+    // Also support a pre-existing CRLF checkout without discarding user edits.
+    const edited=manifest+'description = "local edit"\n';
+    writeFileSync(cargo,edited.replaceAll('\n','\r\n'));
+    assert.equal(prepareTauriManifest(root),true);
+    assert.equal(readFileSync(cargo,'utf8'),edited);
+    const before=sourceSnapshot(root);
+    writeFileSync(cargo,readFileSync(cargo,'utf8').replaceAll('\r\n','\n'));
+    assert.doesNotThrow(()=>assertSourceUnchanged(before,sourceSnapshot(root)));
+    assert.equal(sourceFingerprint(root),before.fingerprint);
+    writeFileSync(cargo,edited.replace('0.2.4','0.2.5'));
+    assert.throws(()=>assertSourceUnchanged(before,sourceSnapshot(root)),/Changed files: desktop\/src-tauri\/Cargo\.toml/);
+  }finally{
+    assert.ok(root.startsWith(join(tmpdir(),'gim-acceptance-eol-')));
+    rmSync(root,{recursive:true,force:true});
   }
 });
 

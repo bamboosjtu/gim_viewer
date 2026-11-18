@@ -40,18 +40,41 @@ function command(binary, args, options = {}) {
   return result.stdout?.trim() ?? '';
 }
 
-export function sourceFingerprint(root) {
+export function sourceSnapshot(root, {details = true} = {}) {
   const paths = new Set();
   for (const flags of [['--cached'], ['--others', '--exclude-standard']]) {
     const listing = command('git', ['ls-files', '-z', ...flags, '--', 'desktop', 'crates', 'packages'], {cwd: root});
     for (const name of listing.split('\0')) if (name && existsSync(join(root, name))) paths.add(name);
   }
   const hash = createHash('sha256');
+  const files = new Map();
   for (const name of [...paths].sort()) {
     const bytes = readFileSync(join(root, name));
     hash.update(`${name}\0${bytes.length}\0`); hash.update(bytes);
+    if(details)files.set(name,createHash('sha256').update(bytes).digest('hex'));
   }
-  return hash.digest('hex');
+  return {fingerprint:hash.digest('hex'),files};
+}
+
+export function sourceFingerprint(root) {
+  return sourceSnapshot(root,{details:false}).fingerprint;
+}
+
+export function assertSourceUnchanged(before, after) {
+  if(before.fingerprint===after.fingerprint)return;
+  const changed=[...new Set([...before.files.keys(),...after.files.keys()])]
+    .filter(name=>before.files.get(name)!==after.files.get(name)).sort();
+  throw Error(`Source changed during acceptance build; no manifest published. Changed files: ${changed.join(', ')}`);
+}
+
+/** Existing Windows checkouts may still contain CRLF after attributes change.
+ * Prepare only the manifest Tauri rewrites, before capturing build identity. */
+export function prepareTauriManifest(root) {
+  const path=join(root,'desktop/src-tauri/Cargo.toml');
+  const text=readFileSync(path,'utf8'),normalized=text.replaceAll('\r\n','\n');
+  if(text===normalized)return false;
+  writeFileSync(path,normalized);
+  return true;
 }
 
 export async function fileSha256(path) {
@@ -86,6 +109,7 @@ export async function buildAcceptance(root, {benchmark = false} = {}) {
   const dataRoot=join(root,'tmp','native-acceptance-data',ACCEPTANCE_IDENTIFIER);
   const env = {...process.env, TEMP: temporary, TMP: temporary, TMPDIR: temporary, GIM_ACCEPTANCE_DATA_ROOT:dataRoot, VITE_GIM_DIAGNOSTICS:'1'};
   if(benchmark){env.VITE_GIM_BENCHMARK='1';env.GIM_BENCHMARK_WORKSPACE=root;}
+  if(prepareTauriManifest(root))console.log('[acceptance] Prepared Cargo.toml LF line endings for Tauri');
   const head = command('git', ['rev-parse', 'HEAD'], {cwd: root});
   const dirty = Boolean(command('git', ['status', '--porcelain', '--untracked-files=normal'], {cwd: root}));
   env.VITE_GIM_COMMIT = head + (dirty ? '-dirty' : '');
@@ -102,12 +126,12 @@ export async function buildAcceptance(root, {benchmark = false} = {}) {
     command(process.execPath,[join(desktop,'node_modules','vite','bin','vite.js'),'build'],{cwd:desktop,env,stdio:'inherit'});
     benchmarkChunk=assertBenchmarkFrontend(join(desktop,'dist'));
   }
-  const fingerprint = sourceFingerprint(root);
+  const before = sourceSnapshot(root),fingerprint=before.fingerprint;
   command(process.execPath, [join(desktop, 'node_modules', '@tauri-apps', 'cli', 'tauri.js'), 'build',
     '--config', join(desktop, 'src-tauri', 'tauri.portable.conf.json'), '--config', config, '--no-bundle', '--ci', ...(benchmark?['--features','benchmark']:[])],
     {cwd: desktop, env, stdio: 'inherit'});
   if(benchmark)command('cargo',['build','--manifest-path',join(desktop,'src-tauri/Cargo.toml'),'--release','--features','benchmark','--example','measurement_sampler'],{cwd:desktop,env,stdio:'inherit'});
-  if (sourceFingerprint(root) !== fingerprint) throw Error('Source changed during acceptance build; no manifest published');
+  assertSourceUnchanged(before,sourceSnapshot(root));
   const tag = new Date().toISOString().replaceAll(':', '-');
   const output = join(root, ...(benchmark?['tmp','gim-bench']:['output','acceptance']), 'builds', `${tag}-${fingerprint.slice(0,12)}`);
   mkdirSync(output, {recursive: true});

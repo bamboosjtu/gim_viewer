@@ -1,6 +1,9 @@
 # 自动识别文本文件
 * text=auto
 
+# Tauri rewrites this manifest as LF. Keep checkout bytes stable for build attestation.
+/desktop/src-tauri/Cargo.toml text eol=lf
+
 # Formatter-adopted modules stay identical on Windows checkout.
 /desktop/src/utils/logger.ts text eol=lf
 /desktop/src/utils/backgroundErrors.ts text eol=lf
