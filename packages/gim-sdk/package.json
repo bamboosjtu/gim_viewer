@@ -111,16 +111,6 @@
       "gim-source": "./src/gim/engineering/evidenceProvider.ts",
       "import": "./dist/gim/engineering/evidenceProvider.js"
     },
-    "./gim/engineering/geometryOccurrences.js": {
-      "types": "./src/gim/engineering/geometryOccurrences.ts",
-      "gim-source": "./src/gim/engineering/geometryOccurrences.ts",
-      "import": "./dist/gim/engineering/geometryOccurrences.js"
-    },
-    "./gim/engineering/ifcSourceRecords.js": {
-      "types": "./src/gim/engineering/ifcSourceRecords.ts",
-      "gim-source": "./src/gim/engineering/ifcSourceRecords.ts",
-      "import": "./dist/gim/engineering/ifcSourceRecords.js"
-    },
     "./gim/engineering/inventory.js": {
       "types": "./src/gim/engineering/inventory.ts",
       "gim-source": "./src/gim/engineering/inventory.ts",
@@ -135,11 +125,6 @@
       "types": "./src/gim/engineering/recognitionFieldPolicy.ts",
       "gim-source": "./src/gim/engineering/recognitionFieldPolicy.ts",
       "import": "./dist/gim/engineering/recognitionFieldPolicy.js"
-    },
-    "./gim/engineering/semanticAdapter.js": {
-      "types": "./src/gim/engineering/semanticAdapter.ts",
-      "gim-source": "./src/gim/engineering/semanticAdapter.ts",
-      "import": "./dist/gim/engineering/semanticAdapter.js"
     },
     "./gim/engineering/sourceDocuments.js": {
       "types": "./src/gim/engineering/sourceDocuments.ts",
@@ -214,10 +199,10 @@
     "!src/**/__tests__/**"
   ],
   "scripts": {
-    "check": "node policy-fingerprints.mjs && tsc -p tsconfig.json",
+    "check": "node policy-fingerprints.mjs && tsc -p tsconfig.json && tsc -p tsconfig.test.json",
     "sync:policy": "node policy-fingerprints.mjs --write",
     "build": "npm run check && node build.mjs",
-    "test": "node test-unit.mjs",
+    "test": "tsc -p tsconfig.test.json && node test-unit.mjs",
     "test:consumer": "node test-consumer.mjs"
   },
   "dependencies": {

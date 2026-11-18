@@ -52,11 +52,11 @@ class LoopbackPort implements EngineeringWorkerPort {
       if (this.holdAssemble && request.type === 'assemble') await new Promise<void>(resolve => { this.resumeAssembly = resolve; });
       if(this.holdRestore&&request.type==='restore')await new Promise<void>(resolve=>{this.resumeRestore=resolve;});
       if (this.holdCache && request.type === 'encode-cache') await new Promise<void>(resolve => { this.resumeCache=resolve; });
-      try {
-        const reply = await this.handle(request);
-        this.onmessage?.({ data: { ...reply, requestId: request.requestId } as EngineeringWorkerResponse } as MessageEvent<EngineeringWorkerResponse>);
-      } catch (error) { this.onmessage?.({ data: { type: 'error', requestId: request.requestId, message: String(error) } } as MessageEvent<EngineeringWorkerResponse>); }
-    })();
+      const reply = await this.handle(request);
+      this.onmessage?.({ data: { ...reply, requestId: request.requestId } as EngineeringWorkerResponse } as MessageEvent<EngineeringWorkerResponse>);
+    })().catch(error => {
+      this.onmessage?.({ data: { type: 'error', requestId: request.requestId, message: String(error) } } as MessageEvent<EngineeringWorkerResponse>);
+    });
   }
   terminate(): void { this.terminated = true; }
 }

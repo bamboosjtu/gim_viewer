@@ -24,7 +24,7 @@
     "posttauri:build": "node scripts/package-portable.mjs",
     "test": "node scripts/with-workspace-temp.mjs node_modules/vitest/vitest.mjs run",
     "test:module": "node scripts/with-workspace-temp.mjs scripts/test-module.mjs",
-    "test:presentation-boundaries": "node scripts/with-workspace-temp.mjs --test scripts/presentation-boundaries.test.mjs scripts/core-boundaries.test.mjs ../packages/gim-sdk/verify-capabilities.test.mjs scripts/package-boundaries.test.mjs scripts/native-contract-boundaries.test.mjs",
+    "test:presentation-boundaries": "node scripts/with-workspace-temp.mjs --test scripts/presentation-boundaries.test.mjs scripts/core-boundaries.test.mjs ../packages/gim-sdk/verify-capabilities.test.mjs scripts/package-boundaries.test.mjs scripts/native-contract-boundaries.test.mjs scripts/startup-chunks.test.mjs",
     "test:sqlite": "node scripts/with-workspace-temp.mjs node_modules/vitest/vitest.mjs run --config vitest.sqlite.config.ts",
     "local-tests:check": "node scripts/with-workspace-temp.mjs scripts/local-tests/cli.mjs check",
     "test:local": "node scripts/with-workspace-temp.mjs scripts/local-tests/cli.mjs run",

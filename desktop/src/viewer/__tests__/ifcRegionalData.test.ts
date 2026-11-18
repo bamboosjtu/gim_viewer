@@ -2,22 +2,21 @@ import { expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import {
   classifyRegionalOpenings,
-  isRegionalConnectionObject,
-  isRegionalConnectionType,
   queryRegionalObjects,
   RegionalIndexCollector,
 } from '../ifcRegionalData.js';
+import { isRegionalConnectionObject } from '../../shared/ifcConnectionEvidence.js';
 
 it('classifies only known IFC segment entities for the connection preview lane', () => {
-  expect(isRegionalConnectionType('IFCCABLESEGMENT')).toBe(true);
-  expect(isRegionalConnectionType('ifcwiresegment')).toBe(true);
-  expect(isRegionalConnectionType('IFCTRANSFORMER')).toBe(false);
-  expect(isRegionalConnectionType('')).toBe(false);
+  expect(isRegionalConnectionObject({ifcType:'IFCCABLESEGMENT',name:''})).toBe(true);
+  expect(isRegionalConnectionObject({ifcType:'ifcwiresegment',name:''})).toBe(true);
+  expect(isRegionalConnectionObject({ifcType:'IFCTRANSFORMER',name:''})).toBe(false);
+  expect(isRegionalConnectionObject({ifcType:'',name:''})).toBe(false);
 });
 
 it('uses proxy entity names as source evidence without classifying ordinary proxies', () => {
-  expect(isRegionalConnectionObject({ expressId: 1, globalId: '1', ifcType: 'IFCBUILDINGELEMENTPROXY', name: '软导体', bounds: [0, 0, 0, 1, 1, 1] })).toBe(true);
-  expect(isRegionalConnectionObject({ expressId: 2, globalId: '2', ifcType: 'IFCBUILDINGELEMENTPROXY', name: '墙体描述', bounds: [0, 0, 0, 1, 1, 1] })).toBe(false);
+  expect(isRegionalConnectionObject({ ifcType: 'IFCBUILDINGELEMENTPROXY', name: '软导体' })).toBe(true);
+  expect(isRegionalConnectionObject({ ifcType: 'IFCBUILDINGELEMENTPROXY', name: '墙体描述' })).toBe(false);
 });
 
 it('emits source-evidenced connection objects once while retaining all regional objects', () => {

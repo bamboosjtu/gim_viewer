@@ -2,6 +2,8 @@
   "version": 1,
   "dataVersion": "gim-blender-v1",
   "origin": "Local source snapshot, maintained independently; no runtime or build dependency on the viewer.",
+  "snapshotCommit": "f1935261a9222fb03e624826758df17f630478c2",
+  "snapshotCommittedAt": "2026-11-16T07:23:43+08:00",
   "files": [
     {
       "path": "engine/snapshot/core/src/engineering/catalog.json",

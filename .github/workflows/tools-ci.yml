@@ -37,6 +37,20 @@ jobs:
           architecture: x64
       - name: Verify the frozen Blender converter snapshot
         run: python tools/gim_blender/verify_snapshot.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tools/gim_blender/package-lock.json
+      - name: Build the standalone Blender converter without model samples
+        run: |
+          New-Item -ItemType Directory -Path tmp/ci/blender -Force | Out-Null
+          $env:TEMP = (Resolve-Path tmp/ci/blender).Path
+          $env:TMP = $env:TEMP
+          $env:TMPDIR = $env:TEMP
+          npm ci --prefix tools/gim_blender
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run build --prefix tools/gim_blender
       - name: Reject unsafe build paths and preserve previous outputs
         shell: pwsh
         # Negative fixtures intentionally invoke Python with exit 17. A child

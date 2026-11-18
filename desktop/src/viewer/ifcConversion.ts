@@ -29,6 +29,8 @@ export async function loadRawIfc(
   options: {
     transferInput?: boolean;
     openingPolicy?: IfcOpeningPolicy;
+    /** Digest of this exact IFC buffer when already computed for its cache key. */
+    sourceSha256?: string;
     onConversionStage?: (stage: string) => void;
     onFarArtifact?:(bytes:Uint8Array<ArrayBuffer>,index:RegionalIndex)=>void;
     onRegionalBatch?: (batch: IfcRegionalConnectionBatch) => void;
@@ -135,7 +137,7 @@ export async function loadRawIfc(
           && buffer.byteOffset === 0 && buffer.byteLength === buffer.buffer.byteLength;
         const owned = (options.transferInput && exactBuffer ? buffer : new Uint8Array(buffer)) as Uint8Array<ArrayBuffer>;
         const input: IfcConversionInput = { bytes: owned, wasm: { ...ctx.ifcLoader.settings.wasm },
-          webIfcSettings: { ...ctx.ifcLoader.settings.webIfc }, openingPolicy: options.openingPolicy ?? 'full' };
+          webIfcSettings: { ...ctx.ifcLoader.settings.webIfc }, openingPolicy: options.openingPolicy ?? 'full', sourceSha256: options.sourceSha256 };
         input.earlyConnections = state.substationMemoryPressure !== 'high' && state.substationMemoryPressure !== 'critical';
         try { input.earlyConnections &&= localStorage.getItem('gim-connection-early') !== '0'; } catch { /* defaults apply */ }
         endPrepare(undefined, {

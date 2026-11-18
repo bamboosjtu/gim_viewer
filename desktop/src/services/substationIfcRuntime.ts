@@ -5,7 +5,7 @@ import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import { setSubstationViewerInteractive } from './substationLoadingState.js';
 /** Sequential IFC loading, early geometry, cache profiles and background gates. */
 import { setConnectionStatus, setIfcStatus as publishIfcStatus } from './presentation/shell_statusBar.js';
-import type { IfcEntry, CbmNode } from '../gim/types.js';
+import type { IfcEntry } from '../gim/types.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import { getFileByPath } from '../gim/fileLookup.js';
 import { isTauri } from '@desktop/runtime.js';
@@ -15,8 +15,7 @@ import { SubstationBackgroundCoordinator, type SubstationBackgroundGate } from '
 import { perfCurrentSession, perfBegin, perfMark, perfMarkProductMoment, perfRecordIfcLoadProfile } from '../utils/perfTimings.js';
 import { startSubstationResourceMonitor } from './substationResourceTelemetry.js';
 import { showLoading, hideLoading } from './gimOpenCore.js';
-import { prioritizeIfcEntries } from './ifcLoadOrder.js';
-import { resolveIfcModelId } from '../gim/modelIdentity.js';
+import { planSubstationIfcLoad } from './ifcLoadOrder.js';
 import { autoLoadModStlPostIfc } from './substationDevRuntime.js';
 
 import { renderSubstationCoreUi, showLoadingBeforeInteractive } from './substationPresentation.js';
@@ -450,46 +449,16 @@ export async function loadAllIfcFiles(
         const file = state.currentFiles && getFileByPath(state.currentFiles, entry.path);
         if (file) sizes.set(entry.path.toLowerCase(), file.size);
       }
-      const queue = [...entries];
-      // 超大 IFC（如 452 MB 的设备接线）冷转换可能需要数分钟；默认允许后台
-      // 长转换并排到队尾。设置里可显式跳过这类非关键文件，跳过后在状态栏和
-      // 控制台列出，绝不静默丢弃。
-      const { shouldSkipLargeIfc, LARGE_IFC_BYTES } = await import('./appSettings.js');
-      const skippedLargeIfc: Array<{ path: string; bytes: number }> = [];
-      const { isRegionalConnectionObject } = await import('../viewer/ifcRegionalData.js');
-      const evidencedConnections = new Set<string>();
-      const visitConnectionEvidence = (node: CbmNode): void => {
-        if (node.ifcFile && node.ifcGuid && isRegionalConnectionObject({
-expressId: 0, globalId: node.ifcGuid,
-          ifcType: 'IFCBUILDINGELEMENTPROXY', name: node.name, bounds: []
-})) {
-          const id = resolveIfcModelId(node.ifcFile, entries);
-          if (id) evidencedConnections.add(id);
-        }
-        node.children.forEach(visitConnectionEvidence);
-      };
-      if (state.currentCbmTree) visitConnectionEvidence(state.currentCbmTree);
-      const isConnectionIfc = (entry: IfcEntry): boolean =>
-        evidencedConnections.has(entry.modelId) || /接线|连接线|软导|导线|wire|cable/i.test(`${entry.name} ${entry.path}`);
-      if (shouldSkipLargeIfc() && queue.length > 1) {
-        for (let index = queue.length - 1;index >= 1;index--) {
-          // Connection-line IFC is the only source of those lines for some
-          // substations; never silently skip it by size.
-          if (isConnectionIfc(queue[index])) continue;
-          const bytes = sizes.get(queue[index].path.toLowerCase()) ?? 0;
-          if (bytes <= LARGE_IFC_BYTES) continue;
-          skippedLargeIfc.push({ path: queue[index].path, bytes });
-          queue.splice(index, 1);
-        }
-        if (skippedLargeIfc.length > 0) {
-          console.warn('[IFC] 已按设置跳过超大文件:', skippedLargeIfc);
-          perfMark('IFC 跳过超大文件', { skipped: skippedLargeIfc }, perfSession);
-        }
+      const { shouldSkipLargeIfc } = await import('./appSettings.js');
+      if (!isCurrent()) return;
+      const {queue, skippedLargeIfc, evidencedConnections, hasConnections} =
+        planSubstationIfcLoad(entries, sizes, state.currentCbmTree, shouldSkipLargeIfc());
+      if (skippedLargeIfc.length) {
+        console.warn('[IFC] 已按设置跳过超大文件:', skippedLargeIfc);
+        perfMark('IFC 跳过超大文件', { skipped: skippedLargeIfc }, perfSession);
       }
-      state.ifcLoading.skippedLargeIfc = skippedLargeIfc.map((row) => row.path);
-      const connectionEntries = queue.filter(isConnectionIfc);
-      queue.splice(0, queue.length, ...prioritizeIfcEntries(queue, sizes, new Set(connectionEntries.map(entry => entry.modelId))));
-      if (connectionEntries.length) {
+      state.ifcLoading.skippedLargeIfc = skippedLargeIfc.map(row => row.path);
+      if (hasConnections) {
         perfMark('IFC 连接线优先', {
           order: queue.slice(0, 4).map((entry) => entry.path),
           evidencedModels: [...evidencedConnections],

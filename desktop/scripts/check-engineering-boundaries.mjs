@@ -3,7 +3,7 @@ import { dirname, resolve, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import {checkPresentationSource} from './presentation-boundaries.mjs';
-import {packageBoundaryError} from './package-boundaries.mjs';
+import {dependencyCycles, packageBoundaryError, staleSdkImportExceptions} from './package-boundaries.mjs';
 import {coreBoundaryErrors} from './core-boundaries.mjs';
 import {nativeContractCallErrors} from './native-contract-boundaries.mjs';
 
@@ -194,18 +194,9 @@ for (const family of runtimeFamilies) {
     }
     visit(ast);
   }
-  const visiting = new Set(), visited = new Set();
-  function visit(path) {
-    if (visiting.has(path)) {
-      failures.push(`${relative(root, path)}: circular runtime module dependency`);
-      return;
-    }
-    if (visited.has(path)) return;
-    visiting.add(path);
-    for (const target of graph.get(path)) visit(target);
-    visiting.delete(path); visited.add(path);
+  for (const cycle of dependencyCycles(graph)) {
+    failures.push(`Circular runtime module dependency: ${cycle.map(path => relative(root, path)).join(' -> ')}`);
   }
-  paths.forEach(visit);
 }
 
 // Whole-source static value graph. Dynamic and type dependencies are counted,
@@ -242,22 +233,10 @@ for(const path of all){
   ts.forEachChild(node,scan);
  };scan(ast);
 }
-for (const [file, imports] of Object.entries(sdkInternalImports)) {
-  for (const name of imports) {
-    if (!observedSdkInternalImports.get(file)?.has(name)) {
-      failures.push(`${file}: remove unused SDK internal-import exception ${name}`);
-    }
-  }
+failures.push(...staleSdkImportExceptions(sdkInternalImports, observedSdkInternalImports));
+for (const cycle of dependencyCycles(graph)) {
+  failures.push(`Static value cycle: ${cycle.map(path => relative(root, path)).join(' -> ')}`);
 }
-
-const visiting=new Set(),visited=new Set();
-function checkCycle(path,trail=[]){
- if(visiting.has(path)){failures.push(`Static value cycle: ${[...trail,path].map(p=>relative(root,p)).join(' -> ')}`);return;}
- if(visited.has(path))return;visiting.add(path);
- for(const target of graph.get(path))checkCycle(target,[...trail,path]);
- visiting.delete(path);visited.add(path);
-}
-all.forEach(path=>checkCycle(path));
 console.log(`Dependency graph: ${all.length} modules, ${typeEdges} type edges, ${dynamicEdges} dynamic edges`);
 if (failures.length) { console.error(failures.join('\n')); process.exitCode=1; }
 else console.log('Engineering, source, viewer and runtime module boundaries passed.');

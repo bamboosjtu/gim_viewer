@@ -42,8 +42,7 @@ export async function loadBimIfc(
   readBytes: () => Promise<Uint8Array | null>,
   onProgress?: (p: number) => void,
   options: {
-    sourceIdentity?: string;
-    initialBytes?: Uint8Array;
+    standaloneSource?: boolean;
     onStage?: (stage: IfcLoadStage, meta?: Record<string, unknown>) => void;
     onProfile?: (profile: IfcFileProfile) => void;
     onRegionalBatch?: (batch: IfcRegionalConnectionBatch) => void;
@@ -59,18 +58,26 @@ export async function loadBimIfc(
   let cacheWriteMs: number | null = null;
   let cacheWriteOk: boolean | null = null;
   options.onStage?.('checking-cache', { path });
-  let input: Uint8Array | null = options.initialBytes ?? null;
-  let identity = options.sourceIdentity ?? session.sourceSha256;
+  let input: Uint8Array | null = null;
+  let sourceSha256: string | undefined;
+  let identity = options.standaloneSource ? null : session.sourceSha256;
   if (!identity) {
     input = await readBytes();
     if (!input || !current()) return;
-    identity = [
+    // The reread provider is checked separately by the regional Worker. Only
+    // carry this digest forward with the same privately owned initial bytes.
+    const bytes = input.buffer instanceof ArrayBuffer
+      ? new Uint8Array(input.buffer, input.byteOffset, input.byteLength)
+      : (input = new Uint8Array(input));
+    sourceSha256 = [
       ...new Uint8Array(
-        await crypto.subtle.digest('SHA-256', new Uint8Array(input))
+        await crypto.subtle.digest('SHA-256', bytes)
       ),
     ]
       .map((v) => v.toString(16).padStart(2, '0'))
       .join('');
+    identity = sourceSha256;
+    if (!current()) return;
   }
   const key = `${IFC_LOD_CACHE_VERSION}|${identity}|${path.toLowerCase()}`;
   const connectionKey = `${key}|near-templates-v${CONNECTION_GEOMETRY_VERSION}|0`;
@@ -133,6 +140,7 @@ export async function loadBimIfc(
       {
         transferInput: true,
         openingPolicy: 'bim-lod',
+        sourceSha256,
         onConversionStage: stage => options.onStage?.('cold-convert', { path, phase: ({
           'source-hash': '校验来源', 'early-connection': '连接预览已提交',
           'wasm-init': '读取模型', 'source-open': '生成浏览表示',

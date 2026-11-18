@@ -1,6 +1,6 @@
 import type { IfcAPI, LoaderSettings } from 'web-ifc';
 import { buildEarlyConnectionInput, type IndexedOpening } from '../gim/ifcConnectionSubset.js';
-import { CONNECTION_IFC_TYPES, isRegionalConnectionObject } from './ifcRegionalData.js';
+import { CONNECTION_IFC_TYPES, isRegionalConnectionObject } from '../shared/ifcConnectionEvidence.js';
 import { CONNECTION_GEOMETRY_VERSION, streamConnectionGeometry, validConnectionArtifact,
   type ConnectionGeometryBatch } from './ifcConnectionBatches.js';
 
@@ -21,7 +21,7 @@ export async function streamEarlyConnection(createApi: () => Promise<IfcAPI>, by
   let prepared;
   try {
     prepared = buildEarlyConnectionInput(bytes, CONNECTION_IFC_TYPES,
-      (ifcType, name) => isRegionalConnectionObject({expressId: 0, globalId: '', ifcType, name, bounds: []}));
+      (ifcType, name) => isRegionalConnectionObject({ifcType, name}));
   } catch (error) { result.fallback = String(error); }
   result.profile.earlyPreparationMs = performance.now() - began;
   if (!prepared) return result;

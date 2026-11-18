@@ -36,6 +36,8 @@ desktop.ini
 # Logs
 *.log
 npm-debug.log*
+smoke-settings.ini
+*.png.settings.ini
 
 # TypeScript cache
 *.tsbuildinfo

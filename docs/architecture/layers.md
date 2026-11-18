@@ -21,7 +21,6 @@
 | `desktop/src/app/` | 启动、`AppState`、工程会话、模块接线 | services、ui 入口 | 具体 parser 内部 |
 | `packages/gim-sdk/` | 五组纯核心；来源、语义、物理目录、表示绑定与投影 | 包内纯模块、powerline-core | desktop/app 宿主、DOM、Tauri、Three/Viewer、DB |
 | `desktop/src/engineering/` | 现有消费者的 SDK 出口转发 | 声明的 SDK exports | 核心算法和配置副本 |
-| `desktop/src/standards/` | 首批标准要求/属性定义、字段级原文证据与只读上下文查询 | 本地数据资源、纯函数 | 工程识别算法、Viewer、DB、模型校核执行 |
 | `desktop/src/gim/engineering/` | 现有来源消费者的 SDK 转发入口；来源适配实现与测试归 SDK | SDK exports | 规则副本、Viewer、UI、DB |
 | `desktop/src/gim/` | 容器、CBM/DEV/PHM/MOD/IFC 纯解析、索引和地图数据 | 共享纯库 | services、viewer、ui |
 | `desktop/src/viewer/` | Three.js、Fragments、web-ifc、MOD/STL 编译与渲染 | three、geometry 纯函数、类型 | services、ui、DB |
@@ -43,7 +42,7 @@ UI 可消费只读的稳定来源 ID 查找、路径格式化、空值判断及�
 3. `services/engineering*` 只做 Worker 调度、快照发布、缓存、表示绑定和取消；不重新判断工程类别。
 4. `viewer/` 只消费 `SourceGeometryOccurrence`、模板和 IFC 对象。几何编译器不接收工程组成分组，也不按实体名称选择 LOD。
 5. `ui/` 不直接访问数据库或原生 IPC；最近工程、缓存管理和工程打开均通过 `services/projectCacheService`、`services/gimOpenCore` 等入口。`engineeringTreeView` 只渲染投影结果并回调选择服务。
-6. 重依赖按需动态 import：入口和 `openGimService` 不静态引入 Three.js、web-ifc、MapLibre；IFC、几何、地图和工程实体 Worker 各自分包。
+6. 重依赖按需动态 import：入口和 `openGimService` 不静态引入 Three.js、web-ifc、MapLibre；IFC、几何、地图和工程实体 Worker 各自分包。Vite 生产构建从 HTML 入口检查生成块的静态依赖闭包，发现 Three.js、web-ifc 或 MapLibre 即失败。
 7. 读取语义和提交状态必须由会话/请求守卫控制；UI 不能直接改写缓存版本、解析器结果或场景所有权。
 
 ### 已知边界例外
@@ -78,7 +77,7 @@ bootstrap
 
 `AppState.engineering` 持有工程事实与构建状态，`viewState` 持有导航、展开、相机意图和历史；`sourceGeometry` 独立持有物理目录、就绪 Promise 与缓存状态，读取由所有者统一做会话前后校验，不等待语义；`ifcLoading` 持有 IFC 尾部 pending 与明确跳过清单；`properties` 直接持有属性 Map 并负责 reset，AppState 不再提供旧根字段转发。选择的请求/取消、相机意图快照、反馈与装饰释放器由 `selection` 持有；IFC 会话地址、模型与区域运行时由 `ifc` 注册表持有，登记和迟到删除在注册表内统一校验。新所有者通过窄运行时端口接线，消费者不使用根字段转发。应用组合根仍保留工程源数据与运行面协调状态。工程实体、导航、几何目录的构建由服务层启动，UI 通过订阅/回调刷新。工程切换后，旧 Worker、旧请求和旧投影必须释放或拒绝提交。
 
-共享包通过 package.json 声明依赖和 package exports 访问。纯名称、KV、跨越、线路属性/图类型、资源限制及线路 MOD parser 直接引用包出口，测试属于共享实现。桌面仅保留有实际责任的入口：`lineCbmParserCore` / `lineMapData` 初始化桌面日志 sink，`geometry/ir` / `sourceDocument` 是当前来源与编译契约入口；`@gim/measurement-core/source` 是显式源码出口，SDK 默认入口仍为构建后的 dist。生产代码不允许用深相对路径绕过包边界。
+共享包通过 package.json 声明依赖和 package exports 访问。纯名称、KV、跨越、线路属性/图类型、资源限制及线路 MOD parser 直接引用包出口，测试属于共享实现。桌面仅保留有实际责任的入口：`lineCbmParserCore` / `lineMapData` 初始化桌面日志 sink，`geometry/ir` / `sourceDocument` 是当前来源与编译契约入口；`powerline-core` 逐项声明共享入口。`@gim/measurement-core/source` 是测量核心的唯一包出口；GIM SDK 的默认入口仍为构建后的 dist。生产代码不允许用深相对路径绕过包边界。
 
 ## 五组能力入口
 

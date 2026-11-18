@@ -30,9 +30,7 @@ import {buildLineMapProjection} from '../services/lineMapProjection.js';
 import { buildLineAttributeIndex } from '../services/lineAttrRestoreService.js';
 import { buildWireSemanticInfo } from '../services/lineWireSemanticService.js';
 import type { WireSemanticInfo } from '../services/lineWireSemanticService.js';
-import { buildLineCatenaryAuditExportPayload } from '../services/lineCatenaryAuditExportService.js';
 import type { LineCatenaryAuditExportPayload } from '../services/lineCatenaryAuditExportService.js';
-import { formatLineCatenaryAuditMarkdown } from '../services/lineCatenaryAuditExportService.js';
 import { DEBUG_LINE_MAP } from '../config/debug.js';
 import { ENABLE_CATENARY, runtimeBasemapMode, setRuntimeBasemapMode, resetRuntimeBasemapMode } from '../config/features.js';
 import type { LineBasemapMode } from '../config/features.js';
@@ -443,17 +441,14 @@ let latestCatenaryAuditPayload: LineCatenaryAuditExportPayload | null = null;
 let latestCatenaryAuditContext: { graph: GimGraph; mapData: LineMapData } | null = null;
 
 /** M4-B3A：读取最新悬链线审计 payload（供快捷键 Ctrl+Shift+C 调用） */
-export function getLatestCatenaryAuditPayload(): LineCatenaryAuditExportPayload | null {
-  if (!latestCatenaryAuditPayload && latestCatenaryAuditContext) {
-    latestCatenaryAuditPayload = buildLineCatenaryAuditExportPayload(latestCatenaryAuditContext);
-  }
-  return latestCatenaryAuditPayload;
-}
+export async function getLatestCatenaryAuditPayload(): Promise<LineCatenaryAuditExportPayload | null> {
+  const context = latestCatenaryAuditContext;
+  if (!context || latestCatenaryAuditPayload) return latestCatenaryAuditPayload;
 
-/** M4-B3A：将 payload 格式化为 Markdown（供快捷键 Ctrl+Shift+C 调用） */
-export function formatLatestCatenaryAuditMarkdown(): string | null {
-  const payload = getLatestCatenaryAuditPayload();
-  return payload ? formatLineCatenaryAuditMarkdown(payload) : null;
+  const { buildLineCatenaryAuditExportPayload } = await import('../services/lineCatenaryAuditExportService.js');
+  if (context !== latestCatenaryAuditContext) return null;
+  latestCatenaryAuditPayload ??= buildLineCatenaryAuditExportPayload(context);
+  return latestCatenaryAuditPayload;
 }
 
 /** 当前线路地图的可选在线底图句柄；Canvas 首帧始终先就绪。 */

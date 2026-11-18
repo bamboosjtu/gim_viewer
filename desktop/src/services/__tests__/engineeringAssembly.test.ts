@@ -1,4 +1,4 @@
-import {normalizeEngineeringSources} from '@gim/gim-sdk/gim/engineering/semanticAdapter.js';
+import {normalizeEngineeringSources} from '@gim/gim-sdk/source-adapter';
 // @vitest-environment node
 import {afterEach,expect,it,vi} from 'vitest';
 import {assembleEngineeringView,assembleStoredEngineeringView} from '../engineeringAssembly.js';

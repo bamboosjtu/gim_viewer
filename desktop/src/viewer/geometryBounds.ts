@@ -17,3 +17,9 @@ export function invalidGeometryBounds(box:THREE.Box3):string|null {
 export function invalidGeometryExtent(object:THREE.Object3D):string|null {
   return invalidGeometryBounds(new THREE.Box3().setFromObject(object));
 }
+
+export function hasRenderableGeometry(root: THREE.Object3D): boolean {
+  const mesh = root as THREE.Mesh;
+  if (mesh.isMesh && (mesh.geometry?.getAttribute?.('position')?.count ?? 0) > 0) return true;
+  return root.children.some(hasRenderableGeometry);
+}

@@ -93,7 +93,12 @@ class MainWindow(QMainWindow):
         self.resize(1360, 860)
         self.setAcceptDrops(True)
 
-        self.settings = QSettings(os.path.abspath('smoke-settings.ini'), QSettings.IniFormat) if SMOKE else QSettings('GIMElement', 'Inventory')
+        if SMOKE:
+            index = sys.argv.index('--smoke')
+            screenshot = sys.argv[index + 2] if len(sys.argv) > index + 2 else 'smoke.png'
+            self.settings = QSettings(os.path.abspath(screenshot + '.settings.ini'), QSettings.IniFormat)
+        else:
+            self.settings = QSettings('GIMElement', 'Inventory')
         self.worker = None
         self.cur_path = None
         self.result = None

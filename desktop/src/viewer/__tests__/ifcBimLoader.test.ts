@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import { webcrypto } from 'node:crypto';
 import * as THREE from 'three';
 import { AppState } from '../../app/state.js';
 import { loadBimIfc } from '../ifcBimLoader.js';
@@ -153,6 +154,23 @@ it('a corrupt artifact retries source even when no failed model can be disposed'
   expect(cache.remove).toHaveBeenCalledOnce();
   expect(cache.write).toHaveBeenCalledOnce();
   expect(model.object.userData.ifcLodCacheHit).toBe(false);
+});
+
+it('uses the standalone IFC digest for both the cache key and the exact conversion input', async () => {
+  const {state,session,ctx}=setup();
+  const bytes=new Uint8Array([0,97,98,99]).subarray(1);
+  const sha256='ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
+  const read=vi.fn(async()=>bytes);
+  vi.stubGlobal('crypto',webcrypto);
+  const digest=vi.spyOn(webcrypto.subtle,'digest');
+  try {
+    await loadBimIfc(ctx,state,session,'runtime','logical','model.ifc',read,undefined,{standaloneSource:true});
+    expect(read).toHaveBeenCalledOnce();
+    expect(digest).toHaveBeenCalledOnce();
+    expect(cache.read).toHaveBeenCalledWith(expect.stringContaining(`|${sha256}|model.ifc`));
+    expect(cache.raw.mock.calls[0][3]).toBe(bytes);
+    expect(cache.raw.mock.calls[0][8].sourceSha256).toBe(sha256);
+  } finally { digest.mockRestore();vi.unstubAllGlobals(); }
 });
 
 it('replays a complete connection receipt in the original order on a warm hit after successful far deserialization', async () => {

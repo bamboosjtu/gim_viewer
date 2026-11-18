@@ -41,7 +41,7 @@ jobs:
         working-directory: app
     steps:
       - name: Checkout selected source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.source_sha || github.ref }}
           fetch-depth: 0
@@ -214,7 +214,7 @@ jobs:
 
       - name: Upload signed APK as Actions artifact
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gim-viewer-android-${{ inputs.source_sha }}
           path: dist/android/*

@@ -116,6 +116,7 @@ test('semantic stall distinguishes an active engineering task from an idle missi
   const active={projectType:'substation',progress:{semantic:false},measurement:{activeTasks:[{family:'engineering'}]}};
   assert.equal(semanticStallReason(active,59_999),null);
   assert.equal(semanticStallReason(active,60_000),'product-stalled');
+  assert.equal(semanticStallReason({...active,measurement:{activeTasks:[{family:'engineering-composition'}]}},60_000),'product-stalled');
   assert.equal(semanticStallReason({...active,measurement:{activeTasks:[]}},60_000),null);
   assert.equal(semanticStallReason({...active,measurement:{activeTasks:[]}},120_000),'engineering-progress-stalled');
   assert.equal(semanticStallReason({...active,progress:{semantic:true,engineeringBuildPending:true},

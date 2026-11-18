@@ -1,7 +1,7 @@
 import tseslint from 'typescript-eslint';
 import {architectureModules as adopted} from './scripts/format-architecture.mjs';
 export default tseslint.config({
-  ignores: ['node_modules/**', 'dist/**', 'public/**', '.tmp/**', '**/__tests__/**', '**/*.test.ts'],
+  ignores: ['node_modules/**', 'dist/**', 'public/**', '.tmp/**'],
 }, {
   files: ['src/**/*.ts', 'bridge/**/*.ts', '../packages/gim-sdk/src/**/*.ts'],
   languageOptions: { parser: tseslint.parser, parserOptions: { project: './tsconfig.json', tsconfigRootDir: import.meta.dirname } },
@@ -12,6 +12,7 @@ export default tseslint.config({
   },
 },{
   files: ['../packages/gim-sdk/src/**/*.ts'],
+  ignores: ['../packages/gim-sdk/src/**/__tests__/**'],
   rules: {
     'no-console': 'error',
     'no-restricted-globals': ['error', ...['self', 'fetch', 'caches', 'indexedDB', 'importScripts', 'navigator', 'window', 'document']],

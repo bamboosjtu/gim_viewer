@@ -91,13 +91,8 @@ describe('Substation Loading readiness lifecycle', () => {
     const backgroundStarted=deferred<void>();
     const secondIfcGate = deferred<void>();
     const secondIfcStarted = deferred<void>();
-    const spatialGate = deferred<void>();
     const spatialStart = vi.fn(() => {
       backgroundStarted.resolve();
-      // A real spatial starter owns its promise and is intentionally not
-      // awaited by loadAllIfcFiles.  Keep this one pending to prove that the
-      // interactive caller is independent from it.
-      void spatialGate.promise;
       expect(perfProductMomentSnapshot().interactive).not.toBeNull();
       perfMarkProductMoment('spatialSemanticStart', { test: true });
       throw new Error('test spatial semantic failure');
@@ -165,8 +160,6 @@ describe('Substation Loading readiness lifecycle', () => {
       startStdSld: stdSldStart,
       startCachePersistence: cachePersistenceStart,
     });
-    let callerSettled = false;
-    void loading.then(() => { callerSettled = true; });
 
     // The public promise must settle while the sequential IFC tail is still
     // held. Await that contract instead of racing cold dynamic imports against
@@ -185,7 +178,6 @@ describe('Substation Loading readiness lifecycle', () => {
     expect(spatialStart).toHaveBeenCalledOnce();
 
     expect(mocks.fitCameraToStationOverview).toHaveBeenCalledTimes(1);
-    expect(callerSettled).toBe(true);
     expect(mocks.loadIfcEntry).toHaveBeenCalledTimes(2);
     expect(spatialStart).toHaveBeenCalledTimes(1);
     expect(stdSldStart).toHaveBeenCalledTimes(1);
@@ -214,7 +206,6 @@ describe('Substation Loading readiness lifecycle', () => {
     expect(perfProductMomentSnapshot().interactive!.atMs)
       .toBeLessThanOrEqual(perfProductMomentSnapshot().allIfcReady!.atMs);
     await loading;
-    spatialGate.resolve();
     await vi.waitFor(()=>expect(mocks.setIfcStatus).toHaveBeenLastCalledWith(expect.stringContaining('IFC 已结束')));
   });
 

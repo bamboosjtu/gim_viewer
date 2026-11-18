@@ -6,7 +6,7 @@ export const progressDigest=progress=>progress?digest(canonical(progress)):null;
 export function semanticStallReason(observation,idleMs){
   if(observation?.projectType!=='substation'||
     observation.progress?.semantic!==false&&observation.progress?.engineeringBuildPending!==true)return null;
-  const active=observation.measurement?.activeTasks?.some(task=>task.family==='engineering')===true;
+  const active=observation.measurement?.activeTasks?.some(task=>task.family==='engineering'||task.family==='engineering-composition')===true;
   return idleMs>=(active?60_000:120_000)?active?'product-stalled':'engineering-progress-stalled':null;
 }
 export function readyForSettle(observation,{cacheState}={}){

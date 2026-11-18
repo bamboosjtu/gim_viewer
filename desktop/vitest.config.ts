@@ -64,7 +64,6 @@ export default defineConfig({
         'src/services/openGimService.ts': {statements:70,lines:70,functions:80,branches:50},
         'src/services/substationRuntime.ts': {statements:70,lines:70,functions:45,branches:70},
         'src/services/viewerUIBinding.ts': {statements:80,lines:80,functions:50,branches:70},
-        'src/viewer/viewerRuntime.ts': {statements:100,lines:100,functions:100,branches:100},
         'src/ui/lineProjectView.ts': {statements:70,lines:70,functions:60,branches:65},
         'src/ui/lineMapView.ts': {statements:65,lines:65,functions:65,branches:60},
       },

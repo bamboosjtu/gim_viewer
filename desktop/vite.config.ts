@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from 'vite';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { startupChunkViolations } from './scripts/startup-chunks.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -31,6 +32,14 @@ export default defineConfig(({ mode }) => {
     .find(Boolean) ?? '';
 
   return {
+    plugins: [{
+      name: 'check-startup-chunks',
+      apply: 'build',
+      generateBundle(_options, bundle) {
+        const violations = startupChunkViolations(bundle);
+        if (violations.length) this.error(`Heavy dependencies in the startup graph:\n${violations.join('\n')}`);
+      },
+    }],
     worker: { format: 'es' },
     clearScreen: false,
     // Vite 默认以 process.cwd()（desktop/）为 envDir；这里显式指向仓库根，
@@ -71,9 +80,7 @@ export default defineConfig(({ mode }) => {
     },
     assetsInclude: ['**/*.gim'],
     build: {
-      // 重依赖（three 1.5MB / maplibre 1MB / web-ifc 3.6MB）已按工程类型拆分且
-      // 仅在对应分支动态加载（P2 评审 #6），单 chunk 体积是预期行为，非首屏负载。
-      // 阈值放宽至 2MB，超出仍会告警。
+      // 入口静态依赖由 check-startup-chunks 验证；分拆的大块仍由 Vite 报告体积。
       chunkSizeWarningLimit: 2000,
       rollupOptions: {
         output: {

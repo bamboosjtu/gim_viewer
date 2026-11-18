@@ -1557,9 +1557,28 @@ function collectProxyIdentityProperties(text: string, products: RawIfcEntity[], 
     if(ids.length&&type!=null)typeLinks.set(type,[...(typeLinks.get(type)??[]),...ids]);
   }
   const result = new Map<number, IfcPropertyGroup[]>();
+  if (!links.size && !typeLinks.size) return result;
+
   const typeRecords=new Map(products.filter(record=>typeLinks.has(record.expressId)).map(record=>[record.expressId,record]));
-  if(typeRecords.size<typeLinks.size)scanIfcEntityBoundaries(text,(expressId,ifcType,bodyStart,bodyEnd)=>{
-    if(typeLinks.has(expressId)&&!typeRecords.has(expressId))typeRecords.set(expressId,materializeIfcEntity(text,{expressId,ifcType,bodyStart,bodyEnd}));
+  const setCandidates = new Map<number, ScannedIfcEntity>();
+  const valueCandidates: Array<{ entity: ScannedIfcEntity; name: string }> = [];
+  const nameToken = /\s*('(?:[^']|'')*')\s*(?=,|\))/y;
+  // STEP references can point forward or backward. Gather offsets in one pass,
+  // then materialize only the Psets and named values reached by the links.
+  scanIfcEntityBoundaries(text, (expressId, ifcType, bodyStart, bodyEnd) => {
+    if (typeLinks.has(expressId) && !typeRecords.has(expressId)) {
+      typeRecords.set(expressId, materializeIfcEntity(text, {expressId, ifcType, bodyStart, bodyEnd}));
+    }
+    if (ifcType === 'IFCPROPERTYSET' && (typeLinks.size || links.has(expressId))) {
+      setCandidates.set(expressId, {expressId, ifcType, bodyStart, bodyEnd});
+    }
+    if (ifcType === 'IFCPROPERTYSINGLEVALUE') {
+      nameToken.lastIndex = bodyStart;
+      const name = parseString(nameToken.exec(text)?.[1]);
+      if (keys.has(name.toUpperCase())) {
+        valueCandidates.push({entity: {expressId, ifcType, bodyStart, bodyEnd}, name});
+      }
+    }
   });
   for(const [id,type] of typeRecords){
     const ids=typeLinks.get(id)!;
@@ -1570,29 +1589,29 @@ function collectProxyIdentityProperties(text: string, products: RawIfcEntity[], 
     }
   }
   if (!links.size) return result;
-  const sets = new Map<number, RawIfcEntity>(), wanted = new Set<number>();
-  scanIfcEntityBoundaries(text, (expressId, ifcType, bodyStart, bodyEnd) => {
-    if (ifcType !== 'IFCPROPERTYSET' || !links.has(expressId)) return;
-    const record = materializeIfcEntity(text, {expressId, ifcType, bodyStart, bodyEnd});
-    sets.set(expressId, record); parseRefs(record.args[4]).forEach(id => wanted.add(id));
-  });
+  const sets = new Map<number, { name: string; refs: number[] }>(), wanted = new Set<number>();
+  for (const [id, candidate] of setCandidates) {
+    if (!links.has(id)) continue;
+    const record = materializeIfcEntity(text, candidate);
+    const refs = parseRefs(record.args[4]);
+    sets.set(id, {name: parseString(record.args[2]), refs});
+    refs.forEach(ref => wanted.add(ref));
+  }
   const values = new Map<number, IfcPropertyValue>();
-  scanIfcEntityBoundaries(text, (expressId, ifcType, bodyStart, bodyEnd) => {
-    if (ifcType !== 'IFCPROPERTYSINGLEVALUE' || !wanted.has(expressId)) return;
-    const record = materializeIfcEntity(text, {expressId, ifcType, bodyStart, bodyEnd});
-    const name = parseString(record.args[0]);
-    if (!keys.has(name.toUpperCase())) return;
+  for (const {entity, name} of valueCandidates) {
+    if (!wanted.has(entity.expressId)) continue;
+    const record = materializeIfcEntity(text, entity);
     const nominal = record.args[2]?.match(/^(IFC\w+)\((.*)\)$/i);
     const raw=nominal?.[2]??record.args[2]??'';
     const value = parseString(raw)||(/^[+-]?\d+(?:\.\d*)?$/.test(raw)?raw:/^\.[A-Z_]+\.$/i.test(raw)?raw.slice(1,-1):'');
-    if (value) values.set(expressId, {name, value, ...(nominal ? {dataType:nominal[1]} : {})});
-  });
+    if (value) values.set(entity.expressId, {name, value, ...(nominal ? {dataType:nominal[1]} : {})});
+  }
   for (const [id, record] of sets) {
-    const selected = parseRefs(record.args[4]).flatMap(key => values.has(key) ? [values.get(key)!] : []);
+    const selected = record.refs.flatMap(key => values.has(key) ? [values.get(key)!] : []);
     if (!selected.length) continue;
     for (const {product,applicability} of links.get(id)!) {
       const groups = result.get(product) ?? [];
-      groups.push({id, name:parseString(record.args[2]), kind:'property',applicability, values:selected, truncated:true}); result.set(product, groups);
+      groups.push({id, name:record.name, kind:'property',applicability, values:selected, truncated:true}); result.set(product, groups);
     }
   }
   return result;

@@ -104,7 +104,7 @@
 
 共享 JSON 契约夹具使用静态导入纳入依赖图；例如识别契约 JSON 改动可直接选择跨语言对照测试。动态文件读取和 Python 子进程内部依赖不属于 JS 导入图；独立算法修改仍同时执行工具 `unit/` 与对应 TS 模块门禁。
 
-例：在 desktop 下执行 `npm run test:module -- engineering gim/engineering`，可同时核对纯领域、来源适配及相关的 services/UI 消费者；只修改一个文件时也可传 `src/engineering/classify.ts`。共享核心可传 `../packages/powerline-core/src`。目录或标准名称可配置时，测试验证公开分类与投影契约，目录标签取当前输入数据，不把历史标签当作业务规则。
+在 `desktop/` 执行 `npm run test:module -- ../packages/gim-sdk/src/engineering ../packages/gim-sdk/src/gim/engineering` 可核对领域、来源适配及桌面消费者。单文件变更可指定对应 SDK 源文件，共享线路核心可传 `../packages/powerline-core/src`。识别和投影测试应按当前目录核对公开结果。
 
 | 门禁命令（`desktop/` 下） | 证明什么 |
 |---|---|
@@ -153,7 +153,7 @@
 
 样本只读检查可使用[样本验证技能](../.agents/skills/gim-sample-verification/SKILL.md)，在工作区 `output/` 保存结果。
 
-研究阶段的九工程归一化记录保存在 `research/data/engineering-wholes/`，不作为当前产品的验收输入或人工真值。当前本地门禁由开发者私有注册表与原生运行报告确定。
+真实工程验收使用开发者私有注册表与原生运行报告。工程归属签认按样本 SHA 关联来源 occurrence、类别、直接父级、所属整体和成员状态，记录签认人、日期、结论及差异原因。
 
 ## 真实桌面复核
 
@@ -285,7 +285,6 @@ cargo test --manifest-path app/src-tauri/Cargo.toml six_native_imports -- --igno
 | `services/openGimService.ts` | 70% | 80% | 50% |
 | `services/substationRuntime.ts` | 70% | 45% | 70% |
 | `services/viewerUIBinding.ts` | 80% | 50% | 70% |
-| `viewer/viewerRuntime.ts` | 100% | 100% | 100% |
 | `ui/lineProjectView.ts` | 70% | 60% | 65% |
 | `ui/lineMapView.ts` | 65% | 65% | 60% |
 

@@ -9,6 +9,7 @@ import type { AppState, ProjectLoadSession, SelectionRequest, SelectionGeometryS
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 import * as THREE from 'three';
 import { freezeContainerLocalMatrix } from '../viewer/staticContainer.js';
+import { hasRenderableGeometry } from '../viewer/geometryBounds.js';
 import { collectIfcRefs } from '../gim/cbmParser.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
@@ -35,7 +36,7 @@ import {
  * 1. 立即显示基础属性 + 打开属性面板（纯 UI，无 Viewer）
  * 2. 如果节点有 ifcFile/ifcGuid：
  *    a. 检查对应 IFC 模型是否已加载
- *    b. 未加载 → getViewerRuntimeWithUI() → ensureEngineReady() → loadIfcBuffer() → buildIfcNameIndex()
+ *    b. 未加载则按需创建 Viewer 并读取关联 IFC，再建立名称索引。
  *    c. 已加载 → getViewerRuntimeWithUI()
  *    d. highlightIfcItems() + 刷新完整属性
  * 3. 如果节点无 IFC 关联，只显示基础属性
@@ -68,12 +69,6 @@ export function describeNodeSelectionGeometry(state: AppState, node: CbmNode, at
   if (collectIfcRefs(node,state.currentIfcEntries).size>0) return {status:attempted ? 'unknown':'not-loaded',detail:attempted ? '未找到可显示的直接 GUID 关联构件。':'正在读取直接 IFC 对象关联。'};
   if (node.ifcFile || state.deviceToIfcFile.has(node.path.split('/').pop() || '')) return {status:'file-only',detail:'只有 IFC 文件来源，没有直接对象 GUID 关联；保留相机位置。'};
   return {status:'unassociated',detail:'此对象没有可定位的设备几何或直接 IFC 对象关联；保留相机位置。'};
-}
-
-function hasRenderableGeometry(group: THREE.Object3D): boolean {
-  let found=false;
-  group.traverse((o) => { const mesh=o as THREE.Mesh; if (mesh.isMesh && (mesh.geometry?.getAttribute('position')?.count ?? 0)>0) found=true; });
-  return found;
 }
 
 /** Clear selection effects without creating a viewer just for an empty object. */

@@ -1,6 +1,6 @@
 import {it,expect} from 'vitest';
 import {encodeSourceGeometryCache,decodeSourceGeometryCache} from '../sourceGeometryCache.js';
-import type {SourceGeometryOccurrenceCatalog} from '@gim/gim-sdk/gim/engineering/geometryOccurrences.js';
+import type {SourceGeometryOccurrenceCatalog} from '@gim/gim-sdk/geometry';
 
 it('deduplicates repeated physical identities and applies the budget to actual UTF-8 bytes',async()=>{
   const parent='cbm:'+'a'.repeat(990),matrix=[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1];

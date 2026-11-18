@@ -4,7 +4,8 @@ import type { ProjectLoadSession } from '../shared/projectSession.js';
 import type { ViewerContext } from './viewerEngine.js';
 import type { IfcSelectionScope } from './ifcModelVisibility.js';
 import { IFC_CONNECTION_BATCH_MAX_BYTES, IFC_CONNECTION_BATCH_MAX_OBJECTS, connectionChunkBytes, type ConnectionGeometryBatch } from './ifcConnectionBatches.js';
-import { isRegionalConnectionObject, type RegionalObject } from './ifcRegionalData.js';
+import { isRegionalConnectionObject} from '../shared/ifcConnectionEvidence.js';
+import type { RegionalObject } from './ifcRegionalData.js';
 import { validEndpointEvidence } from '../gim/connectionEndpoints.js';
 
 export interface ConnectionPreviewBatch extends ConnectionGeometryBatch {

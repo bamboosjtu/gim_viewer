@@ -40,8 +40,8 @@ flowchart TD
 
 | 模块 | 负责 | 生命周期约束 |
 |---|---|---|
-| `modGeometryScene` | 图层根节点、范围检查和场景放置 | 由服务层持有图层；遵守 Viewer 的资源释放契约 |
-| `modGeometrySourceFiles` | 来源文件水合及单个 MOD/STL 加载 | 仅沿真实引用链读取 |
+| `modGeometryScene` | 创建并复用 MOD/STL 图层根节点 | 图层随场景释放；放置与范围校验由 DEV LOD 运行时及 Viewer 的几何工具负责 |
+| `modGeometrySourceFiles` | 为当前会话建立共享的设备来源文件索引 | 读请求沿真实引用链触发；会话失效后拒绝读取 |
 | `devLodTemplateStore` | 请求去重、缓存输入预算、模板校验/编译、L1 demand 和 LRU | 与一个工程会话绑定；取消时关闭 reader、拒绝排队请求；移除场景使用者后释放模板 |
 | `devLodArtifactWriter` | 缓存准备、写入准入、并发槽和写入诊断 | 取消未准入写入；已开始的原生写入继续持有预算，完成后释放 |
 | `devLodSourceWorkset` | 有界预取、部分缓存缺失后的来源恢复 | 使用当前会话及压力回调；不抢占几何计算槽 |

@@ -243,9 +243,8 @@ async function bootstrapAsync(): Promise<void> {
       if (e.ctrlKey && e.shiftKey && (e.key === 'C' || e.key === 'c')) {
         e.preventDefault();
         try {
-          const { getLatestCatenaryAuditPayload, formatLatestCatenaryAuditMarkdown } =
-            await import('../ui/lineProjectView.js');
-          const payload = getLatestCatenaryAuditPayload();
+          const { getLatestCatenaryAuditPayload } = await import('../ui/lineProjectView.js');
+          const payload = await getLatestCatenaryAuditPayload();
           if (!payload) {
             showLoading('当前没有可导出的线路悬链线参数审计数据');
             setTimeout(hideLoading, 2500);
@@ -254,8 +253,8 @@ async function bootstrapAsync(): Promise<void> {
           showLoading('正在复制悬链线参数审计 JSON...');
           const jsonStr = JSON.stringify(payload, null, 2);
           await navigator.clipboard.writeText(jsonStr);
-          const markdown = formatLatestCatenaryAuditMarkdown();
-          console.log('[M4-B3A] 悬链线参数审计摘要\n' + (markdown || ''));
+          const { formatLineCatenaryAuditMarkdown } = await import('../services/lineCatenaryAuditExportService.js');
+          console.log('[M4-B3A] 悬链线参数审计摘要\n' + formatLineCatenaryAuditMarkdown(payload));
           console.log('[M4-B3A] 完整 JSON 已复制到剪贴板（' + jsonStr.length + ' 字节）');
           showLoading('悬链线参数审计 JSON 已复制');
           setTimeout(hideLoading, 2500);

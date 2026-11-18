@@ -2,7 +2,7 @@
 
 测量协议统一为 `gim-measurement-v1`，唯一版本常量 `MEASUREMENT_VERSION` 位于 `packages/measurement-core/src/version.mjs`，由 Collector、原生 Benchmark 报告的 `conditions.measurementVersion` 和正向测试 fixture 共用；比较与测量验收拒绝未知版本。测量核心位于 `packages/measurement-core`，不依赖 DOM、Tauri、Three 或应用状态。桌面适配器位于 `desktop/src/measurement`；原有 `perfTimings` 继续提供产品阶段与诊断，其任务阶段和原生进程内存检查点接入同一 Collector。
 
-桌面在 `package.json` 声明 `@gim/measurement-core`，仅通过 `desktop/src/measurement/core.ts` 引用包的显式 `/source` 出口。该门面是当前测量边界，边界脚本禁止其他桌面模块直接引用此包，并禁止核心向桌面、DOM、Tauri、Three 或外部包导入。包默认入口仍指向构建后的 dist；SDK 打包、声明文件和独立安装另行验证，不把桌面源码出口使用表述为完整 SDK 安装验收。
+桌面在 `package.json` 声明 `@gim/measurement-core`，仅通过 `desktop/src/measurement/core.ts` 引用包的显式 `/source` 出口。该门面是当前测量边界，边界脚本禁止其他桌面模块直接引用此包，并禁止核心向桌面、DOM、Tauri、Three 或外部包导入。测量核心仅提供该源码出口。工程实体构建和组成投影分别使用 Worker family `engineering` 与 `engineering-composition`；组成投影按需执行。
 
 ## 目录
 

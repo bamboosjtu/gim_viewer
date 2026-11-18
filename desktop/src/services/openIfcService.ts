@@ -20,7 +20,7 @@ export async function openIfcWithDialog(
   presentation.setBusy('ifc', true);
   try {
     showLoading('正在加载 3D 引擎...');
-    const [{ getViewerRuntimeWithUI }, { ensureEngineReady, loadIfcBuffer }, { fitCameraToScene }] =
+    const [{ getViewerRuntimeWithUI }, { ensureEngineReady, loadStandaloneIfc }, { fitCameraToScene }] =
       await Promise.all([
         import('./viewerUIBinding.js'),
         import('../viewer/ifcLoader.js'),
@@ -52,16 +52,14 @@ export async function openIfcWithDialog(
     for (const source of sources) {
       if (!state.isCurrentSession(session)) return;
       showLoading(`正在加载 ${source.label}...`);
-      const bytes = await source.read();
-      if (!state.isCurrentSession(session)) return;
-      await loadIfcBuffer(
+      await loadStandaloneIfc(
         runtime.ctx,
         source.name,
-        bytes,
+        source.read,
         state,
         (p) => showLoading(`${source.progressLabel}: ${Math.round(p * 100)}%`),
         source.key,
-        { session, readBytes: source.read },
+        session,
       );
     }
     if (!state.isCurrentSession(session)) return;

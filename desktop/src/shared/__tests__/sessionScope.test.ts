@@ -13,9 +13,10 @@ it('rejects delayed reads after replacement without exposing the result to a com
 it('guards publication even when replacement runs between preparation and the caller resuming',async()=>{
   const state=new AppState(),scope=state.sessionScope(state.activateProject(1,'a')),commit=vi.fn();
   const ready=scope.read(async()=>42);
-  void ready.then(()=>state.activateProject(2,'b'));
+  const replaced=ready.then(()=>state.activateProject(2,'b'));
   expect(await ready).toBe(42);
   expect(scope.withSession(()=>{commit();})).toBe(false);expect(commit).not.toHaveBeenCalled();
+  await replaced;
 });
 
 it('freezes tokens, keeps geometry replacement independent and refuses outgoing commits before disposal',()=>{

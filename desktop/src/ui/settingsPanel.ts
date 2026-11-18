@@ -1,4 +1,5 @@
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
+import { LARGE_IFC_BYTES } from '../config/features.js';
 /**
  * 应用设置面板。
  *
@@ -6,7 +7,6 @@ import { reportBackgroundError } from '../utils/backgroundErrors.js';
  * 跳过开关。密钥不写入构建产物，也不随工程缓存分发。
  */
 import {
-  LARGE_IFC_BYTES,
   SETTING_SKIP_LARGE_IFC,
   SETTING_TIANDITU_KEY,
   getSetting,

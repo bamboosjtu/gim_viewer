@@ -33,6 +33,7 @@ export interface IfcConversionInput {
   wasm: { path: string; absolute: boolean };
   webIfcSettings: LoaderSettings;
   openingPolicy?: IfcOpeningPolicy;
+  sourceSha256?: string;
   earlyConnections?: boolean;
 }
 export type IfcConversionOutput =
@@ -66,18 +67,11 @@ self.onmessage = createWorkerProbe().wrap(async (event: MessageEvent<IfcConversi
     let regionalIndex: RegionalIndex | undefined;
     const coldPipeline: Record<string, number> = {};
     let removedOpeningRelations = 0;
-    const hashStarted = performance.now();
-    const sourceSha256 =
-      input.openingPolicy === 'bim-lod'
-        ? [
-            ...new Uint8Array(
-              await crypto.subtle.digest('SHA-256', input.bytes)
-            ),
-          ]
-            .map((v) => v.toString(16).padStart(2, '0'))
-            .join('')
-        : undefined;
-    if (input.openingPolicy === 'bim-lod') {
+    let sourceSha256 = input.sourceSha256;
+    if (input.openingPolicy === 'bim-lod' && !sourceSha256) {
+      const hashStarted = performance.now();
+      sourceSha256 = [...new Uint8Array(await crypto.subtle.digest('SHA-256', input.bytes))]
+        .map((v) => v.toString(16).padStart(2, '0')).join('');
       coldPipeline.sourceHashMs = performance.now() - hashStarted;
       self.postMessage({type:'stage',stage:'source-hash',elapsedMs:coldPipeline.sourceHashMs} satisfies IfcConversionOutput);
     }

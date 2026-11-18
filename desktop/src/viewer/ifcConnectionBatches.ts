@@ -4,7 +4,8 @@ export const IFC_CONNECTION_BATCH_MAX_BYTES = 4 * 1024 * 1024;
 
 import * as THREE from 'three';
 import type { IfcAPI } from 'web-ifc';
-import { isRegionalConnectionObject, CONNECTION_IFC_TYPES, type RegionalObject } from './ifcRegionalData.js';
+import { isRegionalConnectionObject, CONNECTION_IFC_TYPES} from '../shared/ifcConnectionEvidence.js';
+import type { RegionalObject } from './ifcRegionalData.js';
 import { validEndpointEvidence, type ConnectionEndpointEvidence } from '../gim/connectionEndpoints.js';
 
 export interface ConnectionMeshChunk {

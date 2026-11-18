@@ -47,12 +47,12 @@ npm run tauri:dev     # Tauri 开发窗口
 | `npm run generate:native-contracts` | 从 contracts/native-v1.json 生成 TS/Rust 原生 DTO、错误、命令名和共享版本 |
 | `npm run test:native-contracts` | 生成漂移、类型所有权与共享夹具 TS 编译检查，无工程样本 |
 | `cargo test --manifest-path src-tauri/Cargo.toml --lib command_registry --locked` | 桌面与 Android 命令注册表 AST 线程边界检查，无工程样本 |
-| `npm run sync:engineering-catalog` | 同步独立 JSON 词汇、工具配置副本和目录文档，不读取 XLSX |
+| `npm run sync:engineering-catalog` | 从 SDK 的 JSON 生成词汇、内容指纹、盘点器配置副本和目录索引 |
 | `npm run check:engineering-catalog` | JSON 目录、词汇命名空间、独立工具数据副本及目录文档一致性 |
 
-核心 SDK 的源码、目录配置和测试位于 `packages/gim-sdk/`。首次构建先在该目录执行 `npm ci`，再在 desktop 执行 `npm ci`；CI 同样安装两个运行面的声明依赖。`npm run sdk:build` 构建无运行时外部依赖的 ESM，`npm run test:sdk` 在工作区 tmp 的隔离 Node 消费目录中验证五个能力出口。SDK 自身 `npm test` 使用工作区临时目录运行所属单元测试。SDK 构建产物不包含 Viewer、DOM 或原生 IPC，独立 Python 工具仍使用自己的实现和资产。
+核心 SDK 的源码、目录配置和测试位于 `packages/gim-sdk/`。首次构建先在该目录执行 `npm ci`，再在 `desktop/` 执行 `npm ci`。`npm run sdk:build` 构建独立 ESM，`npm run test:sdk` 在工作区 `tmp/` 中验证构建产物的能力入口和来源适配器。源码与目录维护见 [SDK 说明](../packages/gim-sdk/README.md)和[实体目录](engineering/catalogs/README.md)。
 
-桌面 Vite / TypeScript / Vitest 用 gim-source 条件连接包源码，构建默认 ESM 的行为由 SDK 独立消费者验证。模块测试可选择 `../packages/gim-sdk/src/engineering` 或原转发模块；test:module 会扩展 SDK 转发目标，并选择所属与依赖消费者测试。lint 从工作区根配置同时检查桌面与 SDK，实现迁移不缩小覆盖率或规则范围。
+桌面 Vite / TypeScript / Vitest 用 gim-source 条件连接包源码，构建默认 ESM 的行为由 SDK 独立消费者验证。模块测试可选择 `../packages/gim-sdk/src/engineering` 或原转发模块；test:module 会扩展 SDK 转发目标，并选择所属与依赖消费者测试。lint 从工作区根配置检查桌面与 SDK，并在两边测试中检查异步 Promise 使用。SDK 自带测试类型检查。新增或修改的 SDK 生产 TypeScript 文件须加入 `format-architecture.mjs` 清单，随同现有接入模块接受 Prettier 和类型感知 lint 检查。
 
 应用版本以 `desktop/package.json` 为准；Tauri 配置引用该文件。portable 组包还会读取 EXE 的 ProductVersion，拒绝把旧程序标成新版本。发布与资产细节见[平台、安全与发布](architecture/platform.md)。
 
@@ -147,8 +147,6 @@ Markdown 文档不作为 CI 测试输入；事实正确性仍需对照源码和�
 - [Benchmark CLI](benchmark.md)：批量冷暖、比较与报告。
 - [性能测试指南](performance-guide.md)：单机验收的 测量口径与步骤。
 - [文档首页](README.md)：文档地图、写作约定与单一权威表。
-
-维护实体目录名称、别名和部件宿主关系时，编辑 `docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx` 并标黄修改单元格；内部角色默认值由 `recognitionPolicy.json` 维护。随后在 desktop/ 运行 `npm run sync:engineering-catalog`，同步主程序、独立工具的数据副本和目录索引；生成的 JSON 不作为下一次导入的输入。该命令不读取 PDF、不启动工程样本或性能矩阵。
 
 仅核对来源按需输入的真实 Worker 协议时，可在 desktop/ 执行 `node scripts/with-workspace-temp.mjs scripts/engineering/check-worker-browser.mjs "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" 14358 source-input`。使用自有无头浏览器及内存 DTO，检查批量输入、物理/语义复用及测量控制消息，不读取工程样本或执行性能验收；结果在 output/log/source-input-browser.json。
 

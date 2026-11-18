@@ -4,7 +4,16 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 
 import { dirname, join, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { workspaceTemp } from './test-workspace.mjs';
-import { formattedArchitectureModules } from './format-architecture.mjs';
+import { formattedArchitectureModules, unadoptedSdkSources } from './format-architecture.mjs';
+
+test('changed SDK production sources must join the shared formatting and typed lint list', () => {
+  assert.deepEqual(unadoptedSdkSources([
+    'packages/gim-sdk/src/new.ts',
+    'packages/gim-sdk/src/shared/sourceRecord.ts',
+    'packages/gim-sdk/src/shared/__tests__/sourceRecord.test.ts',
+    'desktop/src/app/bootstrap.ts',
+  ]), ['packages/gim-sdk/src/new.ts']);
+});
 
 test('formatter scope survives a Git checkout with core.autocrlf=true', () => {
   const folder = mkdtempSync(join(workspaceTemp(), 'windows-format-'));

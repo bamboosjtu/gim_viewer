@@ -253,22 +253,18 @@ export async function ensureEngineReady(
 }
 
 /**
- * 直接加载 IFC Buffer（不启用 Fragments 缓存）。
- * 用于本地 IFC 打开等无 project_id 的场景。
- * GIM IFC entry 加载请使用 ifcEntryLoader.loadIfcEntry。
- * @param options 可选的工程会话快照；传入后可在工程切换时丢弃迟到加载。
+ * 打开独立 IFC，以文件内容摘要查找派生缓存，并保留按需重读句柄。
  */
-export async function loadIfcBuffer(
+export async function loadStandaloneIfc(
   ctx: ViewerContext,
   name: string,
-  buffer: Uint8Array,
+  readBytes: () => Promise<Uint8Array<ArrayBuffer>>,
   state: AppState,
-  onProgress?: (progress: number) => void,
-  identityPath?: string,
-  options: { session?: ProjectLoadSession; readBytes?:()=>Promise<Uint8Array|null> } = {},
+  onProgress: (progress: number) => void,
+  identityPath: string,
+  session: ProjectLoadSession,
 ): Promise<void> {
   const modelId = createIfcModelId(identityPath || name);
-  const session = options.session ?? state.captureProjectSession();
   const isCurrent = () => state.isCurrentSession(session);
   if (!isCurrent()) return;
   const runtimeModelId = state.ifc.getRuntimeModelId(modelId, session);
@@ -289,10 +285,8 @@ export async function loadIfcBuffer(
     if (isCurrent()) onProgress?.(progress);
   };
   const {loadBimIfc}=await import('./ifcBimLoader.js');
-  const identity=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new Uint8Array(buffer)))].map(v=>v.toString(16).padStart(2,'0')).join('');
-  const retained=options.readBytes?null:buffer.slice();
   await loadBimIfc(ctx,state,session,runtimeModelId,modelId,identityPath||name,
-    options.readBytes??(async()=>retained!.slice()),reportProgress,{sourceIdentity:identity,initialBytes:buffer});
+    readBytes,reportProgress,{standaloneSource:true});
   if (!isCurrent()) {
     try { void Promise.resolve(ctx.fragments.core.disposeModel(runtimeModelId)).catch(reportBackgroundError); } catch { /* 事件尚未登记时无需清理 */ }
     return;

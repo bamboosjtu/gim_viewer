@@ -1,6 +1,6 @@
 import type { IfcAPI } from 'web-ifc';
 import { normalizeConnectionPointGuid, type ConnectionEndpointEvidence } from '../gim/connectionEndpoints.js';
-import { CONNECTION_IFC_TYPES, isRegionalConnectionObject } from './ifcRegionalData.js';
+import { CONNECTION_IFC_TYPES, isRegionalConnectionObject } from '../shared/ifcConnectionEvidence.js';
 
 /** Supported standard IFC connectivity plus explicit connection-point GUID
  * property sets. Names describe fields/capabilities, never vendors or files. */
@@ -15,7 +15,7 @@ export function readConnectionEndpointEvidence(api: IfcAPI, model: number): Map<
   const ref = (value: any): number => Number(value?.value ?? value);
   const text = (value: any): string => String(value?.value ?? '');
   for (const type of [...CONNECTION_IFC_TYPES,'IFCBUILDINGELEMENTPROXY']) lines(type,(id,row)=>{
-    if (isRegionalConnectionObject({expressId:id,globalId:text(row.GlobalId),ifcType:type,name:text(row.Name),bounds:[]})) result.set(id,[]);
+    if (isRegionalConnectionObject({ifcType:type,name:text(row.Name)})) result.set(id,[]);
   });
   if (!result.size) return result;
   const append = (id: number, evidence: ConnectionEndpointEvidence): void => {

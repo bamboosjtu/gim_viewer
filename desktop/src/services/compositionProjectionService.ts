@@ -85,7 +85,7 @@ export function installCompositionProjection(state: AppState, onReady?: (complet
     }
     const runRevision = revision;
     let owned: Worker;
-    try { owned = worker = createMeasuredWorker('engineering', identity => new Worker(measurementWorkerUrl(measuredWorkerAsset,identity), {type:'module',...(identity?{name:identity}:{})})); }
+    try { owned = worker = createMeasuredWorker('engineering-composition', identity => new Worker(measurementWorkerUrl(measuredWorkerAsset,identity), {type:'module',...(identity?{name:identity}:{})})); }
     catch (error) { console.warn('[工程组成投影]', error); restore();state.engineering.treeStatus='ready';state.engineering.navigation={...base,compositionCoverage:'partial'};state.notifyEngineeringChanged();onReady?.(false); return; }
     owned.onmessage = (event: MessageEvent<ProjectionOutput>) => {
       if (!current() || worker !== owned || revision !== runRevision || snapshot !== state.engineering.snapshot || view !== state.engineering.navigation) { owned.terminate(); return; }

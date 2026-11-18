@@ -29,7 +29,7 @@ import { getFileEntryResolver } from '../gim/entryResolver.js';
 import { DEBUG_GIM_CACHE } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import { getFileByPath } from '../gim/fileLookup.js';
-import { invalidGeometryExtent, GEOMETRY_MAX_EXTENT_M } from '../viewer/geometryBounds.js';
+import { hasRenderableGeometry, invalidGeometryExtent, GEOMETRY_MAX_EXTENT_M } from '../viewer/geometryBounds.js';
 import {
   disposeXmlModGroup,
   XML_MOD_GEOMETRY_DIAGNOSTICS_KEY,
@@ -418,16 +418,6 @@ export async function serializeDevToGlbDetailed(
 
   let modLoaded = 0;
   let stlLoaded = 0;
-  const hasRenderableGeometry = (group: THREE.Group): boolean => {
-    let found = false;
-    group.traverse((object) => {
-      if (found) return;
-      const mesh = object as THREE.Mesh;
-      const position = mesh.geometry?.getAttribute?.('position');
-      if (mesh.isMesh && position && position.count > 0) found = true;
-    });
-    return found;
-  };
   const readXmlDiagnostics = (group: THREE.Group): XmlModGeometryDiagnostics | undefined => {
     const value = group.userData[XML_MOD_GEOMETRY_DIAGNOSTICS_KEY];
     if (!value || typeof value !== 'object') return undefined;

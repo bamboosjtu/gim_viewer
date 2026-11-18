@@ -1,4 +1,5 @@
-import { isRegionalConnectionObject, type RegionalObject } from '../viewer/ifcRegionalData.js';
+import { isRegionalConnectionObject } from '../shared/ifcConnectionEvidence.js';
+import type { RegionalObject } from '../viewer/ifcRegionalData.js';
 import { ifcConnectionOwnershipIndex, type IfcConnectionOwnership } from '../gim/ifcConnectionOwnership.js';
 import type { ConnectionEndpointEvidence } from '../gim/connectionEndpoints.js';
 import { discoverSubstationGlSidecars, substationDevIdentity, buildSubstationAliasIndex, buildSubstationIfcEvidence, findSubstationSourceDocuments } from '../gim/substationEvidence.js';
@@ -18,6 +19,18 @@ export function withEntryPrefix(prefix: string, value: string): string {
     ? normalized
     : `${prefix}/${normalized}`;
 }
+
+type InspectorState = Pick<AppState,
+  'currentFiles'
+  | 'properties'
+  | 'ifcGuidToName'
+  | 'currentIfcEntries'
+  | 'currentCbmTree'
+  | 'fileDevRelations'
+  | 'substationEntryPaths'
+  | 'substationConnectionPorts'
+  | 'cbmNodeIndex'
+>;
 
 export function getCachedByPath<T>(map: Map<string, T>, path: string): T | undefined {
   const exact = map.get(path);
@@ -87,7 +100,7 @@ function collectComponentNodes(node: CbmNode, out: CbmNode[], limit = 120): void
   }
 }
 
-export async function readDevKv(state: AppState, devKey: string): Promise<Record<string, string> | null> {
+export async function readDevKv(state: InspectorState, devKey: string): Promise<Record<string, string> | null> {
   if (state.currentFiles) {
     const file = getFileByPath(state.currentFiles, getFileEntryResolver(state.currentFiles)(devKey) ?? devKey);
     return file ? parseKeyValue(await readGimText(file)) : null;
@@ -96,7 +109,7 @@ export async function readDevKv(state: AppState, devKey: string): Promise<Record
 }
 
 async function collectPropertySources(
-  state: AppState,
+  state: InspectorState,
   node: CbmNode,
 ): Promise<{ sources: Record<string, string>[]; componentCount: number }> {
   const cbmKv = node.rawProperties ?? {};
@@ -162,7 +175,7 @@ async function collectPropertySources(
   return { sources: [famKv, devMerged, cbmKv], componentCount };
 }
 
-export async function buildInspectorSummary(state: AppState, node: CbmNode): Promise<InspectorSummary> {
+export async function buildInspectorSummary(state: InspectorState, node: CbmNode): Promise<InspectorSummary> {
   const { sources, componentCount } = await collectPropertySources(state, node);
   const cbmKv = sources[2];
 
@@ -219,13 +232,13 @@ export async function buildInspectorSummary(state: AppState, node: CbmNode): Pro
 }
 
 
-export async function readInspectorFamily(state:AppState,path:string) {
+export async function readInspectorFamily(state:InspectorState,path:string) {
   const actual=state.currentFiles ? getFileEntryResolver(state.currentFiles)(path) : null;
   const file=state.currentFiles && actual ? getFileByPath(state.currentFiles,actual) : undefined;
   return file ? parseFamSectionsWithDiagnostics(await readGimText(file),actual!) : null;
 }
 
-export function inspectAuxiliarySources(state:AppState,node:CbmNode):Array<{label:string;value:string;kind?:'gl'|'dev'}> {
+export function inspectAuxiliarySources(state:InspectorState,node:CbmNode):Array<{label:string;value:string;kind?:'gl'|'dev'}> {
   const rows:Array<{label:string;value:string;kind?:'gl'|'dev'}>=[];
   const documents=findSubstationSourceDocuments(node,state.currentCbmTree,state.fileDevRelations);
   if(documents.length)rows.push({label:'原始设计文档',value:documents.join('、')});
@@ -246,7 +259,7 @@ export interface InspectorFamilyData {
   properties:FamSourceProperty[];
 }
 /** Resolve/read/classify parameter sources before the view renders any rows. */
-export async function inspectNodeParameters(state:AppState,node:CbmNode) {
+export async function inspectNodeParameters(state:InspectorState,node:CbmNode) {
   const seen=new Set<string>(),properties:FamSourceProperty[]=[];
   const readFamily=async(path:string):Promise<InspectorFamilyData|null>=>{
     if(seen.has(path.toLowerCase()))return null;seen.add(path.toLowerCase());
@@ -263,7 +276,7 @@ export async function inspectNodeParameters(state:AppState,node:CbmNode) {
   for(const ref of resolveBaseFamilyReferences(dev??{})){const family=await readFamily(withEntryPrefix('DEV',ref.path));if(family)devFamilies.push(family);}
   return {cbmFamilies,devFamilies,dev,identity:resolveSubstationBusinessIdentity(properties)};
 }
-export function inspectRegionalConnectionOwnership(state:AppState,modelId:string,object:RegionalObject):IfcConnectionOwnership|undefined {
+export function inspectRegionalConnectionOwnership(state:InspectorState,modelId:string,object:RegionalObject):IfcConnectionOwnership|undefined {
   return isRegionalConnectionObject(object)
     ? ifcConnectionOwnershipIndex(state.currentCbmTree,state.currentIfcEntries).get(modelId,object.globalId) : undefined;
 }
@@ -279,7 +292,7 @@ export function findCbmNodeByPath(root: CbmNode | null, path: string): CbmNode |
   return null;
 }
 
-export function connectionOwnershipRows(state: AppState, evidence: IfcConnectionOwnership): Array<[string,string]> {
+export function connectionOwnershipRows(state: InspectorState, evidence: IfcConnectionOwnership): Array<[string,string]> {
   return [
     ['CBM 来源关联', evidence.status === 'confirmed' ? '源 IFCGUID 已核对'
       : evidence.status === 'ambiguous' ? `${evidence.semanticNodes.length} 个来源候选` : '源模型未提供可验证关联'],
@@ -289,7 +302,7 @@ export function connectionOwnershipRows(state: AppState, evidence: IfcConnection
   ];
 }
 
-export function connectionEndpointRows(state: AppState, modelId: string, references?: readonly ConnectionEndpointEvidence[]): Array<[string,string]> {
+export function connectionEndpointRows(state: InspectorState, modelId: string, references?: readonly ConnectionEndpointEvidence[]): Array<[string,string]> {
   if(references===undefined)return [['设备端点关联','端点证据尚未收集；未据此推断设备归属']];
   if(!references.length)return [['设备端点关联','未发现可用的已支持引用；整站显示不依赖此关联']];
   const groups=new Map<string,ConnectionEndpointEvidence[]>();

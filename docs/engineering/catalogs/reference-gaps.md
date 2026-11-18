@@ -1,30 +1,18 @@
-# 目录解释与验收边界
+# 目录识别规则
 
-运行时 JSON 独立维护，工作簿只作参考。当前目录包含 60 条设备、42 条材料、40 条构件，以及 46 行部件名称。配置同步、构建和运行不读取工作簿。
+先读取当前对象的结构化类型、角色和关联 FAM 属性。有可识别的中文分类声明时优先采用中文，再用英文声明补足。显示名称可以提供候选类别，实际装配与明确宿主声明负责确定归属。目录中用 `/` 合写的词汇可以分别查找，共用同一条目身份。
 
-当前采用的明确规则：
-
-| 场景 | 解释 |
+| 场景 | 处理方式 |
 |---|---|
-| 同一对象的分类字段存在中文和英文名称 | 优先使用可识别的中文声明；没有有效中文声明时使用英文声明。类型和角色等属性先于显示名称 |
-| 只有名称可供兜底 | 中文名优先英文名，保留候选状态；名称不能单独证明宿主关系 |
-| 同一类型的多个名称用 `/` 合写 | 分别索引每个中文名和英文名，与拆成单行的查找含义一致，不把 `/` 当成实体身份的一部分 |
-| 消弧线圈、接地变压器成套装置 | 分别为 ArcExtinguishingCoil、GroundTransformer，目录按修正后的中文对应维护 |
-| TerminalBox 属于设备 | 本体端子箱部件；真实装配、明确宿主或明确部件角色提供归属依据 |
-| TerminalBox 独立 | 端子箱材料；明确 independent 不被装配关系覆盖 |
-| GroundResistance 是单独设备 | 接地电阻成套装置 |
-| GroundResistance 不是设备整体 | 接地电阻材料；材料属性、部件角色、中文消歧及设备内实际装配提供语境 |
-| 电容器组 | 框架式电容器组、并联电容器组与完整来源值 `AssembledCapacitorBank;SeriesCapacitorSet` 指向同一个目录项。各实例按来源身份计数，分号保留在原始值中。集合式与串补成套装置各有目录项 |
-| 油浸式变压器、绝缘子串 | `OilFilledTransformer`、`ChainInsulation` 分别作为来源别名，规范英文保留 `OilImmersedTransformer`、`InsulatorsSring` |
-| ScreenCabinetsAndInstallations | 对象自身的屏柜名称提供柜体证据时，可解释为二次屏柜；明确部件角色优先 |
-| LED | 灯具分类依赖对象自身证据。带 LED 声明的端子板在真实灯具装配下保留为候选部件。独立边界或细类证据不足时保留待确认 |
-| 中性点成套设备 | 明确独立角色的对象归设备目录。主变附件根据实际装配或明确宿主声明归属，宿主不能确定时保留待归 |
-| 均压屏蔽装置没有更具体信息 | 默认金具；两个原目录来源继续保留，明确英文类型仍可细分 |
-| ProtectionEquipment 没有其他信息 | 默认保护设备；有明确中文分类或类型消歧信息时，区分线路保护装置和变压器保护装置 |
-| 部件宿主能力 | 所有设备都可以有部件，不按设备类别白名单拒绝；未知宿主不默认当设备，材料/构件不自动取得设备宿主身份 |
+| `TerminalBox` | 属于设备时为本体端子箱部件。独立端子箱归材料 |
+| `GroundResistance` | 作为独立设备时归接地电阻成套装置。材料声明、有效中文消歧或设备内实际装配可将其解释为接地电阻材料，成员仍随设备计入组成 |
+| 均压屏蔽装置 | 只有通用中文词时默认归金具。明确英文类型可定位两个原目录项 |
+| `ProtectionEquipment` | 默认保护设备。当前对象明确声明为线路保护装置或变压器保护装置时采用相应部件类型 |
+| 中性点成套设备 | 有明确独立角色时按设备识别。附件可按实际装配或唯一且兼容的明确宿主归入主变，宿主未确认时保留待归 |
+| 消弧线圈与接地变压器成套装置 | 英文分别为 `ArcExtinguishingCoil` 和 `GroundTransformer` |
+| 电容器组 | 框架式、并联的名称和完整来源值 `AssembledCapacitorBank;SeriesCapacitorSet` 对应同一目录项。保留完整来源值，实例按来源身份计数。集合式和串补成套装置各有独立目录项 |
+| 油浸式变压器与绝缘子串 | `OilFilledTransformer` 和 `ChainInsulation` 分别作为来源别名，规范英文保留 `OilImmersedTransformer`、`InsulatorsSring` |
+| `ScreenCabinetsAndInstallations` | 对象自身的屏柜名称提供柜体证据时可解释为二次屏柜。明确部件角色优先 |
+| `LED` | 灯具类别由对象自身证据决定。带有 LED 声明的端子板可沿实际 DEV 装配归入灯具，保留候选成员状态 |
 
-六类屏柜英文名称为 ControlCabinet、ControlPanel、MeasurementAndControlCabinet、ProtectionPanel、ProtectionCabinet、RelayProtectionCabinet。
-
-名称仅用于兜底或消解已有类型词义，不替代 FAM/IFC 属性、明确角色和装配/宿主事实。分类与归属均保留各自证据；中文优先不改变原始值、来源 occurrence、物理父级或几何地址。
-
-真实工程人工验收仍缺少逐对象真值。开发者选择变压器、GIS、断路器的复核范围，记录源 SHA、来源 occurrence、期望整体、类别、部件类型、宿主和依据，再比较拆分、合并与归属差异。算法一致性和目录用例不能代替准确率。
+六类屏柜的英文名称为 `ControlCabinet`、`ControlPanel`、`MeasurementAndControlCabinet`、`ProtectionPanel`、`ProtectionCabinet` 和 `RelayProtectionCabinet`。具有明确变压器保护装置且没有线路保护装置冲突的二次屏柜，可细分为主变压器保护柜。物理归属、独立角色和冲突处理见[实体与来源模型](../entities.md)。

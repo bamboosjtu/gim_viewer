@@ -1,3 +1,6 @@
+/** 大于此值的 IFC 在加载队列中延后，并可按设置跳过非关键来源。 */
+export const LARGE_IFC_BYTES = 64 * 1024 * 1024;
+
 /** Trial stays opt-in until native draw-call and interaction gates pass. */
 export const DEV_INSTANCE_BATCHES_DEBUG_KEY = 'gim-debug-dev-instancing';
 export function isDevInstanceBatchesEnabled(): boolean {

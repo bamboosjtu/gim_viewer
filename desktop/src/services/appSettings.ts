@@ -14,9 +14,6 @@ import { setTiandituKey } from '../config/tianditu.js';
 export const SETTING_TIANDITU_KEY = 'tianditu.apiKey';
 export const SETTING_SKIP_LARGE_IFC = 'ifc.skipLargeFiles';
 
-/** 超过该大小的单 IFC 视为超大文件（后台长转换，可被跳过开关排除）。 */
-export const LARGE_IFC_BYTES = 64 * 1024 * 1024;
-
 const values = new Map<string, string>();
 let loaded = false;
 

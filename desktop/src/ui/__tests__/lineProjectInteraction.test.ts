@@ -31,7 +31,13 @@ it('links real navigation, map tower/wire selections and property references wit
   expect(view.handleLinePropertyReference({kind:'mod',path:'missing.mod'})).toBe(true);
   for(const row of [...document.querySelectorAll<HTMLElement>('.tree-row')])row.click();
   expect(handles[0].focusBboxByNodePaths).toHaveBeenCalled();
-  expect(view.getLatestCatenaryAuditPayload()).not.toBeNull();expect(view.formatLatestCatenaryAuditMarkdown()).toContain('#');
+  expect(await view.getLatestCatenaryAuditPayload()).not.toBeNull();
+});
+it('discards a lazily loaded audit request when its project closes',async()=>{
+  const {view}=await fixture();
+  const pending=view.getLatestCatenaryAuditPayload();
+  view.destroyLineMapView();
+  expect(await pending).toBeNull();
 });
 it('late MOD details cannot replace another node or a new project inspector',async()=>{
   const {view,nodes,state}=await fixture(),first=deferred<[]>(),second=deferred<[]>();m.mod.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);

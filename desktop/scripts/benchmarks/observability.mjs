@@ -11,7 +11,7 @@ const identities=new Set(['inputId','sampleId','runId','workerId','taskId','sour
 const arrays=new Set(['rows','runs','summaries','stages','slowTasks','slowPhases','templateDiagnostics','workers','domains','paths','taskPaths','ids','unattributed','issues','captures','diagnostics','system','gpu','hotspots','pipeline','metrics','counts','coverage','processSampling','memory','cases','actions','cacheStates']);
 const enums=new Set(['PASS','PARTIAL','FAIL','INCONCLUSIVE','INPUT_ERROR','ERROR','SKIPPED','CANCELLED','DUPLICATE','RUNNING','PENDING','COMPLETE',
   'cold','warm','none','substation','equipment','transmission_line','benchmark','diagnostic','available','unavailable','unsupported','not-triggered',
-  'not-requested','CDP-sample-delta-estimate','elapsed-query-command-range','ms','us','bytes','calls','truncated','complete','partial','unknown','closed','open','conflict','interval-only','Critical Path','Critical Path Candidates','Partial Blocking Path','scope-unclosed','effective-scope-missing','capability-disabled','clock-mapping-unavailable','span-evidence-partial','host','dev','engineering','line','spatial','ifc-conversion','ifc-regional','ifc-fine']);
+  'not-requested','CDP-sample-delta-estimate','elapsed-query-command-range','ms','us','bytes','calls','truncated','complete','partial','unknown','closed','open','conflict','interval-only','Critical Path','Critical Path Candidates','Partial Blocking Path','scope-unclosed','effective-scope-missing','capability-disabled','clock-mapping-unavailable','span-evidence-partial','host','dev','engineering','engineering-composition','line','spatial','ifc-conversion','ifc-regional','ifc-fine']);
 enums.add(WORKER_HEAP_POLICY.version);enums.add('shared-cdp-heap-v1');enums.add('isolated-cdp-heap-v1');
 const publicKeys=new Set(['exportId','status','outcome','correctness','cacheState','projectType','family','availability','state','kind','mode',
   'repetitions','repetition','planned','validRepetitions','passed','partial','failed','inconclusive','skipped','coverageGroups','startupRetries','count','totalMs','maxMs',
@@ -53,7 +53,7 @@ for(const code of ['source-graph-incomplete','engineering-reference-coverage-inc
   'renderer-process-exited','project-open-failed','native-cdp-unavailable','cdp-request-failed','native-run-failed','post-settle-task-incomplete',
   'final-evidence-drift','final-evidence-unverified','final-evidence-session-mismatch','warm-webview-profile-unavailable'])reasonWords.add(code);
 function controlledStage(value){const segments=value.split(':');
-  if(segments.length>2||segments.length===2&&!['host','dev','engineering','line','spatial','ifc-conversion','ifc-regional','ifc-fine'].includes(segments[0]))return false;
+  if(segments.length>2||segments.length===2&&!['host','dev','engineering','engineering-composition','line','spatial','ifc-conversion','ifc-regional','ifc-fine'].includes(segments[0]))return false;
   const name=segments.at(-1),parts=name.split('.');
   if(/^host\.cacheWrite\.(catalog|templates\.L[012])$/.test(name))return true;
   return ['host','dev','worker','engineering','ifc','spatial','line','render'].includes(parts[0])&&phaseNames.has(parts.at(-1))&&parts.slice(1,-1).every(p=>['worker','catalog','templates','L0','L1','L2'].includes(p));}

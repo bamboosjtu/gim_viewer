@@ -29,16 +29,24 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: windows-ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
 jobs:
   frontend-and-rust:
     name: Frontend + Tauri Rust checks
     runs-on: windows-latest
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: desktop
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Reject tracked Android plugin build outputs
         shell: pwsh
@@ -105,6 +113,8 @@ jobs:
         run: npm run lint
 
       - name: Check adopted module formatting
+        env:
+          GIM_FORMAT_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           npm run test:format-config
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -112,6 +122,14 @@ jobs:
 
       - name: Install stable Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependency downloads
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-downloads-${{ hashFiles('desktop/src-tauri/Cargo.lock', 'app/src-tauri/Cargo.lock', 'crates/gim-native-core/Cargo.lock') }}
 
       - uses: actions/setup-python@v7
         with:
@@ -228,7 +246,7 @@ jobs:
 
       - name: Upload Windows portable benchmark artifact
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gim-viewer-windows-portable-benchmark-${{ github.sha }}
           retention-days: 14

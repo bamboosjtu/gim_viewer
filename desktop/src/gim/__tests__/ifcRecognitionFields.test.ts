@@ -1,6 +1,6 @@
 import {it,expect} from 'vitest';
 import {buildSubstationSpatialIndexFromTexts} from '../ifcSpatialParser.js';
-import {ifcSourceRecords} from '@gim/gim-sdk/gim/engineering/ifcSourceRecords.js';
+import {ifcSourceRecords} from '@gim/gim-sdk/source';
 import {toObjectEvidence,ENGINEERING_EVIDENCE_FIELDS} from '@gim/gim-sdk/source-adapter';
 import {interpretObject} from '@gim/gim-sdk/engineering/classify.js';
 const entry={path:'model.ifc',name:'model.ifc',modelId:'ifc-test'};
@@ -25,4 +25,24 @@ it('exposes an inherited IFC predefined type without inventing an AC/DC or porce
 ENDSEC;END-ISO-10303-21;`;
   const index=buildSubstationSpatialIndexFromTexts([{entry,text}],null,[],undefined,ENGINEERING_EVIDENCE_FIELDS),object=index.objects.find(o=>o.expressId===1)!;
   const result=interpretObject(toObjectEvidence(ifcSourceRecords([object])[0]));expect(result.category).toBe('E06');expect(result.equipmentType).toBeUndefined();
+});
+
+it('resolves mixed forward and backward Pset links without pulling in unrelated properties',()=>{
+  const text=String.raw`ISO-10303-21;HEADER;ENDSEC;DATA;
+#1=IFCBUILDINGELEMENTPROXY('0000000000000000000001',$,'保护器',$,$,$,$,$,.NOTDEFINED.);
+#31=IFCPROPERTYSINGLEVALUE('Category',$,IFCLABEL('Type'),$);
+#40=IFCPROPERTYSET('0000000000000000000040',$,'Inherited',$,(#31));
+#12=IFCRELDEFINESBYPROPERTIES('0000000000000000000012',$,$,$,(#1),#41);
+#11=IFCRELDEFINESBYTYPE('0000000000000000000011',$,$,$,(#1),#10);
+#10=IFCBUILDINGELEMENTPROXYTYPE('0000000000000000000010',$,'保护器型号',$,$,(#40),$,$,$,.NOTDEFINED.);
+#41=IFCPROPERTYSET('0000000000000000000041',$,'Instance',$,(#32,#33));
+#32=IFCPROPERTYSINGLEVALUE('\X2\7C7B522B\X0\',$,IFCLABEL('Instance'),$);
+#33=IFCPROPERTYSINGLEVALUE('Unrelated',$,IFCLABEL('Ignored'),$);
+#34=IFCPROPERTYSINGLEVALUE('Category',$,IFCLABEL('Unlinked'),$);
+ENDSEC;END-ISO-10303-21;`;
+  const index=buildSubstationSpatialIndexFromTexts([{entry,text}],null,[],undefined,ENGINEERING_EVIDENCE_FIELDS);
+  expect(index.objects.find(o=>o.expressId===1)?.propertySets).toMatchObject([
+    {name:'Inherited',applicability:'type',values:[{name:'Category',value:'Type'}]},
+    {name:'Instance',applicability:'instance',values:[{name:'类别',value:'Instance'}]},
+  ]);
 });

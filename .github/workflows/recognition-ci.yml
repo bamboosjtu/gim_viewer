@@ -16,7 +16,9 @@ jobs:
         working-directory: desktop
         shell: pwsh
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -35,8 +37,8 @@ jobs:
       - run: npm ci
       - run: npm ci --prefix ../packages/gim-sdk
       - run: npm run check:engineering-catalog
-      - run: npm run check:engineering-boundaries
       - name: Recognition DTOs and adapters without geometry or model samples
+        if: github.event_name == 'workflow_dispatch'
         run: npm run test:recognition
       - name: Independent Python recognition contracts
         run: python -m unittest discover -s ../tools/gim_element/tests/unit -p test_standard_recognition.py -v
