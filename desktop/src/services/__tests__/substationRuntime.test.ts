@@ -61,7 +61,7 @@ it('warm open restores the index without extraction and shares deferred source w
   expect(context.getExtracted).not.toHaveBeenCalled();expect(m.restore).toHaveBeenCalledOnce();expect(state.currentCbmTree?.path).toBe('cached.cbm');
   expect(m.render).toHaveBeenCalledOnce();expect(m.load.mock.calls[0][1][0].path).toBe('cached.ifc');
 });
-it('releases warm viewer owners before falling back to the cold path',async()=>{
+it('releases warm viewer owners and does not reparse after core publication',async()=>{
   const {state,context}=fixture();m.native=true;context.projectId=1;
   const cancelPending=vi.fn(),releasePreview=vi.fn(),releaseMonitor=vi.fn();
   m.load.mockImplementationOnce(async(current:AppState)=>{
@@ -72,19 +72,12 @@ it('releases warm viewer owners before falling back to the cold path',async()=>{
     current.ifcLoading.pending=true;
     throw Error('viewer startup failed');
   });
-  await openSubstationProject(context);
-  expect(cancelPending).toHaveBeenCalledOnce();
-  expect(releasePreview).toHaveBeenCalledOnce();
-  expect(releaseMonitor).toHaveBeenCalledOnce();
-  expect(state.substationFineQueue).toBeNull();
-  expect(state.substationConnectionPreview).toBeNull();
-  expect(state.substationResourceMonitor).toBeNull();
-  expect(state.viewState.stationOverview).toBeNull();
-  expect(state.ifcLoading.pending).toBe(false);
-  expect(m.load).toHaveBeenCalledTimes(2);
-  expect(context.getExtracted).toHaveBeenCalledOnce();
+  await expect(openSubstationProject(context)).rejects.toThrow('viewer startup failed');
+  expect(cancelPending).toHaveBeenCalledOnce();expect(releasePreview).toHaveBeenCalledOnce();expect(releaseMonitor).toHaveBeenCalledOnce();
+  expect(state.substationFineQueue).toBeNull();expect(state.substationConnectionPreview).toBeNull();expect(state.substationResourceMonitor).toBeNull();
+  expect(state.viewState.stationOverview).toBeNull();expect(state.ifcLoading.pending).toBe(false);
+  expect(m.render).toHaveBeenCalledOnce();expect(m.load).toHaveBeenCalledOnce();expect(context.getExtracted).not.toHaveBeenCalled();
 });
-
 it.each(['validation','restore'])('falls back to the real cold path after a current %s failure',async(stage)=>{
   const {state,context}=fixture();m.native=true;context.projectId=1;
   const warning=vi.spyOn(console,'warn').mockImplementation(()=>{});

@@ -348,6 +348,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
       });
 
     if (validation?.valid) {
+      let warmCorePublished = false;
       try {
         if (validation.ifc_entry_count > 0) {
           // This is a confirmed IFC-backed open. Start module loading while
@@ -464,6 +465,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
             '变电 navigation/UI（core semantic，缓存命中）',
           ),
         );
+        warmCorePublished = true;
 
         void Promise.resolve(
           sampleSubstationMemory(state, 'coreSemanticReady', perfSession, {
@@ -683,6 +685,16 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
       } catch (err) {
         if (!scope.isCurrent()) return;
         releaseWarmIfcAttempt(state);
+        if (warmCorePublished) {
+          // The cache was structurally valid and the semantic tree/UI were
+          // already published. A viewer/loader failure cannot be repaired by
+          // reparsing the same source; do not run a second core publication.
+          logger.warn(
+            '[Substation Runtime] warm viewer failed after core publication; not falling back to cold reparse:',
+            err,
+          );
+          throw err;
+        }
         logger.warn(
           '[Substation Runtime] warm cache restore failed, falling back to cold path:',
           err,
