@@ -4,15 +4,15 @@ on:
   push:
     paths:
       - 'tools/**'
+      - '.github/**'
       - 'packages/gim-sdk/src/engineering/catalog.json'
-      - '.github/workflows/tools-ci.yml'
       - '.gitignore'
       - '.gitattributes'
   pull_request:
     paths:
       - 'tools/**'
+      - '.github/**'
       - 'packages/gim-sdk/src/engineering/catalog.json'
-      - '.github/workflows/tools-ci.yml'
       - '.gitignore'
       - '.gitattributes'
   workflow_dispatch:
@@ -53,6 +53,8 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: tools/gim_blender/package-lock.json
+      - name: Check GitHub Action version pins
+        run: node .github/scripts/check-action-versions.mjs
       - name: Build the standalone Blender converter without model samples
         run: |
           npm ci --prefix tools/gim_blender
@@ -112,6 +114,66 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           path: tools/${{ matrix.tool }}/dist/*.zip
+          overwrite: true
+          retention-days: 7
+          if-no-files-found: error
+
+  gui:
+    name: gim_blender / GUI folder + startup
+    needs: build-safety
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tools/gim_blender/package-lock.json
+      - name: Prepare workspace temporary directory
+        run: |
+          New-Item -ItemType Directory -Path tmp/ci/blender-gui -Force | Out-Null
+          $scratch = (Resolve-Path tmp/ci/blender-gui).Path
+          "TEMP=$scratch" >> $env:GITHUB_ENV
+          "TMP=$scratch" >> $env:GITHUB_ENV
+          "TMPDIR=$scratch" >> $env:GITHUB_ENV
+      - name: Install the Blender GUI's pinned build dependencies
+        run: |
+          python -m pip --isolated install --disable-pip-version-check --index-url https://pypi.org/simple --no-cache-dir --only-binary :all: -r tools/gim_blender/requirements-build.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Blender GUI dependency installation failed' }
+      - name: Install the Blender converter's Node dependencies
+        run: |
+          npm ci --prefix tools/gim_blender
+          if ($LASTEXITCODE -ne 0) { throw 'Blender converter npm ci failed' }
+      # Slim GUI only: the optional portable Blender runtime is developer-supplied
+      # (the build accepts -BlenderDirectory but CI does not download Blender).
+      - name: Build, startup-check, and publish the Blender GUI folder
+        run: |
+          & "./tools/gim_blender/build.ps1" -Python (Get-Command python).Source -NoVenv -SkipInstall -Publish
+      - name: Verify the published GUI archive
+        run: |
+          $zip = Get-Item -LiteralPath tools/gim_blender/dist/gim_blender.zip
+          $sha = Get-Item -LiteralPath "$($zip.FullName).sha256"
+          if ($zip.Length -le 0 -or $sha.Length -le 0) { throw 'Blender GUI ZIP or checksum is empty' }
+          $expected = ((Get-Content -LiteralPath $sha.FullName -Raw).Trim() -split '\s+')[0]
+          $actual = (Get-FileHash -LiteralPath $zip.FullName -Algorithm SHA256).Hash
+          if ($expected -notmatch '^[0-9a-fA-F]{64}$' -or $expected -ne $actual) { throw 'Blender GUI ZIP checksum mismatch' }
+      - name: Upload tested Blender GUI folder
+        uses: actions/upload-artifact@v7
+        with:
+          name: gim-blender-gui-${{ github.sha }}
+          path: |
+            tools/gim_blender/dist/gim_blender.zip
+            tools/gim_blender/dist/gim_blender.zip.sha256
           overwrite: true
           retention-days: 7
           if-no-files-found: error

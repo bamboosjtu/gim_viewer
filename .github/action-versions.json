@@ -1,0 +1,13 @@
+{
+  "policy": "Pin every GitHub Action to one major across all workflows. Majors differ by action because each action has its own release line; do not mix majors within the same action.",
+  "actions": {
+    "actions/checkout": "v7",
+    "actions/setup-node": "v4",
+    "actions/setup-python": "v7",
+    "actions/setup-java": "v4",
+    "actions/cache": "v6",
+    "actions/upload-artifact": "v7",
+    "android-actions/setup-android": "v4",
+    "dtolnay/rust-toolchain": "stable"
+  }
+}
