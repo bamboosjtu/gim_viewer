@@ -1,2 +1,8 @@
 /** Desktop compatibility entry; implementation and tests belong to gim-sdk. */
-export * from '@gim/gim-sdk/gim/famParser.js';
+export {
+  parseFamSections,
+  resolveSubstationBusinessIdentity,
+  parseFamSectionsWithDiagnostics,
+  type FamParseDiagnostics,
+  type FamSourceProperty,
+} from '@gim/gim-sdk/source';

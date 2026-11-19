@@ -1,5 +1,5 @@
 import vocabulary from '../sourceVocabulary.json';
-import {expect,it} from 'vitest';
+import {expect,it,vi} from 'vitest';
 import {toObjectEvidence,type SourceRecord} from '../recognizeSource.js';
 import {interpretRecognitionObject as interpretObject} from '../classify.js';
 import {normalizeEngineeringModel} from '../normalize.js';
@@ -101,4 +101,15 @@ it.each(['SYSCLASSIFYNAME','PARTNAME'])('keeps %s unverified mappings candidate 
 it.each(['组合电器 GIS','组合电器 HGIS'])('matches the reviewed mixed-case Chinese term %s',value=>{
   const result=interpretObject(toObjectEvidence(record('unknown','OTHERS',{properties:[{keys:['SYSCLASSIFYNAME'],value}]})));
   expect(result.categoryStatus).toBe('confirmed');expect(result.vocabularyObservations?.[0].verification).toBe('verified');
+});
+
+it('changes the recognition contract when the source vocabulary version changes',async()=>{
+  const previous=(await import('../recognizeSource.js')).ENGINEERING_RECOGNITION_VERSION;
+  vi.resetModules();
+  vi.doMock('../sourceVocabulary.json',()=>({default:{...vocabulary,version:'test-vocabulary-next'}}));
+  try{
+    const next=(await import('../recognizeSource.js')).ENGINEERING_RECOGNITION_VERSION;
+    expect(next).not.toBe(previous);
+    expect(next.split('|')).toContain('test-vocabulary-next');
+  }finally{vi.doUnmock('../sourceVocabulary.json');vi.resetModules();}
 });

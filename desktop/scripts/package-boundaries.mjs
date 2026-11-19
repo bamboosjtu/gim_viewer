@@ -7,12 +7,6 @@ export function packageBoundaryError(specifier,dependencies) {
   return null;
 }
 
-export function staleSdkImportExceptions(exceptions, observed) {
-  return Object.entries(exceptions).flatMap(([file, names]) => names
-    .filter(name => !observed.get(file)?.has(name))
-    .map(name => `${file}: remove unused SDK internal-import exception ${name}`));
-}
-
 export function dependencyCycles(graph) {
   const active = new Set(), visited = new Set(), cycles = [];
   function visit(path) {

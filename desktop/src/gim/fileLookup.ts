@@ -1,5 +1,5 @@
-import {normalizeFilePath} from '@gim/gim-sdk/gim/path.js';
-export {normalizeFilePath} from '@gim/gim-sdk/gim/path.js';
+import { normalizeFilePath } from '@gim/gim-sdk/source';
+export { normalizeFilePath } from '@gim/gim-sdk/source';
 /**
  * GIM 解压文件集合的路径查找工具。
  *
@@ -65,4 +65,3 @@ export function findFileByPath(files: Map<string, File>, path: string): FilePath
 export function hasFileByPath(files: Map<string, File>, path: string): boolean {
   return findFileByPath(files, path) !== undefined;
 }
-

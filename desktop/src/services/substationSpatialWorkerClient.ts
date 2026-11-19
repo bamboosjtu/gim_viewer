@@ -2,77 +2,156 @@ import measuredWorkerAsset from './substationSpatialWorker.ts?worker&url';
 import { createMeasuredWorker, measurementWorkerUrl } from '../measurement/hostWorker.js';
 import { WorkerRequests } from './workerRequests.js';
 import type { CbmNode, FileDevEntry, IfcEntry } from '../gim/types.js';
-import { buildSubstationSpatialIndexFromFiles, type SubstationSpatialIndex,
-  type SubstationSpatialIndexObserver } from '../gim/ifcSpatialParser.js';
+import {
+  buildSubstationSpatialIndexFromFiles,
+  type SubstationSpatialIndex,
+  type SubstationSpatialIndexObserver,
+} from '../gim/ifcSpatialParser.js';
 import type { SpatialWorkerRequest, SpatialWorkerResponse } from './substationSpatialWorker.js';
-import type {SubstationSpatialSnapshotMetadata,EncodedSpatialCache} from './substationSpatialCodec.js';
-import recognitionFields from '@gim/gim-sdk/shared/recognitionFields.json';
+import type {
+  SubstationSpatialSnapshotMetadata,
+  EncodedSpatialCache,
+} from './substationSpatialCodec.js';
+import { ENGINEERING_EVIDENCE_FIELDS as recognitionFields } from '@gim/gim-sdk/source';
 
-const active=new Set<()=>void>();
-export function cancelSubstationSpatialWorkers():void {
-  for(const cancel of [...active])cancel();
+const active = new Set<() => void>();
+export function cancelSubstationSpatialWorkers(): void {
+  for (const cancel of [...active]) cancel();
 }
 
 /** Keep the existing builder and per-file read/error semantics; isolate STEP
  * scan/finalize only. No cache format, spatial identity or property reduction. */
 export async function buildSubstationSpatialIndexInWorker(
-  files:Map<string,File>,entries:IfcEntry[],tree:CbmNode|null,relations:FileDevEntry[],
-  observer:SubstationSpatialIndexObserver,isCurrent:()=>boolean,
-  cacheOptions?:{metadata:SubstationSpatialSnapshotMetadata;onEncoded:(cache:EncodedSpatialCache)=>void},
-):Promise<SubstationSpatialIndex> {
-  if(typeof Worker==='undefined') return buildSubstationSpatialIndexFromFiles(files,entries,tree,relations,observer,recognitionFields);
-  const worker=createMeasuredWorker('spatial', identity => new Worker(measurementWorkerUrl(measuredWorkerAsset,identity), {type:'module',...(identity?{name:identity}:{})}));
-  let sequence=0;
-  const requests=new WorkerRequests<SubstationSpatialIndex|undefined>(120_000,()=>cancel());
-  let terminated=false;
-  const cancel=()=>{
-    if(terminated)return;
-    terminated=true;worker.terminate();active.delete(cancel);
-    requests.rejectAll(new DOMException('Spatial parse belongs to an obsolete project','AbortError'));
+  files: Map<string, File>,
+  entries: IfcEntry[],
+  tree: CbmNode | null,
+  relations: FileDevEntry[],
+  observer: SubstationSpatialIndexObserver,
+  isCurrent: () => boolean,
+  cacheOptions?: {
+    metadata: SubstationSpatialSnapshotMetadata;
+    onEncoded: (cache: EncodedSpatialCache) => void;
+  },
+): Promise<SubstationSpatialIndex> {
+  if (typeof Worker === 'undefined')
+    return buildSubstationSpatialIndexFromFiles(
+      files,
+      entries,
+      tree,
+      relations,
+      observer,
+      recognitionFields,
+    );
+  const worker = createMeasuredWorker(
+    'spatial',
+    (identity) =>
+      new Worker(measurementWorkerUrl(measuredWorkerAsset, identity), {
+        type: 'module',
+        ...(identity ? { name: identity } : {}),
+      }),
+  );
+  let sequence = 0;
+  const requests = new WorkerRequests<SubstationSpatialIndex | undefined>(120_000, () => cancel());
+  let terminated = false;
+  const cancel = () => {
+    if (terminated) return;
+    terminated = true;
+    worker.terminate();
+    active.delete(cancel);
+    requests.rejectAll(
+      new DOMException('Spatial parse belongs to an obsolete project', 'AbortError'),
+    );
   };
   active.add(cancel);
-  worker.onmessage=(event:MessageEvent<SpatialWorkerResponse>)=>{
-    if(!isCurrent()){cancel();return;}
-    const response=event.data;
-    if(response.type==='diagnostic') {
+  worker.onmessage = (event: MessageEvent<SpatialWorkerResponse>) => {
+    if (!isCurrent()) {
+      cancel();
+      return;
+    }
+    const response = event.data;
+    if (response.type === 'diagnostic') {
       // The protocol carries the existing observer's plain profile records.
-      const callback=observer[response.event] as ((profile:unknown)=>void)|undefined;
-      callback?.(response.profile);return;
+      const callback = observer[response.event] as ((profile: unknown) => void) | undefined;
+      callback?.(response.profile);
+      return;
     }
-    if(response.type==='complete'&&response.cache){
-      try{cacheOptions?.onEncoded(response.cache);}
-      catch(error){requests.settle(sequence,undefined,error instanceof Error?error:Error(String(error)));return;}
+    if (response.type === 'complete' && response.cache) {
+      try {
+        cacheOptions?.onEncoded(response.cache);
+      } catch (error) {
+        requests.settle(sequence, undefined, error instanceof Error ? error : Error(String(error)));
+        return;
+      }
     }
-    requests.settle(sequence,response.type==='complete'?response.index:undefined,response.type==='error'?new Error(response.message):undefined);
+    requests.settle(
+      sequence,
+      response.type === 'complete' ? response.index : undefined,
+      response.type === 'error' ? new Error(response.message) : undefined,
+    );
   };
-  worker.onerror=event=>{requests.rejectAll(new Error(event.message||'Spatial worker failed'));cancel();};
-  worker.onmessageerror=()=>{requests.rejectAll(new Error('Spatial worker returned unreadable data'));cancel();};
-  const send=(request:SpatialWorkerRequest,transfer:Transferable[]=[])=>{
-    if(terminated||!isCurrent())return Promise.reject(new DOMException('Spatial parse belongs to an obsolete project','AbortError'));
-    return requests.request(++sequence,()=>worker.postMessage(request,transfer));
+  worker.onerror = (event) => {
+    requests.rejectAll(new Error(event.message || 'Spatial worker failed'));
+    cancel();
+  };
+  worker.onmessageerror = () => {
+    requests.rejectAll(new Error('Spatial worker returned unreadable data'));
+    cancel();
+  };
+  const send = (request: SpatialWorkerRequest, transfer: Transferable[] = []) => {
+    if (terminated || !isCurrent())
+      return Promise.reject(
+        new DOMException('Spatial parse belongs to an obsolete project', 'AbortError'),
+      );
+    return requests.request(++sequence, () => worker.postMessage(request, transfer));
   };
   try {
-    await send({type:'init',tree,relations,propertyNames:recognitionFields});
-    const canonical=(path:string)=>path.replace(/\\/g,'/').toLowerCase();
-    const sources=new Map([...files].map(([path,file])=>[canonical(path),file]));
-    for(const entry of entries) {
-      if(!isCurrent())throw new DOMException('Spatial parse belongs to an obsolete project','AbortError');
-      const file=sources.get(canonical(entry.path)),started=performance.now();
-      let bytes:ArrayBuffer|null=null,text:string|null=null,error:string|undefined;
-      const blob=file instanceof Blob ? file : undefined;
+    await send({ type: 'init', tree, relations, propertyNames: recognitionFields });
+    const canonical = (path: string) => path.replace(/\\/g, '/').toLowerCase();
+    const sources = new Map([...files].map(([path, file]) => [canonical(path), file]));
+    for (const entry of entries) {
+      if (!isCurrent())
+        throw new DOMException('Spatial parse belongs to an obsolete project', 'AbortError');
+      const file = sources.get(canonical(entry.path)),
+        started = performance.now();
+      let bytes: ArrayBuffer | null = null,
+        text: string | null = null,
+        error: string | undefined;
+      const blob = file instanceof Blob ? file : undefined;
       try {
-        if(file){
-          if(blob){/* Immutable source backing store is read inside the Worker. */}
-          else if(typeof file.arrayBuffer==='function')bytes=await file.arrayBuffer();
-          else if(typeof file.text==='function')text=await file.text();
+        if (file) {
+          if (blob) {
+            /* Immutable source backing store is read inside the Worker. */
+          } else if (typeof file.arrayBuffer === 'function') bytes = await file.arrayBuffer();
+          else if (typeof file.text === 'function') text = await file.text();
           else throw new Error('IFC 文件对象不支持 arrayBuffer/text');
         }
-      } catch(cause){error=cause instanceof Error?cause.message:String(cause);}
-      const read={modelId:entry.modelId,entryPath:entry.path,bytes:bytes?.byteLength ??
-        (text===null ? file?.size??0:new TextEncoder().encode(text).byteLength),readMs:performance.now()-started,
-        decodeMs:0,found:file!=null,...(error?{error}:{})};
-      await send({type:'model',entry,bytes,text,read,...(blob?{blob}:{})},bytes?[bytes]:[]);
+      } catch (cause) {
+        error = cause instanceof Error ? cause.message : String(cause);
+      }
+      const read = {
+        modelId: entry.modelId,
+        entryPath: entry.path,
+        bytes:
+          bytes?.byteLength ??
+          (text === null ? (file?.size ?? 0) : new TextEncoder().encode(text).byteLength),
+        readMs: performance.now() - started,
+        decodeMs: 0,
+        found: file != null,
+        ...(error ? { error } : {}),
+      };
+      await send(
+        { type: 'model', entry, bytes, text, read, ...(blob ? { blob } : {}) },
+        bytes ? [bytes] : [],
+      );
     }
-    return (await send({type:'finish',...(cacheOptions?{cacheMetadata:cacheOptions.metadata}:{})}))!;
-  } finally {cancel();worker.onmessage=null;worker.onerror=null;worker.onmessageerror=null;}
+    return (await send({
+      type: 'finish',
+      ...(cacheOptions ? { cacheMetadata: cacheOptions.metadata } : {}),
+    }))!;
+  } finally {
+    cancel();
+    worker.onmessage = null;
+    worker.onerror = null;
+    worker.onmessageerror = null;
+  }
 }

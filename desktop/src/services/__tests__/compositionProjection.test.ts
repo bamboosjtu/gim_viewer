@@ -3,7 +3,7 @@ import { AppState } from '../../app/state.js';
 import { extractEngineeringSourceGraph } from '@gim/gim-sdk/source';
 import {buildTestEngineeringSources} from '../../../../packages/gim-sdk/src/gim/engineering/__tests__/fixtures.js';
 import { projectEngineeringNavigation } from '@gim/gim-sdk/projection';
-import { projectEngineeringComposition } from '@gim/gim-sdk/engineering/composition.js';
+import { projectEngineeringComposition } from '@gim/gim-sdk/projection';
 import type { IfcSpatialObject } from '../../gim/ifcSpatialParser.js';
 import { installCompositionProjection, reconcileProjectionSelection } from '../compositionProjectionService.js';
 import { projectSpatialComposition } from '../projections/compositionSpatial.js';

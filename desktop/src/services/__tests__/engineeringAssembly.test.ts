@@ -3,25 +3,19 @@ import {normalizeEngineeringSources} from '@gim/gim-sdk/source-adapter';
 import {afterEach,expect,it,vi} from 'vitest';
 import {assembleEngineeringView,assembleStoredEngineeringView} from '../engineeringAssembly.js';
 import {extractEngineeringSourceGraph} from '@gim/gim-sdk/source';
-import * as composition from '@gim/gim-sdk/engineering/composition.js';
-import * as sourceProjection from '@gim/gim-sdk/gim/engineering/sourceProjection.js';
-import * as inventory from '@gim/gim-sdk/gim/engineering/inventory.js';
+import {failNextProjection} from '../../../../packages/gim-sdk/src/gim/engineering/__tests__/projectionFailures.js';
 import {assertEngineeringNavigation} from '../engineeringNavigationCache.js';
 
-import {assertEngineeringPartition} from '@gim/gim-sdk/engineering/validate.js';
+import {assertEngineeringPartition} from '@gim/gim-sdk/semantic';
 import {createEngineeringWorkerHandler} from '../engineeringWorker.js';
-import {ModelEvidenceProvider} from '@gim/gim-sdk/gim/engineering/evidenceProvider.js';
+import {ModelEvidenceProvider} from '@gim/gim-sdk/source';
 import {decodeEngineeringWorkerResult,encodeEngineeringWorkerResultAsync,type TransportGraphCache} from '../engineeringWorkerTransport.js';
 import type { IfcSpatialObject } from '../../gim/ifcSpatialParser.js';
 afterEach(()=>{vi.restoreAllMocks();});
 it.each(['composition','source','inventory','inventory-search'] as const)('transfers an explicitly failed %s projection while rejecting it as a complete cache',async failure=>{
   const stage=failure;
   const g=await graph();
-  const fail=()=>{throw Error('projection failure');};
-  if(stage==='composition')vi.spyOn(composition,'projectEngineeringComposition').mockImplementationOnce(fail);
-  else if(stage==='source')vi.spyOn(sourceProjection,'projectEngineeringSource').mockImplementationOnce(fail);
-  else if(failure==='inventory-search')vi.spyOn(inventory,'projectInventorySearch').mockImplementationOnce(fail);
-  else vi.spyOn(inventory,'projectEngineeringInventory').mockImplementationOnce(fail);
+  failNextProjection(stage);
   const result=assembleEngineeringView('scope',g,[],[]);
   const restored=await decodeEngineeringWorkerResult(await encodeEngineeringWorkerResultAsync(result),()=>true);
   expect(restored.stageErrors?.[stage]).toContain('projection failure');
@@ -73,7 +67,7 @@ it('publishes the independent source tree after recognition fails, including sou
   expect(assembleStoredEngineeringView('scope',first.sources,fail).navigation.sourceRows.size).toBe(1);
 });
 it('isolates composition failure without altering semantics, source view or physical placement',async()=>{
-  const g=await graph();vi.spyOn(composition,'projectEngineeringComposition').mockImplementationOnce(()=>{throw Error('projection failure');});
+  const g=await graph();failNextProjection('composition');
   const first=assembleEngineeringView('scope',g,[],[]);
   expect(first.stageErrors.composition).toContain('projection failure');expect(first.snapshot.entities).toHaveLength(1);expect(first.navigation.sourceRows.size).toBe(1);
   const other=assembleEngineeringView('scope',g,[],[],[],(scope,sources)=>{const s=normalizeEngineeringSources(scope,sources);s.entities[0].category='E06';return s;});

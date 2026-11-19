@@ -1,2 +1,6 @@
 /** Desktop compatibility entry; implementation and tests belong to gim-sdk. */
-export * from '@gim/gim-sdk/gim/engineering/evidenceProvider.js';
+export {
+  checkEvidenceRange,
+  MAX_EVIDENCE_RANGE_ENTRIES,
+  ModelEvidenceProvider,
+} from '@gim/gim-sdk/source';

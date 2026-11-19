@@ -20,7 +20,7 @@ function fixture() {
   copyFileSync(resolve('package.json'),join(folder,'desktop/package.json'));
   for(const name of ['check-engineering-boundaries','core-boundaries','package-boundaries','presentation-boundaries','native-contract-boundaries'])
     copyFileSync(resolve('scripts',`${name}.mjs`),join(folder,'desktop/scripts',`${name}.mjs`));
-  files('desktop/scripts/sdk-internal-imports.json','{}');
+  files('packages/gim-sdk/src/gim/engineering/projection.ts',"export {projectEngineeringComposition} from '../../engineering/composition.js';");
   files('desktop/src/measurement/core.ts',"export * from '@gim/measurement-core/source';");
   for(const name of ['substationRuntime','substationPresentation','substationRuntimeTelemetry','substationSpatialRuntime',
     'substationDocumentRuntime','substationIfcRuntime','substationIfcSource','substationDevRuntime','substationLoadingState',
@@ -43,12 +43,12 @@ test('checker accepts a valid fixture and rejects a forbidden reverse import',()
   assert.match(rejected.stderr,/forbidden import \.\.\/viewer\/demo\.js/);
 });
 
-test('checker rejects an unused SDK internal-import exception',()=>{
+test('checker rejects SDK implementation imports',()=>{
   const {files,run}=fixture();
-  files('desktop/scripts/sdk-internal-imports.json',JSON.stringify({'gim/model.ts':['@gim/gim-sdk/gim/sourceDocument.js']}));
+  files('desktop/src/gim/model.ts',"import type {SourceRecord} from '@gim/gim-sdk/gim/sourceDocument.js';");
   const rejected=run();
   assert.equal(rejected.status,1);
-  assert.match(rejected.stderr,/gim\/model\.ts: remove unused SDK internal-import exception/);
+  assert.match(rejected.stderr,/gim\/model\.ts: use the SDK capability export/);
 });
 
 test('checker rejects a cycle within a runtime family through dynamic dependencies',()=>{

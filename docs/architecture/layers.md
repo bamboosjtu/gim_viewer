@@ -77,7 +77,7 @@ bootstrap
 
 `AppState.engineering` 持有工程事实与构建状态。`viewState` 持有导航、展开、相机意图和历史，并负责工程导航释放和全站视角命令。`sourceGeometry` 独立持有物理目录、就绪 Promise 与缓存状态，读取由所有者统一做会话前后校验，不等待语义。`ifcLoading` 持有 IFC 尾部 pending 与明确跳过清单，`properties` 直接持有属性 Map 并负责 reset。选择的请求、取消、相机意图快照、反馈与装饰释放器由 `selection` 持有。IFC 会话地址、模型与区域运行时由 `ifc` 注册表持有，登记和迟到删除在注册表内统一校验。新所有者通过窄运行时端口接线。应用组合根仍保留工程源数据与运行面协调状态。工程实体、导航、几何目录的构建由服务层启动，UI 通过订阅和回调刷新。工程切换后，旧 Worker、旧请求和旧投影必须释放或拒绝提交。
 
-共享包通过 package.json 声明依赖和 package exports 访问。纯名称、KV、跨越、线路属性/图类型、资源限制及线路 MOD parser 直接引用包出口，测试属于共享实现。桌面仅保留有实际责任的入口：`lineCbmParserCore` / `lineMapData` 初始化桌面日志 sink，`geometry/ir` / `sourceDocument` 是当前来源与编译契约入口；`powerline-core` 逐项声明共享入口。`@gim/measurement-core/source` 是测量核心的唯一包出口；GIM SDK 的默认入口仍为构建后的 dist。生产代码不允许用深相对路径绕过包边界。
+共享包通过 package.json 声明依赖和 package exports 访问。纯名称、KV、跨越、线路属性/图类型、资源限制及线路 MOD parser 直接引用包出口，测试属于共享实现。桌面仅保留有实际责任的入口：`lineCbmParserCore` / `lineMapData` 初始化桌面日志 sink，`geometry/ir` / `sourceDocument` 是当前来源与编译契约入口；`powerline-core` 逐项声明共享入口。`@gim/measurement-core/source` 是测量核心的唯一包出口；GIM SDK 的默认入口为构建后的 dist。桌面生产代码仅使用公开能力入口，纯领域转发模块从 projection 具名转发对应领域模块的符号。生产代码不允许用深相对路径绕过包边界。
 
 ## 五组能力入口
 
@@ -85,7 +85,7 @@ bootstrap
 
 SDK 的实现及模块测试归 `packages/gim-sdk/src/`，IFC 运行时解析器仍在桌面；其共享对象/空间类型由 SDK 的 ifcSpatialTypes 提供。桌面与 Vitest 使用 gim-source 条件读取当前源码，默认包 import 消费构建后的 ESM。
 
-构建按目录为模块分配能力角色，同目录历史混放模块采用显式角色。六个包入口的运行时闭包只能包含该入口允许的角色。桌面遗留深导入在 [SDK 兼容入口清单](../../desktop/scripts/sdk-internal-imports.json) 按调用文件和路径登记。迁移时先将消费者切到对应能力出口，最后一个生产消费者迁出后删除转发壳和对应清单项，再检查相关测试与文档引用。边界检查拒绝新深导入和失效清单项。
+构建按目录为模块分配能力角色，同目录历史混放模块采用显式角色。六个包入口的运行时闭包只能包含该入口允许的角色。SDK 包清单仅公开根入口与六个能力子路径。桌面分层门禁直接拒绝内部路径，隔离消费门禁核对包清单的完整出口集合。
 
 `core-boundaries.mjs` 补充职责检查：投影和绑定不得导入分类器/归一化运行值，几何入口和目录不得消费语义主归属。中立类型允许共享；SDK 的裸包出口和能力别名同样参与依赖检查，UI/Viewer 的 SDK 运行值调用经服务端口接线，展示格式器保持精确登记入口。负向用例纳入 `test:presentation-boundaries`。入口不意味着五个独立进程或串行执行，几何仍可先于实体完成。
 

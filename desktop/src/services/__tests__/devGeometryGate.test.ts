@@ -7,7 +7,7 @@ import { collectEquipmentGeometryOccurrences } from '../../gim/equipmentGeometry
 import { buildCbmTree } from '../../gim/cbmParser.js';
 import { buildGimIndexPayload } from '../gimIndexPersistenceService.js';
 import { restoreGimIndexToState } from '../gimIndexRestoreService.js';
-import { isUsableAffineMatrix } from '@gim/gim-sdk/gim/geometry/affineMatrix.js';
+import { isUsableAffineMatrix } from '@gim/gim-sdk/geometry';
 import { createSourcePlacementMatrix } from '../devGlbTemplateRuntime.js';
 import { discoverGeometriesFromDevPath } from '../modGeometryDiscovery.js';
 import { parseWorkerXmlMod } from '../../gim/geometry/xmlModWorkerParser.js';

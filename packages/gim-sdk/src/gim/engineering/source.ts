@@ -27,3 +27,21 @@ export type {
 } from "../../shared/sourceRecord.js";
 export { isIfcFeatureSourceType } from "../../shared/sourceRecord.js";
 export { ifcSourceRecords } from "./ifcSourceRecords.js";
+
+export * from "./evidenceProvider.js";
+
+export * from "./recognitionFieldPolicy.js";
+
+export * from "../entryResolver.js";
+
+export * from "../famParser.js";
+
+export * from "../path.js";
+
+export * from "../gimValueSemantics.js";
+
+export * from "../ifcOutwardProduct.js";
+
+export * from "../ifcSpatialTypes.js";
+
+export * from "../sourceDocument.js";

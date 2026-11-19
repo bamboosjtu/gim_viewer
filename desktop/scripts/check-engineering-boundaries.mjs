@@ -3,7 +3,7 @@ import { dirname, resolve, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import {checkPresentationSource} from './presentation-boundaries.mjs';
-import {dependencyCycles, packageBoundaryError, staleSdkImportExceptions} from './package-boundaries.mjs';
+import {dependencyCycles, packageBoundaryError} from './package-boundaries.mjs';
 import {coreBoundaryErrors} from './core-boundaries.mjs';
 import {nativeContractCallErrors} from './native-contract-boundaries.mjs';
 
@@ -20,8 +20,6 @@ function* files(dir) {
   }
 }
 const failures = [];
-const sdkInternalImports = JSON.parse(readFileSync(new URL('./sdk-internal-imports.json', import.meta.url), 'utf8'));
-const observedSdkInternalImports = new Map();
 const sharedDependencies=JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8')).dependencies;
 for(const path of [...files(resolve(root,'..','bridge')),...files(root),...files(resolve(root,'..','..','app','src'))]) {
   failures.push(...nativeContractCallErrors(readFileSync(path,'utf8'),relative(root,path)));
@@ -216,12 +214,7 @@ for(const path of all){
     const name = internal.text;
     const localPath = relative(root, path).replaceAll('\\', '/');
     if (/^@gim\/gim-sdk\/(?:engineering|gim|shared)\//.test(name)) {
-      if (!sdkInternalImports[localPath]?.includes(name)) {
-        failures.push(`${localPath}: use the SDK capability export instead of adding an internal import ${name}`);
-      }
-      const observed = observedSdkInternalImports.get(localPath) ?? new Set();
-      observed.add(name);
-      observedSdkInternalImports.set(localPath, observed);
+      failures.push(`${localPath}: use the SDK capability export instead of adding an internal import ${name}`);
     }
   }
   if(specifier&&ts.isStringLiteral(specifier)){
@@ -241,7 +234,6 @@ for(const path of all){
   ts.forEachChild(node,scan);
  };scan(ast);
 }
-failures.push(...staleSdkImportExceptions(sdkInternalImports, observedSdkInternalImports));
 for (const entry of ['main.ts','services/openGimService.ts']) {
   const pending=[resolve(root,entry)], visited=new Set();
   for (const path of pending) {

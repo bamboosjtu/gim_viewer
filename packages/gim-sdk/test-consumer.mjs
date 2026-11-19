@@ -10,6 +10,9 @@ cpSync(join(root,'dist'),join(installed,'dist'),{recursive:true});
 cpSync(join(root,'package.json'),join(installed,'package.json'));
 const manifest=JSON.parse(readFileSync(join(installed,'dist/build-manifest.json'),'utf8'));
 const packageMetadata=JSON.parse(readFileSync(join(installed,'package.json'),'utf8'));
+const publicEntries=['.','./source','./semantic','./geometry','./engineering','./projection','./source-adapter'];
+if(JSON.stringify(Object.keys(packageMetadata.exports).sort())!==JSON.stringify(publicEntries.sort()))
+  throw Error('Expected exactly the public SDK entry points');
 if(manifest.version!==packageMetadata.version||Object.keys(manifest.capabilities??{}).length!==6)
   throw Error('SDK build manifest is stale or lacks capability verification. Run the SDK build first.');
 if(manifest.runtimeExternals.length)throw Error('SDK consumer needs external runtime dependencies');
@@ -22,10 +25,17 @@ import * as geometry from '@gim/gim-sdk/geometry';
 import * as engineering from '@gim/gim-sdk/engineering';
 import * as projection from '@gim/gim-sdk/projection';
 import * as sourceAdapter from '@gim/gim-sdk/source-adapter';
+await assert.rejects(import('@gim/gim-sdk/engineering/classify.js'),{code:'ERR_PACKAGE_PATH_NOT_EXPORTED'});
 assert.equal(globalThis.window,undefined);
 const entrypoints={source,semantic,geometry,engineering,projection,sourceAdapter};
 assert.deepEqual(Object.keys(sdk).sort(),Object.keys(entrypoints).sort());
 for(const [name,api] of Object.entries(entrypoints))assert.deepEqual({...sdk[name]},{...api});
+assert.equal(typeof source.createEntryResolver,'function');
+assert.equal(typeof source.parseFamSectionsWithDiagnostics,'function');
+assert.ok(source.ENGINEERING_EVIDENCE_FIELDS.length);
+assert.equal(typeof geometry.isUsableAffineMatrix,'function');
+assert.equal(typeof projection.projectEngineeringComposition,'function');
+assert.equal(typeof semantic.assertEngineeringPartition,'function');
 const text={'project.cbm':'OBJECTMODELPOINTER=unit.dev','unit.dev':'TYPE=GIS\\nSUBDEVICE0=part.dev','part.dev':'TYPE=CircuitBreaker'};
 const graph=await source.extractEngineeringSourceGraph({paths:Object.keys(text),readText:async path=>text[path]});
 const sources=source.collectEngineeringSources(graph,[],[]);

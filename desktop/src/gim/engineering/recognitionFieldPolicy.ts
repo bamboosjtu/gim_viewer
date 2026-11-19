@@ -1,2 +1,2 @@
 /** Desktop compatibility entry; implementation and tests belong to gim-sdk. */
-export * from '@gim/gim-sdk/gim/engineering/recognitionFieldPolicy.js';
+export { ENGINEERING_EVIDENCE_FIELDS, RECOGNITION_FIELDS_FINGERPRINT } from '@gim/gim-sdk/source';

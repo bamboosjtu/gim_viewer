@@ -1,2 +1,6 @@
 /** Desktop compatibility entry; implementation and tests belong to gim-sdk. */
-export * from '@gim/gim-sdk/gim/engineering/compositionContexts.js';
+export {
+  collectCompositionEvidence,
+  collectDeclaredCompositionContexts,
+  type SourceCompositionEvidence,
+} from '@gim/gim-sdk/projection';

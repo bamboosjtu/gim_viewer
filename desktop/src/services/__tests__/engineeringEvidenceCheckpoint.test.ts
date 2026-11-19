@@ -2,7 +2,7 @@
 import {afterEach,expect,it,vi} from 'vitest';
 import {EngineeringWorkerClient,type EngineeringWorkerPort} from '../engineeringWorkerClient.js';
 import {createEngineeringWorkerHandler} from '../engineeringWorker.js';
-import {ModelEvidenceProvider} from '@gim/gim-sdk/gim/engineering/evidenceProvider.js';
+import {ModelEvidenceProvider} from '@gim/gim-sdk/source';
 import type {EngineeringWorkerRequest,EngineeringWorkerReply,EngineeringWorkerResponse} from '../engineeringWorkerProtocol.js';
 
 class LocalPort implements EngineeringWorkerPort {

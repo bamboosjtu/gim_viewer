@@ -4,7 +4,7 @@ import {extractEngineeringSourceGraph} from '@gim/gim-sdk/source';
 import {assembleEngineeringView,assembleStoredEngineeringView} from '../engineeringAssembly.js';
 import {collectSourceGeometryOccurrences} from '@gim/gim-sdk/geometry';
 import {encodeEngineeringSources,decodeEngineeringSources} from '../engineeringCacheCodec.js';
-import {ModelEvidenceProvider} from '@gim/gim-sdk/gim/engineering/evidenceProvider.js';
+import {ModelEvidenceProvider} from '@gim/gim-sdk/source';
 const raw:Record<string,string>={'project.cbm':'OBJECTMODELPOINTER=main.dev\nSUBDEVICE0=part.cbm','main.dev':'TYPE=GIS\nSYMBOLNAME=组合电器','part.cbm':'ENTITYNAME=PARTINDEX\nPARTNAME=本体\nOBJECTMODELPOINTER=body.dev\nBASEFAMILY=body.fam','body.dev':'TYPE=Body','body.fam':'[设计]\n部件名称=PARTNAME=本体'};
 it('retains an unmatched attribute component without inventing a physical root, including cache restoration and evidence assignments',async()=>{
   const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async p=>raw[p]}),identity={sourceSha256:'a'.repeat(64),parserVersion:'fixture',entries:Object.keys(raw)};

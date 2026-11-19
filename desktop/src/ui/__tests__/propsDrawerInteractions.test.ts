@@ -1,3 +1,4 @@
+import { parseFamSectionsWithDiagnostics } from '@gim/gim-sdk/source';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppState } from '../../app/state.js';
 import type { CbmNode } from '../../gim/types.js';
@@ -18,7 +19,6 @@ describe('属性检查器纯 DOM 交互', () => {
 
   it('FAM duplicate source rows and conflicts remain visible cold and warm', async () => {
     const drawer = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../propsDrawer.js'); });
-    const { parseFamSectionsWithDiagnostics } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('@gim/gim-sdk/gim/famParser.js'); });
     const state = new AppState();
     const text = '[设计参数]\n材质=Material=铝\n材质=Material=铝\n材质=Material=铜';
     const parsed = parseFamSectionsWithDiagnostics(text,'CBM/raw.fam');

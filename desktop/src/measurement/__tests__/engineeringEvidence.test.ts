@@ -1,5 +1,5 @@
 import {expect,it} from 'vitest';
-import type {EngineeringSnapshot} from '@gim/gim-sdk/engineering/types.js';
+import type {EngineeringSnapshot} from '@gim/gim-sdk/semantic';
 import {engineeringSemanticEvidence} from '../engineeringEvidence.js';
 
 function snapshot():EngineeringSnapshot{
