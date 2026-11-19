@@ -1,29 +1,36 @@
 /** Format-neutral contracts. Source parsing and rendering are separate consumers. */
 export interface EvidenceValue {
-  confidence?:'confirmed'|'candidate';
+  confidence?: "confirmed" | "candidate";
   value: string;
   evidenceId: string;
-  context?:{section?:string;container?:string;rawContainerName?:string;applicability?:'instance'|'type'|'unknown'};
+  context?: {
+    section?: string;
+    container?: string;
+    rawContainerName?: string;
+    applicability?: "instance" | "type" | "unknown";
+  };
 }
 
 /** Names belonging to this occurrence, with their original evidence address. */
 export interface ObjectNameEvidence extends EvidenceValue {
-  kind: 'object' | 'engineering' | 'family' | 'source';
+  kind: "object" | "engineering" | "family" | "source";
 }
 
 export interface ObjectEvidence {
   /** Typed source edges, independent of physical placement and organization. */
   composition?: readonly CompositionEvidence[];
   /** Same source facts interpreted when a proven physical/declared host is equipment. */
-  equipmentMemberVariant?:ObjectEvidence;
-  vocabularyAmbiguities?:readonly string[];
-  standardClasses?:readonly StandardClassEvidence[];
-  hostCodes?:readonly EvidenceValue[];
-  hostDesignations?:readonly EvidenceValue[];
-  declaredHostSourceIds?:readonly EvidenceValue[];
-  vocabularyObservations?:readonly VocabularyObservation[];
-  equipmentTypeCandidates?:readonly EvidenceValue[];
-  componentTypeCandidates?:readonly EvidenceValue[];
+  equipmentMemberVariant?: ObjectEvidence;
+  cabinetMemberVariant?: ObjectEvidence;
+  allowNameFallback?: boolean;
+  vocabularyAmbiguities?: readonly string[];
+  standardClasses?: readonly StandardClassEvidence[];
+  hostCodes?: readonly EvidenceValue[];
+  hostDesignations?: readonly EvidenceValue[];
+  declaredHostSourceIds?: readonly EvidenceValue[];
+  vocabularyObservations?: readonly VocabularyObservation[];
+  equipmentTypeCandidates?: readonly EvidenceValue[];
+  componentTypeCandidates?: readonly EvidenceValue[];
   purposes?: readonly EvidenceValue[];
   /** Package-local occurrence identity, never a template or display-name identity. */
   sourceId: string;
@@ -56,22 +63,26 @@ export interface ObjectEvidence {
 }
 
 export interface CompositionEvidence {
-  kind: 'semantic_composition' | 'physical_assembly' | 'object_decomposition';
+  kind: "semantic_composition" | "physical_assembly" | "object_decomposition";
   parentSourceIds: readonly string[];
   evidence: readonly string[];
-  status: 'confirmed' | 'ambiguous' | 'unresolved';
+  status: "confirmed" | "ambiguous" | "unresolved";
 }
 
-export type SourceMeaning = 'object' | 'part' | 'neutral_set' | 'container' | 'detail' | 'source_only';
+export type SourceMeaning =
+  "object" | "part" | "neutral_set" | "container" | "detail" | "source_only";
 export interface ObjectInterpretation {
   /** Private identity/assembly role, independent from the workbook directory. */
-  recognitionCode?:string;
-  sourceName?:string;
-  standardClass?:StandardClassEvidence & {status:'confirmed'|'candidate'|'unresolved';evidence:readonly string[]};
-  membershipEvidence?:readonly string[];
-  membershipStatus?:'confirmed'|'candidate'|'unresolved';
-  vocabularyObservations?:readonly VocabularyObservation[];
-  categoryStatus?: 'confirmed' | 'candidate' | 'unresolved';
+  recognitionCode?: string;
+  sourceName?: string;
+  standardClass?: StandardClassEvidence & {
+    status: "confirmed" | "candidate" | "unresolved";
+    evidence: readonly string[];
+  };
+  membershipEvidence?: readonly string[];
+  membershipStatus?: "confirmed" | "candidate" | "unresolved";
+  vocabularyObservations?: readonly VocabularyObservation[];
+  categoryStatus?: "confirmed" | "candidate" | "unresolved";
   equipmentType?: TermInterpretation;
   componentType?: TermInterpretation;
   purpose?: TermInterpretation;
@@ -82,48 +93,66 @@ export interface ObjectInterpretation {
   basis: string;
   conflict: string;
   independent: boolean;
-  classificationStatus?: 'confirmed' | 'candidate' | 'unresolved';
+  classificationStatus?: "confirmed" | "candidate" | "unresolved";
   classificationEvidence?: string[];
   unknownReason?: string;
   subtype?: string;
   subtypeLabel?: string;
 }
 
-export interface TermInterpretation {id?:string;status:'confirmed'|'candidate'|'unresolved';evidence:readonly string[]}
+export interface TermInterpretation {
+  id?: string;
+  status: "confirmed" | "candidate" | "unresolved";
+  evidence: readonly string[];
+}
 export interface VocabularyObservation {
-  verification?:'verified'|'unverified'|'ambiguous';sourceLocation?:string;
-  field:string;rawValue:string;status:'mapped'|'unresolved'|'ambiguous';evidenceId:string;dictionaryVersion:string;dictionaryEvidence?:string;
+  verification?: "verified" | "unverified" | "ambiguous";
+  sourceLocation?: string;
+  field: string;
+  rawValue: string;
+  status: "mapped" | "unresolved" | "ambiguous";
+  evidenceId: string;
+  dictionaryVersion: string;
+  dictionaryEvidence?: string;
 }
 
 export interface EngineeringEntity {
   /** Functional equipment subtype inferred from confirmed members, not catalog facts. */
-  subtypeStatus?:'confirmed'|'candidate'|'unresolved';
-  subtypeEvidence?:readonly string[];
+  subtypeStatus?: "confirmed" | "candidate" | "unresolved";
+  subtypeEvidence?: readonly string[];
   /** Identity/assembly role; category is exclusively the workbook directory code. */
-  recognitionCode?:string;
-  standardClass?:ObjectInterpretation['standardClass'];
+  recognitionCode?: string;
+  standardClass?: ObjectInterpretation["standardClass"];
   id: string;
   category: string;
   name: string;
-  kind: 'whole' | 'set' | 'transformer_bank';
+  kind: "whole" | "set" | "transformer_bank";
   boundaryEvidence: string;
-  classificationState: 'identified' | 'unknown';
+  classificationState: "identified" | "unknown";
   sourceIds: string[];
   classificationConflicts: number;
-  classificationStatus?: 'confirmed' | 'candidate' | 'unresolved';
-  categoryStatus?: 'confirmed' | 'candidate' | 'unresolved';
-  boundaryStatus?: 'confirmed' | 'candidate' | 'unresolved';
+  classificationStatus?: "confirmed" | "candidate" | "unresolved";
+  categoryStatus?: "confirmed" | "candidate" | "unresolved";
+  boundaryStatus?: "confirmed" | "candidate" | "unresolved";
   subtype?: string;
   subtypeLabel?: string;
   unknownReason?: string;
-  grain?: 'item' | 'segment';
+  grain?: "item" | "segment";
   phaseBodyCount?: number;
-  compositionState?: 'declared_identity_physical_completeness_unverified' | 'phase_completeness_unverified';
+  compositionState?:
+    | "declared_identity_physical_completeness_unverified"
+    | "phase_completeness_unverified";
 }
 
 export interface StandardClassEvidence extends EvidenceValue {
-  recognitionCode?:string;
-  id:string;kind:'equipment'|'material'|'construction';label:string;term:string;category:string;catalogCategory?:string;catalogGroup?:string;
+  recognitionCode?: string;
+  id: string;
+  kind: "equipment" | "material" | "construction";
+  label: string;
+  term: string;
+  category: string;
+  catalogCategory?: string;
+  catalogGroup?: string;
 }
 
 export interface PendingWhole {
@@ -139,7 +168,7 @@ export interface SourceMembership {
   parentPartId?: string;
   sourceId: string;
   ownerId: string | null;
-  disposition: 'whole_member' | 'pending_whole_member' | 'source_only';
+  disposition: "whole_member" | "pending_whole_member" | "source_only";
   interpretation: ObjectInterpretation;
 }
 
@@ -147,27 +176,35 @@ export interface SourceMembership {
 export interface EntityRelationship {
   from: string;
   to: string;
-  kind: 'associated_with';
+  kind: "associated_with";
   evidence: string;
 }
 
 export interface SourceAlias {
   sourceId: string;
   candidates: readonly string[];
-  status: 'confirmed' | 'ambiguous' | 'unresolved';
+  status: "confirmed" | "ambiguous" | "unresolved";
 }
 
 export interface WholeAlias {
   sourceId: string;
   ownerId: string | null;
-  status: 'whole_resolved_component_ambiguous' | 'pending_bundle_resolved' | 'whole_unresolved';
+  status:
+    | "whole_resolved_component_ambiguous"
+    | "pending_bundle_resolved"
+    | "whole_unresolved";
   componentCandidates: readonly string[];
 }
 
 export interface EngineeringSnapshot {
   /** Source-fact revision, separate from query pagination/residency cursors. */
-  evidenceBinding:{scope:string;sourceRevision:number};
-  recognitionCoverage?: {inputSourceIds:readonly string[];processed:number;confirmed:number;complete:boolean};
+  evidenceBinding: { scope: string; sourceRevision: number };
+  recognitionCoverage?: {
+    inputSourceIds: readonly string[];
+    processed: number;
+    confirmed: number;
+    complete: boolean;
+  };
   scope: string;
   rulesVersion: string;
   entities: EngineeringEntity[];

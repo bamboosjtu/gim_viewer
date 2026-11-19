@@ -4,6 +4,8 @@
 
 转换器使用 [snapshot.json](snapshot.json) 标记的工具专属冻结快照。该快照采用自己的转换契约和数据版本，不随 Viewer 或 SDK 自动同步。清单记录这份快照首次随仓库提交的版本和时间。更新快照时须更新源文件摘要和可核对的来源记录，并验证工具自己的转换结果。CI 构建独立 Node 转换器。
 
+清单对 CRLF 归一为 LF 后的源码字节计算 SHA-256。Windows 工作区使用 CRLF，`python tools/gim_blender/verify_snapshot.py` 按同一口径校验。更新快照后，用归一化的源码字节计算清单摘要并运行校验。
+
 ## 运行方式
 
 解压完整目录，运行 `gim_blender.exe`。导入时自动缓存原 GIM 并转换为 Blender、GLB、HTML 和导航数据。重复导入同一源 SHA 会使用已有完整结果。删除只处理工具内对应缓存，保留外部原文件。

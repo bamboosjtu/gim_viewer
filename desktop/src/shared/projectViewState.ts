@@ -1,5 +1,13 @@
 export class ProjectViewState {
   viewHistory: import('../viewer/viewHistory.js').ViewerViewHistory | null = null;
+  stationOverview: (() => void) | null = null;
+  engineeringNavigationCleanup: (() => void) | null = null;
+
+  releaseNavigation(): void {
+    const dispose = this.engineeringNavigationCleanup;
+    this.engineeringNavigationCleanup = null;
+    dispose?.();
+  }
   hasFittedCamera = false;
   viewerUserInteracted = false;
   // Window-monotonic: a project reset must not revive an earlier camera intent.

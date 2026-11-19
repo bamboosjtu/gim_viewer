@@ -1,2 +1,2 @@
 /** Desktop compatibility entry; implementation and tests belong to gim-sdk. */
-export * from '@gim/gim-sdk/gim/engineering/sourceDocuments.js';
+export { SourceDocuments, parseSourceDocument, type SourceDocument } from '@gim/gim-sdk/source';

@@ -90,11 +90,9 @@ export class AppState {
   substationResourceMonitor: { release(): void } | null = null;
   substationMemoryPressure: import('../utils/memoryPressure.js').MemoryPressure = 'unknown';
 
-  stationOverview: (() => void) | null = null;
   engineeringGeometryFilter: ((root?: THREE.Object3D) => void) | null = null;
   engineeringRepresentationChanged: ((rootOccurrence?: string) => void) | null = null;
   engineeringGeometryEvidenceChanged: (() => void) | null = null;
-  engineeringNavigationCleanup: (() => void) | null = null;
   private readonly deviceRuntimeSlot = new RuntimeSlot<DeviceRuntime>();
   get deviceLodRuntime(): DeviceRuntime | null {
     return this.deviceRuntimeSlot.value;
@@ -252,9 +250,7 @@ export class AppState {
     this.sessionDisposables.clear();
     for (const dispose of disposables) this.safelyRelease(dispose);
     this.selection.releaseDecorations();
-    const navigationCleanup = this.engineeringNavigationCleanup;
-    this.engineeringNavigationCleanup = null;
-    if (navigationCleanup) this.safelyRelease(navigationCleanup);
+    this.safelyRelease(() => this.viewState.releaseNavigation());
     this.safelyRelease(() => this.engineering.release());
     this.deviceLodRuntime = null;
     const monitor = this.substationResourceMonitor;
@@ -267,7 +263,7 @@ export class AppState {
     this.substationFineQueue = null;
     this.substationConnectionPorts = null;
     this.safelyRelease(() => this.viewState.viewHistory?.clear());
-    this.stationOverview = null;
+    this.viewState.stationOverview = null;
     this.selection.onlySelected = false;
     this.safelyRelease(() => this.selection.invalidateSelection());
     this.ifc.releaseRuntimes();

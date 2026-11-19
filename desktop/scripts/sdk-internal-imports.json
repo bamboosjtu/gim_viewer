@@ -29,17 +29,8 @@
   "gim/engineering/evidenceProvider.ts": [
     "@gim/gim-sdk/gim/engineering/evidenceProvider.js"
   ],
-  "gim/engineering/navigation.ts": [
-    "@gim/gim-sdk/gim/engineering/navigation.js"
-  ],
   "gim/engineering/recognitionFieldPolicy.ts": [
     "@gim/gim-sdk/gim/engineering/recognitionFieldPolicy.js"
-  ],
-  "gim/engineering/sourceDocuments.ts": [
-    "@gim/gim-sdk/gim/engineering/sourceDocuments.js"
-  ],
-  "gim/engineering/sourceGraph.ts": [
-    "@gim/gim-sdk/gim/engineering/sourceGraph.js"
   ],
   "gim/engineering/sourceProjection.ts": [
     "@gim/gim-sdk/gim/engineering/sourceProjection.js"

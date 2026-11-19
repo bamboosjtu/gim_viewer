@@ -10,6 +10,7 @@ on:
       - 'desktop/scripts/test-workspace.mjs'
       - 'desktop/scripts/with-workspace-temp.mjs'
       - '.gitignore'
+      - '.gitattributes'
       - '.github/workflows/android-ci.yml'
   pull_request:
     paths:
@@ -20,6 +21,7 @@ on:
       - 'desktop/scripts/test-workspace.mjs'
       - 'desktop/scripts/with-workspace-temp.mjs'
       - '.gitignore'
+      - '.gitattributes'
       - '.github/workflows/android-ci.yml'
   workflow_dispatch:
     inputs:

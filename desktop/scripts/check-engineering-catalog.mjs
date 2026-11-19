@@ -9,11 +9,14 @@ const codes=new Set(catalog.categories.map(c=>c.code)),roles=new Set(policy.reco
 if(codes.size!==catalog.categories.length||new Set(standard.items.map(i=>i.id)).size!==standard.items.length||standard.items.some(i=>!codes.has(i.category)||!roles.has(policy.catalogRoles[i.id]??policy.terms[i.term.toLowerCase()])))throw Error('Catalog IDs / directory and recognition role mapping mismatch');
 for(const file of ['catalog.json','standardCatalog.json','recognitionPolicy.json','compositionPolicy.json'])if(JSON.stringify(load('packages/gim-sdk/src/engineering/'+file))!==JSON.stringify(load('tools/gim_element/'+file)))throw Error('Standalone catalog copy differs: '+file);
 if(JSON.stringify(load('packages/gim-sdk/src/engineering/sourceVocabulary.json'))!==JSON.stringify(load('tools/gim_element/sourceVocabulary.json')))throw Error('Standalone vocabulary copy differs');
-if(JSON.stringify(load('packages/gim-sdk/src/engineering/sourceCompatibilityPolicy.json'))!==JSON.stringify(load('tools/gim_element/sourceCompatibilityPolicy.json')))throw Error('Standalone compatibility policy differs');
+const compatibility=load('packages/gim-sdk/src/engineering/sourceCompatibilityPolicy.json');
+if(JSON.stringify(compatibility)!==JSON.stringify(load('tools/gim_element/sourceCompatibilityPolicy.json')))throw Error('Standalone compatibility policy differs');
 const vocabulary=load('packages/gim-sdk/src/engineering/sourceVocabulary.json');
 for(const entry of Object.values(vocabulary.keywordDictionary.entries))if('componentType' in entry)throw Error('Component meaning leaked into model vocabulary');
 for(const item of standard.items)for(const word of [item.label,item.term,...item.label.split('/'),...item.term.split('/'),...item.aliases])if(!vocabulary.keywordDictionary.entries[word.trim().toLowerCase()]?.catalogIds.includes(item.id))throw Error('Model vocabulary missing '+item.id+' / '+word);
 for(const part of catalog.components)for(const word of [part.label,part.term,...part.aliases])if(!vocabulary.componentDictionary.entries[word.trim().toLowerCase()]?.componentIds.includes(part.id))throw Error('Component vocabulary missing '+part.term+' / '+word);
+for(const [term,id] of Object.entries(compatibility.typeDefaults))if(!standard.items.some(item=>item.id===id))throw Error('Unknown default type: '+term+' → '+id);
+for(const [term,first] of Object.entries(compatibility.orderedTypeValues))if(!vocabulary.keywordDictionary.entries[first.toLowerCase()]&&!vocabulary.componentDictionary.entries[first.toLowerCase()])throw Error('Unknown first type: '+term+' → '+first);
 const composition=load('packages/gim-sdk/src/engineering/compositionPolicy.json');
 if(JSON.stringify(composition.hostKinds)!==JSON.stringify(['equipment']))throw Error('Every equipment type must support components');
 for(const rule of composition.hostSubtypes){

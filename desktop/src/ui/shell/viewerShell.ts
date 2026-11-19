@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.js';
 import { reportBackgroundError } from '../../utils/backgroundErrors.js';
 import type { AppState } from '../../app/state.js';
 import { btnCacheManager, btnLoadGim, btnLoadLocal, gimFileInput } from '../dom.js';
@@ -5,18 +6,29 @@ import { isTauri } from '../../services/platformService.js';
 import { hideLoading, showLoading } from '../../services/gimOpenCore.js';
 import { escapeHtml } from '../../shared/html.js';
 import { setSelectionStatus } from './statusBar.js';
-import { readRecentProjects, type ProjectCacheSummary } from '../../services/projectCacheService.js';
+import {
+  readRecentProjects,
+  type ProjectCacheSummary,
+} from '../../services/projectCacheService.js';
 import { setupSelectionToolbar } from '../selectionToolbar.js';
 
 const AUTO_OPEN_LAST_KEY = 'gim-auto-open-last';
 const AUTO_SHOW_PROPS_KEY = 'gim-auto-show-props';
 
 export function shouldAutoOpenLastProject(): boolean {
-  try { return localStorage.getItem(AUTO_OPEN_LAST_KEY) === '1'; } catch { return false; }
+  try {
+    return localStorage.getItem(AUTO_OPEN_LAST_KEY) === '1';
+  } catch {
+    return false;
+  }
 }
 
 export function shouldAutoShowProps(): boolean {
-  try { return localStorage.getItem(AUTO_SHOW_PROPS_KEY) !== '0'; } catch { return true; }
+  try {
+    return localStorage.getItem(AUTO_SHOW_PROPS_KEY) !== '0';
+  } catch {
+    return true;
+  }
 }
 
 function formatRelativeTime(ms: number): string {
@@ -29,7 +41,11 @@ function formatRelativeTime(ms: number): string {
 }
 
 function writeSetting(key: string, enabled: boolean): void {
-  try { localStorage.setItem(key, enabled ? '1' : '0'); } catch { /* ignore */ }
+  try {
+    localStorage.setItem(key, enabled ? '1' : '0');
+  } catch {
+    /* ignore */
+  }
 }
 
 async function openRecentProject(state: AppState, projectId: number): Promise<void> {
@@ -38,7 +54,7 @@ async function openRecentProject(state: AppState, projectId: number): Promise<vo
     const { openGimProjectFromId } = await import('../../services/openGimService.js');
     await openGimProjectFromId(state, (text) => showLoading(text), projectId);
   } catch (error) {
-    console.error('[ViewerShell] open recent project failed:', error);
+    logger.error('[ViewerShell] open recent project failed:', error);
     showLoading(`打开最近工程失败: ${error instanceof Error ? error.message : String(error)}`);
     setTimeout(hideLoading, 3000);
   }
@@ -63,9 +79,14 @@ function renderRecentList(
       const button = document.createElement('button');
       button.type = 'button';
       button.className = target.id === 'menu-recent-projects' ? '' : 'recent-project';
-      const typeLabel = project.projectType === 'transmission_line' ? '线路'
-        : project.projectType === 'equipment' ? '设备'
-        : project.projectType === 'substation' ? '变电' : 'GIM';
+      const typeLabel =
+        project.projectType === 'transmission_line'
+          ? '线路'
+          : project.projectType === 'equipment'
+            ? '设备'
+            : project.projectType === 'substation'
+              ? '变电'
+              : 'GIM';
       const ago = formatRelativeTime(project.lastOpenedAt);
       const meta = ago ? `${typeLabel} · ${ago}` : typeLabel;
       if (target.id === 'menu-recent-projects') {
@@ -75,7 +96,9 @@ function renderRecentList(
         button.innerHTML = `<span class="name">${escapeHtml(project.name)}</span><span class="meta">${escapeHtml(meta)}</span>`;
         button.title = project.path;
       }
-      button.addEventListener('click', () => { void Promise.resolve(openRecentProject(state, project.id)).catch(reportBackgroundError); });
+      button.addEventListener('click', () => {
+        void Promise.resolve(openRecentProject(state, project.id)).catch(reportBackgroundError);
+      });
       target.appendChild(button);
     }
   }
@@ -84,10 +107,12 @@ function renderRecentList(
 export function setupViewerShell(state: AppState): void {
   setupSelectionToolbar(state);
   const moreButton = document.getElementById('btn-more') as HTMLButtonElement | null;
-  const menu = document.getElementById('more-menu') as HTMLElement | null;
-  const menuRecent = document.getElementById('menu-recent-projects') as HTMLElement | null;
-  const welcomeRecent = document.getElementById('recent-projects') as HTMLElement | null;
-  const continueButton = document.getElementById('btn-welcome-continue') as HTMLButtonElement | null;
+  const menu = document.getElementById('more-menu');
+  const menuRecent = document.getElementById('menu-recent-projects');
+  const welcomeRecent = document.getElementById('recent-projects');
+  const continueButton = document.getElementById(
+    'btn-welcome-continue',
+  ) as HTMLButtonElement | null;
   const welcomeOpen = document.getElementById('btn-welcome-open') as HTMLButtonElement | null;
   const autoOpenInput = document.getElementById('menu-auto-open-last') as HTMLInputElement | null;
   const autoPropsInput = document.getElementById('menu-show-props') as HTMLInputElement | null;
@@ -101,13 +126,19 @@ export function setupViewerShell(state: AppState): void {
     moreButton.setAttribute('aria-expanded', 'false');
   };
   const refreshRecent = async (): Promise<boolean> => {
-    const request = ++recentRequest, result = await readRecentProjects();
+    const request = ++recentRequest,
+      result = await readRecentProjects();
     if (request !== recentRequest) return false;
     recent = result.ok ? result.value : [];
-    renderRecentList([menuRecent, welcomeRecent].filter((node): node is HTMLElement => !!node), recent, state, result.ok ? '' : result.message);
+    renderRecentList(
+      [menuRecent, welcomeRecent].filter((node): node is HTMLElement => !!node),
+      recent,
+      state,
+      result.ok ? '' : result.message,
+    );
     if (continueButton) {
       continueButton.disabled = recent.length === 0;
-      continueButton.title = result.ok ? recent[0]?.path ?? '暂无最近工程' : result.message;
+      continueButton.title = result.ok ? (recent[0]?.path ?? '暂无最近工程') : result.message;
     }
     return true;
   };
@@ -137,11 +168,22 @@ export function setupViewerShell(state: AppState): void {
         const viewItem = document.getElementById('menu-previous-view');
         if (viewItem) viewItem.hidden = !state.viewState.viewHistory?.canGoBack;
         const onlyItem = document.getElementById('menu-only-selected');
-        if (onlyItem) onlyItem.hidden = !['substation', 'equipment'].includes(state.currentProjectType ?? '') || !state.selection.selectionRequest?.target || state.selection.onlySelected || !state.selection.canIsolateSelection;
+        if (onlyItem)
+          onlyItem.hidden =
+            !['substation', 'equipment'].includes(state.currentProjectType ?? '') ||
+            !state.selection.selectionRequest?.target ||
+            state.selection.onlySelected ||
+            !state.selection.canIsolateSelection;
         const allItem = document.getElementById('menu-show-all');
-        if (allItem) allItem.hidden = !['substation', 'equipment'].includes(state.currentProjectType ?? '') || !state.selection.onlySelected;
+        if (allItem)
+          allItem.hidden =
+            !['substation', 'equipment'].includes(state.currentProjectType ?? '') ||
+            !state.selection.onlySelected;
         const overviewItem = document.getElementById('menu-station-overview');
-        if (overviewItem) overviewItem.hidden = !['substation', 'equipment'].includes(state.currentProjectType ?? '') || !state.stationOverview;
+        if (overviewItem)
+          overviewItem.hidden =
+            !['substation', 'equipment'].includes(state.currentProjectType ?? '') ||
+            !state.viewState.stationOverview;
         void Promise.resolve(refreshRecent()).catch(reportBackgroundError);
       }
     });
@@ -150,28 +192,37 @@ export function setupViewerShell(state: AppState): void {
   }
 
   document.getElementById('menu-attach-ifc')?.addEventListener('click', () => {
-    closeMenu(); btnLoadLocal.click();
+    closeMenu();
+    btnLoadLocal.click();
   });
   document.getElementById('menu-cache')?.addEventListener('click', () => {
-    closeMenu(); btnCacheManager.click();
+    closeMenu();
+    btnCacheManager.click();
   });
   document.getElementById('menu-ifc-detail')?.addEventListener('click', () => {
     closeMenu();
-    void Promise.resolve(import('../ifcDetailPanel.js').then(({ openIfcDetailPanel }) => openIfcDetailPanel())).catch(reportBackgroundError);
+    void Promise.resolve(
+      import('../ifcDetailPanel.js').then(({ openIfcDetailPanel }) => openIfcDetailPanel()),
+    ).catch(reportBackgroundError);
   });
   document.getElementById('menu-settings')?.addEventListener('click', () => {
     closeMenu();
-    void Promise.resolve(import('../settingsPanel.js').then(({ openSettingsPanel }) => openSettingsPanel())).catch(reportBackgroundError);
+    void Promise.resolve(
+      import('../settingsPanel.js').then(({ openSettingsPanel }) => openSettingsPanel()),
+    ).catch(reportBackgroundError);
   });
   document.getElementById('menu-previous-view')?.addEventListener('click', () => {
     closeMenu();
     const session = state.captureProjectSession();
     const selection = state.selection.selectionRequest;
-    void Promise.resolve(state.viewState.viewHistory?.back().catch(error => {
-      if (!state.isCurrentSession(session) || state.selection.selectionRequest !== selection) return;
-      console.warn('[View history]', error);
-      setSelectionStatus('暂时无法恢复上一视角，请重试。');
-    })).catch(reportBackgroundError);
+    void Promise.resolve(
+      state.viewState.viewHistory?.back().catch((error) => {
+        if (!state.isCurrentSession(session) || state.selection.selectionRequest !== selection)
+          return;
+        logger.warn('[View history]', error);
+        setSelectionStatus('暂时无法恢复上一视角，请重试。');
+      }),
+    ).catch(reportBackgroundError);
   });
   document.getElementById('menu-only-selected')?.addEventListener('click', () => {
     closeMenu();
@@ -183,29 +234,40 @@ export function setupViewerShell(state: AppState): void {
   });
   document.getElementById('menu-station-overview')?.addEventListener('click', () => {
     closeMenu();
-    state.stationOverview?.();
+    state.viewState.stationOverview?.();
   });
   welcomeOpen?.addEventListener('click', () => btnLoadGim.click());
   continueButton?.addEventListener('click', () => {
-    void refreshRecent().then(async applied => {
-      if (!applied) return;
-      const first=recent[0];if(first)await openRecentProject(state,first.id);
-    }).catch(reportBackgroundError);
+    void refreshRecent()
+      .then(async (applied) => {
+        if (!applied) return;
+        const first = recent[0];
+        if (first) await openRecentProject(state, first.id);
+      })
+      .catch(reportBackgroundError);
   });
 
   // 打开/关闭工程后刷新“最近工程”，避免欢迎页与“继续上次工程”停留在启动时的旧顺序。
-  window.addEventListener('gim:recent-projects-changed', () => { void Promise.resolve(refreshRecent()).catch(reportBackgroundError); });
-  window.addEventListener('gim:project-closed', () => { void Promise.resolve(refreshRecent()).catch(reportBackgroundError); });
+  window.addEventListener('gim:recent-projects-changed', () => {
+    void Promise.resolve(refreshRecent()).catch(reportBackgroundError);
+  });
+  window.addEventListener('gim:project-closed', () => {
+    void Promise.resolve(refreshRecent()).catch(reportBackgroundError);
+  });
 
   // Browser drop: a File has no persistent path, but the one-shot input path
   // already owns browser-mode opening. Desktop drag-drop is intentionally not
   // wired because arbitrary page-provided paths are outside the file grant.
   if (!isTauri()) {
     const viewport = document.getElementById('viewport');
-    viewport?.addEventListener('dragover', (event) => { event.preventDefault(); });
+    viewport?.addEventListener('dragover', (event) => {
+      event.preventDefault();
+    });
     viewport?.addEventListener('drop', (event) => {
       event.preventDefault();
-      const file = Array.from(event.dataTransfer?.files ?? []).find((item) => /\.gim$/i.test(item.name));
+      const file = Array.from(event.dataTransfer?.files ?? []).find((item) =>
+        /\.gim$/i.test(item.name),
+      );
       if (!file) return;
       const transfer = new DataTransfer();
       transfer.items.add(file);
@@ -214,10 +276,12 @@ export function setupViewerShell(state: AppState): void {
     });
   }
 
-  void refreshRecent().then(async applied => {
-    if (!applied || !shouldAutoOpenLastProject() || autoOpenAttempted) return;
-    autoOpenAttempted=true;
-    const first=recent.find(project=>project.parserVersion);
-    if(first && state.currentProjectType==null)await openRecentProject(state,first.id);
-  }).catch(reportBackgroundError);
+  void refreshRecent()
+    .then(async (applied) => {
+      if (!applied || !shouldAutoOpenLastProject() || autoOpenAttempted) return;
+      autoOpenAttempted = true;
+      const first = recent.find((project) => project.parserVersion);
+      if (first && state.currentProjectType == null) await openRecentProject(state, first.id);
+    })
+    .catch(reportBackgroundError);
 }

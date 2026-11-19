@@ -386,7 +386,8 @@
       "items": [
         "material:cable",
         "material:cabletermination",
-        "material:cableauxiliaryfacilities"
+        "material:cableauxiliaryfacilities",
+        "material:cableaccessories"
       ]
     },
     {
@@ -973,15 +974,15 @@
       }
     },
     {
-      "id": "on_off_indicator",
-      "label": "示意分合指示器",
-      "term": "OnOffIndicator",
+      "id": "power_box",
+      "label": "动力箱",
+      "term": "PowerBox",
       "aliases": [],
       "order": 26,
       "evidence": {
         "sourceKind": "workbook",
         "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-        "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+        "workbookSha256": "18a47319e1e80b6b5da8775a5416af026bd136ea7fa5d1c26756bb22db4c625f",
         "sheet": "设备模型部件名称对照表",
         "cell": "C28",
         "cellRange": "B28:C28",
@@ -990,15 +991,15 @@
       }
     },
     {
-      "id": "parallel_resistance",
-      "label": "并联电阻",
-      "term": "ParallelResistance",
+      "id": "on_off_indicator",
+      "label": "示意分合指示器",
+      "term": "OnOffIndicator",
       "aliases": [],
       "order": 27,
       "evidence": {
         "sourceKind": "workbook",
         "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-        "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+        "workbookSha256": "18a47319e1e80b6b5da8775a5416af026bd136ea7fa5d1c26756bb22db4c625f",
         "sheet": "设备模型部件名称对照表",
         "cell": "C29",
         "cellRange": "B29:C29",
@@ -1007,15 +1008,15 @@
       }
     },
     {
-      "id": "cabinet",
-      "label": "箱体",
-      "term": "Cabinet",
+      "id": "parallel_resistance",
+      "label": "并联电阻",
+      "term": "ParallelResistance",
       "aliases": [],
       "order": 28,
       "evidence": {
         "sourceKind": "workbook",
         "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-        "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+        "workbookSha256": "18a47319e1e80b6b5da8775a5416af026bd136ea7fa5d1c26756bb22db4c625f",
         "sheet": "设备模型部件名称对照表",
         "cell": "C30",
         "cellRange": "B30:C30",
@@ -1024,15 +1025,15 @@
       }
     },
     {
-      "id": "ground_resistance",
-      "label": "接地电阻",
-      "term": "GroundResistance",
+      "id": "cabinet",
+      "label": "箱体",
+      "term": "Cabinet",
       "aliases": [],
       "order": 29,
       "evidence": {
         "sourceKind": "workbook",
         "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-        "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+        "workbookSha256": "18a47319e1e80b6b5da8775a5416af026bd136ea7fa5d1c26756bb22db4c625f",
         "sheet": "设备模型部件名称对照表",
         "cell": "C31",
         "cellRange": "B31:C31",
@@ -1041,15 +1042,15 @@
       }
     },
     {
-      "id": "gridding",
-      "label": "网栏",
-      "term": "Gridding",
+      "id": "ground_resistance",
+      "label": "接地电阻",
+      "term": "GroundResistance",
       "aliases": [],
       "order": 30,
       "evidence": {
         "sourceKind": "workbook",
         "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-        "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+        "workbookSha256": "18a47319e1e80b6b5da8775a5416af026bd136ea7fa5d1c26756bb22db4c625f",
         "sheet": "设备模型部件名称对照表",
         "cell": "C32",
         "cellRange": "B32:C32",
@@ -1058,15 +1059,15 @@
       }
     },
     {
-      "id": "devices_in_cubicle",
-      "label": "装置",
-      "term": "DevicesInCubicle",
+      "id": "gridding",
+      "label": "网栏",
+      "term": "Gridding",
       "aliases": [],
       "order": 31,
       "evidence": {
         "sourceKind": "workbook",
         "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-        "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+        "workbookSha256": "18a47319e1e80b6b5da8775a5416af026bd136ea7fa5d1c26756bb22db4c625f",
         "sheet": "设备模型部件名称对照表",
         "cell": "C33",
         "cellRange": "B33:C33",
@@ -1075,15 +1076,15 @@
       }
     },
     {
-      "id": "counter_online_monitor",
-      "label": "计数器/在线检测仪",
-      "term": "Counter/OnlineMonitor",
+      "id": "devices_in_cubicle",
+      "label": "装置",
+      "term": "DevicesInCubicle",
       "aliases": [],
       "order": 32,
       "evidence": {
         "sourceKind": "workbook",
         "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-        "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+        "workbookSha256": "18a47319e1e80b6b5da8775a5416af026bd136ea7fa5d1c26756bb22db4c625f",
         "sheet": "设备模型部件名称对照表",
         "cell": "C34",
         "cellRange": "B34:C34",
@@ -1092,15 +1093,15 @@
       }
     },
     {
-      "id": "capacitor_unit",
-      "label": "电容器单元",
-      "term": "CapacitorUnit",
+      "id": "counter_online_monitor",
+      "label": "计数器/在线检测仪",
+      "term": "Counter/OnlineMonitor",
       "aliases": [],
       "order": 33,
       "evidence": {
         "sourceKind": "workbook",
         "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-        "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+        "workbookSha256": "18a47319e1e80b6b5da8775a5416af026bd136ea7fa5d1c26756bb22db4c625f",
         "sheet": "设备模型部件名称对照表",
         "cell": "C35",
         "cellRange": "B35:C35",
@@ -1109,15 +1110,15 @@
       }
     },
     {
-      "id": "damped_reactor",
-      "label": "阻尼电抗器",
-      "term": "DampedReactor",
+      "id": "capacitor_unit",
+      "label": "电容器单元",
+      "term": "CapacitorUnit",
       "aliases": [],
       "order": 34,
       "evidence": {
         "sourceKind": "workbook",
         "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-        "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+        "workbookSha256": "18a47319e1e80b6b5da8775a5416af026bd136ea7fa5d1c26756bb22db4c625f",
         "sheet": "设备模型部件名称对照表",
         "cell": "C36",
         "cellRange": "B36:C36",
@@ -1126,15 +1127,15 @@
       }
     },
     {
-      "id": "imbalance_dta",
-      "label": "不平衡电流互感器",
-      "term": "ImbalanceDTA",
+      "id": "damped_reactor",
+      "label": "阻尼电抗器",
+      "term": "DampedReactor",
       "aliases": [],
       "order": 35,
       "evidence": {
         "sourceKind": "workbook",
         "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-        "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+        "workbookSha256": "18a47319e1e80b6b5da8775a5416af026bd136ea7fa5d1c26756bb22db4c625f",
         "sheet": "设备模型部件名称对照表",
         "cell": "C37",
         "cellRange": "B37:C37",
@@ -1143,15 +1144,15 @@
       }
     },
     {
-      "id": "valve_group",
-      "label": "阀组",
-      "term": "ValveGroup",
+      "id": "imbalance_dta",
+      "label": "不平衡电流互感器",
+      "term": "ImbalanceDTA",
       "aliases": [],
       "order": 36,
       "evidence": {
         "sourceKind": "workbook",
         "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-        "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+        "workbookSha256": "18a47319e1e80b6b5da8775a5416af026bd136ea7fa5d1c26756bb22db4c625f",
         "sheet": "设备模型部件名称对照表",
         "cell": "C38",
         "cellRange": "B38:C38",
@@ -1160,15 +1161,15 @@
       }
     },
     {
-      "id": "grid_side_bushing",
-      "label": "网侧套管",
-      "term": "GridSideBushing",
+      "id": "valve_group",
+      "label": "阀组",
+      "term": "ValveGroup",
       "aliases": [],
       "order": 37,
       "evidence": {
         "sourceKind": "workbook",
         "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-        "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+        "workbookSha256": "18a47319e1e80b6b5da8775a5416af026bd136ea7fa5d1c26756bb22db4c625f",
         "sheet": "设备模型部件名称对照表",
         "cell": "C39",
         "cellRange": "B39:C39",
@@ -1177,15 +1178,15 @@
       }
     },
     {
-      "id": "valve_side_bushing",
-      "label": "阀侧套管",
-      "term": "ValveSideBushing",
+      "id": "grid_side_bushing",
+      "label": "网侧套管",
+      "term": "GridSideBushing",
       "aliases": [],
       "order": 38,
       "evidence": {
         "sourceKind": "workbook",
         "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-        "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+        "workbookSha256": "18a47319e1e80b6b5da8775a5416af026bd136ea7fa5d1c26756bb22db4c625f",
         "sheet": "设备模型部件名称对照表",
         "cell": "C40",
         "cellRange": "B40:C40",
@@ -1194,15 +1195,15 @@
       }
     },
     {
-      "id": "spark_gap",
-      "label": "放电间隙",
-      "term": "SparkGap",
+      "id": "valve_side_bushing",
+      "label": "阀侧套管",
+      "term": "ValveSideBushing",
       "aliases": [],
       "order": 39,
       "evidence": {
         "sourceKind": "workbook",
         "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-        "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+        "workbookSha256": "18a47319e1e80b6b5da8775a5416af026bd136ea7fa5d1c26756bb22db4c625f",
         "sheet": "设备模型部件名称对照表",
         "cell": "C41",
         "cellRange": "B41:C41",
@@ -1211,15 +1212,15 @@
       }
     },
     {
-      "id": "tcrgd",
-      "label": "相控电抗器",
-      "term": "Tcrgd",
+      "id": "spark_gap",
+      "label": "放电间隙",
+      "term": "SparkGap",
       "aliases": [],
       "order": 40,
       "evidence": {
         "sourceKind": "workbook",
         "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-        "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+        "workbookSha256": "18a47319e1e80b6b5da8775a5416af026bd136ea7fa5d1c26756bb22db4c625f",
         "sheet": "设备模型部件名称对照表",
         "cell": "C42",
         "cellRange": "B42:C42",
@@ -1228,15 +1229,15 @@
       }
     },
     {
-      "id": "devices",
-      "label": "二次屏柜柜内装置",
-      "term": "Devices",
+      "id": "tcrgd",
+      "label": "相控电抗器",
+      "term": "Tcrgd",
       "aliases": [],
       "order": 41,
       "evidence": {
         "sourceKind": "workbook",
         "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-        "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+        "workbookSha256": "18a47319e1e80b6b5da8775a5416af026bd136ea7fa5d1c26756bb22db4c625f",
         "sheet": "设备模型部件名称对照表",
         "cell": "C43",
         "cellRange": "B43:C43",
@@ -1246,19 +1247,36 @@
     },
     {
       "id": "devices",
-      "label": "保护装置",
-      "term": "ProtectionDevice",
+      "label": "二次屏柜柜内装置",
+      "term": "Devices",
       "aliases": [],
       "order": 42,
       "evidence": {
         "sourceKind": "workbook",
         "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-        "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+        "workbookSha256": "18a47319e1e80b6b5da8775a5416af026bd136ea7fa5d1c26756bb22db4c625f",
         "sheet": "设备模型部件名称对照表",
         "cell": "C44",
         "cellRange": "B44:C44",
         "verification": "verified",
         "sourceLocation": "设备模型部件名称对照表!B44:C44"
+      }
+    },
+    {
+      "id": "devices",
+      "label": "保护装置",
+      "term": "ProtectionDevice",
+      "aliases": [],
+      "order": 43,
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "18a47319e1e80b6b5da8775a5416af026bd136ea7fa5d1c26756bb22db4c625f",
+        "sheet": "设备模型部件名称对照表",
+        "cell": "C45",
+        "cellRange": "B45:C45",
+        "verification": "verified",
+        "sourceLocation": "设备模型部件名称对照表!B45:C45"
       }
     },
     {
@@ -1269,28 +1287,11 @@
         "ProtectionEquipment",
         "ProtectiveDevice/ProtectionEquipment"
       ],
-      "order": 43,
-      "evidence": {
-        "sourceKind": "workbook",
-        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-        "workbookSha256": "e2958af1225917b4dc3d498c0b3bd1958a3d96a5a2ae594340d9d015817413cf",
-        "sheet": "设备模型部件名称对照表",
-        "cell": "C45",
-        "cellRange": "B45:C45",
-        "verification": "verified",
-        "sourceLocation": "设备模型部件名称对照表!B45:C45"
-      }
-    },
-    {
-      "id": "line_protection_device",
-      "label": "线路保护装置",
-      "term": "ProtectionEquipment",
-      "aliases": [],
       "order": 44,
       "evidence": {
         "sourceKind": "workbook",
         "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-        "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+        "workbookSha256": "18a47319e1e80b6b5da8775a5416af026bd136ea7fa5d1c26756bb22db4c625f",
         "sheet": "设备模型部件名称对照表",
         "cell": "C46",
         "cellRange": "B46:C46",
@@ -1299,20 +1300,54 @@
       }
     },
     {
-      "id": "transformer_protection_device",
-      "label": "变压器保护装置",
+      "id": "line_protection_device",
+      "label": "线路保护装置",
       "term": "ProtectionEquipment",
       "aliases": [],
       "order": 45,
       "evidence": {
         "sourceKind": "workbook",
         "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
-        "workbookSha256": "396361124f8c351b63b32ba5e174926247b802eae8ab62bb6922bfd991216f82",
+        "workbookSha256": "18a47319e1e80b6b5da8775a5416af026bd136ea7fa5d1c26756bb22db4c625f",
         "sheet": "设备模型部件名称对照表",
         "cell": "C47",
         "cellRange": "B47:C47",
         "verification": "verified",
         "sourceLocation": "设备模型部件名称对照表!B47:C47"
+      }
+    },
+    {
+      "id": "transformer_protection_device",
+      "label": "变压器保护装置",
+      "term": "ProtectionEquipment",
+      "aliases": [],
+      "order": 46,
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "18a47319e1e80b6b5da8775a5416af026bd136ea7fa5d1c26756bb22db4c625f",
+        "sheet": "设备模型部件名称对照表",
+        "cell": "C48",
+        "cellRange": "B48:C48",
+        "verification": "verified",
+        "sourceLocation": "设备模型部件名称对照表!B48:C48"
+      }
+    },
+    {
+      "id": "cabinet_led",
+      "label": "柜内LED部件",
+      "term": "LED",
+      "aliases": [],
+      "order": 47,
+      "evidence": {
+        "sourceKind": "workbook",
+        "workbook": "docs/engineering/catalogs/变电三维设计建模规范_实体索引表.xlsx",
+        "workbookSha256": "18a47319e1e80b6b5da8775a5416af026bd136ea7fa5d1c26756bb22db4c625f",
+        "sheet": "设备模型部件名称对照表",
+        "cell": "C49",
+        "cellRange": "B49:C49",
+        "verification": "verified",
+        "sourceLocation": "设备模型部件名称对照表!B49:C49"
       }
     }
   ]

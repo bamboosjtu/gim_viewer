@@ -1165,7 +1165,7 @@
     }
   },
   {
-    "name": "catalog-led-alone-unresolved",
+    "name": "catalog-independent-led-is-lamp",
     "records": [
       {
         "id": "x",
@@ -1182,7 +1182,8 @@
     ],
     "pending": 0,
     "expectedEntity": {
-      "category": "U-OBJECT"
+      "category": "M05",
+      "catalogId": "material:lamps"
     }
   },
   {
@@ -1432,6 +1433,593 @@
     "expectedMember": {
       "sourceId": "neutral",
       "pendingReason": "component_host_incompatible"
+    }
+  },
+  {
+    "name": "latest-powerbox-material",
+    "records": [
+      {
+        "id": "x",
+        "type": "PowerBox"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "M05",
+      "catalogId": "material:powerbox"
+    }
+  },
+  {
+    "name": "latest-powerbox-list-first",
+    "records": [
+      {
+        "id": "x",
+        "type": "POWERBOX/LIGHTINGBOX/MAINTENANCEBOX"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "M05",
+      "catalogId": "material:powerbox"
+    }
+  },
+  {
+    "name": "latest-protection-panel-list-first",
+    "records": [
+      {
+        "id": "x",
+        "type": "OTHERS",
+        "props": {
+          "设备类型": "保护屏/测控屏"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "E17",
+      "catalogId": "equipment:protectionpanel"
+    }
+  },
+  {
+    "name": "latest-dc-arrester-list-first",
+    "records": [
+      {
+        "id": "x",
+        "type": "DCArrester/FilterArrester"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "E14",
+      "catalogId": "equipment:dcarrester"
+    }
+  },
+  {
+    "name": "latest-frame-foundation-list-first",
+    "records": [
+      {
+        "id": "x",
+        "type": "FrameAndFoundation"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "C03",
+      "catalogId": "construction:gantriescomponents"
+    }
+  },
+  {
+    "name": "latest-cable-accessories-model",
+    "records": [
+      {
+        "id": "x",
+        "type": "CableAccessories"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "M07",
+      "catalogId": "material:cableaccessories"
+    }
+  },
+  {
+    "name": "latest-default-switch-cabinet",
+    "records": [
+      {
+        "id": "x",
+        "type": "SwitchCabinet"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "E12",
+      "catalogId": "equipment:hvswitchcabinet"
+    }
+  },
+  {
+    "name": "latest-explicit-low-voltage-overrides-default",
+    "records": [
+      {
+        "id": "x",
+        "type": "SwitchCabinet",
+        "props": {
+          "设备类型": "低压开关柜"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "E12",
+      "catalogId": "equipment:lvswitchcabinet"
+    }
+  },
+  {
+    "name": "latest-arrester-authority",
+    "records": [
+      {
+        "id": "x",
+        "type": "LightningProtector"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "E14",
+      "catalogId": "equipment:lightningarrester"
+    }
+  },
+  {
+    "name": "latest-explicit-filter-overrides-default",
+    "records": [
+      {
+        "id": "x",
+        "type": "LightningProtector",
+        "props": {
+          "EQUIPMENTTYPE": "FilterArrester"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "E14",
+      "catalogId": "equipment:filterarrester"
+    }
+  },
+  {
+    "name": "latest-structured-bushing-default",
+    "records": [
+      {
+        "id": "x",
+        "type": "OTHERS",
+        "props": {
+          "设备类型": "穿墙套管"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "E16",
+      "catalogId": "equipment:acwallbushing"
+    }
+  },
+  {
+    "name": "latest-generic-cabinet-type-blocks-name",
+    "records": [
+      {
+        "id": "x",
+        "type": "SecondaryCabinet",
+        "props": {
+          "模型分类名称": "二次屏柜"
+        },
+        "name": "测控柜"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "E17",
+      "catalogId": "equipment:secondarycabinet"
+    }
+  },
+  {
+    "name": "latest-cabinet-model-is-type-evidence",
+    "records": [
+      {
+        "id": "x",
+        "type": "SecondaryCabinet",
+        "props": {
+          "模型分类名称": "二次屏柜",
+          "屏柜型号": "公用测控柜"
+        },
+        "name": "保护柜"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "E17",
+      "catalogId": "equipment:measurementandcontrolcabinet"
+    }
+  },
+  {
+    "name": "latest-no-cabinet-type-allows-name",
+    "records": [
+      {
+        "id": "x",
+        "type": "SecondaryCabinet",
+        "props": {
+          "型号": "800x600x2260",
+          "屏柜编号": "8"
+        },
+        "name": "公用测控柜"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "E17",
+      "catalogId": "equipment:measurementandcontrolcabinet",
+      "standardStatus": "candidate"
+    }
+  },
+  {
+    "name": "latest-no-type-fuse",
+    "records": [
+      {
+        "id": "x",
+        "type": "OTHERS",
+        "props": {
+          "额定电压": "10"
+        },
+        "name": "熔断器"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "E13",
+      "catalogId": "equipment:fuse",
+      "standardStatus": "candidate"
+    }
+  },
+  {
+    "name": "latest-unmapped-real-type-blocks-name",
+    "records": [
+      {
+        "id": "x",
+        "type": "OTHERS",
+        "props": {
+          "TYPE": "VendorSpecific"
+        },
+        "name": "熔断器"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "U-OBJECT"
+    }
+  },
+  {
+    "name": "latest-dc-blocking-model-beats-coarse-dev-type",
+    "records": [
+      {
+        "id": "x",
+        "type": "SeriesCompensation",
+        "props": {
+          "型号": "电容隔直装置"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "E09",
+      "catalogId": "equipment:dcblockingdevice"
+    }
+  },
+  {
+    "name": "latest-road-inside",
+    "records": [
+      {
+        "id": "x",
+        "type": "Road",
+        "props": {
+          "围墙关系": "围墙内"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "C01",
+      "catalogId": "construction:stationinroadways"
+    }
+  },
+  {
+    "name": "latest-road-outside",
+    "records": [
+      {
+        "id": "x",
+        "type": "Road",
+        "props": {
+          "道路位置": "站外"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "C01",
+      "catalogId": "construction:stationoutroadways"
+    }
+  },
+  {
+    "name": "latest-road-missing-position",
+    "records": [
+      {
+        "id": "x",
+        "type": "Road",
+        "name": "进站道路"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "C01"
+    }
+  },
+  {
+    "name": "latest-ifc-device-type-before-name",
+    "records": [
+      {
+        "id": "x",
+        "type": "IFCTRANSFORMER",
+        "name": "灯具",
+        "track": "ifc"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "E01"
+    }
+  },
+  {
+    "name": "latest-ifc-material-type-before-name",
+    "records": [
+      {
+        "id": "x",
+        "type": "IFCLIGHTFIXTURE",
+        "name": "主变压器",
+        "track": "ifc"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "M05"
+    }
+  },
+  {
+    "name": "latest-ifc-objecttype-material",
+    "records": [
+      {
+        "id": "x",
+        "type": "IFCBUILDINGELEMENTPROXY",
+        "props": {
+          "IFC.ObjectType": "PowerBox"
+        },
+        "name": "控制柜",
+        "track": "ifc"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "M05",
+      "catalogId": "material:powerbox"
+    }
+  },
+  {
+    "name": "latest-ifc-objecttype-device",
+    "records": [
+      {
+        "id": "x",
+        "type": "IFCBUILDINGELEMENTPROXY",
+        "props": {
+          "IFC.ObjectType": "ProtectionCabinet"
+        },
+        "name": "灯具",
+        "track": "ifc"
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "E17",
+      "catalogId": "equipment:protectioncabinet"
+    }
+  },
+  {
+    "name": "latest-assembled-power-box",
+    "records": [
+      {
+        "id": "h",
+        "type": "GIS"
+      },
+      {
+        "id": "p",
+        "type": "PowerBox",
+        "parent": "h"
+      }
+    ],
+    "groups": [
+      [
+        "h",
+        "p"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "p",
+      "membershipStatus": "confirmed",
+      "componentId": "power_box"
+    }
+  },
+  {
+    "name": "latest-assembled-LED",
+    "records": [
+      {
+        "id": "h",
+        "type": "SecondaryCabinet"
+      },
+      {
+        "id": "p",
+        "type": "LED",
+        "parent": "h"
+      }
+    ],
+    "groups": [
+      [
+        "h",
+        "p"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "p",
+      "membershipStatus": "confirmed",
+      "componentId": "cabinet_led"
+    }
+  },
+  {
+    "name": "latest-specific-host-panel-beats-generic-cabinet-default",
+    "records": [
+      {
+        "id": "x",
+        "type": "OTHERS",
+        "props": {
+          "类型": "开关柜",
+          "设备类型": "主机屏"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "x"
+      ]
+    ],
+    "pending": 0,
+    "expectedEntity": {
+      "category": "E17",
+      "catalogId": "equipment:secondarycabinet"
     }
   }
 ]

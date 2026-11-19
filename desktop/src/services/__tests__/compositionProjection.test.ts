@@ -1,26 +1,31 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { AppState } from '../../app/state.js';
-import { extractEngineeringSourceGraph } from '@gim/gim-sdk/gim/engineering/sourceGraph.js';
+import { extractEngineeringSourceGraph } from '@gim/gim-sdk/source';
 import {buildTestEngineeringSources} from '../../../../packages/gim-sdk/src/gim/engineering/__tests__/fixtures.js';
-import { projectEngineeringNavigation } from '@gim/gim-sdk/gim/engineering/navigation.js';
+import { projectEngineeringNavigation } from '@gim/gim-sdk/projection';
 import { projectEngineeringComposition } from '@gim/gim-sdk/engineering/composition.js';
 import type { IfcSpatialObject } from '../../gim/ifcSpatialParser.js';
 import { installCompositionProjection, reconcileProjectionSelection } from '../compositionProjectionService.js';
 import { projectSpatialComposition } from '../projections/compositionSpatial.js';
 import type { ProjectionInput } from '../compositionProjectionWorker.js';
 import { selectEngineeringTarget, clearEngineeringHighlight } from '../engineeringSelection.js';
+import { EngineeringWorkerClient } from '../engineeringWorkerClient.js';
+import { measurementWorkerTask } from '../../measurement/hostWorker.js';
+import { measurementSnapshot, resetMeasurementRun } from '../../measurement/runtime.js';
 
 vi.mock('../engineeringSelection.js',()=>({selectEngineeringTarget:vi.fn(async()=>true),clearEngineeringHighlight:vi.fn(async()=>{})}));
 vi.mock('../../ui/propsDrawer.js',()=>({renderInspectorTabs:vi.fn(),sectionHtml:vi.fn(()=> '')}));
 
-class ProjectionWorker {
+class ProjectionWorker extends EventTarget {
   static instances: ProjectionWorker[]=[];
   input!: ProjectionInput;
   onmessage?: (event: MessageEvent) => void;
   onerror?: (event: ErrorEvent) => void;
   terminate=vi.fn();
-  constructor(){ProjectionWorker.instances.push(this);}
-  postMessage(input:ProjectionInput){this.input=input;}
+  constructor(){super();ProjectionWorker.instances.push(this);}
+  postMessage(input:unknown){
+    if(input && typeof input==='object' && 'snapshot' in input)this.input=input as ProjectionInput;
+  }
   reply(){
     const assignments=projectSpatialComposition(this.input.snapshot,this.input.facts,this.input.bounds);
     this.onmessage?.({data:{composition:projectEngineeringComposition(this.input.snapshot,assignments,'工程组成',this.input.declarations),contexts:assignments.map(a=>[a.entityId,a.paths.map(p=>p.map(g=>g.title).join('/')).join('；')])}} as MessageEvent);
@@ -39,7 +44,31 @@ async function fixture(){
   const run=()=>{state.engineeringGeometryEvidenceChanged?.();vi.advanceTimersByTime(500);return ProjectionWorker.instances[ProjectionWorker.instances.length-1];};
   return {state,dispose,run};
 }
-afterEach(()=>{vi.useRealTimers();vi.unstubAllGlobals();vi.clearAllMocks();});
+afterEach(()=>{vi.useRealTimers();vi.unstubAllGlobals();resetMeasurementRun({});vi.clearAllMocks();});
+
+it('attributes production engineering and composition tasks to distinct Worker families',async()=>{
+  const f=await fixture();
+  vi.stubGlobal('__GIM_MEASUREMENT_CONFIG__',{mode:'benchmark'});
+  vi.stubGlobal('URL',class extends URL {
+    static createObjectURL(){return 'blob:measured-worker-fixture';}
+    static revokeObjectURL(){}
+  });
+  resetMeasurementRun({});
+  const engineering=EngineeringWorkerClient.create(()=>true);
+  const pending=engineering.init('fixture',[]).catch(error=>error);
+  try {
+    const worker=ProjectionWorker.instances[0];
+    const projection=f.run();
+    const mainTask=measurementWorkerTask(worker as unknown as Worker)!;
+    const projectionTask=measurementWorkerTask(projection as unknown as Worker)!;
+    expect(mainTask.family).toBe('engineering');
+    expect(projectionTask.family).toBe('engineering-composition');
+    expect(mainTask.workerId).not.toBe(projectionTask.workerId);
+    const workers=measurementSnapshot()!.workers;
+    expect(workers[mainTask.workerId].family).toBe(mainTask.family);
+    expect(workers[projectionTask.workerId].family).toBe(projectionTask.family);
+  } finally {engineering.close();f.dispose();await pending;}
+});
 
 it('refines only composition, preserves semantic inputs and does not accumulate search text',async()=>{
   const f=await fixture(),snapshot=f.state.engineering.snapshot!,before=JSON.stringify(snapshot),sources=f.state.engineering.sources,base=f.state.engineering.navigation!;

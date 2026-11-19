@@ -46,6 +46,50 @@ beforeEach(()=>{
 });
 afterEach(()=>{cancelIfcConversions();vi.unstubAllGlobals();localStorage.clear();});
 
+it('boots the one IFC worker before its deferred source is ready', async () => {
+  const state = new AppState(), session = state.activateProject(1, 'sha'), {ctx} = context(state);
+  const runtimeId = state.ifc.getRuntimeModelId(entry.modelId, session);
+  state.ifc.registerIfcRuntimeModel(entry.modelId, runtimeId, session);
+  let supply!: (bytes: Uint8Array) => void;
+  const read = vi.fn(() => new Promise<Uint8Array>(resolve => { supply = resolve; }));
+  const loading = loadRawIfc(ctx, state, session, read, runtimeId, entry.path, undefined, undefined, {transferInput:true});
+  await vi.waitFor(() => expect(read).toHaveBeenCalledOnce());
+  const worker = ConversionWorker.instances[0];
+  expect(worker.input).toBeUndefined();
+  expect(geometryWorkSnapshot().ifcActive).toBe(0);
+  const bytes = new Uint8Array([1, 2, 3]);
+  supply(bytes);
+  await vi.waitFor(() => expect(Array.from(worker.input?.bytes ?? [])).toEqual([1, 2, 3]));
+  expect(geometryWorkSnapshot().ifcActive).toBe(1);
+  expect(bytes.byteLength).toBe(0);
+  worker.reply({type:'complete',bytes:new Uint8Array([9]),conversionMs:1});
+  await loading;
+  expect(worker.terminate).toHaveBeenCalledOnce();
+  expect(ctx.fragments.core.load).toHaveBeenCalledOnce();
+  expect(geometryWorkSnapshot().ifcActive).toBe(0);
+});
+
+it('cancels the booted worker while native source reading is pending', async () => {
+  const state = new AppState(), session = state.activateProject(1, 'sha'), {ctx} = context(state);
+  let supply!: (bytes: Uint8Array) => void;
+  const read = vi.fn(() => new Promise<Uint8Array>(resolve => { supply = resolve; }));
+  const loading = loadRawIfc(ctx, state, session, read, 'old', entry.path, undefined, undefined, {transferInput:true});
+  const settled = expect(loading).rejects.toThrow('obsolete project');
+  await vi.waitFor(() => expect(read).toHaveBeenCalledOnce());
+  const worker = ConversionWorker.instances[0];
+  state.activateProject(2, 'new-sha');
+  cancelIfcConversions();
+  await settled;
+  const bytes = new Uint8Array([1]);
+  supply(bytes);
+  await Promise.resolve();
+  expect(worker.input).toBeUndefined();
+  expect(bytes.byteLength).toBe(1);
+  expect(worker.terminate).toHaveBeenCalledOnce();
+  expect(ctx.fragments.core.load).not.toHaveBeenCalled();
+  expect(geometryWorkSnapshot().ifcActive).toBe(0);
+});
+
 it('raw entry transfers a dedicated input copy, preserves identity/settings and commits through real model events',async()=>{
   const state=new AppState(),session=state.activateProject(1,'sha'),{ctx,scene}=context(state);
   const input=new Uint8Array([1,2,3]),progress=vi.fn();

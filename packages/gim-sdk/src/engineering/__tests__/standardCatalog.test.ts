@@ -11,9 +11,9 @@ const build=(rows:SourceRecord[])=>normalizeEngineeringModel('scope',rows.map(to
 
 it('covers every verified index row, using the maintained workbook hierarchy and highlighted additions',()=>{
   expect(STANDARD_CATALOG.filter(i=>i.kind==='equipment')).toHaveLength(60);
-  expect(STANDARD_CATALOG.filter(i=>i.kind==='material')).toHaveLength(42);
+  expect(STANDARD_CATALOG.filter(i=>i.kind==='material')).toHaveLength(43);
   expect(STANDARD_CATALOG.filter(i=>i.kind==='construction')).toHaveLength(40);
-  expect(standardTerms('MetalFence')[0].evidence.termCells).toEqual(['D40']);
+  expect(standardTerms('MetalFence')[0].evidence.termCells).toEqual(['D41']);
   expect(standardTerms('Airduct')[0].evidence.sheet).toBe('材料模型索引表');
   expect(STANDARD_CATALOG.filter(i=>i.label==='均压屏蔽装置')).toHaveLength(2);
 });

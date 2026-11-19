@@ -81,7 +81,8 @@
     "structuralmember": "C-A15",
     "protectiondevice": "part",
     "dcpillarinsulator": "E20",
-    "dcwallbushing": "E21"
+    "dcwallbushing": "E21",
+    "road": "C-C5"
   },
   "ifcPredefined": {
     "IFCPROTECTIVEDEVICE.CIRCUITBREAKER": "E06",
@@ -154,13 +155,44 @@
     "IFCBEAMSTANDARDCASE": "C-A4",
     "IFCCOLUMNSTANDARDCASE": "C-A3",
     "IFCMEMBERSTANDARDCASE": "C-A15",
-    "IFCPROTECTIVEDEVICE": "part"
+    "IFCPROTECTIVEDEVICE": "part",
+    "IFCROAD": "C-C5",
+    "IFCDISTRIBUTIONBOARD": "E09"
   },
   "description": "Format-specific source enums. Exact model declarations take precedence; collisions are observable, not extra classifications.",
   "structured": {
-    "道路": "C-C5"
+    "道路": "C-C5",
+    "Road": "C-C5"
   },
   "cabinetTypeWithFamilyName": {
-    "screencabinetsandinstallations": "SecondaryCabinet"
+    "screencabinetsandinstallations": "SecondaryCabinet",
+    "屏柜及装置": "SecondaryCabinet",
+    "主机屏": "SecondaryCabinet"
+  },
+  "typeDefaults": {
+    "switchcabinet": "equipment:hvswitchcabinet",
+    "开关柜": "equipment:hvswitchcabinet",
+    "postinsulator": "equipment:acpillarinsulator",
+    "lightningprotector": "equipment:lightningarrester",
+    "避雷器": "equipment:lightningarrester",
+    "disconnectingswitch": "equipment:acisolatingswitch",
+    "earthingswitch": "equipment:acgroundswitch",
+    "接地开关": "equipment:acgroundswitch",
+    "potentialtransformer": "equipment:electromagnetictv",
+    "walltubeinsulator": "equipment:acwallbushing",
+    "穿墙套管": "equipment:acwallbushing",
+    "智能控制柜": "equipment:controlcabinet",
+    "主变压器": "equipment:oilimmersedtransformer",
+    "气体绝缘金属封闭开关设备": "equipment:gis"
+  },
+  "orderedTypeValues": {
+    "powerbox/lightingbox/maintenancebox": "PowerBox",
+    "trench(tunnel)road": "Trench",
+    "frameandfoundation": "GantriesComponents",
+    "equipmentsupportandfoundation": "TrussesComponents",
+    "保护屏/测控屏": "ProtectionPanel",
+    "dcarrester/filterarrester": "DCArrester",
+    "干式/油浸式": "DryTypeTransformer",
+    "主机屏": "SecondaryCabinet"
   }
 }

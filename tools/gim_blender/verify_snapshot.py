@@ -3,18 +3,20 @@ import hashlib
 import json
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
-manifest = json.loads((ROOT / 'snapshot.json').read_text(encoding='utf-8'))
-for row in manifest['files']:
-    file = (ROOT / row['path']).resolve()
-    if not file.is_relative_to(ROOT):
-        raise ValueError(f"Snapshot path outside tool: {row['path']}")
-    raw = file.read_bytes()
-    recorded = row['sha256']
-    # Git on Windows may check text out with CRLF.
-    if recorded not in (
-        hashlib.sha256(raw).hexdigest(),
-        hashlib.sha256(raw.replace(b'\r\n', b'\n')).hexdigest(),
-    ):
-        raise ValueError(f"Snapshot hash mismatch: {row['path']}")
-print(f"Verified {len(manifest['files'])} frozen converter files")
+def verify_snapshot(root: Path) -> int:
+    root = root.resolve()
+    manifest = json.loads((root / 'snapshot.json').read_text(encoding='utf-8'))
+    for row in manifest['files']:
+        file = (root / row['path']).resolve()
+        if not file.is_relative_to(root):
+            raise ValueError(f"Snapshot path outside tool: {row['path']}")
+        # The manifest hashes canonical LF source bytes on every checkout.
+        lf_bytes = file.read_bytes().replace(b'\r\n', b'\n')
+        if hashlib.sha256(lf_bytes).hexdigest() != row['sha256']:
+            raise ValueError(f"Snapshot hash mismatch: {row['path']}")
+    return len(manifest['files'])
+
+
+if __name__ == '__main__':
+    count = verify_snapshot(Path(__file__).resolve().parent)
+    print(f'Verified {count} frozen converter files')

@@ -7,15 +7,15 @@
   "files": [
     {
       "path": "engine/snapshot/core/src/engineering/catalog.json",
-      "sha256": "3e20b13e754e984dd52fd757debe85257073e95d1d156b77ac62aeb5bdb97e5a"
+      "sha256": "b05e29b813962a314ce62b46e483d878215309b1188a1e3de6d623fe32a9b54e"
     },
     {
       "path": "engine/snapshot/core/src/engineering/catalogLabels.ts",
-      "sha256": "e239bf724d4bb3e0edadeeef2e185b57dc7068f07775bbb5a516eb5f3b6595bb"
+      "sha256": "04d6f0c6325cb09b4c300528aebcb0e9e48daae7231e1f3dbef6f0cba3de52e1"
     },
     {
       "path": "engine/snapshot/core/src/engineering/catalogRules.json",
-      "sha256": "326ce61ed9da8396acb109baeb1380ce5351af6bd2edd5f19884e649b103c340"
+      "sha256": "a7a06c35e6f0169c4e2caa8406c4ac7a66cdfe389630c79d2fb3a4d47a23fbd4"
     },
     {
       "path": "engine/snapshot/core/src/engineering/classificationDetails.ts",
@@ -23,23 +23,23 @@
     },
     {
       "path": "engine/snapshot/core/src/engineering/classify.ts",
-      "sha256": "2fba2a6b39adfea289fb73d2031d3a05724e4726346ac68253eedcca5904bef7"
+      "sha256": "8b9092344bb382f4ac6c095c1e61f25844b10e5c90f0bac88f5a661f5e3601ed"
     },
     {
       "path": "engine/snapshot/core/src/engineering/standardCatalog.json",
-      "sha256": "d1911f132dfea52ec273747b9e8c399ee8e322134b22fc60f33a626d60c7a8b3"
+      "sha256": "9931da2065c686a0548c24971b84e23ab25ccf51be9bf29c5b64593878ee9c73"
     },
     {
       "path": "engine/snapshot/core/src/engineering/standardCatalog.ts",
-      "sha256": "e03f88568e862ac5504be38e4dcaa2fd8c46de87ed1db785c2c98e1e5ef9fb6b"
+      "sha256": "088b9762709b84cafa993560d95671ffce65257f51192920dd152f6a4c82a3d2"
     },
     {
       "path": "engine/snapshot/core/src/engineering/types.ts",
-      "sha256": "84abb2e7c1f6a2e7cb08f8d1821b29cab9e1980ff40560dda7e99dd3d2d808ef"
+      "sha256": "357a5f189e752514331dae1afbd67f667e9f9824e532a8b0d4c0b822554f8ce5"
     },
     {
       "path": "engine/snapshot/core/src/gim/engineering/geometryOccurrences.ts",
-      "sha256": "562f1be32ca6ed5e8f36127f4d36b5434ccaa8ed5d675ae4b3ea9c4acd440a1d"
+      "sha256": "8cabc78a2ff14d7de444343e25537eb19583ac60a0c7253acf883e02441f6960"
     },
     {
       "path": "engine/snapshot/core/src/gim/engineering/proxyCategories.json",
@@ -47,31 +47,31 @@
     },
     {
       "path": "engine/snapshot/core/src/gim/engineering/recognitionFields.json",
-      "sha256": "c4f228a3426ac27b99de44ca5f0c1bf38db704c1970fdde357727083ce0fdef3"
+      "sha256": "8529ae50c279d47292b6d35a5103e2da46a3c6b156daba6b7939dcbfc781e33f"
     },
     {
       "path": "engine/snapshot/core/src/gim/engineering/sourceDocuments.ts",
-      "sha256": "58fb027a137232f0dbb2ee88c4b596995bad0027f579e92488fd90656955b3ca"
+      "sha256": "36b1cea2a138ab249103e6cb70d738e788b971508d2070314d93b753e6080032"
     },
     {
       "path": "engine/snapshot/core/src/gim/engineering/sourceEvidence.ts",
-      "sha256": "1f9b2f1384cea3c851954b3657125a3162e7d80eafe1d31582bf0436a884231c"
+      "sha256": "4176af79adf670fb70a985b15a42a279ab2f2858a0f0df7a7438720cbe8a7f3c"
     },
     {
       "path": "engine/snapshot/core/src/gim/engineering/sourceGraph.ts",
-      "sha256": "a753795c85d980b0b055103139ec20e081b173cdf24a783900b560f2370dc760"
+      "sha256": "a3d9d7696d877feda6ac642fb818281f0066e2042ea1eb2be83c84e17f0b8735"
     },
     {
       "path": "engine/snapshot/core/src/gim/engineering/sourceTypeAliases.json",
-      "sha256": "08a76cc42ff490a2dbf0a3c3d878c458c4db176a2f62275bf0e5515f07708d35"
+      "sha256": "ff33e2659e0567668cab49e872ef5a470f57d5e490e3d79c5f1388119b5307e3"
     },
     {
       "path": "engine/snapshot/core/src/gim/engineering/sourceVocabulary.json",
-      "sha256": "fe7470ab6447f875a55cac64e591d048c834fa900b9ef52bc4df7b4c76ed8f0d"
+      "sha256": "cd231c9b6903420b61ec257307dd522a9102c977891d14180881970dee6ffab2"
     },
     {
       "path": "engine/snapshot/core/src/gim/entryResolver.ts",
-      "sha256": "5b85a16f574a3fe806efa4a290a6a6e5ae70894062918e3508fe3190ed25b364"
+      "sha256": "5d23f83001a8b7a7ad725aaafb3261165953566a6942a8e8c8345b31ce0cf937"
     },
     {
       "path": "engine/snapshot/core/src/gim/famParser.ts",
@@ -79,7 +79,7 @@
     },
     {
       "path": "engine/snapshot/core/src/gim/fileLookup.ts",
-      "sha256": "479172c2f2eb440cf501aeb352497c430207250fd9d81c037fcd9642c4bb8a8e"
+      "sha256": "74b9bbb6aaf2f05587fd08cfd8684d9fa723a477e11d4a192f57449b5f94893c"
     },
     {
       "path": "engine/snapshot/core/src/gim/geometry/affineMatrix.ts",
@@ -95,47 +95,47 @@
     },
     {
       "path": "engine/snapshot/core/src/gim/geometry/ir.ts",
-      "sha256": "68e1ae6475f3e7c05ec5d612f5aef4e6461c2d544e8f747d052a76691dcc350d"
+      "sha256": "cfd598430f150a96fc08714f95714fda25db1f470755d31b9db26bbf9e37e0c7"
     },
     {
       "path": "engine/snapshot/core/src/gim/geometry/offsetRectangularTable.ts",
-      "sha256": "748a999209751618190d744fe7fdf153c4082f8721fcee881f901efd33daa9fc"
+      "sha256": "44e98b9e7395f54250837f1008c63c160068d1bf13db37d5436e68f22b3393c0"
     },
     {
       "path": "engine/snapshot/core/src/gim/geometry/phmParser.ts",
-      "sha256": "f0fb227dcfbcf0c5eb1567a7fb0d2f95957a511d8faf9ad86deb93a4f7506b63"
+      "sha256": "d298262ea559e8a47cb4d1e06d34572e32c6368fb13c1923fd0744431bbb79ea"
     },
     {
       "path": "engine/snapshot/core/src/gim/geometry/sourceGeometryError.ts",
-      "sha256": "203886b03e1a5455f7caced1693288497be697cd70fda219e44ef519b6240c0a"
+      "sha256": "ab2a9bc024482be36eecac019a6a53d3e444bd8f92e63899533e87bc36a38607"
     },
     {
       "path": "engine/snapshot/core/src/gim/geometry/stretchedBody.ts",
-      "sha256": "8e59e98e7d47badd9e6c58c9f199dda9d18bfa84e88029d91c7dc8211d186403"
+      "sha256": "b42d3e215fc6c80e8611807d66a8539c07256ea13a77eda60101b048dbceecf1"
     },
     {
       "path": "engine/snapshot/core/src/gim/geometry/xmlModParser.ts",
-      "sha256": "685555129b4bceeb9e4ede0b47315680478ce6526a08e0e562ec6ffa43916746"
+      "sha256": "961a1a9357ed31f76e9b7c5dd72720347235900073be1438e0b5dc365be0ad0a"
     },
     {
       "path": "engine/snapshot/core/src/gim/geometry/xmlModWorkerParser.ts",
-      "sha256": "ec6fec2569b71d1a811200cca158cc1041d6756ef7833ef32d7858f4ef2769aa"
+      "sha256": "16d0183ff4877d420a66060076432a34adc0817721f9ca540cc2fcfc9af15814"
     },
     {
       "path": "engine/snapshot/core/src/gim/gimValueSemantics.ts",
-      "sha256": "5024d92d4ab02e169ddd73b6951ed138f60d48fa488dc326bbbdd4984635e253"
+      "sha256": "573ab8904be414be7a6ec85031ded96424b3d9eeeb83040214e24c8e3f34134c"
     },
     {
       "path": "engine/snapshot/core/src/gim/kvParser.ts",
-      "sha256": "3fca516f55693d76524306d3b8d3d68de67a6e6e090d8f04c444fce13dff047f"
+      "sha256": "5ce3d0d22fe5e0f68b43c9a18860da800e30a04da51c80e889fbd74079caefd8"
     },
     {
       "path": "engine/snapshot/core/src/gim/parserLimits.ts",
-      "sha256": "68d862c4312549cc4e9bbd92f399d11e105964c8bd5c9faf0236b59b974ca0e4"
+      "sha256": "875835b79174e0bda18b1761980755d41595356ab9f85d3995cd63722752f90f"
     },
     {
       "path": "engine/snapshot/core/src/gim/types.ts",
-      "sha256": "d9ea0ba59000e515edbc815aff741baf98646910f16764c7bb94750754500428"
+      "sha256": "bec687d7353d4f0796be897fc9247b4e2524393e4d0cb96d2ff13e84a6a238fd"
     },
     {
       "path": "engine/snapshot/core/src/measurement/core.ts",
@@ -147,19 +147,19 @@
     },
     {
       "path": "engine/snapshot/core/src/viewer/stlLoader.ts",
-      "sha256": "d3009e418a8c0947af8c86645e8ad7ab7ab8869936633f0e64deb43203920c7c"
+      "sha256": "6ac08f3543e773efc2d3d175c14f54ce7dfe072a5e4845608f501998f8b1fead"
     },
     {
       "path": "engine/snapshot/core/src/viewer/xmlModGeometry.ts",
-      "sha256": "c0dd8cb51b60218e42f8e8f9eb84b5741247f4f467488e499bc80a7f2de1cd52"
+      "sha256": "e387c0f959486aaffddc723c282c43bb7da732006808b269db1fbffdc7a8d34a"
     },
     {
       "path": "engine/snapshot/core/src/viewer/xmlModLoader.ts",
-      "sha256": "2f867e53183a37e1966a38c884e8447e19ebf144d7db6bdac528856dfbc7d095"
+      "sha256": "129bdd6d960a863d3860b7a36a3cf4a4039c80f35ddfdae46dfa6fecc606036c"
     },
     {
       "path": "engine/snapshot/packages/measurement-core/src/collector.ts",
-      "sha256": "b5a73fc2280aff321bb64be80e354610635093652027d8c6f7d13d99e0103736"
+      "sha256": "d7757ca9d3b06e1c17f2d0f5ab77a9966f550858b421389bbf08983b419c4803"
     },
     {
       "path": "engine/snapshot/packages/measurement-core/src/context.ts",
@@ -171,11 +171,11 @@
     },
     {
       "path": "engine/snapshot/packages/measurement-core/src/memory.ts",
-      "sha256": "e741014cd8838b2db2dbde3c459d4f227b6a9616b6714218b80fba0490f78edd"
+      "sha256": "fad2d65a37ff184e5445159c84c13012052258b9b5994f65c528253a7d246ac6"
     },
     {
       "path": "engine/snapshot/packages/measurement-core/src/probe.ts",
-      "sha256": "ca9cb246f748d7c73a03fc7f8e7284763e34f87881b0cf69ac4046203bf244f3"
+      "sha256": "a45c0e72f99a7825a4fb67480a207a072189a2dd1cee35d6f9edca61da4c7224"
     },
     {
       "path": "engine/snapshot/packages/measurement-core/src/stats.ts",
@@ -195,15 +195,15 @@
     },
     {
       "path": "engine/snapshot/packages/powerline-core/src/geometry/ir.ts",
-      "sha256": "dacb3e0c7ca70afc47cfe947371108b5dab952b7767e13c220633729772eead5"
+      "sha256": "ebf2331d71aeedc8340d21291599512f1d9cbf300534f1a39d4ac38cb90cda13"
     },
     {
       "path": "engine/snapshot/packages/powerline-core/src/kvParser.ts",
-      "sha256": "7d907c9c892e6ad2ed0d1383acae545dd603cb5aa9b8e70edfb1814a7db256c1"
+      "sha256": "a00d046d14132d885a67c2481274604dc6957df55b8fb57c5bc1331b4871fbc3"
     },
     {
       "path": "engine/snapshot/packages/powerline-core/src/parserLimits.ts",
-      "sha256": "47786d20333bd31ca48c8851b8a175b8b01f242d62a9ba8ea5631f5688c033aa"
+      "sha256": "ef91eb15c190029feae0fb1efdf2e67009877a3b137f66960d5a806b28af5105"
     }
   ]
 }

@@ -28,7 +28,7 @@ flowchart TD
 ```
 
 - `substationSpatialRuntime` 负责 Spatial 恢复、重建、缓存发布与后台门控，保留捕获的工程会话检查。
-- `substationIfcRuntime` 负责 IFC 顺序队列、首个可用表示、区域批次、缓存读取和加载诊断。
+- `substationIfcRuntime` 负责 IFC 顺序队列、首个可用表示、区域批次和加载诊断。`substationIfcSource` 使用窄会话状态读取单条 IFC 源字节并处理缓存路径。
 - `substationDevRuntime` 负责 IFC 后的 DEV LOD 启动。
 - `substationDocumentRuntime` 负责可选 STD/SLD 的解析与缓存恢复。
 - `substationPresentation` 负责导航 DOM、选择回调和加载提示。与 IFC 阶段共享的提示标志放在 `substationLoadingState`，IFC 加载开始时重置。

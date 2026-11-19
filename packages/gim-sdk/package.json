@@ -116,30 +116,15 @@
       "gim-source": "./src/gim/engineering/inventory.ts",
       "import": "./dist/gim/engineering/inventory.js"
     },
-    "./gim/engineering/navigation.js": {
-      "types": "./src/gim/engineering/navigation.ts",
-      "gim-source": "./src/gim/engineering/navigation.ts",
-      "import": "./dist/gim/engineering/navigation.js"
-    },
     "./gim/engineering/recognitionFieldPolicy.js": {
       "types": "./src/gim/engineering/recognitionFieldPolicy.ts",
       "gim-source": "./src/gim/engineering/recognitionFieldPolicy.ts",
       "import": "./dist/gim/engineering/recognitionFieldPolicy.js"
     },
-    "./gim/engineering/sourceDocuments.js": {
-      "types": "./src/gim/engineering/sourceDocuments.ts",
-      "gim-source": "./src/gim/engineering/sourceDocuments.ts",
-      "import": "./dist/gim/engineering/sourceDocuments.js"
-    },
     "./gim/engineering/sourceEvidence.js": {
       "types": "./src/gim/engineering/sourceEvidence.ts",
       "gim-source": "./src/gim/engineering/sourceEvidence.ts",
       "import": "./dist/gim/engineering/sourceEvidence.js"
-    },
-    "./gim/engineering/sourceGraph.js": {
-      "types": "./src/gim/engineering/sourceGraph.ts",
-      "gim-source": "./src/gim/engineering/sourceGraph.ts",
-      "import": "./dist/gim/engineering/sourceGraph.js"
     },
     "./gim/engineering/sourceProjection.js": {
       "types": "./src/gim/engineering/sourceProjection.ts",

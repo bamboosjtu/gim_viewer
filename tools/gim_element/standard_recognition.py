@@ -78,28 +78,98 @@ def luminaire_terminal(row):
     return next((p for p in values(row,'TYPE','类型','模型分类名称','装置名称','设备类型','设备类别','材料类型','构件类型',
         'DEVICETYPE','EQUIPMENTTYPE','MATERIALTYPE','CONSTRUCTIONTYPE','MATERIALSUBTYPE','EQUIPMENTSUBTYPE','材料子类','设备子类')
         if p['value'].strip().upper()=='LED'),None)
-def interpret(row,has_children=False,equipment_member=False):
+TYPE_FIELDS=('TYPE','类型','模型分类名称','装置名称','DEVICETYPE','EQUIPMENTTYPE','设备类型','设备类别','设备分类','材料类型','材料类别',
+             '构件类型','构件类别','MATERIALTYPE','CONSTRUCTIONTYPE','MATERIALSUBTYPE','EQUIPMENTSUBTYPE','材料子类','设备子类',
+             '设计类型','IFC.OBJECTTYPE','绝缘方式')
+KEYWORD_FIELDS=('SYSCLASSIFYNAME','PARTNAME','COMPONENTTYPE','部件类型')
+TYPE_DEFAULTS=ALIASES['typeDefaults']
+ORDERED_TYPES=ALIASES['orderedTypeValues']
+NEUTRAL_NAMES={'消弧线圈及接地变压器成套装置','消弧线圈/接地变压器成套装置','中性点接地成套装置'}
+NON_TYPES={'','-','—','/','-100','软件自动生成','暂无','无','通用','标准','默认','其他','others','unknown','null','none','notdefined','userdefined'}
+IFC_NONPHYSICAL=re.compile(r'IFC(?:DISTRIBUTIONPORT|PORT|OPENINGELEMENT|OPENINGSTANDARDCASE|ANNOTATION|GRID|VOIDINGFEATURE|FEATUREELEMENT.*|PROJECTIONELEMENT)')
+def term_key(value):return unicodedata.normalize('NFKC',value.strip()).casefold()
+def canonical_type(value):
+    explicit=ORDERED_TYPES.get(term_key(value))
+    if explicit:return explicit
+    if value.strip() in NEUTRAL_NAMES:return 'NeutralPointEquipment'
+    if '/' not in value or resolved_terms(value):return value
+    words=[v.strip() for v in value.split('/')]
+    return words[0] if all(len(resolved_terms(v))==1 for v in words) else value
+def is_type_declaration(value):
+    word=term_key(value)
+    return word not in NON_TYPES and not re.fullmatch(r'[\d\s.+*x×/：:毫米米kva]+',word,re.I)
+def cabinet_model(value):
+    if '保护' in value and '测控' in value:return None
+    measurement=bool(re.search('测控柜|测控屏',value));protection=bool(re.search('保护(?:[ABＡＢ])?[柜屏]',value,re.I))
+    if measurement==protection:return None
+    return 'MeasurementAndControlCabinet' if measurement else 'ProtectionCabinet'
+def ifc_model_type(kind,value):
+    for part in (v.strip() for v in re.split('[:：]',value)):
+        if re.fullmatch('IFCBEAM(?:STANDARDCASE)?',kind) and re.search(r'^(?:钢|steel)$|钢梁',part,re.I):return 'SteelBeam'
+        if re.fullmatch('IFCCOLUMN(?:STANDARDCASE)?',kind) and re.search(r'^(?:钢|steel)$|钢柱',part,re.I):return 'SteelColumn'
+        if re.fullmatch('IFC(?:DUCTSEGMENT|DUCTFITTING|FLOWSEGMENT|FLOWFITTING)',kind) and part.endswith('风管') and '风机' not in part:return 'Airduct'
+        if kind=='IFCBUILDINGELEMENTPROXY':
+            if re.fullmatch(r'(?:户内|户外|室内|室外)?照明箱',part):return 'LightingBox'
+            if re.fullmatch(r'(?:户内|户外|室内|室外)?检修箱(?:模型\d+)?',part):return 'MaintenanceBox'
+            if part=='事故油池':return 'OilPool'
+def align_type_defaults(declarations):
+    if not any(term_key(p['value']) in TYPE_DEFAULTS for p in declarations):return declarations
+    families={i['category'] for d in declarations if term_key(d['value']) not in TYPE_DEFAULTS for i in resolved_terms(d['value'])}
+    result=[]
+    for p in declarations:
+        default=CONTEXTUAL_CATALOG.get(TYPE_DEFAULTS.get(term_key(p['value'])))
+        if not default:result.append(p)
+        elif default['category'] not in families and not (default['catalogCategory']=='开关柜' and 'E17' in families):
+            result.append(dict(p,value=default['term']))
+    return result
+def road_position(type,row):
+    if term_key(type) not in ('road','道路','ifcroad'):return None
+    positions=values(row,'道路位置','围墙关系','STATIONFENCERELATION')
+    mapped={'站内':'StationInRoadWays','围墙内':'StationInRoadWays','inside':'StationInRoadWays',
+            '站外':'StationOutRoadWays','围墙外':'StationOutRoadWays','outside':'StationOutRoadWays'}
+    bounds={mapped.get(term_key(p['value'])) for p in positions}
+    if len(bounds)==1 and None not in bounds:return dict(positions[0],value=next(iter(bounds)))
+
+def interpret(row,has_children=False,equipment_member=False,cabinet_member=False,neutral_assembly=False):
     if not isinstance(row,EvidenceRecord):row=EvidenceRecord(row)
-    type=row['source_type'];props=values(row,'TYPE','类型','模型分类名称','装置名称','DEVICETYPE','EQUIPMENTTYPE','设备类型','设备类别','材料类型','构件类型','MATERIALTYPE','CONSTRUCTIONTYPE','MATERIALSUBTYPE','EQUIPMENTSUBTYPE','材料子类','设备子类','SYSCLASSIFYNAME','PARTNAME','COMPONENTTYPE','部件类型')
-    terminal=luminaire_terminal(row)
+    type='NeutralPointEquipment' if neutral_assembly else canonical_type(row['source_type'])
+    type_props=values(row,*TYPE_FIELDS)
+    keyword_props=values(row,*KEYWORD_FIELDS)
+    type_models=[]
+    model_keys=['屏柜型号','设备型号','型号','MODEL','MODELSPEC']
+    if row.get('track')=='ifc':model_keys.extend(['类型名称','族与类型','族名称','结构材料','结构材质'])
+    for p in values(row,*model_keys):
+        value=p['value'] if resolved_terms(p['value']) else cabinet_model(p['value']) or (ifc_model_type(type,p['value']) if row.get('track')=='ifc' else None)
+        if value:type_models.append(dict(p,value=value))
+    allow_name=not row.get('typeSourcesIncomplete') and not type_models and not any(
+        is_type_declaration(p['value']) for p in type_props if row.get('track')!='dev' or not p.get('path','').lower().endswith('.dev'))
+    allow_name=allow_name and not any(term_key(p['value']) in VOCAB['keywordDictionary']['entries'] or term_key(p['value']) in COMPONENTS for p in keyword_props)
+    terminal=None if cabinet_member else luminaire_terminal(row)
     roles=set()
     for p in values(row,'OBJECTROLE','COMPONENTROLE','对象角色','组件角色'):
         if re.search(r'内部|组成|部件|component|part',p['value'],re.I):roles.add('part')
         if re.search(r'独立|independent',p['value'],re.I):roles.add('independent')
         for role,label in [('source_only','非物理来源'),('detail','细部'),('container','装配容器')]:
             if p['value'].strip().casefold() in (role,label):roles.add(role)
+    if 'independent' in roles:terminal=None
     component_context=equipment_member or 'part' in roles or bool(row.get('declaredHosts')) or bool(values(row,'COMPONENTTYPE','部件类型','所属设备编码','宿主设备编码','HOSTEQUIPMENTID','HOSTEQUIPMENTCODE','PARENTEQUIPMENTID','所属设备名称','所属设备工程中名称','宿主设备名称','HOSTEQUIPMENTNAME','PARENTEQUIPMENTNAME'))
-    raw_declarations=[{'keys':['source_type'],'value':type,'path':row['source'],'line':0},*props]
-    cabinet_type=ALIASES['cabinetTypeWithFamilyName'].get(type.strip().casefold())
-    if cabinet_type and 'part' not in roles:
+    raw_declarations=[{'keys':['source_type'],'value':type,'path':row['source'],'line':0},*type_props,*type_models,*keyword_props]
+    cabinet_types=ALIASES['cabinetTypeWithFamilyName']
+    cabinet_type=next((cabinet_types[term_key(v)] for v in [type,*[p['value'] for p in type_props]] if term_key(v) in cabinet_types),None)
+    if cabinet_type and 'part' not in roles and not type_models:
         cabinet_name=next((p for p in values(row,'屏柜名称') if re.search('[柜屏]',p['value'])),None)
         if cabinet_name:raw_declarations.append(dict(cabinet_name,value=cabinet_type))
-    chinese=[p for p in raw_declarations if re.search('[\u3400-\u9fff]',p['value']) and (resolved_terms(p['value']) or p['value'].strip().casefold() in COMPONENTS)]
-    declarations=chinese or raw_declarations
+    if position:=road_position(type,row):raw_declarations.append(position)
+    resolved=align_type_defaults([dict(p,value='NeutralPointEquipment' if neutral_assembly and term_key(p['value'])==term_key(row['source_type'])
+                                     else canonical_type(p['value'])) for p in raw_declarations])
+    if any(p['value'] in ('MeasurementAndControlCabinet','ProtectionCabinet') for p in type_models):
+        resolved=[p for p in resolved if term_key(p['value']) not in ('secondarycabinet','controlcabinet','二次屏柜','控制柜')]
+    chinese=[p for p in resolved if re.search('[\u3400-\u9fff]',p['value']) and (resolved_terms(p['value']) or p['value'].strip().casefold() in COMPONENTS)]
+    declarations=[p for p in (chinese or resolved) if not terminal or term_key(p['value'])!='led']
     def context_rule(value):return POLICY['contextualModels'].get(POLICY['contextualTerms'].get(value.strip().casefold()),{})
     def ground_word(value):return bool(context_rule(value).get('materialRecognitionCode'))
     needs_hint=any(p['value'].strip().casefold() in COMPONENTS and (len(COMPONENTS[p['value'].strip().casefold()]['componentIds'])>1 or COMPONENTS[p['value'].strip().casefold()].get('defaultComponentId') or resolved_terms(p['value'])) for p in declarations)
-    hint=next((COMPONENTS[p.strip().casefold()] for p in [*[v['value'] for v in values(row,'设备名称','DEVICENAME')],row['name']] if re.search('[\u3400-\u9fff]',p) and p.strip().casefold() in COMPONENTS),None) if needs_hint else None
+    hint=next((COMPONENTS[p.strip().casefold()] for p in [*[v['value'] for v in values(row,'设备名称','DEVICENAME')],row['name']] if re.search('[\u3400-\u9fff]',p) and p.strip().casefold() in COMPONENTS),None) if needs_hint and allow_name else None
     material_rule=next((context_rule(p['value']) for p in declarations if ground_word(p['value'])),None)
     ground_material=bool(material_rule) and (component_context and 'independent' not in roles
         or any(ground_word(p['value']) for p in values(row,'MATERIALTYPE','材料类型'))
@@ -116,7 +186,8 @@ def interpret(row,has_children=False,equipment_member=False):
         p=dict(original);word=p['value'].strip().casefold();items=model_terms(p['value']);part=COMPONENTS.get(word)
         use_part=False
         if part and not ground_word(p['value']) and 'independent' not in roles:
-            if not items or component_context:use_part=True
+            if context_rule(p['value']).get('hostKind')=='cabinet':use_part=cabinet_member
+            elif not items or component_context:use_part=True
             elif context_rule(p['value']):use_part=bool(hint and set(hint['componentIds'])&set(part['componentIds']))
             elif word in POLICY['modelPreferredTerms']:use_part=bool(hint and set(hint['componentIds'])&set(part['componentIds']))
             else:ambiguous_namespace.append(word);continue
@@ -130,15 +201,22 @@ def interpret(row,has_children=False,equipment_member=False):
         if any(k.upper() in ('SYSCLASSIFYNAME','PARTNAME') for k in p['keys']) and not verified(VOCAB['keywordDictionary']['entries'].get(word,{})):p['confidence']='candidate'
         standard.extend((item,p) for item in items)
     if ground_member:component.append((material_rule['componentId'],next(p for p in declarations if ground_word(p['value']))))
+    if allow_name and term_key(type)=='secondarycabinet' and not component:
+        name_props=values(row,'设备名称','DEVICENAME','工程中名称','PROJECTNAME','SYMBOLNAME','NAME','OBJECTNAME','PARTNAME')
+        candidate=next(((p,cabinet_model(p['value'])) for p in [*name_props,{'keys':['Name'],'value':row['name']}]
+                        if cabinet_model(p['value'])),None)
+        if candidate:
+            p,value=candidate;standard=[(item,dict(p,value=value,confidence='candidate')) for item in resolved_terms(value)]
     structured=[(item['recognitionCode'],p) for item,p in standard if p['keys']!=['source_type']]
-    structured += [(category_value(p['value']),p) for p in props if p in declarations and not resolved_terms(p['value']) and not (ground_material and ground_word(p['value'])) and p['value'].strip().casefold() not in COMPONENTS]
+    structured += [(category_value(p['value']),p) for p in declarations if p['keys']!=['source_type'] and not resolved_terms(p['value']) and not (ground_material and ground_word(p['value'])) and p['value'].strip().casefold() not in COMPONENTS]
     structured=[(c,p) for c,p in structured if c not in ('U-OBJECT','part')]
-    typed=material_rule['materialRecognitionCode'] if ground_material else category_value(type)
+    selected_type=next((p['value'] for p in declarations if p['keys']==['source_type']),None)
+    typed=material_rule['materialRecognitionCode'] if ground_material else category_value(selected_type or type)
     if component and not standard and not ground_material:typed='part'
     elif ground_material:typed=material_rule['materialRecognitionCode']
     elif ambiguous_namespace:typed='U-OBJECT'
-    elif not any(p['keys']==['source_type'] for p in declarations) or standard and not resolved_terms(type):typed='U-OBJECT'
-    if not component and not standard and not structured and typed=='U-OBJECT' and not TERMS.get(norm(row['name'])):
+    elif not selected_type or standard and not resolved_terms(selected_type):typed='U-OBJECT'
+    if allow_name and not component and not standard and not structured and typed=='U-OBJECT' and not TERMS.get(norm(row['name'])):
         own=row['name'].strip().casefold();tail=re.split(r'[_－:：]',row['name'])[-1].strip().casefold();hit=COMPONENT_EXPRESSION.search(row['name'])
         word=own if own in COMPONENTS else tail if tail in COMPONENTS else hit[0] if hit else None
         if word:component=[(id,{'keys':['Name'],'value':row['name'],'path':row['source'],'line':0,'confidence':'candidate'}) for id in COMPONENTS[word]['componentIds']]
@@ -148,7 +226,7 @@ def interpret(row,has_children=False,equipment_member=False):
         if enum:typed=enum;structured.append((enum,p))
     if typed=='E01' and type!='E01':typed='E-T'
     meaning='object';category=typed;basis='type' if typed!='U-OBJECT' else 'unknown';status='confirmed' if basis=='type' else 'unresolved'
-    if 'source_only' in roles or re.fullmatch(r'IFC(?:DISTRIBUTIONPORT|PORT|OPENINGELEMENT|OPENINGSTANDARDCASE|ANNOTATION|GRID|VOIDINGFEATURE|FEATUREELEMENT.*)',type):meaning='source_only';category=''
+    if 'source_only' in roles or IFC_NONPHYSICAL.fullmatch(type):meaning='source_only';category=''
     elif 'detail' in roles or type in ('IFCFASTENER','IFCMECHANICALFASTENER'):meaning='detail';category=''
     elif 'container' in roles:meaning='container';category=''
     elif roles=={'part','independent'}:basis='attribute_conflict';category='U-OBJECT'
@@ -162,10 +240,10 @@ def interpret(row,has_children=False,equipment_member=False):
             for c,p in structured:
                 if category=='U-OBJECT' or compatible(category,c):category=c;basis='object_attribute'
                 elif not compatible(c,category):category='U-OBJECT';basis='attribute_conflict';break
-        if basis!='attribute_conflict' and category=='U-OBJECT' and not terminal:
+        if allow_name and basis!='attribute_conflict' and category=='U-OBJECT' and not terminal:
             fallback_name=next((name for name in [*[p['value'] for p in values(row,'设备名称','DEVICENAME','PROJECTNAME','工程中名称')],row['name']] if re.search('[\u3400-\u9fff]',name) and name_category(name)!='U-OBJECT'),row['name'])
             category=name_category(fallback_name);basis='object_name' if category!='U-OBJECT' else 'unknown';status='candidate'
-        if basis=='unknown' and not terminal:
+        if allow_name and basis=='unknown' and not terminal:
             for p in values(row,'设备名称','DEVICENAME','PROJECTNAME','工程中名称'):
                 named=name_category(p['value'])
                 if named!='U-OBJECT':category=named;basis='family_identity_candidate';status='candidate';break
@@ -224,7 +302,12 @@ def normalize(rows,scope):
     for r in rows:
         if r['parent']:children[r['parent']].append(r)
     if len(raw)!=len(rows):raise ValueError('Duplicate source occurrence identity')
-    parents={r['parent'] for r in rows if r['parent']};meanings={r['id']:interpret(r,r['id'] in parents) for r in rows};entities={};pending={};owners={};diagnostics=[];visiting=set();equipment_contexts={}
+    def complete_neutral(row):
+        if not re.fullmatch(r'CompleteSetOfArcSuppressionCoilAndGroundingTransformer|GroundTransformer/ArcExtinguishingCoil',row['source_type'],re.I):return False
+        assembly=[c['source_type']+' '+c['name'] for c in children[row['id']] if c.get('track')=='dev']
+        return any(re.search('GroundTransformer|接地变',v,re.I) for v in assembly) and any(re.search('ArcExtinguishingCoil|消弧线圈',v,re.I) for v in assembly)
+    neutral_assemblies={r['id'] for r in rows if complete_neutral(r)}
+    parents={r['parent'] for r in rows if r['parent'] and not IFC_NONPHYSICAL.fullmatch(r['source_type'])};meanings={r['id']:interpret(r,r['id'] in parents,neutral_assembly=r['id'] in neutral_assemblies) for r in rows};entities={};pending={};owners={};diagnostics=[];visiting=set();equipment_contexts={}
     def entity(seed,category,name,proof,sources):
         id='entity:'+identity([scope,seed]);m=meanings[sources[0]]
         if id in entities:return id
@@ -256,8 +339,15 @@ def normalize(rows,scope):
         if id in visiting:raise ValueError('Source assembly cycle: '+id)
         visiting.add(id);r=raw[id];m=meanings[id];above=assign(r['parent']) if r['parent'] in raw else None;cat=entities.get(above,{}).get('category');role={p['value'].casefold() for p in values(r,'OBJECTROLE','对象角色','COMPONENTROLE','组件角色')};independent=bool(role&{'independent','独立'})
         parent_meaning=meanings.get(r['parent']);parent_equipment=equipment_contexts.get(r['parent'],False) or bool(parent_meaning and declared_equipment(parent_meaning))
-        if parent_equipment and not independent and any(p['value'].strip().casefold() in POLICY['contextualTerms'] for p in [{'value':r['source_type']},*values(r,'TYPE','类型','模型分类名称','装置名称','DEVICETYPE','EQUIPMENTTYPE','MATERIALTYPE','SYSCLASSIFYNAME','PARTNAME','设备类型','设备类别','材料类型','材料子类','MATERIALSUBTYPE','设备子类','EQUIPMENTSUBTYPE','COMPONENTTYPE','部件类型')]):
-            m=interpret(r,id in parents,equipment_member=True);meanings[id]=m
+        if parent_equipment and not independent:
+            host_class=(entities.get(above,{}).get('standardClass') or {}).get('catalogCategory')
+            cabinet=host_class in ('二次屏柜','开关柜')
+            contextual=POLICY['contextualTerms']
+            models=POLICY['contextualModels']
+            if any(key in contextual and (cabinet or models[contextual[key]].get('hostKind')!='cabinet')
+                   for key in [term_key(canonical_type(r['source_type'])),*[term_key(canonical_type(p['value'])) for p in values(r,*TYPE_FIELDS,*KEYWORD_FIELDS)]]):
+                m=interpret(r,id in parents,equipment_member=True,cabinet_member=cabinet,neutral_assembly=id in neutral_assemblies)
+                meanings[id]=m
         if m['basis']=='attribute_conflict':bundle(id,'object_attributes_conflict')
         elif (above in entities and not independent and not m.get('conflict') and m['meaning']=='object'
               and m['category']=='U-OBJECT' and r.get('track')=='dev'
@@ -284,6 +374,9 @@ def normalize(rows,scope):
         elif above and parent_equipment and unclassified_assembly_candidate(r,m):
             owners[id]=above;m['meaning']='part';m['membershipStatus']='candidate';m['basis']='unclassified_equipment_assembly_member'
             m['membershipEvidence']=['assembly:'+r['parent']+'->'+id,'policy:'+COMPOSITION['version']+':unclassified-assembly-member']
+            if r.get('cbmAssemblyEvidence'):
+                m['membershipStatus']='confirmed'
+                m['membershipEvidence'].append(r['cbmAssemblyEvidence'])
         elif m['meaning']=='part':
             if m.get('componentType') and m['componentType']['status']!='confirmed' and not role&{'part','内部部件','部件'}:bundle(id,'component_type_unresolved');m['membershipStatus']='unresolved'
             elif above:owners[id]=above;m['membershipStatus']='confirmed'
@@ -326,6 +419,7 @@ def normalize(rows,scope):
         resolved=[v for v in constraints if v];conflicting=len(resolved)>1 and not set.intersection(*(set(v) for v in resolved))
         if len(candidates)==1:
             target=next(iter(candidates))
+            if m['basis']=='luminaire_terminal_assembly' and target==owners.get(id):continue
             if not explicit and m['meaning']=='object' and target==owners.get(id):continue
             previous=owners.get(id)
             composition_conflict=previous in entities and previous!=target and m.get('membershipStatus')=='confirmed' and bool(r['parent'])

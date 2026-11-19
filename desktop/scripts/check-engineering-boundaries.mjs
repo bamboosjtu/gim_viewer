@@ -170,7 +170,7 @@ for (const [layer,sourceRoot] of [...['engineering','gim','viewer','ui','service
 // runtime entry remains legal (for example IFC starting DEV LOD).
 const runtimeFamilies = [
   ['substationRuntime', 'substationPresentation', 'substationRuntimeTelemetry', 'substationSpatialRuntime',
-    'substationDocumentRuntime', 'substationIfcRuntime', 'substationDevRuntime', 'substationLoadingState'],
+    'substationDocumentRuntime', 'substationIfcRuntime', 'substationIfcSource', 'substationDevRuntime', 'substationLoadingState'],
   ['devLodRuntime', 'devLodTemplateStore', 'devLodArtifactWriter', 'devLodSourceWorkset',
     'devLodReadiness', 'devLodDiagnostics', 'devLodTypes'],
 ];
@@ -202,6 +202,7 @@ for (const family of runtimeFamilies) {
 // Whole-source static value graph. Dynamic and type dependencies are counted,
 // but cannot create an eager module-initialization cycle by themselves.
 const all=[...files(root),...files(resolve(root,'../bridge')),...files(sdkRoot)], graph=new Map(all.map(path=>[path,new Set()]));
+const eagerRenderImports = new Map();
 let typeEdges=0,dynamicEdges=0;
 for(const path of all){
  const ast=ts.createSourceFile(path,readFileSync(path,'utf8'),ts.ScriptTarget.Latest,true);
@@ -223,17 +224,34 @@ for(const path of all){
       observedSdkInternalImports.set(localPath, observed);
     }
   }
-  if(specifier&&ts.isStringLiteral(specifier)&&specifier.text.startsWith('.')){
-   const target=resolve(dirname(path),specifier.text.replace(/\.js$/,'.ts'));
+  if(specifier&&ts.isStringLiteral(specifier)){
+   const name=specifier.text;
    const clause=ts.isImportDeclaration(node)?node.importClause:undefined;
    const typeOnly=node.isTypeOnly||clause?.isTypeOnly||
      (clause&&!clause.name&&clause.namedBindings&&ts.isNamedImports(clause.namedBindings)&&clause.namedBindings.elements.every(item=>item.isTypeOnly));
-   if(dynamic)dynamicEdges++;else if(typeOnly)typeEdges++;else if(graph.has(target))graph.get(path).add(target);
+   if(name.startsWith('.')){
+    const target=resolve(dirname(path),name.replace(/\.js$/,'.ts'));
+    if(dynamic)dynamicEdges++;else if(typeOnly)typeEdges++;else if(graph.has(target))graph.get(path).add(target);
+   }else if(!dynamic&&!typeOnly&&/^(?:three|web-ifc|maplibre-gl|@thatopen\/(?:components|fragments))(?:\/|$)/.test(name)){
+    const dependencies=eagerRenderImports.get(path)??[];
+    dependencies.push(name);
+    eagerRenderImports.set(path,dependencies);
+   }
   }
   ts.forEachChild(node,scan);
  };scan(ast);
 }
 failures.push(...staleSdkImportExceptions(sdkInternalImports, observedSdkInternalImports));
+for (const entry of ['main.ts','services/openGimService.ts']) {
+  const pending=[resolve(root,entry)], visited=new Set();
+  for (const path of pending) {
+    if(visited.has(path))continue;
+    visited.add(path);
+    for(const name of eagerRenderImports.get(path)??[])
+      failures.push(`${entry}: eager renderer dependency ${name} through ${relative(root,path)}`);
+    pending.push(...(graph.get(path)??[]));
+  }
+}
 for (const cycle of dependencyCycles(graph)) {
   failures.push(`Static value cycle: ${cycle.map(path => relative(root, path)).join(' -> ')}`);
 }

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import {it,expect} from 'vitest';
-import {extractEngineeringSourceGraph} from '@gim/gim-sdk/gim/engineering/sourceGraph.js';
+import {extractEngineeringSourceGraph} from '@gim/gim-sdk/source';
 import {assembleEngineeringView,assembleStoredEngineeringView} from '../engineeringAssembly.js';
 import {collectSourceGeometryOccurrences} from '@gim/gim-sdk/geometry';
 import {encodeEngineeringSources,decodeEngineeringSources} from '../engineeringCacheCodec.js';

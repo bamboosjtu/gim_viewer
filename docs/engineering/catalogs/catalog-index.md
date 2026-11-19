@@ -104,15 +104,16 @@
 | M07 | 电缆及其附件 | 电缆 | Cable | 材料模型索引表!B32:D32 |  |
 | M07 | 电缆及其附件 | 电缆终端 | CableTermination | 材料模型索引表!B33:D33 |  |
 | M07 | 电缆及其附件 | 电缆辅助设施/电缆桥架/桥架 | CableAuxiliaryFacilities | 材料模型索引表!B34:D34 |  |
-| M08 | 防火材料 | 电缆沟防火墙 | CableDitchFireWall | 材料模型索引表!B35:D35 |  |
-| M09 | 安装材料 | 槽钢 | USteel | 材料模型索引表!B36:D36 |  |
-| M09 | 安装材料 | 角钢 | AngleSteel | 材料模型索引表!B37:D37 |  |
-| M09 | 安装材料 | 工字钢 | IBeam | 材料模型索引表!B38:D38 |  |
-| M09 | 安装材料 | 钢板 | SteelSheet | 材料模型索引表!B39:D39 |  |
-| M09 | 安装材料 | 金属围栏 | MetalFence | 材料模型索引表!B40:D40 |  |
-| M09 | 安装材料 | 电气埋管 | ElectricBuriedPipe | 材料模型索引表!B41:D41 |  |
-| M10 | 水暖材料 | 风管 | Airduct | 材料模型索引表!B42:D42 |  |
-| M10 | 水暖材料 | 水管 | Plumbing | 材料模型索引表!B43:D43 |  |
+| M07 | 电缆及其附件 | 电缆附件 | CableAccessories | 材料模型索引表!B35:D35 | 是 |
+| M08 | 防火材料 | 电缆沟防火墙 | CableDitchFireWall | 材料模型索引表!B36:D36 |  |
+| M09 | 安装材料 | 槽钢 | USteel | 材料模型索引表!B37:D37 |  |
+| M09 | 安装材料 | 角钢 | AngleSteel | 材料模型索引表!B38:D38 |  |
+| M09 | 安装材料 | 工字钢 | IBeam | 材料模型索引表!B39:D39 |  |
+| M09 | 安装材料 | 钢板 | SteelSheet | 材料模型索引表!B40:D40 |  |
+| M09 | 安装材料 | 金属围栏 | MetalFence | 材料模型索引表!B41:D41 |  |
+| M09 | 安装材料 | 电气埋管 | ElectricBuriedPipe | 材料模型索引表!B42:D42 |  |
+| M10 | 水暖材料 | 风管 | Airduct | 材料模型索引表!B43:D43 |  |
+| M10 | 水暖材料 | 水管 | Plumbing | 材料模型索引表!B44:D44 |  |
 
 ## 构件
 
@@ -189,23 +190,25 @@
 | 操作机构箱 | OperatingMechanismBox | 设备模型部件名称对照表!B25:C25 |
 | 汇控柜 | ControlCabinet | 设备模型部件名称对照表!B26:C26 |
 | 中控箱 | CentralControlBox | 设备模型部件名称对照表!B27:C27 |
-| 示意分合指示器 | OnOffIndicator | 设备模型部件名称对照表!B28:C28 |
-| 并联电阻 | ParallelResistance | 设备模型部件名称对照表!B29:C29 |
-| 箱体 | Cabinet | 设备模型部件名称对照表!B30:C30 |
-| 接地电阻 | GroundResistance | 设备模型部件名称对照表!B31:C31 |
-| 网栏 | Gridding | 设备模型部件名称对照表!B32:C32 |
-| 装置 | DevicesInCubicle | 设备模型部件名称对照表!B33:C33 |
-| 计数器/在线检测仪 | Counter/OnlineMonitor | 设备模型部件名称对照表!B34:C34 |
-| 电容器单元 | CapacitorUnit | 设备模型部件名称对照表!B35:C35 |
-| 阻尼电抗器 | DampedReactor | 设备模型部件名称对照表!B36:C36 |
-| 不平衡电流互感器 | ImbalanceDTA | 设备模型部件名称对照表!B37:C37 |
-| 阀组 | ValveGroup | 设备模型部件名称对照表!B38:C38 |
-| 网侧套管 | GridSideBushing | 设备模型部件名称对照表!B39:C39 |
-| 阀侧套管 | ValveSideBushing | 设备模型部件名称对照表!B40:C40 |
-| 放电间隙 | SparkGap | 设备模型部件名称对照表!B41:C41 |
-| 相控电抗器 | Tcrgd | 设备模型部件名称对照表!B42:C42 |
-| 二次屏柜柜内装置 | Devices | 设备模型部件名称对照表!B43:C43 |
-| 保护装置 | ProtectionDevice | 设备模型部件名称对照表!B44:C44 |
-| 保护设备 | ProtectiveDevice | 设备模型部件名称对照表!B45:C45 |
-| 线路保护装置 | ProtectionEquipment | 设备模型部件名称对照表!B46:C46 |
-| 变压器保护装置 | ProtectionEquipment | 设备模型部件名称对照表!B47:C47 |
+| 动力箱 | PowerBox | 设备模型部件名称对照表!B28:C28 |
+| 示意分合指示器 | OnOffIndicator | 设备模型部件名称对照表!B29:C29 |
+| 并联电阻 | ParallelResistance | 设备模型部件名称对照表!B30:C30 |
+| 箱体 | Cabinet | 设备模型部件名称对照表!B31:C31 |
+| 接地电阻 | GroundResistance | 设备模型部件名称对照表!B32:C32 |
+| 网栏 | Gridding | 设备模型部件名称对照表!B33:C33 |
+| 装置 | DevicesInCubicle | 设备模型部件名称对照表!B34:C34 |
+| 计数器/在线检测仪 | Counter/OnlineMonitor | 设备模型部件名称对照表!B35:C35 |
+| 电容器单元 | CapacitorUnit | 设备模型部件名称对照表!B36:C36 |
+| 阻尼电抗器 | DampedReactor | 设备模型部件名称对照表!B37:C37 |
+| 不平衡电流互感器 | ImbalanceDTA | 设备模型部件名称对照表!B38:C38 |
+| 阀组 | ValveGroup | 设备模型部件名称对照表!B39:C39 |
+| 网侧套管 | GridSideBushing | 设备模型部件名称对照表!B40:C40 |
+| 阀侧套管 | ValveSideBushing | 设备模型部件名称对照表!B41:C41 |
+| 放电间隙 | SparkGap | 设备模型部件名称对照表!B42:C42 |
+| 相控电抗器 | Tcrgd | 设备模型部件名称对照表!B43:C43 |
+| 二次屏柜柜内装置 | Devices | 设备模型部件名称对照表!B44:C44 |
+| 保护装置 | ProtectionDevice | 设备模型部件名称对照表!B45:C45 |
+| 保护设备 | ProtectiveDevice | 设备模型部件名称对照表!B46:C46 |
+| 线路保护装置 | ProtectionEquipment | 设备模型部件名称对照表!B47:C47 |
+| 变压器保护装置 | ProtectionEquipment | 设备模型部件名称对照表!B48:C48 |
+| 柜内LED部件 | LED | 设备模型部件名称对照表!B49:C49 |

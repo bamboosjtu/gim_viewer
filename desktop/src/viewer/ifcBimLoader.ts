@@ -1,4 +1,5 @@
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
+import { logger } from '../utils/logger.js';
 import type { ViewerContext } from './viewerEngine.js';
 import type { ViewerState as AppState } from '../shared/viewerState.js';
 import type { ProjectLoadSession } from '../shared/projectSession.js';
@@ -12,7 +13,6 @@ import {
 import { IfcRegionalRuntime } from './ifcRegionalRuntime.js';
 import type { RegionalIndex } from './ifcRegionalData.js';
 import type { IfcRegionalConnectionBatch } from './ifcConversion.js';
-import { CONNECTION_GEOMETRY_VERSION, validConnectionArtifact, type ConnectionGeometryArtifact } from './ifcConnectionBatches.js';
 import { removeModHighlightGroup } from './highlight.js';
 import { syncIfcRepresentationHighlight } from './ifcRepresentationHighlight.js';
 import { readIfcCoordinateAnchor } from './ifcCoordinateAnchor.js';
@@ -20,7 +20,14 @@ interface FarArtifact {
   bytes: ArrayBuffer;
   index: RegionalIndex;
 }
-export type IfcLoadStage = 'checking-cache' | 'lod-cache-hit' | 'cold-convert' | 'far-ready' | 'cache-write-start' | 'cache-written' | 'cache-write-failed';
+export type IfcLoadStage =
+  | 'checking-cache'
+  | 'lod-cache-hit'
+  | 'cold-convert'
+  | 'far-ready'
+  | 'cache-write-start'
+  | 'cache-written'
+  | 'cache-write-failed';
 export interface IfcFileProfile {
   path: string;
   bytes: number;
@@ -47,11 +54,15 @@ export async function loadBimIfc(
     onProfile?: (profile: IfcFileProfile) => void;
     onRegionalBatch?: (batch: IfcRegionalConnectionBatch) => void;
     onRegionalComplete?: (meta: { objectCount: number; sequence: number }) => void;
-  } = {}
+  } = {},
 ) {
   const current = () => state.isCurrentSession(session);
   const discardModel = async (): Promise<void> => {
-    try { await ctx.fragments.core.disposeModel(runtimeId); } catch { /* Already disposed by session cleanup. */ }
+    try {
+      await ctx.fragments.core.disposeModel(runtimeId);
+    } catch {
+      /* Already disposed by session cleanup. */
+    }
   };
   const startedAt = performance.now();
   let cacheReadMs = 0;
@@ -66,25 +77,22 @@ export async function loadBimIfc(
     if (!input || !current()) return;
     // The reread provider is checked separately by the regional Worker. Only
     // carry this digest forward with the same privately owned initial bytes.
-    const bytes = input.buffer instanceof ArrayBuffer
-      ? new Uint8Array(input.buffer, input.byteOffset, input.byteLength)
-      : (input = new Uint8Array(input));
-    sourceSha256 = [
-      ...new Uint8Array(
-        await crypto.subtle.digest('SHA-256', bytes)
-      ),
-    ]
+    const bytes =
+      input.buffer instanceof ArrayBuffer
+        ? new Uint8Array(input.buffer, input.byteOffset, input.byteLength)
+        : (input = new Uint8Array(input));
+    sourceSha256 = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))]
       .map((v) => v.toString(16).padStart(2, '0'))
       .join('');
     identity = sourceSha256;
     if (!current()) return;
   }
   const key = `${IFC_LOD_CACHE_VERSION}|${identity}|${path.toLowerCase()}`;
-  const connectionKey = `${key}|near-templates-v${CONNECTION_GEOMETRY_VERSION}|0`;
   const cacheStarted = performance.now();
-  let artifact = await readIfcLodArtifact<FarArtifact>(key),
-    model: any,
-    hit = false;
+  let artifact = await readIfcLodArtifact<FarArtifact>(key);
+  let model: Awaited<ReturnType<ViewerContext['fragments']['core']['load']>> | null | undefined;
+  let hit = false;
+  let restoredBytes = 0;
   cacheReadMs = performance.now() - cacheStarted;
   if (!current()) return;
   if (
@@ -95,27 +103,30 @@ export async function loadBimIfc(
   ) {
     try {
       ctx.fragments.core.settings.autoCoordinate = true;
-      model = await ctx.fragments.core.load(artifact.bytes.slice(0), {
+      // IndexedDB returns an owned clone. Fragments may transfer it to its
+      // Worker; only the index and original byte count are needed afterward.
+      restoredBytes = artifact.bytes.byteLength;
+      model = await ctx.fragments.core.load(artifact.bytes, {
         modelId: runtimeId,
       });
-      const connections = await readIfcLodArtifact<ConnectionGeometryArtifact>(connectionKey);
-      if (!current()) { await discardModel(); return; }
-      if (connections && !validConnectionArtifact(connections)) await deleteIfcLodArtifact(connectionKey);
-      if (validConnectionArtifact(connections)) {
-        for (const batch of connections.batches) {
-          if (!current()) { await discardModel(); return; }
-          options.onRegionalBatch?.(batch);
-          await new Promise<void>(resolve => setTimeout(resolve, 0));
-        }
-        if (!current()) { await discardModel(); return; }
-        options.onRegionalComplete?.(connections.complete);
+      if (!current()) {
+        await discardModel();
+        return;
       }
+      // The authoritative model is loaded. Connection previews are only useful
+      // while conversion is in progress, so there is no mesh replay on a hit.
       hit = true;
-      options.onStage?.('lod-cache-hit', { path, bytes: artifact.bytes.byteLength, readMs: Math.round(cacheReadMs) });
-
+      options.onStage?.('lod-cache-hit', {
+        path,
+        bytes: restoredBytes,
+        readMs: Math.round(cacheReadMs),
+      });
     } catch {
-      try { await ctx.fragments.core.disposeModel(runtimeId); }
-      catch { /* A rejected load may not have registered a model. */ }
+      try {
+        await ctx.fragments.core.disposeModel(runtimeId);
+      } catch {
+        /* A rejected load may not have registered a model. */
+      }
       await deleteIfcLodArtifact(key);
       artifact = null;
       model = null;
@@ -124,15 +135,11 @@ export async function loadBimIfc(
   if (!model) {
     artifact = null;
     options.onStage?.('cold-convert', { path });
-    input ??= await readBytes();
-    if (!input || !current()) return;
-    const connectionArtifact: ConnectionGeometryArtifact = { version: CONNECTION_GEOMETRY_VERSION, batches: [], complete: { objectCount: -1, sequence: -1 } };
-    let connectionBytes = 0;
     model = await loadRawIfc(
       ctx,
       state,
       session,
-      input,
+      input ?? readBytes,
       runtimeId,
       path,
       onProgress,
@@ -141,53 +148,72 @@ export async function loadBimIfc(
         transferInput: true,
         openingPolicy: 'bim-lod',
         sourceSha256,
-        onConversionStage: stage => options.onStage?.('cold-convert', { path, phase: ({
-          'source-hash': '校验来源', 'early-connection': '连接预览已提交',
-          'wasm-init': '读取模型', 'source-open': '生成浏览表示',
-        } as Record<string,string>)[stage] ?? '生成浏览表示' }),
+        onConversionStage: (stage) =>
+          options.onStage?.('cold-convert', {
+            path,
+            phase:
+              (
+                {
+                  'source-hash': '校验来源',
+                  'early-connection': '连接预览已提交',
+                  'wasm-init': '读取模型',
+                  'source-open': '生成浏览表示',
+                } as Record<string, string>
+              )[stage] ?? '生成浏览表示',
+          }),
         onFarArtifact: (bytes, index) => {
           artifact = { bytes: bytes.slice().buffer, index };
         },
-        onRegionalBatch: batch => {
-          connectionBytes += batch.bytes;
-          if (connectionBytes <= 48 * 1024 * 1024) connectionArtifact.batches.push(batch);
-          else connectionArtifact.batches = [];
-          options.onRegionalBatch?.(batch);
-        },
-        onRegionalComplete: meta => { connectionArtifact.complete = meta; options.onRegionalComplete?.(meta); },
-      }
+        onRegionalBatch: options.onRegionalBatch,
+        onRegionalComplete: options.onRegionalComplete,
+      },
     );
     if (!model || !artifact || !current()) {
-      if (model) void Promise.resolve(ctx.fragments.core.disposeModel(runtimeId)).catch(reportBackgroundError);
+      if (model)
+        void Promise.resolve(ctx.fragments.core.disposeModel(runtimeId)).catch(
+          reportBackgroundError,
+        );
       return;
     }
     // Return the usable far model immediately. Persisting the derived far
     // artifact is a cache concern; it must not become part of first-usable.
     const cached = artifact as FarArtifact;
-    // Independent optional derived domain. No receipt or partial stream is
-    // written on interruption; oversized streams remain usable in memory.
-    if (current() && validConnectionArtifact(connectionArtifact)) void Promise.resolve(writeIfcLodArtifact(connectionKey, connectionArtifact)).catch(reportBackgroundError);
     const writeStarted = performance.now();
     options.onStage?.('cache-write-start', { path, bytes: cached.bytes.byteLength });
-    void Promise.resolve(writeIfcLodArtifact(key, cached)).then((result) => {
-      const ok = (result as { ok?: boolean } | undefined)?.ok !== false;
-      cacheWriteOk = ok;
-      cacheWriteMs = performance.now() - writeStarted;
-      options.onStage?.(ok ? 'cache-written' : 'cache-write-failed', {
-        path, ms: Math.round(cacheWriteMs),
-        ...(ok ? {} : { error: (result as { error?: string } | undefined)?.error ?? 'cache write failed' }),
+    void Promise.resolve(writeIfcLodArtifact(key, cached))
+      .then((result) => {
+        const ok = (result as { ok?: boolean } | undefined)?.ok !== false;
+        cacheWriteOk = ok;
+        cacheWriteMs = performance.now() - writeStarted;
+        options.onStage?.(ok ? 'cache-written' : 'cache-write-failed', {
+          path,
+          ms: Math.round(cacheWriteMs),
+          ...(ok
+            ? {}
+            : { error: (result as { error?: string } | undefined)?.error ?? 'cache write failed' }),
+        });
+      })
+      .catch((error) => {
+        cacheWriteOk = false;
+        cacheWriteMs = performance.now() - writeStarted;
+        options.onStage?.('cache-write-failed', {
+          path,
+          error: String(error),
+          ms: Math.round(cacheWriteMs),
+        });
+      })
+      .finally(() => {
+        options.onProfile?.({
+          path,
+          bytes: cached.bytes.byteLength,
+          source: 'ifc',
+          cacheHit: false,
+          cacheReadMs: Math.round(cacheReadMs),
+          loadMs: Math.round(performance.now() - startedAt),
+          cacheWriteMs: cacheWriteMs == null ? null : Math.round(cacheWriteMs),
+          cacheWriteOk,
+        });
       });
-    }).catch((error) => {
-      cacheWriteOk = false;
-      cacheWriteMs = performance.now() - writeStarted;
-      options.onStage?.('cache-write-failed', { path, error: String(error), ms: Math.round(cacheWriteMs) });
-    }).finally(() => {
-      options.onProfile?.({
-        path, bytes: cached.bytes.byteLength, source: 'ifc', cacheHit: false,
-        cacheReadMs: Math.round(cacheReadMs), loadMs: Math.round(performance.now() - startedAt),
-        cacheWriteMs: cacheWriteMs == null ? null : Math.round(cacheWriteMs), cacheWriteOk,
-      });
-    });
   }
   if (!current()) {
     void Promise.resolve(ctx.fragments.core.disposeModel(runtimeId)).catch(reportBackgroundError);
@@ -198,20 +224,24 @@ export async function loadBimIfc(
   options.onStage?.('far-ready', { path, source: hit ? 'lod-cache' : 'ifc' });
   if (hit) {
     options.onProfile?.({
-      path, bytes: artifact?.bytes.byteLength ?? 0, source: 'lod-cache', cacheHit: true,
-      cacheReadMs: Math.round(cacheReadMs), loadMs: Math.round(performance.now() - startedAt),
-      cacheWriteMs: null, cacheWriteOk: null,
+      path,
+      bytes: restoredBytes,
+      source: 'lod-cache',
+      cacheHit: true,
+      cacheReadMs: Math.round(cacheReadMs),
+      loadMs: Math.round(performance.now() - startedAt),
+      cacheWriteMs: null,
+      cacheWriteOk: null,
     });
   }
   let baseModel = ctx.fragments.list.get(ctx.fragments.baseCoordinationModel);
   for (let frame = 0; !baseModel && frame < 60 && current(); frame++) {
-    await new Promise<void>((resolve) =>
-      requestAnimationFrame(() => resolve())
-    );
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     baseModel = ctx.fragments.list.get(ctx.fragments.baseCoordinationModel);
   }
   if (!baseModel || !current()) {
-    if (!current()) void Promise.resolve(ctx.fragments.core.disposeModel(runtimeId)).catch(reportBackgroundError);
+    if (!current())
+      void Promise.resolve(ctx.fragments.core.disposeModel(runtimeId)).catch(reportBackgroundError);
     else throw Error('IFC coordinate anchor unavailable');
     return;
   }
@@ -230,14 +260,28 @@ export async function loadBimIfc(
     sourceToViewer: base.clone(),
     fineQueue: state.substationFineQueue,
     visibility: state.selection.selectionVisibility?.registerModel(logicalId, model),
-    onBeforeDisposeGroup:group=>removeModHighlightGroup(state,group),
-    onRepresentationChanged:(object,group,localId,isCurrent,prepareHighlight)=>syncIfcRepresentationHighlight(
-      ctx,state,runtimeId,logicalId,object,group,localId,isCurrent,prepareHighlight),
+    onBeforeDisposeGroup: (group) => removeModHighlightGroup(state, group),
+    onRepresentationChanged: (object, group, localId, isCurrent, prepareHighlight) =>
+      syncIfcRepresentationHighlight(
+        ctx,
+        state,
+        runtimeId,
+        logicalId,
+        object,
+        group,
+        localId,
+        isCurrent,
+        prepareHighlight,
+      ),
   });
   runtime.setMemoryPressure?.(state.substationMemoryPressure);
   runtime.setOnlySelected?.(state.selection.onlySelected);
   state.ifc.regionalRuntimes.set(logicalId, runtime);
   state.engineeringGeometryEvidenceChanged?.();
-  void Promise.resolve(state.selection.selectionVisibility?.sync().catch(error => console.warn('[Selection visibility]', error))).catch(reportBackgroundError);
+  void Promise.resolve(
+    state.selection.selectionVisibility
+      ?.sync()
+      .catch((error) => logger.warn('[Selection visibility]', error)),
+  ).catch(reportBackgroundError);
   return model;
 }

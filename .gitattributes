@@ -1,44 +1,11 @@
-# 自动识别文本文件
-* text=auto
+# Windows working copies use CRLF; Git stores normalized text.
+* text=auto eol=crlf
 
-# Tauri rewrites this manifest as LF. Keep checkout bytes stable for build attestation.
+# Tauri rewrites Cargo.toml as LF. The Android wrapper runs as a POSIX script.
 /desktop/src-tauri/Cargo.toml text eol=lf
+/app/src-tauri/gen/android/gradlew text eol=lf
 
-# Formatter-adopted modules stay identical on Windows checkout.
-/desktop/src/utils/logger.ts text eol=lf
-/desktop/src/utils/backgroundErrors.ts text eol=lf
-/desktop/src/shared/projectViewState.ts text eol=lf
-/desktop/src/shared/sourceGeometryState.ts text eol=lf
-/desktop/src/shared/ifcLoadingState.ts text eol=lf
-/desktop/src/services/ifcSelectionProjection.ts text eol=lf
-/desktop/src/services/*PresentationPort.ts text eol=lf
-/desktop/src/services/sourceGeometryService.ts text eol=lf
-/desktop/src/services/projectPropertyCache.ts text eol=lf
-/desktop/src/services/lineAttrRestoreService.ts text eol=lf
-/desktop/src/app/state.ts text eol=lf
-
-# Preserve existing CRLF blobs outside the formatting scope; retain space/tab checks.
+# Retain space/tab checks for existing CRLF blobs in the repository.
 /desktop/src/gim/substationEvidence.ts whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 /desktop/src/gim/__tests__/substationEvidence.test.ts whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 /desktop/src/services/__tests__/selectionInteraction.test.ts whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
-
-# PowerShell 脚本统一使用 crlf
-*.ps1 text eol=crlf
-
-/desktop/src/shared/projectSelectionState.ts text eol=lf
-/desktop/src/shared/ifcRuntimeState.ts text eol=lf
-/desktop/src/shared/runtimeSlot.ts text eol=lf
-/desktop/src/shared/sessionScope.ts text eol=lf
-/desktop/src/shared/viewerState.ts text eol=lf
-/desktop/src/services/selectionVisibility.ts text eol=lf
-/desktop/src/services/ifcNameIndex.ts text eol=lf
-/desktop/src/shared/selectionContracts.ts text eol=lf
-/packages/gim-sdk/src/shared/designation.ts text eol=lf
-/packages/gim-sdk/src/shared/sourceRecord.ts text eol=lf
-/packages/gim-sdk/src/shared/representationAddresses.ts text eol=lf
-/packages/gim-sdk/src/engineering/catalogClassification.ts text eol=lf
-/packages/gim-sdk/src/engineering/query.ts text eol=lf
-/packages/gim-sdk/src/gim/engineering/sourceRecordSelectors.ts text eol=lf
-/packages/gim-sdk/src/gim/engineering/compositionContexts.ts text eol=lf
-/packages/gim-sdk/src/gim/engineering/navigation.ts text eol=lf
-/packages/gim-sdk/src/gim/engineering/sourceProjection.ts text eol=lf

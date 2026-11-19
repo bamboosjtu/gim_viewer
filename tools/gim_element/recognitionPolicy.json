@@ -1211,7 +1211,8 @@
     "relayprotectioncabinet": "E16.panel_cabinet",
     "powerbox": "M12",
     "lightingbox": "M12",
-    "maintenancebox": "M12"
+    "maintenancebox": "M12",
+    "cableaccessories": "M08"
   },
   "componentIds": {
     "body": "body",
@@ -1278,7 +1279,10 @@
     "terminalbox": "material:terminalbox",
     "groundresistance": "equipment:groundresistance",
     "端子箱": "material:terminalbox",
-    "接地电阻": "equipment:groundresistance"
+    "接地电阻": "equipment:groundresistance",
+    "powerbox": "material:powerbox",
+    "led": "material:lamps",
+    "动力箱": "material:powerbox"
   },
   "contextualModels": {
     "material:terminalbox": {
@@ -1291,6 +1295,13 @@
       "materialTerms": [
         "接地电阻"
       ]
+    },
+    "material:powerbox": {
+      "componentId": "power_box"
+    },
+    "material:lamps": {
+      "componentId": "cabinet_led",
+      "hostKind": "cabinet"
     }
   },
   "catalogRoles": {

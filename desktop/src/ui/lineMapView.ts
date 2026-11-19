@@ -1,9 +1,38 @@
-import { paintEmptyHint, paintBorder, paintGrid, paintLegend, paintScaleBar, COLOR_BG, COLOR_TOWER_STRAIGHT, COLOR_TOWER_STRAIGHT_FILL, COLOR_TOWER_TENSION, COLOR_TOWER_TENSION_FILL, COLOR_CROSS, COLOR_LABEL, WIRE_COLORS, WIRE_COLOR_UNKNOWN } from './lineMapBackground.js';
+import {
+  paintEmptyHint,
+  paintBorder,
+  paintGrid,
+  paintLegend,
+  paintScaleBar,
+  COLOR_BG,
+  COLOR_TOWER_STRAIGHT,
+  COLOR_TOWER_STRAIGHT_FILL,
+  COLOR_TOWER_TENSION,
+  COLOR_TOWER_TENSION_FILL,
+  COLOR_CROSS,
+  COLOR_LABEL,
+  WIRE_COLORS,
+  WIRE_COLOR_UNKNOWN,
+} from './lineMapBackground.js';
 import { nearestTower, nearestWire } from '../services/lineMapHitTesting.js';
 import { mountLineMapControls, LAYER_ITEMS, type LayerState } from './lineMapControls.js';
-import { wireLayerKey, wireScreenPoints, isTensionTower, towerLabel } from '../services/lineMapGeometry.js';
-import { lineMapStageBatchSize, runLineMapStageSlice, type LineMapStage } from '../services/lineMapStages.js';
-import { prepareLineMapGeometry, clamp, type RuntimeGeoPoint, type RuntimeWire } from '../services/lineMapGeometry.js';
+import {
+  wireLayerKey,
+  wireScreenPoints,
+  isTensionTower,
+  towerLabel,
+} from '../services/lineMapGeometry.js';
+import {
+  lineMapStageBatchSize,
+  runLineMapStageSlice,
+  type LineMapStage,
+} from '../services/lineMapStages.js';
+import {
+  prepareLineMapGeometry,
+  clamp,
+  type RuntimeGeoPoint,
+  type RuntimeWire,
+} from '../services/lineMapGeometry.js';
 /**
  * M3-5：线路工程地图渲染层（纯 UI/DOM，Canvas 2D）。
  *
@@ -34,8 +63,9 @@ import type { GimGraphNode } from '@gim/powerline-core/gimGraphTypes.js';
 import type { LineMapProjection } from './lineMapProjection.js';
 import { ENABLE_CATENARY } from '../config/features.js';
 import { perfBegin, perfCurrentSession, perfMark, type PerfSession } from '../utils/perfTimings.js';
-import { escapeHtml } from '../shared/html.js';
-
+import { bindLineMapCanvasInput } from './lineMapCanvasInput.js';
+import { createLineMapTooltip } from './lineMapTooltip.js';
+import { logger } from '../utils/logger.js';
 
 // ---------------------------------------------------------------------------
 // 常量
@@ -92,32 +122,23 @@ export interface RenderLineMapOptions {
 
 /** 导线类型颜色 */
 
-
 const WIRE_WIDTH = 1.5;
 /** M4-B2：导线样式增强常量 */
-const WIRE_WIDTH_SPLIT = 2.5;          // SPLIT > 1 加粗
-const WIRE_WIDTH_SELECTED = 3.5;      // 选中导线高亮线宽
+const WIRE_WIDTH_SPLIT = 2.5; // SPLIT > 1 加粗
+const WIRE_WIDTH_SELECTED = 3.5; // 选中导线高亮线宽
 const WIRE_DASH_JUMPER: number[] = [6, 4]; // 跳线虚线
-const WIRE_HIT_DIST = 6;               // 导线命中距离阈值（像素）
-const WIRE_HIT_DIST_HOVER = 8;         // hover 容差略放宽
+const WIRE_HIT_DIST = 6; // 导线命中距离阈值（像素）
+const WIRE_HIT_DIST_HOVER = 8; // hover 容差略放宽
 
 /** 背景 / 网格 / 边框颜色 */
 
-
-
-
-
 /** 塔位颜色 */
-
-
-
 
 const COLOR_TOWER_SELECTED = '#f59e0b';
 const TOWER_RADIUS = 5;
 const HIT_RADIUS = 11;
 
 /** 跨越点颜色 */
-
 
 /** 标签颜色 */
 
@@ -126,11 +147,9 @@ const LABEL_SHOW_ZOOM = 1.8; // 缩放达到此倍数以上才显示标签，避
 
 /** 图例 */
 
-
- // 防止图例底部被裁切
+// 防止图例底部被裁切
 
 /** 比例尺 */
-
 
 /** fit 边距 */
 const FIT_PADDING = 48;
@@ -164,23 +183,26 @@ function scheduleFrame(callback: FrameRequestCallback): ScheduledFrame {
   if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
     return { id: window.requestAnimationFrame(callback), kind: 'raf' };
   }
-  const id = typeof window !== 'undefined'
-    ? window.setTimeout(() => callback(performance.now()), 0)
-    : setTimeout(() => callback(performance.now()), 0) as unknown as number;
+  const id =
+    typeof window !== 'undefined'
+      ? window.setTimeout(() => callback(performance.now()), 0)
+      : (setTimeout(() => callback(performance.now()), 0) as unknown as number);
   return { id, kind: 'timeout' };
 }
 
 function cancelScheduledFrame(frame: ScheduledFrame | null): void {
   if (!frame) return;
-  if (frame.kind === 'raf' && typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+  if (
+    frame.kind === 'raf' &&
+    typeof window !== 'undefined' &&
+    typeof window.cancelAnimationFrame === 'function'
+  ) {
     window.cancelAnimationFrame(frame.id);
     return;
   }
   if (typeof window !== 'undefined') window.clearTimeout(frame.id);
   else clearTimeout(frame.id as unknown as ReturnType<typeof setTimeout>);
 }
-
-
 
 /**
  * 仅供开发期性能采集器判断渐进地图是否已经补绘完成。
@@ -226,13 +248,32 @@ export function renderLineMap(
   const enableCatenary = options?.enableCatenary ?? ENABLE_CATENARY;
   const perfSession = options?.perfSession ?? perfCurrentSession();
 
-  const { canvas, ctx, tooltip, fitBtn, layerPanel, layerCheckboxes } = mountLineMapControls(container, overlayMode);
+  const { canvas, ctx, tooltip, fitBtn, layerPanel, layerCheckboxes } = mountLineMapControls(
+    container,
+    overlayMode,
+  );
 
   // ---- 投影参数（fit 基准） ----
   // Canvas-only 兜底路径采用 Web Mercator（与 MapLibre/OSM 一致），
   // 替代原等距圆柱投影：等距投影纬线间距恒定，中高纬度东西向被压缩、
   // 形状畸变；Web Mercator 局部形状保真（正形），与主底图形态一致。
-  const { bbox, valid, mercY, centerLng, centerLatRad, invMercY, centerWYAbs, worldW, worldH, centerWX, centerWY, getRuntimePoint, runtimeTowers, runtimeWires, runtimeCrosses } = prepareLineMapGeometry(mapData, enableCatenary);
+  const {
+    bbox,
+    valid,
+    mercY,
+    centerLng,
+    centerLatRad,
+    invMercY,
+    centerWYAbs,
+    worldW,
+    worldH,
+    centerWX,
+    centerWY,
+    getRuntimePoint,
+    runtimeTowers,
+    runtimeWires,
+    runtimeCrosses,
+  } = prepareLineMapGeometry(mapData, enableCatenary);
 
   // ---- 视图状态 ----
   const layerState: LayerState = {
@@ -264,7 +305,8 @@ export function renderLineMap(
   let pendingFrame: ScheduledFrame | null = null;
   let pendingInteractionFrame: ScheduledFrame | null = null;
   let pendingSettledFrame: ScheduledFrame | null = null;
-  let activePhaseEnd: ((labelSuffix?: string, endMeta?: Record<string, unknown>) => void) | null = null;
+  let activePhaseEnd: ((labelSuffix?: string, endMeta?: Record<string, unknown>) => void) | null =
+    null;
   let instrumentNextRender = true;
   /** MapLibre 相机变化期间使用轻量交互帧；停止后才启动完整 progressive。 */
   let progressiveActive = false;
@@ -283,14 +325,6 @@ export function renderLineMap(
 
   /** 选中塔位的 nodePath 集合（树点击/地图 focus 时高亮） */
   let selectedTowerPaths: Set<string> = new Set();
-
-  // 拖拽状态
-  let dragging = false;
-  let dragStartX = 0;
-  let dragStartY = 0;
-  let dragStartPanX = 0;
-  let dragStartPanY = 0;
-  let mouseDownMoved = false;
 
   // 预投影塔位屏幕坐标缓存（每次 draw 时更新）
   let towerScreen: { tower: TowerMarker; x: number; y: number }[] = [];
@@ -372,15 +406,19 @@ export function renderLineMap(
   for (let i = 0; i < LAYER_ITEMS.length; i++) {
     const item = LAYER_ITEMS[i];
     const cb = layerCheckboxes[i];
-    cb.addEventListener('change', () => {
-      layerState[item.key] = cb.checked;
-      // 关闭塔位图层时清除 hover，避免 tooltip 残留
-      if (item.key === 'tower' && !cb.checked) {
-        hoveredTower = null;
-        hideTooltip();
-      }
-      draw();
-    }, {signal: layerEvents.signal});
+    cb.addEventListener(
+      'change',
+      () => {
+        layerState[item.key] = cb.checked;
+        // 关闭塔位图层时清除 hover，避免 tooltip 残留
+        if (item.key === 'tower' && !cb.checked) {
+          hoveredTower = null;
+          towerTooltip.hide();
+        }
+        draw();
+      },
+      { signal: layerEvents.signal },
+    );
   }
 
   // ---- 绘制 ----
@@ -397,14 +435,13 @@ export function renderLineMap(
     const cameraSnapshot = cameraRevision;
     activeDevRenderToken = ++devRenderTokenSequence;
     const devGlobals = globalThis as { __GIM_DEV_LINE_MAP_RENDER_RUN_ID__?: unknown };
-    activeDevRenderRunId = typeof devGlobals.__GIM_DEV_LINE_MAP_RENDER_RUN_ID__ === 'string'
-      ? devGlobals.__GIM_DEV_LINE_MAP_RENDER_RUN_ID__
-      : null;
+    activeDevRenderRunId =
+      typeof devGlobals.__GIM_DEV_LINE_MAP_RENDER_RUN_ID__ === 'string'
+        ? devGlobals.__GIM_DEV_LINE_MAP_RENDER_RUN_ID__
+        : null;
     setDevMapRenderState(activeDevRenderToken, false, activeDevRenderRunId);
     const instrument = instrumentNextRender;
-    const endFirstFrame = instrument
-      ? perfBegin('线路 Canvas 首帧', undefined, perfSession)
-      : null;
+    const endFirstFrame = instrument ? perfBegin('线路 Canvas 首帧', undefined, perfSession) : null;
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     frameProjectionCache = { revision: cameraRevision, points: new Map() };
@@ -452,9 +489,10 @@ export function renderLineMap(
 
     activeDevRenderToken = ++devRenderTokenSequence;
     const devGlobals = globalThis as { __GIM_DEV_LINE_MAP_RENDER_RUN_ID__?: unknown };
-    activeDevRenderRunId = typeof devGlobals.__GIM_DEV_LINE_MAP_RENDER_RUN_ID__ === 'string'
-      ? devGlobals.__GIM_DEV_LINE_MAP_RENDER_RUN_ID__
-      : null;
+    activeDevRenderRunId =
+      typeof devGlobals.__GIM_DEV_LINE_MAP_RENDER_RUN_ID__ === 'string'
+        ? devGlobals.__GIM_DEV_LINE_MAP_RENDER_RUN_ID__
+        : null;
     setDevMapRenderState(activeDevRenderToken, false, activeDevRenderRunId);
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -480,9 +518,10 @@ export function renderLineMap(
     drawCrossRange(0, runtimeCrosses.length);
 
     frameProjectionCache = null;
-    const latencyMs = interactionRequestStartedAt == null
-      ? null
-      : Math.max(0, performance.now() - interactionRequestStartedAt);
+    const latencyMs =
+      interactionRequestStartedAt == null
+        ? null
+        : Math.max(0, performance.now() - interactionRequestStartedAt);
     interactionRequestStartedAt = null;
     // 同一 RAF 内不会被 MapLibre 插入新事件；结束后再次检查 revision，
     // 防止测试替身或同步 fitBounds 触发的旧 camera frame 继续写入。
@@ -491,13 +530,17 @@ export function renderLineMap(
       return;
     }
     if (latencyMs != null) {
-      perfMark('线路 Canvas 交互帧', {
-        cameraRevision: revision,
-        latencyMs: Math.round(latencyMs * 100) / 100,
-        towers: runtimeTowers.length,
-        wires: runtimeWires.length,
-        crosses: runtimeCrosses.length,
-      }, perfSession);
+      perfMark(
+        '线路 Canvas 交互帧',
+        {
+          cameraRevision: revision,
+          latencyMs: Math.round(latencyMs * 100) / 100,
+          towers: runtimeTowers.length,
+          wires: runtimeWires.length,
+          crosses: runtimeCrosses.length,
+        },
+        perfSession,
+      );
     }
   }
 
@@ -536,7 +579,11 @@ export function renderLineMap(
     });
   }
 
-  function startProgressiveRender(generation: number, cameraSnapshot: number, instrument: boolean): void {
+  function startProgressiveRender(
+    generation: number,
+    cameraSnapshot: number,
+    instrument: boolean,
+  ): void {
     progressiveActive = true;
     towerScreen = [];
     labelQueue = [];
@@ -553,13 +600,16 @@ export function renderLineMap(
     instrument: boolean,
   ): void {
     if (destroyed || generation !== renderGeneration || cameraSnapshot !== cameraRevision) return;
-    const sourceLength = stage === 'towers'
-      ? runtimeTowers.length
-      : stage === 'wires'
-        ? runtimeWires.length
-        : stage === 'crosses'
-          ? runtimeCrosses.length
-          : (layerState.label && zoom >= LABEL_SHOW_ZOOM ? labelQueue.length : 0);
+    const sourceLength =
+      stage === 'towers'
+        ? runtimeTowers.length
+        : stage === 'wires'
+          ? runtimeWires.length
+          : stage === 'crosses'
+            ? runtimeCrosses.length
+            : layerState.label && zoom >= LABEL_SHOW_ZOOM
+              ? labelQueue.length
+              : 0;
     const batchSize = lineMapStageBatchSize(stage);
     // 同时设置数量上限和时间预算，避免一条复杂悬链线或低端 WebView
     // 中的 Canvas 实现把一帧再次拉成长任务。
@@ -597,13 +647,21 @@ export function renderLineMap(
       scheduleProgressive(generation, cameraSnapshot, 'labels', 0, instrument);
     } else {
       // 标签关闭或缩放不足时 sourceLength 为 0，也会在这里结束。
-      finishProgressivePhase({ ...stageMeta, visible: layerState.label && zoom >= LABEL_SHOW_ZOOM });
+      finishProgressivePhase({
+        ...stageMeta,
+        visible: layerState.label && zoom >= LABEL_SHOW_ZOOM,
+      });
       frameProjectionCache = null;
-      if (instrument) perfMark('线路 Canvas 地图绘制完成', {
-        towers: runtimeTowers.length,
-        wires: runtimeWires.length,
-        crosses: runtimeCrosses.length,
-      }, perfSession);
+      if (instrument)
+        perfMark(
+          '线路 Canvas 地图绘制完成',
+          {
+            towers: runtimeTowers.length,
+            wires: runtimeWires.length,
+            crosses: runtimeCrosses.length,
+          },
+          perfSession,
+        );
       progressiveActive = false;
       if (instrument) instrumentNextRender = false;
       setDevMapRenderState(activeDevRenderToken, true, activeDevRenderRunId);
@@ -689,11 +747,17 @@ export function renderLineMap(
     });
   }
 
-  function drawEmptyHint(text: string): void { paintEmptyHint(ctx, cssW, cssH, text); }
+  function drawEmptyHint(text: string): void {
+    paintEmptyHint(ctx, cssW, cssH, text);
+  }
 
-  function drawBorder(): void { paintBorder(ctx, cssW, cssH); }
+  function drawBorder(): void {
+    paintBorder(ctx, cssW, cssH);
+  }
 
-  function drawGrid(): void { paintGrid(ctx, bbox, cssW, cssH, geoToScreen); }
+  function drawGrid(): void {
+    paintGrid(ctx, bbox, cssW, cssH, geoToScreen);
+  }
 
   function drawWireRange(start: number, end: number, simplified = false): void {
     ctx.lineCap = 'round';
@@ -735,9 +799,7 @@ export function renderLineMap(
         // 高亮光晕
         ctx.beginPath();
         ctx.arc(p.x, p.y, r + 4, 0, Math.PI * 2);
-        ctx.fillStyle = isSelected
-          ? 'rgba(245,158,11,0.35)'
-          : 'rgba(245,158,11,0.25)';
+        ctx.fillStyle = isSelected ? 'rgba(245,158,11,0.35)' : 'rgba(245,158,11,0.25)';
         ctx.fill();
       }
 
@@ -781,7 +843,11 @@ export function renderLineMap(
    * @param w 导线段
    * @param isSelected 是否为选中态
    */
-  function drawWireSegment(runtimeWire: RuntimeWire, isSelected: boolean, simplified = false): void {
+  function drawWireSegment(
+    runtimeWire: RuntimeWire,
+    isSelected: boolean,
+    simplified = false,
+  ): void {
     const w = runtimeWire.wire;
     const s = geoToScreenPoint(runtimeWire.start);
     const e = geoToScreenPoint(runtimeWire.end);
@@ -885,16 +951,20 @@ export function renderLineMap(
     }
   }
 
-  function drawLegend(): void { paintLegend(ctx, layerState, cssH); }
+  function drawLegend(): void {
+    paintLegend(ctx, layerState, cssH);
+  }
 
-  function drawScaleBar(): void { paintScaleBar(ctx, cssW, cssH, baseScale, zoom, centerLatRad); }
+  function drawScaleBar(): void {
+    paintScaleBar(ctx, cssW, cssH, baseScale, zoom, centerLatRad);
+  }
 
   // ---- 命中测试 ----
-    function hitTestTower(sx: number, sy: number): TowerMarker | null {
+  function hitTestTower(sx: number, sy: number): TowerMarker | null {
     if (!layerState.tower) return null;
     return overlayMode
-      ? nearestTower(runtimeTowers, row => geoToScreenPoint(row.point), sx, sy, HIT_RADIUS)
-      : nearestTower(towerScreen, row => row, sx, sy, HIT_RADIUS);
+      ? nearestTower(runtimeTowers, (row) => geoToScreenPoint(row.point), sx, sy, HIT_RADIUS)
+      : nearestTower(towerScreen, (row) => row, sx, sy, HIT_RADIUS);
   }
 
   /**
@@ -909,42 +979,20 @@ export function renderLineMap(
    *
    * @param threshold 像素阈值，点击用 WIRE_HIT_DIST，hover 用 WIRE_HIT_DIST_HOVER
    */
-    function hitTestWire(sx: number, sy: number, threshold: number): WireSegment | null {
-    return nearestWire(runtimeWires, layer => layerState[layer], geoToScreenPoint, cssW, cssH, sx, sy, threshold);
+  function hitTestWire(sx: number, sy: number, threshold: number): WireSegment | null {
+    return nearestWire(
+      runtimeWires,
+      (layer) => layerState[layer],
+      geoToScreenPoint,
+      cssW,
+      cssH,
+      sx,
+      sy,
+      threshold,
+    );
   }
 
-  // ---- tooltip ----
-  function showTooltip(t: TowerMarker, sx: number, sy: number): void {
-    const famHit = !!t.famSource;
-    const devHit = !!t.devSource;
-    const lines: string[] = [];
-    lines.push(`<b>${escapeHtml(towerLabel(t))}</b>`);
-    if (t.towerNumber) lines.push(`杆塔编号: ${escapeHtml(t.towerNumber)}`);
-    lines.push(`塔型: ${escapeHtml(t.towerType || '—')}`);
-    lines.push(`呼高: ${escapeHtml(t.towerHeight || '—')}`);
-    lines.push(`转角: ${escapeHtml(t.turnAngle || '—')}`);
-    lines.push(`纬度: ${t.lat.toFixed(6)}`);
-    lines.push(`经度: ${t.lng.toFixed(6)}`);
-    if (t.elev != null) lines.push(`高程: ${t.elev} m`);
-    lines.push(`数据质量: ${t.dataQuality}`);
-    lines.push(`FAM: ${famHit ? '命中' : '未命中缓存'}`);
-    lines.push(`DEV: ${devHit ? '命中' : '未命中缓存'}`);
-    tooltip.innerHTML = lines.join('<br>');
-    tooltip.style.display = 'block';
-    // 定位（避免溢出右边/下边）
-    const tw = tooltip.offsetWidth;
-    const th = tooltip.offsetHeight;
-    let tx = sx + 14;
-    let ty = sy + 14;
-    if (tx + tw > cssW - 4) tx = sx - tw - 14;
-    if (ty + th > cssH - 4) ty = sy - th - 14;
-    tooltip.style.left = tx + 'px';
-    tooltip.style.top = ty + 'px';
-  }
-
-  function hideTooltip(): void {
-    tooltip.style.display = 'none';
-  }
+  const towerTooltip = createLineMapTooltip(tooltip);
 
   // ---- 事件处理（内部可复用逻辑，供 Canvas 事件 + overlay 桥接共用） ----
 
@@ -964,7 +1012,7 @@ export function renderLineMap(
       requestVisualRender();
     }
     if (t) {
-      showTooltip(t, mx, my);
+      towerTooltip.show(t, mx, my, cssW, cssH);
       canvas.style.cursor = 'pointer';
       // 命中塔位时清除导线 hover 态
       if (hoveredWire !== null) {
@@ -979,10 +1027,10 @@ export function renderLineMap(
       // hover 不重绘（避免频繁 redraw），仅更新 cursor
     }
     if (w) {
-      hideTooltip();
+      towerTooltip.hide();
       canvas.style.cursor = 'pointer';
     } else {
-      hideTooltip();
+      towerTooltip.hide();
       canvas.style.cursor = valid ? 'grab' : 'default';
     }
   }
@@ -1008,7 +1056,7 @@ export function renderLineMap(
       try {
         onTowerClick(t.nodeRef);
       } catch (err) {
-        console.error('[LineMap] onTowerClick 回调异常:', err);
+        logger.error('[LineMap] onTowerClick 回调异常:', err);
       }
       return;
     }
@@ -1023,7 +1071,7 @@ export function renderLineMap(
         try {
           options.onWireClick(w);
         } catch (err) {
-          console.error('[LineMap] onWireClick 回调异常:', err);
+          logger.error('[LineMap] onWireClick 回调异常:', err);
         }
       }
     }
@@ -1038,79 +1086,18 @@ export function renderLineMap(
     hoveredTower = null;
     // M4-B2 cleanup：鼠标离开地图区域时同时清理导线 hover 态
     hoveredWire = null;
-    hideTooltip();
+    towerTooltip.hide();
     requestVisualRender();
   }
 
-  function onWheel(e: WheelEvent): void {
-    e.preventDefault();
+  function zoomAt(mx: number, my: number, factor: number): void {
     if (!valid) return;
-    const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    // 光标处的地理坐标（缩放不变点）
     const before = screenToWorldGeo(mx, my);
-    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
     zoom = clamp(zoom * factor, MIN_ZOOM, MAX_ZOOM);
-    // 调整 pan 使光标处地理坐标不变
     const after = geoToScreen(before.lat, before.lng);
     panX += mx - after.x;
     panY += my - after.y;
     draw();
-  }
-
-  function onMouseDown(e: MouseEvent): void {
-    if (e.button !== 0) return;
-    dragging = true;
-    mouseDownMoved = false;
-    dragStartX = e.clientX;
-    dragStartY = e.clientY;
-    dragStartPanX = panX;
-    dragStartPanY = panY;
-    canvas.style.cursor = 'grabbing';
-  }
-
-  function onMouseMove(e: MouseEvent): void {
-    const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    if (dragging) {
-      const dx = e.clientX - dragStartX;
-      const dy = e.clientY - dragStartY;
-      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) mouseDownMoved = true;
-      panX = dragStartPanX + dx;
-      panY = dragStartPanY + dy;
-      draw();
-      return;
-    }
-    handlePointerMoveAt(mx, my);
-  }
-
-  function onMouseUp(e: MouseEvent): void {
-    if (dragging) {
-      dragging = false;
-      // M4-B2 cleanup：释放时若仍在导线上，cursor 保持 pointer（塔位优先级不变）
-      canvas.style.cursor = (hoveredTower || hoveredWire) ? 'pointer' : 'grab';
-    }
-    // 点击（未拖拽）→ 命中塔位
-    if (!mouseDownMoved && e.button === 0) {
-      const rect = canvas.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-      handlePointerClickAt(mx, my);
-    }
-  }
-
-  function onMouseLeave(): void {
-    if (dragging) {
-      dragging = false;
-      canvas.style.cursor = 'grab';
-    }
-    handlePointerLeaveInternal();
-  }
-
-  function onDblClick(): void {
-    fit();
   }
 
   function onFitBtnClick(): void {
@@ -1181,16 +1168,23 @@ export function renderLineMap(
     if (towers.length === 0) return false;
 
     // 子 bbox（geo 坐标）
-    let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+    let minLat = Infinity,
+      maxLat = -Infinity,
+      minLng = Infinity,
+      maxLng = -Infinity;
     for (const t of towers) {
-      minLat = Math.min(minLat, t.lat); maxLat = Math.max(maxLat, t.lat);
-      minLng = Math.min(minLng, t.lng); maxLng = Math.max(maxLng, t.lng);
+      minLat = Math.min(minLat, t.lat);
+      maxLat = Math.max(maxLat, t.lat);
+      minLng = Math.min(minLng, t.lng);
+      maxLng = Math.max(maxLng, t.lng);
     }
     // 给 bbox 留 padding（避免塔位贴边）
     const latSpan = maxLat - minLat || 0.002;
     const lngSpan = maxLng - minLng || 0.002;
-    minLat -= latSpan * 0.2; maxLat += latSpan * 0.2;
-    minLng -= lngSpan * 0.2; maxLng += lngSpan * 0.2;
+    minLat -= latSpan * 0.2;
+    maxLat += latSpan * 0.2;
+    minLng -= lngSpan * 0.2;
+    maxLng += lngSpan * 0.2;
 
     selectedTowerPaths = new Set(paths);
 
@@ -1236,12 +1230,7 @@ export function renderLineMap(
     pendingSettledFrame = null;
     interactionRequestStartedAt = null;
     interactionActive = false;
-    canvas.removeEventListener('wheel', onWheel);
-    canvas.removeEventListener('mousedown', onMouseDown);
-    window.removeEventListener('mousemove', onMouseMove);
-    window.removeEventListener('mouseup', onMouseUp);
-    canvas.removeEventListener('mouseleave', onMouseLeave);
-    canvas.removeEventListener('dblclick', onDblClick);
+    disposeCanvasInput();
     fitBtn.removeEventListener('click', onFitBtnClick);
     layerEvents.abort();
     if (resizeObserver) resizeObserver.disconnect();
@@ -1252,7 +1241,9 @@ export function renderLineMap(
       // Resizing clears the backing store without a tracked ctx.clearRect.
       canvas.width = 0;
       canvas.height = 0;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
     if (tooltip.parentNode) tooltip.parentNode.removeChild(tooltip);
     if (fitBtn.parentNode) fitBtn.parentNode.removeChild(fitBtn);
@@ -1268,13 +1259,20 @@ export function renderLineMap(
   }
 
   // ---- 绑定事件 ----
-  canvas.addEventListener('wheel', onWheel, { passive: false });
-  canvas.addEventListener('mousedown', onMouseDown);
-  // mousemove/mouseup 绑到 window，使拖拽可超出 canvas 边界
-  window.addEventListener('mousemove', onMouseMove);
-  window.addEventListener('mouseup', onMouseUp);
-  canvas.addEventListener('mouseleave', onMouseLeave);
-  canvas.addEventListener('dblclick', onDblClick);
+  const disposeCanvasInput = bindLineMapCanvasInput(canvas, {
+    getPan: () => ({ x: panX, y: panY }),
+    panTo: (x, y) => {
+      panX = x;
+      panY = y;
+      draw();
+    },
+    zoomAt,
+    hover: handlePointerMoveAt,
+    click: handlePointerClickAt,
+    leave: handlePointerLeaveInternal,
+    fit,
+    hasHover: () => Boolean(hoveredTower || hoveredWire),
+  });
   fitBtn.addEventListener('click', onFitBtnClick);
 
   const resizeObserver = new ResizeObserver(() => resize());
@@ -1291,7 +1289,7 @@ export function renderLineMap(
     handlePointerMove: handlePointerMoveAt,
     handlePointerClick: handlePointerClickAt,
     handlePointerLeave: handlePointerLeaveInternal,
-    getLayerPanel: () => destroyed ? null : layerPanel,
+    getLayerPanel: () => (destroyed ? null : layerPanel),
   };
 }
 

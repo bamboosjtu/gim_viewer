@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { AppState } from '../../app/state.js';
-import { extractEngineeringSourceGraph } from '@gim/gim-sdk/gim/engineering/sourceGraph.js';
+import { extractEngineeringSourceGraph } from '@gim/gim-sdk/source';
 import {buildTestEngineeringSources} from '../../../../packages/gim-sdk/src/gim/engineering/__tests__/fixtures.js';
 import { getEngineeringRepresentations } from '../engineeringRepresentationService.js';
 import { selectEngineeringTarget, reconcileEngineeringSelection } from '../engineeringSelection.js';
-import { projectEngineeringNavigation } from '@gim/gim-sdk/gim/engineering/navigation.js';
+import { projectEngineeringNavigation } from '@gim/gim-sdk/projection';
 import type { CbmNode } from '../../gim/types.js';
 
 vi.mock('../../ui/dom.js', async () => {

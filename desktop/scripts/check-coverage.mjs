@@ -34,6 +34,9 @@ if(!process.exitCode){
   for(const [metric,limit] of Object.entries(minimum))if(summary[metric].pct<limit){console.error(`${name} ${metric}: ${summary[metric].pct}% < ${limit}%`);failed=true;}
  }
  writeFileSync(resolve(repo,'output/coverage/coverage-summary.json'),JSON.stringify(summaries,null,2)+'\n');
- writeFileSync(resolve(repo,'output/coverage/summary.json'),JSON.stringify({contract:'gim-coverage-v1',scopes,gates},null,2)+'\n');
+ const largestModules=Object.entries(summaries).filter(([file])=>file!=='total')
+  .sort(([left,a],[right,b])=>b.lines.total-a.lines.total||left.localeCompare(right)).slice(0,20)
+  .map(([file,{lines,functions,branches}])=>({path:relative(repo,file).replaceAll('\\','/'),lines,functions,branches}));
+ writeFileSync(resolve(repo,'output/coverage/summary.json'),JSON.stringify({contract:'gim-coverage-v1',scopes,gates,largestModules},null,2)+'\n');
  if(failed)process.exitCode=1;else console.log('SDK and desktop consumer coverage merged; original ownership thresholds passed.');
 }

@@ -11,6 +11,34 @@ async function read(entries:Record<string,string>) {
   const graph=await extractEngineeringSourceGraph({paths:Object.keys(entries),readText});
   return {graph,readText};
 }
+it('distinguishes recognized family type, empty type and unread family before falling back to cabinet name',async()=>{
+  const source = {
+    'project.cbm':'OBJECTMODELPOINTER=panel.dev\nBASEFAMILY=panel.fam',
+    'panel.dev':'TYPE=SecondaryCabinet\nSYMBOLNAME=公用测控柜',
+  };
+  for(const [family,id] of [
+    ['DevType#设备类型#控制柜','equipment:controlcabinet'],
+    ['型号=型号=2260x600x800','equipment:measurementandcontrolcabinet'],
+    [null,'equipment:secondarycabinet'],
+  ] as const){
+    const {graph}=await read(family===null?source:{...source,'panel.fam':family});
+    const model=normalizeEngineeringSources('scope',collectEngineeringSources(graph,[],[]));
+    expect(model.entities[0]?.standardClass?.id).toBe(id);
+    if(id==='equipment:measurementandcontrolcabinet')expect(model.entities[0]?.standardClass?.status).toBe('candidate');
+  }
+});
+it('recognizes a compound neutral set from the two actual DEV assembly members',async()=>{
+  const {graph}=await read({
+    'project.cbm':'OBJECTMODELPOINTER=neutral.dev',
+    'neutral.dev':'TYPE=GroundTransformer/ArcExtinguishingCoil\nOBJECTROLE=independent\nSUBDEVICE0=ground.dev\nSUBDEVICE1=coil.dev',
+    'ground.dev':'TYPE=GroundTransformer',
+    'coil.dev':'TYPE=ArcExtinguishingCoil',
+  });
+  const model=normalizeEngineeringSources('scope',collectEngineeringSources(graph,[],[]));
+  expect(model.entities).toHaveLength(1);
+  expect(model.entities[0]).toMatchObject({category:'E09',standardClass:{id:'equipment:opengroundingequipment/neutralpointequipment'}});
+  expect(model.entities[0].sourceIds).toHaveLength(3);
+});
 it('keeps semantic-only nested parts and their direct parent separate from physical addresses',async()=>{
   const {graph,readText}=await read({'project.cbm':'OBJECTMODELPOINTER=root.dev\nSUBDEVICE0=part.cbm',
     'root.dev':'TYPE=GIS','part.cbm':'ENTITYNAME=PARTINDEX\nOBJECTMODELPOINTER=part.dev\nSUBDEVICE0=leaf.cbm',

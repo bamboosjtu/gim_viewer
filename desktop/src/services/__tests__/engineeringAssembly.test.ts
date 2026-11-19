@@ -2,7 +2,7 @@ import {normalizeEngineeringSources} from '@gim/gim-sdk/source-adapter';
 // @vitest-environment node
 import {afterEach,expect,it,vi} from 'vitest';
 import {assembleEngineeringView,assembleStoredEngineeringView} from '../engineeringAssembly.js';
-import {extractEngineeringSourceGraph} from '@gim/gim-sdk/gim/engineering/sourceGraph.js';
+import {extractEngineeringSourceGraph} from '@gim/gim-sdk/source';
 import * as composition from '@gim/gim-sdk/engineering/composition.js';
 import * as sourceProjection from '@gim/gim-sdk/gim/engineering/sourceProjection.js';
 import * as inventory from '@gim/gim-sdk/gim/engineering/inventory.js';
@@ -12,6 +12,7 @@ import {assertEngineeringPartition} from '@gim/gim-sdk/engineering/validate.js';
 import {createEngineeringWorkerHandler} from '../engineeringWorker.js';
 import {ModelEvidenceProvider} from '@gim/gim-sdk/gim/engineering/evidenceProvider.js';
 import {decodeEngineeringWorkerResult,encodeEngineeringWorkerResultAsync,type TransportGraphCache} from '../engineeringWorkerTransport.js';
+import type { IfcSpatialObject } from '../../gim/ifcSpatialParser.js';
 afterEach(()=>{vi.restoreAllMocks();});
 it.each(['composition','source','inventory','inventory-search'] as const)('transfers an explicitly failed %s projection while rejecting it as a complete cache',async failure=>{
   const stage=failure;
@@ -45,6 +46,23 @@ it('publishes the merged capacitor group through the Viewer assembly and invento
   expect(snapshot.entities).toHaveLength(1);
   expect(snapshot.entities[0]).toMatchObject({category:'E10',standardClass:{id:'equipment:framecapacitor',label:'电容器组'}});
   expect([...navigation.inventory!.nodes.values()].some(node=>node.title==='电容器组'&&node.entityCount===1)).toBe(true);
+});
+it('publishes IFC equipment and material separately even when display names suggest different classes',async()=>{
+  const path='delivery/model.ifc',modelId='logical-model';
+  const make=(expressId:number,name:string,objectType:string):IfcSpatialObject=>({
+    key:`${modelId}#${expressId}`,modelId,expressId,ifcType:'IFCBUILDINGELEMENTPROXY',
+    name,objectType,globalId:'',geometryStatus:'unrepresented',parentObjectKey:null,
+    childObjectKeys:[],relationshipCount:0,hostObjectKey:null,spatialKey:null,spatialKeys:[],
+    spatialContainment:null,sourcePath:path,
+  });
+  const source=await extractEngineeringSourceGraph({paths:['project.cbm',path],readText:async()=>''});
+  const {snapshot,navigation}=assembleEngineeringView('scope',source,[
+    make(1,'灯具','ProtectionCabinet'),make(2,'主变压器','PowerBox'),
+  ],[]);
+  expect(snapshot.entities.map(entity=>entity.category).sort()).toEqual(['E17','M05']);
+  const inventory=navigation.inventory!;
+  expect(inventory.nodes.get('inventory:root/设备')?.entityCount).toBe(1);
+  expect(inventory.nodes.get('inventory:root/材料')?.entityCount).toBe(1);
 });
 it('publishes the independent source tree after recognition fails, including source-cache restoration',async()=>{
   const g=await graph(),fail=()=>{throw Error('recognition failure');};

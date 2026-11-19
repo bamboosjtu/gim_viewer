@@ -40,7 +40,7 @@ npm run tauri:dev     # Tauri 开发窗口
 | `npm run lint` | ESLint（`src`、`bridge`）；已接入模块执行 recommended type-checked 规则 |
 | `npm run format:architecture` | 格式化 scripts/format-architecture.mjs 声明的状态、缓存、日志、投影与展示端口模块 |
 | `npm run check:format` | 只检查上述模块的 Prettier 格式，不改文件 |
-| `npm run test:format-config` | 用 core.autocrlf=true 的真实 Git checkout 验证已接入模块为 LF、PowerShell 为 CRLF |
+| `npm run test:format-config` | 用真实 Git 签出验证源码、PowerShell 和 Prettier 的 CRLF 约定，并核对构建工具需要的 LF 文件 |
 | `npm run check:version` | npm/Cargo 版本一致性；构建前自动执行 |
 | `npm run check:types` | TypeScript 检查（含测试替身的接口完整性） |
 | `npm run check:engineering-boundaries` | 纯领域、来源与 Viewer 边界检查 |
@@ -52,7 +52,9 @@ npm run tauri:dev     # Tauri 开发窗口
 
 核心 SDK 的源码、目录配置和测试位于 `packages/gim-sdk/`。首次构建先在该目录执行 `npm ci`，再在 `desktop/` 执行 `npm ci`。`npm run sdk:build` 构建独立 ESM，`npm run test:sdk` 在工作区 `tmp/` 中验证构建产物的能力入口和来源适配器。源码与目录维护见 [SDK 说明](../packages/gim-sdk/README.md)和[实体目录](engineering/catalogs/README.md)。
 
-桌面 Vite / TypeScript / Vitest 用 gim-source 条件连接包源码，构建默认 ESM 的行为由 SDK 独立消费者验证。模块测试可选择 `../packages/gim-sdk/src/engineering` 或原转发模块；test:module 会扩展 SDK 转发目标，并选择所属与依赖消费者测试。lint 从工作区根配置检查桌面与 SDK，并在两边测试中检查异步 Promise 使用。SDK 自带测试类型检查。新增或修改的 SDK 生产 TypeScript 文件须加入 `format-architecture.mjs` 清单，随同现有接入模块接受 Prettier 和类型感知 lint 检查。
+桌面 Vite / TypeScript / Vitest 用 gim-source 条件连接包源码，构建默认 ESM 的行为由 SDK 独立消费者验证。模块测试可选择 `../packages/gim-sdk/src/engineering` 或原转发模块；test:module 会扩展 SDK 转发目标，并选择所属与依赖消费者测试。lint 从工作区根配置检查桌面与 SDK，并在两边测试中检查异步 Promise 使用。SDK 自带测试类型检查。
+
+新增、修改或重命名至 `desktop/src/`、`desktop/bridge/` 或 `packages/gim-sdk/src/` 的生产 TypeScript 文件须加入 `format-architecture.mjs` 清单，与现有接入项一起接受 Prettier 和类型感知 lint 检查。工作区以 HEAD 为基线，包含未跟踪的新文件。Windows CI 以 PR 基线或推送前的提交作为比较点；首次推送分支查默认分支共同祖先，手工触发查当前提交的上一提交。测试文件继续走类型检查与异步 lint。
 
 应用版本以 `desktop/package.json` 为准；Tauri 配置引用该文件。portable 组包还会读取 EXE 的 ProductVersion，拒绝把旧程序标成新版本。发布与资产细节见[平台、安全与发布](architecture/platform.md)。
 
@@ -150,4 +152,4 @@ Markdown 文档不作为 CI 测试输入；事实正确性仍需对照源码和�
 
 仅核对来源按需输入的真实 Worker 协议时，可在 desktop/ 执行 `node scripts/with-workspace-temp.mjs scripts/engineering/check-worker-browser.mjs "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" 14358 source-input`。使用自有无头浏览器及内存 DTO，检查批量输入、物理/语义复用及测量控制消息，不读取工程样本或执行性能验收；结果在 output/log/source-input-browser.json。
 
-格式与 recommended type-checked ESLint 的接入列表共用 `scripts/format-architecture.mjs`；AppState 另纳入格式检查，推荐规则按模块逐步接入。`.gitattributes` 只为该范围固定 LF，PowerShell 继续 CRLF，避免 Windows checkout 将已格式化文件转换后再判失败。
+格式与 recommended type-checked ESLint 的接入列表共用 `scripts/format-architecture.mjs`，推荐规则按模块逐步接入。Git 签出和编辑器默认使用 CRLF，Prettier 使用相同约定。Tauri 会将桌面 `Cargo.toml` 重写为 LF，Android 的 `gradlew` 在 Linux 执行，这两个文件固定使用 LF。Blender 快照对归一化的源码内容计算摘要。

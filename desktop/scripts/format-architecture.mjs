@@ -4,6 +4,9 @@ import { fileURLToPath } from 'node:url';
 // The same bounded adoption scope drives Prettier and type-checked ESLint.
 export const architectureModules = [
   'src/app/state.ts',
+  'src/gim/engineering/navigation.ts',
+  'src/gim/engineering/sourceDocuments.ts',
+  'src/gim/engineering/sourceGraph.ts',
   'src/shared/projectSelectionState.ts',
   'src/shared/ifcRuntimeState.ts',
   'src/shared/runtimeSlot.ts',
@@ -18,10 +21,32 @@ export const architectureModules = [
   'src/shared/sourceGeometryState.ts',
   'src/shared/ifcLoadingState.ts',
   'src/services/ifcSelectionProjection.ts',
-  'src/services/*PresentationPort.ts',
+  'src/services/diagramPresentationPort.ts',
+  'src/services/equipmentPresentationPort.ts',
+  'src/services/linePresentationPort.ts',
+  'src/services/loadingPresentationPort.ts',
+  'src/services/projectOpenPresentationPort.ts',
+  'src/services/projectPresentationPort.ts',
+  'src/services/selectionPresentationPort.ts',
+  'src/services/sourceInspectorPresentationPort.ts',
+  'src/services/viewerPresentationPort.ts',
   'src/services/sourceGeometryService.ts',
   'src/services/projectPropertyCache.ts',
   'src/services/lineAttrRestoreService.ts',
+  'src/services/substationIfcRuntime.ts',
+  'src/services/substationIfcSource.ts',
+  'src/services/substationRuntime.ts',
+  'src/services/viewerUIBinding.ts',
+  'src/services/equipmentRuntime.ts',
+  'src/ui/engineeringTreeView.ts',
+  'src/ui/lineMapCanvasInput.ts',
+  'src/ui/lineMapTooltip.ts',
+  'src/ui/lineMapView.ts',
+  'src/ui/shell/viewerShell.ts',
+  'src/viewer/geometryWorkGate.ts',
+  'src/viewer/ifcBimLoader.ts',
+  'src/viewer/ifcConnectionPreviewRuntime.ts',
+  'src/viewer/ifcConversion.ts',
   '../packages/gim-sdk/src/shared/designation.ts',
   '../packages/gim-sdk/src/shared/sourceRecord.ts',
   '../packages/gim-sdk/src/shared/representationAddresses.ts',
@@ -31,28 +56,45 @@ export const architectureModules = [
   '../packages/gim-sdk/src/gim/engineering/compositionContexts.ts',
   '../packages/gim-sdk/src/gim/engineering/navigation.ts',
   '../packages/gim-sdk/src/gim/engineering/sourceProjection.ts',
+  '../packages/gim-sdk/src/engineering/classify.ts',
+  '../packages/gim-sdk/src/engineering/normalize.ts',
+  '../packages/gim-sdk/src/engineering/policyFingerprints.ts',
+  '../packages/gim-sdk/src/engineering/recognizeSource.ts',
+  '../packages/gim-sdk/src/engineering/sourceTypePolicy.ts',
+  '../packages/gim-sdk/src/engineering/types.ts',
+  '../packages/gim-sdk/src/gim/engineering/objectEvidence.ts',
+  '../packages/gim-sdk/src/gim/engineering/source.ts',
+  '../packages/gim-sdk/src/gim/famParser.ts',
 ];
 export const formattedArchitectureModules = [...architectureModules];
 
-export function unadoptedSdkSources(paths) {
-  return paths.filter(path => /^packages\/gim-sdk\/src\/.*\.ts$/.test(path)
-    && !path.includes('/__tests__/') && !path.endsWith('.test.ts')
-    && !formattedArchitectureModules.includes(`../${path}`));
+const sourceRoots = ['desktop/src', 'desktop/bridge', 'packages/gim-sdk/src'];
+const adoptedPaths = new Set(architectureModules.map(path => path.startsWith('../') ? path.slice(3) : `desktop/${path}`));
+
+export function unadoptedProductionSources(paths) {
+  return [...new Set(paths)].filter(path => sourceRoots.some(root => path.startsWith(`${root}/`))
+    && path.endsWith('.ts') && !path.endsWith('.test.ts') && !path.includes('/__tests__/')
+    && !adoptedPaths.has(path)).sort();
+}
+
+export function changedProductionSources(cwd, requestedBase) {
+  const base = requestedBase && !/^0+$/.test(requestedBase) ? requestedBase : 'HEAD';
+  if (base !== 'HEAD' && !/^[a-f0-9]{40}$/.test(base)) throw Error('GIM_FORMAT_BASE must be a Git commit SHA');
+  const git = (...args) => execFileSync('git', args, {cwd, encoding:'utf8', windowsHide:true}).split('\0').filter(Boolean);
+  // Rename destinations are checked as additions, even if detection varies across clients.
+  return [
+    ...git('diff', '--name-only', '--diff-filter=AMT', '--no-renames', '--no-ext-diff', '-z', base, '--', ...sourceRoots),
+    ...git('ls-files', '--others', '--exclude-standard', '-z', '--', ...sourceRoots),
+  ];
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const mode = process.argv.includes('--write') ? '--write' : '--check';
   if (mode === '--check') {
     const cwd = fileURLToPath(new URL('../..', import.meta.url));
-    const git = (...args) => execFileSync('git', args, {cwd, encoding:'utf8', windowsHide:true}).split('\0').filter(Boolean);
-    const requestedBase = process.env.GIM_FORMAT_BASE;
-    const base = requestedBase && !/^0+$/.test(requestedBase) ? requestedBase : 'HEAD';
-    if (base !== 'HEAD' && !/^[a-f0-9]{40}$/.test(base)) throw Error('GIM_FORMAT_BASE must be a Git commit SHA');
-    const paths = ['packages/gim-sdk/src'];
-    const changed = git('diff', '--name-only', '--diff-filter=AMR', '--no-ext-diff', '-z', base, '--', ...paths);
-    const missing = unadoptedSdkSources([...changed, ...git('ls-files', '--others', '--exclude-standard', '-z', '--', ...paths)]);
+    const missing = unadoptedProductionSources(changedProductionSources(cwd, process.env.GIM_FORMAT_BASE));
     if (missing.length) {
-      console.error(`Add new or changed SDK sources to architectureModules:\n${missing.join('\n')}`);
+      console.error(`Add new or changed desktop and SDK production sources to architectureModules:\n${missing.join('\n')}`);
       process.exit(1);
     }
   }

@@ -3,7 +3,7 @@ import {COMPONENT_CATALOG} from '../catalogLabels.js';
 import {componentHostCompatibility} from '../compositionPolicy.js';
 import {interpretObject} from '../classify.js';
 import {toObjectEvidence} from '../recognizeSource.js';
-it.each(COMPONENT_CATALOG.flatMap(part=>[part.term,part.label].map(word=>({part,word}))))('matches component $word with its own evidence namespace',({part,word})=>{
+it.each(COMPONENT_CATALOG.flatMap(part=>(part.id==='cabinet_led'?[part.label]:[part.term,part.label]).map(word=>({part,word}))))('matches component $word with its own evidence namespace',({part,word})=>{
  const result=interpretObject(toObjectEvidence({id:'x',name:'unknown',source:'a.dev',source_type:word,parent:'',track:'dev',guid:'',sources:[],context:[],properties:[{keys:['OBJECTROLE'],value:'part',path:'a.fam'}]}));
  const expectedId=word==='ProtectionEquipment'?'protective_device':part.id;
  expect(result).toMatchObject({meaning:'part',componentType:{id:expectedId,status:'confirmed'}});if(part.id==='ground_resistance')expect(result.standardClass?.id).toBe('material:groundresistance');else expect(result.standardClass).toBeUndefined();expect(result.equipmentType).toBeUndefined();

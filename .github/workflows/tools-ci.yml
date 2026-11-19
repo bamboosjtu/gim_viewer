@@ -7,12 +7,14 @@ on:
       - 'packages/gim-sdk/src/engineering/catalog.json'
       - '.github/workflows/tools-ci.yml'
       - '.gitignore'
+      - '.gitattributes'
   pull_request:
     paths:
       - 'tools/**'
       - 'packages/gim-sdk/src/engineering/catalog.json'
       - '.github/workflows/tools-ci.yml'
       - '.gitignore'
+      - '.gitattributes'
   workflow_dispatch:
 
 permissions:
@@ -35,8 +37,17 @@ jobs:
         with:
           python-version: '3.12'
           architecture: x64
+      - name: Prepare workspace temporary directory
+        run: |
+          New-Item -ItemType Directory -Path tmp/ci/blender -Force | Out-Null
+          $scratch = (Resolve-Path tmp/ci/blender).Path
+          "TEMP=$scratch" >> $env:GITHUB_ENV
+          "TMP=$scratch" >> $env:GITHUB_ENV
+          "TMPDIR=$scratch" >> $env:GITHUB_ENV
       - name: Verify the frozen Blender converter snapshot
         run: python tools/gim_blender/verify_snapshot.py
+      - name: Test Blender snapshot verification on Windows line endings
+        run: python -B -m unittest discover -s tools/gim_blender/tests/unit -p test_snapshot.py -v
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -44,10 +55,6 @@ jobs:
           cache-dependency-path: tools/gim_blender/package-lock.json
       - name: Build the standalone Blender converter without model samples
         run: |
-          New-Item -ItemType Directory -Path tmp/ci/blender -Force | Out-Null
-          $env:TEMP = (Resolve-Path tmp/ci/blender).Path
-          $env:TMP = $env:TEMP
-          $env:TMPDIR = $env:TEMP
           npm ci --prefix tools/gim_blender
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run build --prefix tools/gim_blender

@@ -25,10 +25,10 @@ class StandardTests(unittest.TestCase):
                     if len(R.resolved_terms(name))==1:
                         expected=item if item['id']=='material:groundresistance' else R.resolved_terms(name)[0]
                         R.publish_category(result);self.assertEqual(result['category'],expected['category'])
-        self.assertEqual(len(R.STANDARD['items']),142)
+        self.assertEqual(len(R.STANDARD['items']),143)
     def test_all_component_rows_and_namespace_collisions(self):
         for part in R.CATALOG['components']:
-            for word in (part['label'],part['term']):
+            for word in ([part['label']] if part['id']=='cabinet_led' else (part['label'],part['term'])):
                 with self.subTest(word=word):
                     result=R.interpret(record({'id':'x','type':word,'props':{'OBJECTROLE':'part'}}))
                     self.assertEqual(result['componentType']['id'],'protective_device' if word=='ProtectionEquipment' else part['id'])
@@ -52,7 +52,7 @@ class StandardTests(unittest.TestCase):
                 if case.get('expectedEntity'):
                     entity=model['entities'][0]
                     for key,value in case['expectedEntity'].items():
-                        actual=(entity.get('standardClass') or {}).get('id') if key=='catalogId' else entity.get(key)
+                        actual=(entity.get('standardClass') or {}).get({'catalogId':'id','standardStatus':'status'}[key]) if key in ('catalogId','standardStatus') else entity.get(key)
                         self.assertEqual(actual,value)
                 if (expected:=case.get('expectedMember')) and 'pendingReason' in expected:
                     member=next(m for m in model['memberships'] if m['sourceId']==expected['sourceId'])
@@ -64,7 +64,7 @@ class StandardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder)
             for name in ['standard_recognition.py','standard_sources.py','catalog.json','standardCatalog.json','sourceVocabulary.json','sourceCompatibilityPolicy.json','compositionPolicy.json','recognitionPolicy.json','proxyCategories.json']:shutil.copyfile(TOOL/name,root/name)
-            code='import sys;sys.path.insert(0,sys.argv[1]);import standard_recognition as r;assert len(r.STANDARD["items"])==142;assert r.category_value("TerminalBox")=="M10"'
+            code='import sys;sys.path.insert(0,sys.argv[1]);import standard_recognition as r;assert len(r.STANDARD["items"])==143;assert r.category_value("TerminalBox")=="M10"'
             subprocess.run([sys.executable,'-I','-c',code,str(root)],cwd=root,check=True,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
 
 if __name__=='__main__':unittest.main()

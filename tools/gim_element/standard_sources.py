@@ -17,8 +17,11 @@ def fields(text,path,family=False):
     for number,raw in enumerate(text.splitlines(),1):
         line=raw.lstrip('\ufeff').strip()
         if line.startswith('[') and line.endswith(']'):section=line[1:-1];continue
-        if not line or line.startswith((';','#','//')) or '=' not in line:continue
-        pieces=line.split('=',2 if family else 1);keys=pieces[:-1]
+        if not line or line.startswith((';','#','//')):continue
+        tagged=re.fullmatch(r'([\w.-]+)#([^#]+)#([^\r\n]*)',line) if family and '=' not in line else None
+        if '=' not in line and not tagged:continue
+        pieces=[tagged[2],tagged[1],tagged[3]] if tagged else line.split('=',2 if family else 1)
+        keys=pieces[:-1]
         rows.append({'keys':[k.strip() for k in keys],'value':pieces[-1].strip(),'path':path,'line':number,'section':section,'rawLine':raw})
     return rows
 def scalar(rows,key):return next((p['value'] for p in rows if p['keys'][0].upper()==key.upper()),'')
@@ -27,6 +30,7 @@ class Reader:
     def __init__(self,root,files=None):
         self.root=Path(root);self.files=files if files is not None else {p.relative_to(self.root).as_posix():p for p in self.root.rglob('*') if p.is_file()}
         self.exact=collections.defaultdict(list);self.bases=collections.defaultdict(list);self.cache={};self.family_cache={};self.records=[];self.references=[];self.aliases=[];self.diagnostics=[]
+        self.missing_families=set()
         for path in self.files:self.exact[self.norm(path)].append(path);self.bases[self.norm(path).rsplit('/',1)[-1]].append(path)
     @staticmethod
     def norm(path):return posixpath.normpath(path.replace('\\','/').strip()).lower().lstrip('/')
@@ -49,6 +53,7 @@ class Reader:
             if re.match(r'^(?:BASEFAMILY(?:POINTER|\d*)|BASEFAM\d*|FAMILYFILE\d*)$',p['keys'][0],re.I):
                 target=self.resolve(path,p['keys'][0],p['value'])
                 if target:result.extend(self.document(target))
+                else:self.missing_families.add(path)
         self.family_cache[path]=result;return result
     def names(self,row):
         for labels in [('SYMBOLNAME',),('工程中名称','PROJECTNAME'),('设备名称','DEVICENAME'),('NAME','OBJECTNAME','PARTNAME')]:
@@ -61,6 +66,7 @@ class Reader:
         doc=self.document(path)
         props=(self.families(cbm) if not parent else [])+self.families(path)+doc+(self.document(cbm) if not parent else [])
         row={'id':id,'track':'dev','source':path,'source_type':scalar(doc,'TYPE') or scalar(doc,'DEVICETYPE'),'parent':parent,'properties':props,'cbm':cbm_id,'assemblyPath':assembly}
+        if path in self.missing_families or not parent and cbm in self.missing_families:row['typeSourcesIncomplete']=True
         self.names(row);self.records.append(row);subtree=[row];counts=collections.Counter(p['keys'][0].upper() for p in doc)
         for p in doc:
             key=p['keys'][0].upper()
@@ -68,16 +74,22 @@ class Reader:
             target=self.resolve(path,key,p['value']);edge=key+('@line:'+str(p['line']) if counts[key]>1 else '')
             if target:subtree+=self.dev(target,id+'/'+edge+':'+target,id,cbm,cbm_id,ancestry|{path},'/'.join(filter(None,[assembly,'sub:'+str(int(re.search(r'\d+',key)[0]))])))
         return subtree
-    def cbm(self,path,id,ancestry,scopes):
+    def cbm(self,path,id,ancestry,scopes,assembly_host=None):
         if path in ancestry:self.diagnostics.append({'kind':'cycle','source':id});return
         doc=self.document(path);self.families(path);pointer=scalar(doc,'OBJECTMODELPOINTER');next_scopes=scopes
+        matched_source=None
         if pointer:
             target=self.resolve(path,'OBJECTMODELPOINTER',pointer)
             if target:
                 hits=[r for r in scopes[-1][0] if r['source']==target and r['id'] not in scopes[-1][1]] if scopes else []
                 if hits:
                     self.aliases.append({'sourceId':id,'status':'confirmed' if len(hits)==1 else 'ambiguous','candidates':[r['id'] for r in hits]})
-                    if len(hits)==1:hits[0]['properties']+=self.families(path)+doc;self.names(hits[0])
+                    if len(hits)==1:
+                        match=hits[0];matched_source=match['id']
+                        match['properties']+=self.families(path)+doc;self.names(match)
+                        if path in self.missing_families:match['typeSourcesIncomplete']=True
+                        if assembly_host and match['parent']==assembly_host:
+                            match['cbmAssemblyEvidence']='CBM.SUBDEVICE:'+id
                     ids={r['id'] for r in hits};subset=[r for r in scopes[-1][0] if r['id'] in ids or any(r['id'].startswith(i+'/') for i in ids)]
                     next_scopes=scopes+[(subset,ids)]
                 elif scalar(doc,'ENTITYNAME').upper()=='PARTINDEX':
@@ -85,12 +97,14 @@ class Reader:
                     row={'id':'attribute:'+id+':'+target,'track':'dev','source':target,'source_type':scalar(target_doc,'TYPE') or scalar(target_doc,'DEVICETYPE'),'parent':'','attributeOnly':True,'attributeContextId':id,'properties':self.families(path)+self.families(target)+target_doc+doc,
                          'declaredHosts':list(scopes[-1][1]) if scopes else []}
                     self.names(row);self.records.append(row)
+                    if path in self.missing_families or target in self.missing_families:row['typeSourcesIncomplete']=True
                 else:
                     rows=self.dev(target,'dev:'+id+':'+target,'',path,id,set());next_scopes=scopes+[(rows,{r['id'] for r in rows[:1]})]
+                    if rows:matched_source=rows[0]['id']
         edges=[p for p in doc if re.fullmatch(r'SUBSYSTEM\d*|SUBDEVICE\d+',p['keys'][0],re.I) and p['value'].lower().endswith('.cbm')];counts=collections.Counter(p['keys'][0].upper() for p in edges)
         for p in edges:
             key=p['keys'][0].upper();target=self.resolve(path,key,p['value']);edge=key+('@line:'+str(p['line']) if counts[key]>1 else '')
-            if target:self.cbm(target,id+'/'+edge+':'+target,ancestry|{path},next_scopes)
+            if target:self.cbm(target,id+'/'+edge+':'+target,ancestry|{path},next_scopes,matched_source if key.startswith('SUBDEVICE') else None)
     def scan(self):
         root=self.resolve('','project-entry','project.cbm')
         if root:self.cbm(root,'cbm:'+root,set(),[])
@@ -203,6 +217,8 @@ def read_ifc(text,path):
         definition=kind in ('IFCELEMENTQUANTITY','IFCPOSTALADDRESS','IFCTELECOMADDRESS','IFCCLASSIFICATION') or kind.startswith(('IFCTEXTSTYLE','IFCTEXTLITERAL'))
         if len(args)<4 or not (args[0].startswith("'") and len(ifc_string(args[0]))==22 or args[0]=='$' and product_hint) or resources.match(kind) and not feature or definition or kind.endswith(('TYPE','STYLE','PROPERTIES','PROFILEDEF','SYSTEM')) or kind in ('IFCPROJECT','IFCSITE','IFCBUILDING','IFCBUILDINGSTOREY','IFCSPACE','IFCZONE','IFCGROUP'):continue
         sid='ifc:'+identity([model,id]);props=list(properties[id])
+        if len(args)>4 and args[4].startswith("'"):
+            props.append({'keys':['IFC.ObjectType'],'value':ifc_string(args[4]),'path':path,'line':id})
         if args[-1].startswith('.') and args[-1].endswith('.') and args[-1] not in ('.NOTDEFINED.','.USERDEFINED.'):
             props=[p for p in props if p['keys']!=['IFC.PredefinedType']];props.append({'keys':['IFC.PredefinedType'],'value':args[-1].strip('.'),'path':path,'line':id})
         parent=parents.get(id,hosts.get(id) if feature else None)

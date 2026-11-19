@@ -42,6 +42,7 @@ it('isolates exact source identities across current and future batches without c
   const other={...object,expressId:8,globalId:'g8'},next=batch(1);
   const chunks=[{...next.chunks[0],object:other}];
   runtime.acceptBatch({...next,objects:[other],chunks,bytes:chunks.reduce((sum,chunk)=>sum+connectionChunkBytes(chunk),0)});
+  expect(runtime.diagnostics.objects).toBe(2);
   const hidden=runtime.root.children[1].children[0];expect(hidden.visible).toBe(false);
   const matrix=hidden.matrix.toArray();runtime.setTransform(new THREE.Matrix4().makeTranslation(1,2,3));
   expect(hidden.visible).toBe(false);expect(hidden.matrix.toArray()).toEqual(matrix);

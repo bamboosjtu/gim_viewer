@@ -1,2 +1,7 @@
 /** Desktop compatibility entry; implementation and tests belong to gim-sdk. */
-export * from '@gim/gim-sdk/gim/engineering/navigation.js';
+export {
+  ENGINEERING_NAVIGATION_VERSION,
+  projectEngineeringNavigation,
+  type EngineeringNavigationData,
+  type EngineeringSourceNode,
+} from '@gim/gim-sdk/projection';

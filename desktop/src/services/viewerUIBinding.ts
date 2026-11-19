@@ -1,7 +1,8 @@
-import {projectPresentation} from './projectPresentationPort.js';
-import {RetryableResource} from '../shared/retryableResource.js';
+import { projectPresentation } from './projectPresentationPort.js';
+import { RetryableResource } from '../shared/retryableResource.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
-import {prepareViewerPresentation} from './viewerPresentationPort.js';
+import { logger } from '../utils/logger.js';
+import { prepareViewerPresentation } from './viewerPresentationPort.js';
 /**
  * Viewer UI 绑定服务（编排层）。
  *
@@ -30,6 +31,27 @@ export interface ViewerRuntimeWithUI {
 
 const binding = new RetryableResource<ViewerRuntimeWithUI>();
 
+function loadBindingModules() {
+  return Promise.all([
+    import('../viewer/viewerRuntime.js'),
+    import('../viewer/selection.js'),
+    import('./selectionVisibility.js'),
+    import('../viewer/viewHistory.js'),
+    import('./nodeInteractionService.js'),
+    prepareViewerPresentation(),
+    // Load the engine code alongside its consumers. Engine creation remains
+    // the responsibility of getViewerRuntime after the presentation is ready.
+    import('../viewer/viewerEngine.js'),
+  ]);
+}
+
+const modules = new RetryableResource<Awaited<ReturnType<typeof loadBindingModules>>>();
+
+/** A confirmed 3D open can overlap module loading with its source/cache reads. */
+export async function prepareViewerBindingModules(): Promise<void> {
+  await modules.get(loadBindingModules);
+}
+
 /**
  * 获取已装配 UI 集成的 Viewer 运行时（懒加载单例）。
  *
@@ -49,82 +71,134 @@ export async function getViewerRuntimeWithUI(
   showMessage: (text: string) => void = () => {},
 ): Promise<ViewerRuntimeWithUI> {
   return binding.get(async () => {
-    const rollback:Array<()=>void>=[];
+    const rollback: Array<() => void> = [];
     try {
-    const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
-    const { setupSelection } = await import('../viewer/selection.js');
-    const presentation=await prepareViewerPresentation();
+      const [
+        { getViewerRuntime },
+        { setupSelection },
+        { createSelectionVisibility },
+        { ViewerViewHistory },
+        { syncSelectionNavigation },
+        presentation,
+      ] = await modules.get(loadBindingModules);
 
-    const runtime = await getViewerRuntime(container);
-    const { ctx } = runtime;
-    const { createSelectionVisibility } = await import('./selectionVisibility.js');
-    const { ViewerViewHistory } = await import('../viewer/viewHistory.js');
-    const {syncSelectionNavigation}=await import('./nodeInteractionService.js');
-    const previousVisibility=state.selection.selectionVisibility, previousHistory=state.viewState.viewHistory;
-    state.selection.selectionVisibility ??= createSelectionVisibility(state, ctx);
+      const runtime = await getViewerRuntime(container);
+      const { ctx } = runtime;
+      const previousVisibility = state.selection.selectionVisibility,
+        previousHistory = state.viewState.viewHistory;
+      state.selection.selectionVisibility ??= createSelectionVisibility(state, ctx);
 
-    rollback.push(()=>{if(!previousVisibility){state.selection.selectionVisibility?.reset();state.selection.selectionVisibility=null;}if(!previousHistory){state.viewState.viewHistory?.dispose();state.viewState.viewHistory=null;}});
-    state.viewState.viewHistory ??= new ViewerViewHistory(ctx, 20, {
-      getVisibility: () => state.selection.onlySelected ? 'only-selected' : 'all',
-      setVisibility: (value) => state.selection.setOnlySelected(value === 'only-selected'),
-    });
+      rollback.push(() => {
+        if (!previousVisibility) {
+          state.selection.selectionVisibility?.reset();
+          state.selection.selectionVisibility = null;
+        }
+        if (!previousHistory) {
+          state.viewState.viewHistory?.dispose();
+          state.viewState.viewHistory = null;
+        }
+      });
+      state.viewState.viewHistory ??= new ViewerViewHistory(ctx, 20, {
+        getVisibility: () => (state.selection.onlySelected ? 'only-selected' : 'all'),
+        setVisibility: (value) => state.selection.setOnlySelected(value === 'only-selected'),
+      });
 
-    // 装配属性抽屉按钮事件
-    const disposeDrawer=presentation.bindProperties(ctx);
-    rollback.push(()=>disposeDrawer?.());
+      // 装配属性抽屉按钮事件
+      const disposeDrawer = presentation.bindProperties(ctx);
+      rollback.push(() => disposeDrawer?.());
 
-    // 装配 3D 点击拾取 → 显示 IFC 构件属性
-    const disposeSelection=setupSelection(ctx,state,container,async(modelId,localId,request) => {
-      if (state.currentProjectType === 'substation' || state.engineering.snapshot) {
-        const { selectEngineeringFragmentPick } = await import('./engineeringViewportSelection.js');
-        const model = ctx.fragments.list.get(modelId);
-        if (!state.selection.isCurrentSelection(request)) return true;
-        if (model && await selectEngineeringFragmentPick(state, modelId, localId, request, model)) return true;
+      // 装配 3D 点击拾取 → 显示 IFC 构件属性
+      const disposeSelection = setupSelection(
+        ctx,
+        state,
+        container,
+        async (modelId, localId, request) => {
+          if (state.currentProjectType === 'substation' || state.engineering.snapshot) {
+            const { selectEngineeringFragmentPick } =
+              await import('./engineeringViewportSelection.js');
+            const model = ctx.fragments.list.get(modelId);
+            if (!state.selection.isCurrentSelection(request)) return true;
+            if (
+              model &&
+              (await selectEngineeringFragmentPick(state, modelId, localId, request, model))
+            )
+              return true;
+          }
+          void Promise.resolve(syncSelectionNavigation(state, request)).catch(
+            reportBackgroundError,
+          );
+          void Promise.resolve(
+            presentation.showElement(ctx, state, modelId, localId, request),
+          ).catch(reportBackgroundError);
+          return false;
+        },
+        (request) => {
+          void Promise.resolve(syncSelectionNavigation(state, request)).catch(
+            reportBackgroundError,
+          );
+          if (state.selection.isCurrentSelection(request)) {
+            projectPresentation().clearSelection();
+          }
+        },
+        async (regional, object, request) => {
+          if (state.currentProjectType === 'substation' || state.engineering.snapshot) {
+            const { selectEngineeringIfcPick } = await import('./engineeringViewportSelection.js');
+            if (!state.selection.isCurrentSelection(request)) return true;
+            if (await selectEngineeringIfcPick(state, regional.modelId, object.expressId, request))
+              return true;
+          }
+          void Promise.resolve(syncSelectionNavigation(state, request)).catch(
+            reportBackgroundError,
+          );
+          void Promise.resolve(
+            presentation.showRegional(ctx, state, regional, object, request),
+          ).catch(reportBackgroundError);
+          return false;
+        },
+        (rootOccurrence, instanceKey, request, hint) => {
+          void import('./devViewportSelection.js')
+            .then(({ selectViewportDev }) =>
+              selectViewportDev(
+                ctx,
+                state,
+                rootOccurrence,
+                instanceKey,
+                request,
+                showMessage,
+                hint,
+              ),
+            )
+            .catch((error) => logger.warn('[DEV selection]', error));
+        },
+      );
+
+      rollback.push(() => disposeSelection?.());
+
+      // 构造模型生命周期回调（IFC 加载/卸载时同步更新 model-list UI）
+      const modelCallbacks: ModelEventCallbacks = {
+        onModelAdded: (modelId, runtimeModelId) => {
+          const model = ctx.fragments.list.get(runtimeModelId);
+          if (model) state.selection.selectionVisibility?.registerModel(modelId, model);
+          presentation.addModel(ctx, state, modelId, runtimeModelId);
+          if (state.selection.engineeringSelection?.ifc.some((ref) => ref.modelId === modelId))
+            state.engineeringRepresentationChanged?.();
+        },
+        onModelRemoved: (modelId, runtimeModelId) => {
+          state.selection.selectionVisibility?.removeModel(modelId, runtimeModelId);
+          presentation.removeModel(modelId);
+        },
+      };
+
+      return { ctx, modelCallbacks };
+    } catch (error) {
+      for (const dispose of rollback.reverse()) {
+        try {
+          dispose();
+        } catch (cleanupError) {
+          logger.warn('[Viewer binding cleanup]', cleanupError);
+        }
       }
-      void Promise.resolve(syncSelectionNavigation(state,request)).catch(reportBackgroundError);
-      void Promise.resolve(presentation.showElement(ctx,state,modelId,localId,request)).catch(reportBackgroundError);
-      return false;
-    },(request) => {
-      void Promise.resolve(syncSelectionNavigation(state,request)).catch(reportBackgroundError);
-      if (state.selection.isCurrentSelection(request)) {
-        projectPresentation().clearSelection();
-      }
-    },async(regional,object,request)=>{
-      if (state.currentProjectType === 'substation' || state.engineering.snapshot) {
-        const { selectEngineeringIfcPick } = await import('./engineeringViewportSelection.js');
-        if (!state.selection.isCurrentSelection(request)) return true;
-        if (await selectEngineeringIfcPick(state, regional.modelId, object.expressId, request)) return true;
-      }
-      void Promise.resolve(syncSelectionNavigation(state,request)).catch(reportBackgroundError);
-      void Promise.resolve(presentation.showRegional(ctx,state,regional,object,request)).catch(reportBackgroundError);
-      return false;
-    },(rootOccurrence,instanceKey,request,hint)=>{
-      void import('./devViewportSelection.js').then(({selectViewportDev}) =>
-        selectViewportDev(ctx,state,rootOccurrence,instanceKey,request,showMessage,hint))
-        .catch(error=>console.warn('[DEV selection]',error));
-    });
-
-    rollback.push(()=>disposeSelection?.());
-
-    // 构造模型生命周期回调（IFC 加载/卸载时同步更新 model-list UI）
-    const modelCallbacks: ModelEventCallbacks = {
-      onModelAdded: (modelId, runtimeModelId) => {
-        const model = ctx.fragments.list.get(runtimeModelId);
-        if (model) state.selection.selectionVisibility?.registerModel(modelId, model);
-        presentation.addModel(ctx,state,modelId,runtimeModelId);
-        if (state.selection.engineeringSelection?.ifc.some(ref => ref.modelId === modelId)) state.engineeringRepresentationChanged?.();
-      },
-      onModelRemoved: (modelId, runtimeModelId) => {
-        state.selection.selectionVisibility?.removeModel(modelId, runtimeModelId);
-        presentation.removeModel(modelId);
-      },
-    };
-
-    return { ctx, modelCallbacks };
-    } catch(error) {
-      for(const dispose of rollback.reverse()){try{dispose();}catch(cleanupError){console.warn('[Viewer binding cleanup]',cleanupError);}}
       throw error;
     }
   });
 }
-

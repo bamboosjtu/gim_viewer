@@ -1,9 +1,9 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
 import vocabulary from '@gim/gim-sdk/engineering/sourceVocabulary.json';
-import {projectEngineeringNavigation} from '@gim/gim-sdk/gim/engineering/navigation.js';
+import {projectEngineeringNavigation} from '@gim/gim-sdk/projection';
 import {encodeEngineeringNavigation} from '../engineeringNavigationCache.js';
-import { extractEngineeringSourceGraph } from '@gim/gim-sdk/gim/engineering/sourceGraph.js';
+import { extractEngineeringSourceGraph } from '@gim/gim-sdk/source';
 import {buildTestEngineeringSources} from '../../../../packages/gim-sdk/src/gim/engineering/__tests__/fixtures.js';
 import { decodeEngineeringArtifact,encodeEngineeringArtifact,decodeEngineeringEntities, decodeEngineeringSources, encodeEngineeringEntities, encodeEngineeringSources, engineeringCacheEntry, engineeringSourceCacheMatchesFiles } from '../engineeringCacheCodec.js';
 import {packEngineeringSource} from '../engineeringSourceCodec.js';

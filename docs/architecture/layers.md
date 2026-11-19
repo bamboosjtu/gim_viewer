@@ -75,7 +75,7 @@ bootstrap
 
 独立设备打开使用显式 `EquipmentPresentationPort`：服务提交工程身份、导航树、选择回调与会话 signal，UI 的 `equipmentProjectView` 负责工程栏、导航 DOM、搜索、空态及设备状态栏；端口返回仅属于该视图实例的释放器。旧释放器不能移除新导航。设备运行时不访问 DOM 或 `loadPresentation`，边界脚本单独禁止其退回通用 UI 模块加载器和旧 DOM 适配器。通用加载遮罩保留 `gimOpenCore` 公开入口，内部只转发加载展示端口；DOM、进度格式和计时器均属于 UI。
 
-`AppState.engineering` 持有工程事实与构建状态，`viewState` 持有导航、展开、相机意图和历史；`sourceGeometry` 独立持有物理目录、就绪 Promise 与缓存状态，读取由所有者统一做会话前后校验，不等待语义；`ifcLoading` 持有 IFC 尾部 pending 与明确跳过清单；`properties` 直接持有属性 Map 并负责 reset，AppState 不再提供旧根字段转发。选择的请求/取消、相机意图快照、反馈与装饰释放器由 `selection` 持有；IFC 会话地址、模型与区域运行时由 `ifc` 注册表持有，登记和迟到删除在注册表内统一校验。新所有者通过窄运行时端口接线，消费者不使用根字段转发。应用组合根仍保留工程源数据与运行面协调状态。工程实体、导航、几何目录的构建由服务层启动，UI 通过订阅/回调刷新。工程切换后，旧 Worker、旧请求和旧投影必须释放或拒绝提交。
+`AppState.engineering` 持有工程事实与构建状态。`viewState` 持有导航、展开、相机意图和历史，并负责工程导航释放和全站视角命令。`sourceGeometry` 独立持有物理目录、就绪 Promise 与缓存状态，读取由所有者统一做会话前后校验，不等待语义。`ifcLoading` 持有 IFC 尾部 pending 与明确跳过清单，`properties` 直接持有属性 Map 并负责 reset。选择的请求、取消、相机意图快照、反馈与装饰释放器由 `selection` 持有。IFC 会话地址、模型与区域运行时由 `ifc` 注册表持有，登记和迟到删除在注册表内统一校验。新所有者通过窄运行时端口接线。应用组合根仍保留工程源数据与运行面协调状态。工程实体、导航、几何目录的构建由服务层启动，UI 通过订阅和回调刷新。工程切换后，旧 Worker、旧请求和旧投影必须释放或拒绝提交。
 
 共享包通过 package.json 声明依赖和 package exports 访问。纯名称、KV、跨越、线路属性/图类型、资源限制及线路 MOD parser 直接引用包出口，测试属于共享实现。桌面仅保留有实际责任的入口：`lineCbmParserCore` / `lineMapData` 初始化桌面日志 sink，`geometry/ir` / `sourceDocument` 是当前来源与编译契约入口；`powerline-core` 逐项声明共享入口。`@gim/measurement-core/source` 是测量核心的唯一包出口；GIM SDK 的默认入口仍为构建后的 dist。生产代码不允许用深相对路径绕过包边界。
 
@@ -106,7 +106,7 @@ SDK 的实现及模块测试归 `packages/gim-sdk/src/`，IFC 运行时解析器
 线路属性分桶、来源关系与 HNum 预览格式化由 `services/lineInspectorProjection.ts` 提供；字典与纯字符串格式化在 `services/propertyPresentation.ts`，DOM 引用事件桥保留于 UI。地图唯一坐标工作集、Mercator 计算与导线样式语义由 `services/lineMapGeometry.ts` 提供。三者无 DOM、AppState、平台 IO 依赖。线路工程视图返回有代次保护的 `destroy()` 句柄，并由会话登记释放地图、导航、搜索及设置监听；旧句柄不得销毁新视图。
 
 属性抽屉的页签、FAM、IFC 与概览 HTML 位于 `services/inspectorMarkup.ts`；线路地图的导线路径、命中距离和塔位分类位于 `services/lineMapGeometry.ts`，分帧预算位于 `services/lineMapStages.ts`。UI 持有 DOM、Canvas 句柄和取消代次，纯模块只接收值与回调。
-线路地图控制件由 `ui/lineMapControls.ts` 按实例创建；塔位和导线命中计算位于 `services/lineMapHitTesting.ts`，与绘制使用同一条导线屏幕路径。主视图管理 Canvas 绘制、输入事件和分帧任务的归属与释放。
+线路地图控制件由 `ui/lineMapControls.ts` 按实例创建。`ui/lineMapCanvasInput.ts` 持有 Canvas 手势监听，`ui/lineMapTooltip.ts` 负责塔位提示。塔位和导线命中计算位于 `services/lineMapHitTesting.ts`，与绘制使用同一条导线屏幕路径。主视图协调绘制、子组件与分帧任务的释放。
 线路底图按钮和配置状态由 `ui/lineBasemapControls.ts` 渲染；`lineProjectView` 只连接当前地图实例、切换回调和清理代次。
 
 ## 相关文档
