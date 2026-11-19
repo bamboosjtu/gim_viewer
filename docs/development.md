@@ -40,7 +40,7 @@ npm run tauri:dev     # Tauri 开发窗口
 | `npm run lint` | ESLint（`src`、`bridge`）；已接入模块执行 recommended type-checked 规则 |
 | `npm run format:architecture` | 格式化 scripts/format-architecture.mjs 声明的状态、缓存、日志、投影与展示端口模块 |
 | `npm run check:format` | 只检查上述模块的 Prettier 格式，不改文件 |
-| `npm run test:format-config` | 用真实 Git 签出验证源码、PowerShell 和 Prettier 的 CRLF 约定，并核对构建工具需要的 LF 文件 |
+| `npm run test:format-config` | 本地格式基础设施检查：用真实 Git 签出验证源码、PowerShell 和 Prettier 的 CRLF 约定，并核对构建工具需要的 LF 文件；Windows CI 只跑确定性的 `check:format` |
 | `npm run check:version` | npm/Cargo 版本一致性；构建前自动执行 |
 | `npm run check:types` | TypeScript 检查（含测试替身的接口完整性） |
 | `npm run check:engineering-boundaries` | 纯领域、来源与 Viewer 边界检查 |
