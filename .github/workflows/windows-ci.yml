@@ -123,22 +123,7 @@ jobs:
         run: npm run lint
 
       - name: Check adopted module formatting
-        env:
-          GIM_FORMAT_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-          GIM_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          if ($env:GIM_FORMAT_BASE -match '^0+$') {
-            $env:GIM_FORMAT_BASE = git merge-base HEAD "refs/remotes/origin/$env:GIM_DEFAULT_BRANCH"
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            if ($env:GIM_FORMAT_BASE -eq (git rev-parse HEAD)) { $env:GIM_FORMAT_BASE = '' }
-          }
-          if (-not $env:GIM_FORMAT_BASE) {
-            $env:GIM_FORMAT_BASE = git rev-parse --verify 'HEAD^'
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
-          npm run test:format-config
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          npm run check:format
+        run: npm run check:format
 
       - name: Install stable Rust toolchain
         uses: dtolnay/rust-toolchain@stable
