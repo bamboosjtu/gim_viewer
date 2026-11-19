@@ -23,7 +23,7 @@ if(!process.exitCode){
  for(const file of combined.files()){
   const coverage=combined.fileCoverageFor(file),path=relative(repo,file).replaceAll('\\','/');
   summaries[file]=coverage.toSummary().toJSON();
-  const group=path.startsWith('packages/gim-sdk/src/engineering/')?'semantic':path.startsWith('packages/gim-sdk/src/gim/')?'source':path.startsWith('packages/gim-sdk/src/shared/')?'shared':null;
+  const group=path.startsWith('packages/gim-sdk/src/semantic/')?'semantic':path.startsWith('packages/gim-sdk/src/source/')?'source':path.startsWith('packages/gim-sdk/src/shared/')?'shared':null;
   if(group){groups[group]??=createCoverageMap({});groups[group].addFileCoverage(coverage);}
  }
  const gates={};let failed=false;

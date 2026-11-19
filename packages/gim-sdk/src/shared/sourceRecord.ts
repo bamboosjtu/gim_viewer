@@ -1,4 +1,4 @@
-import type { ObjectNameEvidence } from "../engineering/types.js";
+import type { ObjectNameEvidence } from "./contracts.js";
 
 /** Raw source records stay in the source domain, separate from engineering identity. */
 export interface SourceProperty {

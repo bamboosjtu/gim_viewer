@@ -3,7 +3,7 @@ import {normalizeEngineeringSources} from '@gim/gim-sdk/source-adapter';
 import {afterEach,expect,it,vi} from 'vitest';
 import {assembleEngineeringView,assembleStoredEngineeringView} from '../engineeringAssembly.js';
 import {extractEngineeringSourceGraph} from '@gim/gim-sdk/source';
-import {failNextProjection} from '../../../../packages/gim-sdk/src/gim/engineering/__tests__/projectionFailures.js';
+import {failNextProjection} from '../../../../packages/gim-sdk/src/projection/__tests__/projectionFailures.js';
 import {assertEngineeringNavigation} from '../engineeringNavigationCache.js';
 
 import {assertEngineeringPartition} from '@gim/gim-sdk/semantic';

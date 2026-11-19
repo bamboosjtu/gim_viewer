@@ -5,48 +5,34 @@ import {fileURLToPath} from 'node:url';
 const root = fileURLToPath(new URL('.', import.meta.url));
 const manifest = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 const capabilities = ['source','semantic','geometry','engineering','projection','source-adapter'];
-// Transitional modules sharing legacy directories are classified explicitly.
-// New files inherit their directory role, and unknown paths are rejected.
-const roles = new Map(Object.entries({
-  'src/gim/engineering/geometry.ts': 'geometry',
-  'src/gim/engineering/geometryOccurrences.ts': 'geometry',
-  'src/gim/engineering/physicalOccurrences.ts': 'geometry',
-  'src/gim/engineering/objectEvidence.ts': 'source-adapter',
-  'src/gim/engineering/semanticAdapter.ts': 'source-adapter',
-  'src/gim/engineering/sourceRecordSelectors.ts': 'shared',
-  'src/shared/representationAddresses.ts': 'geometry',
-  'src/engineering/fusion.ts': 'engineering',
-  'src/engineering/representations.ts': 'engineering',
-  'src/engineering/query.ts': 'projection',
-  'src/engineering/catalogLabels.ts': 'directory',
-  'src/engineering/catalog.json': 'directory',
-  'src/engineering/standardCatalog.json': 'directory',
-  ...Object.fromEntries(['composition','compositionTemplate','inventoryTemplate'].map(name => [
-    `src/engineering/${name}.ts`, 'projection',
-  ])),
-  ...Object.fromEntries(['projection','navigation','sourceProjection','inventory','compositionContexts','sourceTitles'].map(name => [
-    `src/gim/engineering/${name}.ts`, 'projection',
-  ])),
-}));
+
+// Directory ownership decides a module's role; every input path must resolve
+// through these prefixes and unknown paths fail closed.
+function inputRole(input) {
+  const path = input.replaceAll('\\','/');
+  if (path.startsWith('src/source/')) return 'source';
+  if (path.startsWith('src/semantic/catalog/')) return 'directory';
+  if (path.startsWith('src/semantic/')) return 'semantic';
+  if (path.startsWith('src/geometry/')) return 'geometry';
+  if (path.startsWith('src/engineering/')) return 'engineering';
+  if (path.startsWith('src/projection/')) return 'projection';
+  if (path.startsWith('src/adapters/')) return 'source-adapter';
+  if (path.startsWith('src/shared/')) return 'shared';
+  if (path.startsWith('src/') || /(?:^|\/)powerline-core\/src\//.test(path)) return 'format';
+  return undefined;
+}
 
 const allowed = {
   source: ['source','format','shared'],
   semantic: ['semantic','directory','shared'],
-  geometry: ['geometry','format','shared'],
+  // Geometry has always consumed the shared source-document readers; the tree
+  // migration renames their role from 'format' to 'source', so the allowance
+  // follows the files instead of inventing a new violation.
+  geometry: ['geometry','source','format','shared'],
   engineering: ['engineering','geometry','shared'],
   projection: ['projection','directory','shared'],
   'source-adapter': ['source-adapter','source','format','shared','semantic','directory'],
 };
-
-function inputRole(input) {
-  const path = input.replaceAll('\\','/');
-  if (roles.has(path)) return roles.get(path);
-  if (path.startsWith('src/shared/')) return 'shared';
-  if (path.startsWith('src/engineering/')) return 'semantic';
-  if (path.startsWith('src/gim/engineering/')) return 'source';
-  if (path.startsWith('src/gim/') || /(?:^|\/)powerline-core\/src\//.test(path)) return 'format';
-  return undefined;
-}
 
 export function assertCapabilityInputs(capability, inputs) {
   const permitted = allowed[capability] ?? [];

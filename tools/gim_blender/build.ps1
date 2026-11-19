@@ -67,6 +67,10 @@ try {
             if(Test-Path -LiteralPath $zip){Assert-GimBuildTree -Path $zip}
             & $buildPython (Join-Path $PSScriptRoot 'package_zip.py') --out $zip
             if($LASTEXITCODE -ne 0){throw 'Directory package publication failed'}
+            $hash=(Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+            $sha=Join-Path $dist 'gim_blender.zip.sha256'
+            Assert-GimBuildChild -Path $sha -Parent $dist
+            Set-Content -LiteralPath $sha -Value "$hash  gim_blender.zip" -Encoding ascii
             Write-Output "Published: $zip"
         }
     } catch { throw "Build failed. Previous build preserved at ${previous}. $_" }

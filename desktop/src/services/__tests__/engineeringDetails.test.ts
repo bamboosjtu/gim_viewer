@@ -1,7 +1,7 @@
 import {beforeEach,expect,it,vi} from 'vitest';
 import {AppState} from '../../app/state.js';
 import {extractEngineeringSourceGraph} from '@gim/gim-sdk/source';
-import {buildTestEngineeringSources} from '../../../../packages/gim-sdk/src/gim/engineering/__tests__/fixtures.js';
+import {buildTestEngineeringSources} from '../../../../packages/gim-sdk/src/source/__tests__/fixtures.js';
 import {projectEngineeringNavigation} from '@gim/gim-sdk/projection';
 const evidence=vi.hoisted(()=>({ensure:vi.fn(),query:vi.fn()}));
 vi.mock('../engineeringService.js',()=>({ensureEngineeringEvidence:evidence.ensure,queryEngineeringEvidence:evidence.query}));

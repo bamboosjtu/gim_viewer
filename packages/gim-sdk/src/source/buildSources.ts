@@ -1,0 +1,123 @@
+import type {
+  IfcSpatialObject,
+  IfcSpatialNode,
+  SpatialModelSummary,
+} from "./ifcSpatialTypes.js";
+import { RECOGNITION_FIELDS_FINGERPRINT } from "../shared/recognitionFieldPolicy.js";
+import {
+  collectEngineeringSourceModel,
+  type IfcSourceMatch,
+} from "./engineeringModel.js";
+import { type SourceRecord } from "./sourceEvidence.js";
+import { type EngineeringSourceGraph } from "./sourceGraph.js";
+
+/** Stable on-disk cache directory name, independent of the recognition field list. */
+export const ENGINEERING_SOURCE_SCHEMA = "engineering-source-v1";
+/** Cache contract: a changed recognition field list must invalidate persisted sources. */
+export const ENGINEERING_SOURCE_VERSION = `${ENGINEERING_SOURCE_SCHEMA}|recognition-fields:${RECOGNITION_FIELDS_FINGERPRINT}`;
+export type EngineeringSpatialContext = Pick<
+  IfcSpatialNode,
+  | "key"
+  | "modelId"
+  | "expressId"
+  | "ifcType"
+  | "kind"
+  | "globalId"
+  | "name"
+  | "sourcePath"
+  | "parentKey"
+  | "longName"
+> & { elevationMetres?: number };
+export interface EngineeringSources {
+  version: string;
+  graph: EngineeringSourceGraph;
+  ifcRecords: SourceRecord[];
+  ifcMatches: IfcSourceMatch[];
+  models: Array<{ modelId: string; path: string; error?: string }>;
+  spatialNodes: EngineeringSpatialContext[];
+  complete: boolean;
+  incompleteReasons: string[];
+  /** Source Z-up metres. Placement is evidence for projection, never identity. */
+  locations?: Array<{ sourceId: string; position: number[] }>;
+}
+const canonical = (value: string) => value.replace(/\\/g, "/").toLowerCase();
+
+/** A parse result can be browsed without certifying a complete source snapshot. */
+export function collectEngineeringSources(
+  graph: EngineeringSourceGraph,
+  objects: readonly IfcSpatialObject[],
+  models: readonly SpatialModelSummary[],
+  nodes: readonly IfcSpatialNode[] = [],
+  locations?: EngineeringSources["locations"],
+): EngineeringSources {
+  const model = collectEngineeringSourceModel(graph, objects);
+  const expected = new Set(graph.ifcPaths.map(canonical));
+  const actual = new Set(models.map((m) => canonical(m.entryPath)));
+  const reasons: string[] = [];
+  if (
+    models.length !== actual.size ||
+    expected.size !== actual.size ||
+    [...expected].some((p) => !actual.has(p))
+  )
+    reasons.push("ifc-manifest-incomplete");
+  if (models.some((m) => m.parseError)) reasons.push("ifc-parse-failed");
+  const contexts = new Set(nodes.map((node) => node.key));
+  if (
+    objects.some((object) =>
+      object.spatialKeys.some((key) => !contexts.has(key)),
+    )
+  )
+    reasons.push("ifc-spatial-context-incomplete");
+  if (graph.diagnostics.length) reasons.push("source-graph-incomplete");
+  if (
+    graph.references.some(
+      (r) =>
+        r.status !== "resolved" && /\.(?:cbm|dev|fam|ifc)\$?$/i.test(r.value),
+    )
+  )
+    reasons.push("source-reference-unresolved");
+  return {
+    version: ENGINEERING_SOURCE_VERSION,
+    graph,
+    ifcRecords: model.sources.filter((r) => r.track === "ifc"),
+    ifcMatches: model.ifcMatches,
+    models: models.map((m) => ({
+      modelId: m.modelId,
+      path: m.entryPath,
+      ...(m.parseError ? { error: m.parseError } : {}),
+    })),
+    spatialNodes: nodes.map(
+      ({
+        key,
+        modelId,
+        expressId,
+        ifcType,
+        kind,
+        globalId,
+        name,
+        sourcePath,
+        parentKey,
+        longName,
+        elevation,
+        placement,
+      }) => ({
+        key,
+        modelId,
+        expressId,
+        ifcType,
+        kind,
+        globalId,
+        name,
+        sourcePath,
+        parentKey,
+        longName,
+        ...(elevation !== undefined && placement?.unitScaleToMetres
+          ? { elevationMetres: elevation * placement.unitScaleToMetres }
+          : {}),
+      }),
+    ),
+    ...(locations ? { locations } : {}),
+    complete: reasons.length === 0,
+    incompleteReasons: reasons,
+  };
+}

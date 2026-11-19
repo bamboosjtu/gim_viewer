@@ -12,19 +12,19 @@
       "import": "./dist/index.js"
     },
     "./source": {
-      "types": "./src/gim/engineering/source.ts",
-      "gim-source": "./src/gim/engineering/source.ts",
-      "import": "./dist/gim/engineering/source.js"
+      "types": "./src/source/source.ts",
+      "gim-source": "./src/source/source.ts",
+      "import": "./dist/source/source.js"
     },
     "./semantic": {
-      "types": "./src/engineering/semantic.ts",
-      "gim-source": "./src/engineering/semantic.ts",
-      "import": "./dist/engineering/semantic.js"
+      "types": "./src/semantic/semantic.ts",
+      "gim-source": "./src/semantic/semantic.ts",
+      "import": "./dist/semantic/semantic.js"
     },
     "./geometry": {
-      "types": "./src/gim/engineering/geometry.ts",
-      "gim-source": "./src/gim/engineering/geometry.ts",
-      "import": "./dist/gim/engineering/geometry.js"
+      "types": "./src/geometry/geometry.ts",
+      "gim-source": "./src/geometry/geometry.ts",
+      "import": "./dist/geometry/geometry.js"
     },
     "./engineering": {
       "types": "./src/engineering/fusion.ts",
@@ -32,14 +32,14 @@
       "import": "./dist/engineering/fusion.js"
     },
     "./projection": {
-      "types": "./src/gim/engineering/projection.ts",
-      "gim-source": "./src/gim/engineering/projection.ts",
-      "import": "./dist/gim/engineering/projection.js"
+      "types": "./src/projection/projection.ts",
+      "gim-source": "./src/projection/projection.ts",
+      "import": "./dist/projection/projection.js"
     },
     "./source-adapter": {
-      "types": "./src/gim/engineering/semanticAdapter.ts",
-      "gim-source": "./src/gim/engineering/semanticAdapter.ts",
-      "import": "./dist/gim/engineering/semanticAdapter.js"
+      "types": "./src/adapters/semanticAdapter.ts",
+      "gim-source": "./src/adapters/semanticAdapter.ts",
+      "import": "./dist/adapters/semanticAdapter.js"
     }
   },
   "files": [

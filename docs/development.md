@@ -52,7 +52,7 @@ npm run tauri:dev     # Tauri 开发窗口
 
 核心 SDK 的源码、目录配置和测试位于 `packages/gim-sdk/`。首次构建先在该目录执行 `npm ci`，再在 `desktop/` 执行 `npm ci`。`npm run sdk:build` 构建独立 ESM，`npm run test:sdk` 在工作区 `tmp/` 中验证构建产物的能力入口和来源适配器。源码与目录维护见 [SDK 说明](../packages/gim-sdk/README.md)和[实体目录](engineering/catalogs/README.md)。
 
-桌面 Vite / TypeScript / Vitest 用 gim-source 条件连接包源码，构建默认 ESM 的行为由 SDK 独立消费者验证。模块测试可选择 `../packages/gim-sdk/src/engineering` 或原转发模块；test:module 会扩展 SDK 转发目标，并选择所属与依赖消费者测试。lint 从工作区根配置检查桌面与 SDK，并在两边测试中检查异步 Promise 使用。SDK 自带测试类型检查。
+桌面 Vite / TypeScript / Vitest 用 gim-source 条件连接包源码，构建默认 ESM 的行为由 SDK 独立消费者验证。模块测试可选择 `../packages/gim-sdk/src/semantic` 等原转发模块；test:module 会扩展 SDK 转发目标，并选择所属与依赖消费者测试。lint 从工作区根配置检查桌面与 SDK，并在两边测试中检查异步 Promise 使用。SDK 自带测试类型检查。
 
 新增、修改或重命名至 `desktop/src/`、`desktop/bridge/` 或 `packages/gim-sdk/src/` 的生产 TypeScript 文件须加入 `format-architecture.mjs` 清单，与现有接入项一起接受 Prettier 和类型感知 lint 检查。工作区以 HEAD 为基线，包含未跟踪的新文件。Windows CI 以 PR 基线或推送前的提交作为比较点；首次推送分支查默认分支共同祖先，手工触发查当前提交的上一提交。测试文件继续走类型检查与异步 lint。
 
@@ -60,7 +60,7 @@ npm run tauri:dev     # Tauri 开发窗口
 
 ## 测试与门禁命令
 
-`desktop/` 下的 `npm run test:recognition` 在独立 Node 环境运行实体识别与来源证据专项，不启动几何编译或渲染；对应 CI 为 Entity Recognition Contracts。
+`desktop/` 下的 `npm run test:recognition` 在独立 Node 环境运行实体识别与来源证据专项，不启动几何编译或渲染；对应 CI 为 Windows Desktop CI 中的 recognition 步骤。
 
 | 命令（在 `desktop/` 下） | 范围 |
 |---|---|
@@ -78,6 +78,8 @@ npm run tauri:dev     # Tauri 开发窗口
 | `npm run test:local-contract` | 本地注册表协议 |
 
 Windows CI 保持一个串行任务：版本、测量协议、验收工具、本地注册表、分层、类型和 lint 检查在 Rust 编译及覆盖率之前执行；随后运行 Rust 单元测试、前端覆盖率、SQLite 集成、前端构建和 Rust 编译边界。`workflow_dispatch` 才构建、校验和上传便携 Benchmark 发布包。以上步骤均不执行工程性能样本；性能优化须取得可测的明显提升，功能和正确性修正应避免过大回退；实测收益、具体成本与未决项分别报告，没有统一时间、内存或增长比例验收线，是否接受及复核范围由开发者决定。
+
+CI Action 版本由 `.github/action-versions.json` 单一策略约束：每个 Action 固定一个主版本，不同 Action 的主版本互不替代；`node .github/scripts/check-action-versions.mjs` 在 Tools CI 中校验所有 workflow，同一 Action 出现第二个主版本即失败。
 
 单元测试随模块放入 `__tests__/`，共享包持有自己的测试，跨模块编排测试归编排模块；组织规则见[测试组织](validation.md#测试组织)。`test:module` 在 desktop 和 app 下均可使用，会加载各自的 Vitest 配置及排除规则；它不替代独立的原生/样本门禁。
 
@@ -108,7 +110,7 @@ npm test
 
 Python 工具位于 `tools/`，各自维护 `.venv` 与打包配置；构建、参数和排查见 [tools/README.md](../tools/README.md)。工具的目录归属见[项目目录](architecture.md#项目目录与模块归属)。
 
-独立漫游转换工具见 [gim_blender](../tools/gim_blender/README.md)：`tools/gim_blender/build.ps1` 生成目录包，可用 `-BlenderDirectory <便携目录> -Publish` 包含 Blender 并生成 ZIP；导入数据固定在 exe 旁 `data/`。GUI 只调用独立 Node 服务，服务、漫游前端与转换器分别运行；`start_demo.cmd` / `stop_demo.cmd` 可脱离 GUI 启停，命令行和窗口顶部显示实际端口与地址。它自带解析和几何实现副本，构建与运行不读取主程序资源。
+独立漫游转换工具见 [gim_blender](../tools/gim_blender/README.md)：`tools/gim_blender/build.ps1` 生成目录包，可用 `-BlenderDirectory <便携目录> -Publish` 包含 Blender 并生成 ZIP；导入数据固定在 exe 旁 `data/`。GUI 只调用独立 Node 服务，服务、漫游前端与转换器分别运行；`start_demo.cmd` / `stop_demo.cmd` 可脱离 GUI 启停，命令行和窗口顶部显示实际端口与地址。它自带解析和几何实现副本，构建与运行不读取主程序资源。Tools CI 在 Windows runner 上构建、启动自检并校验精简 GUI 包的 ZIP/SHA-256；可选便携 Blender 运行时仍由开发者本地提供，不在 CI 下载。
 
 ## 工作区与临时目录
 

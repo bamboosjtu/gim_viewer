@@ -51,11 +51,10 @@ if (readFileSync(measurementFacade, 'utf8').trim() !== "export * from '@gim/meas
 }
 // Existing IFC persistence adapters are outside the engineering refactor. Keep
 // exact exceptions visible so this check rejects any additional IO dependency.
-const viewerBridgeImports = new Set([
-  'viewer/ifcBimLoader.ts:@desktop/ifcLodCache.js',
-  'viewer/ifcEntryLoader.ts:@desktop/runtime.js',
-  'viewer/ifcEntryLoader.ts:@desktop/database.js',
-  'viewer/ifcRegionalRuntime.ts:@desktop/ifcLodCache.js',
+// Every entry must stay referenced by a real import; unused entries fail below.
+const viewerBridgeImports = new Map([
+  ['viewer/ifcBimLoader.ts:@desktop/ifcLodCache.js', false],
+  ['viewer/ifcRegionalRuntime.ts:@desktop/ifcLodCache.js', false],
 ]);
 // Views may use explicit presentation selectors/formatters, never parsers or business classifiers.
 const uiPresentationValues = new Map([
@@ -75,7 +74,7 @@ const viewerSourceValues=new Map([
   ['gim/geometry/xmlModParser.ts',new Set(['parseXmlMod'])],
   ['gim/geometry/ir.ts',new Set(['DEFAULT_ANGULAR_SEGMENTS','DEFAULT_LINEAR_SEGMENTS'])],
 ]);
-for (const [layer,sourceRoot] of [...['engineering','gim','viewer','ui','services','app'].map(layer=>[layer,root]),...['engineering','gim','shared'].map(layer=>[layer,sdkRoot])]) for (const path of files(resolve(sourceRoot,layer))) {
+for (const [layer,sourceRoot] of [...['engineering','gim','viewer','ui','services','app'].map(layer=>[layer,root]),...['engineering','semantic','source','geometry','projection','adapters','shared'].map(layer=>[layer,sdkRoot])]) for (const path of files(resolve(sourceRoot,layer))) {
   const ast = ts.createSourceFile(path, readFileSync(path,'utf8'), ts.ScriptTarget.Latest, true);
   const localPath = relative(sourceRoot, path).replaceAll('\\', '/');
   failures.push(...coreBoundaryErrors(readFileSync(path,'utf8'),localPath));
@@ -98,7 +97,7 @@ for (const [layer,sourceRoot] of [...['engineering','gim','viewer','ui','service
     if (pureLineProjection && ts.isIdentifier(node) && ['document','window','localStorage','sessionStorage'].includes(node.text)) {
       failures.push(`${localPath}: pure line projection references browser global ${node.text}`);
     }
-    if (localPath !== 'gim/entryResolver.ts' && ts.isCallExpression(node)
+    if (localPath !== 'source/entryResolver.ts' && ts.isCallExpression(node)
       && (ts.isIdentifier(node.expression) ? resolverFactories.has(node.expression.text)
         : ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'createEntryResolver')) {
       let enumeratesKeys = false;
@@ -121,7 +120,8 @@ for (const [layer,sourceRoot] of [...['engineering','gim','viewer','ui','service
       if (path !== measurementFacade && (resolved?.startsWith(`${measurementCoreRoot}${sep}`) || name.startsWith('@gim/measurement-core'))) {
         failures.push(`${localPath}: import measurement core through measurement/core.ts`);
       }
-      const target = name.startsWith('.') ? relative(sourceRoot,resolve(dirname(path),name)).replaceAll('\\','/').split('/')[0] : name;
+      const targetPath = name.startsWith('.') ? relative(sourceRoot,resolve(dirname(path),name)).replaceAll('\\','/') : name;
+      const target = targetPath.split('/')[0];
       if(layer==='viewer'&&target==='gim') {
         const module=relative(sourceRoot,resolve(dirname(path),name.replace(/\.js$/,'.ts'))).replaceAll('\\','/');
         const clause=ts.isImportDeclaration(node)?node.importClause:undefined,bindings=clause?.namedBindings;
@@ -143,14 +143,31 @@ for (const [layer,sourceRoot] of [...['engineering','gim','viewer','ui','service
         }
       }
 
-      const banned = layer === 'engineering' ? /^(?:app|gim|viewer|ui|services|@desktop|@tauri-apps|three|web-ifc|maplibre)/
-        : layer === 'gim' ? /^(?:app|services|viewer|ui|@desktop|@tauri-apps)/ : layer==='ui'?/^(?:@desktop|@tauri-apps)/:layer==='services'?/^(?:ui)/:layer==='app'?/^(?:gim)/:/^(?:app|services|ui|@desktop|@tauri-apps)/;
-      const exception = viewerBridgeImports.has(`${relative(root,path).replaceAll('\\','/')}:${name}`);
-      if (banned.test(target) && !exception && !((layer==='services'||layer==='app') && ts.isImportDeclaration(node) && node.importClause?.isTypeOnly)) failures.push(`${relative(root,path)}: forbidden import ${name}`);
+      // Desktop layers keep their original rules; SDK capability directories
+      // mirror verify-capabilities allowed roles: a layer bans every sibling
+      // capability plus host/render dependencies. 'semantic/catalog' (dictionary
+      // role) stays legal for semantic/projection; type-only edges are exempt
+      // (esbuild erases them from runtime closures).
+      // UI also bans measurement probes: layers.md lets ui consume only
+      // service results, pure types and whitelisted selectors, so map/worker
+      // probes must be injected by services through presentation ports.
+      const banned = layer === 'engineering' ? /^(?:app|gim|semantic(?!\/catalog)|source|adapters|projection|viewer|ui|services|@desktop|@tauri-apps|three|web-ifc|maplibre)/
+        : layer === 'gim' ? /^(?:app|services|viewer|ui|@desktop|@tauri-apps)/
+        : layer === 'semantic' ? /^(?:app|source|adapters|projection|geometry|engineering|viewer|ui|services|@desktop|@tauri-apps|three|web-ifc|maplibre)/
+        : layer === 'source' ? /^(?:app|semantic(?!\/catalog)|adapters|projection|geometry|engineering|services|viewer|ui|@desktop|@tauri-apps)/
+        : layer === 'geometry' ? /^(?:app|semantic(?!\/catalog)|adapters|projection|engineering|services|viewer|ui|@desktop|@tauri-apps)/
+        : layer === 'projection' ? /^(?:app|source|semantic(?!\/catalog)|adapters|geometry|engineering|services|viewer|ui|@desktop|@tauri-apps|three|web-ifc|maplibre)/
+        : layer === 'adapters' ? /^(?:app|geometry|engineering|projection|services|viewer|ui|@desktop|@tauri-apps|three|web-ifc|maplibre)/
+        : layer==='ui'?/^(?:@desktop|@tauri-apps|measurement)/:layer==='services'?/^(?:ui)/:layer==='app'?/^(?:gim)/:/^(?:app|services|ui|@desktop|@tauri-apps)/;
+      const exceptionKey = `${relative(root,path).replaceAll('\\','/')}:${name}`;
+      const exception = viewerBridgeImports.has(exceptionKey);
+      if (exception) viewerBridgeImports.set(exceptionKey, true);
+      const sdkTypeOnly = sourceRoot===sdkRoot && ts.isImportDeclaration(node) && node.importClause?.isTypeOnly;
+      if (banned.test(targetPath) && !exception && !((layer==='services'||layer==='app') && ts.isImportDeclaration(node) && node.importClause?.isTypeOnly) && !sdkTypeOnly) failures.push(`${relative(root,path)}: forbidden import ${name}`);
       const local=relative(root,path).replaceAll('\\','/');
-      const projection=local==='engineering/inventoryTemplate.ts'||local==='gim/engineering/inventory.ts'?'inventory'
-        :['engineering/composition.ts','engineering/compositionTemplate.ts'].includes(local)?'composition'
-        :local==='gim/engineering/sourceProjection.ts'?'source':undefined;
+      const projection=local==='projection/inventoryTemplate.ts'||local==='projection/inventory.ts'?'inventory'
+        :['projection/composition.ts','projection/compositionTemplate.ts'].includes(local)?'composition'
+        :local==='projection/sourceProjection.ts'?'source':undefined;
       const cross=projection==='inventory'?/composition|sourceProjection|navigation/
         :projection==='composition'?/inventory|sourceProjection|navigation/
         :projection==='source'?/composition|inventory|normalize|classify|navigation/:undefined;
@@ -163,6 +180,10 @@ for (const [layer,sourceRoot] of [...['engineering','gim','viewer','ui','service
   }
   visit(ast);
 }
+// A whitelisted bridge import that no module uses anymore is itself a defect:
+// dead entries would silently widen the viewer's IO surface.
+for (const [entry, hit] of viewerBridgeImports) if (!hit)
+  failures.push(`viewerBridgeImports contains a stale entry with no matching import: ${entry}`);
 // An implementation must not regain its facade's whole dependency graph.
 // Check each runtime family independently: calling another family's public
 // runtime entry remains legal (for example IFC starting DEV LOD).
@@ -213,7 +234,7 @@ for(const path of all){
   if (internal && ts.isStringLiteral(internal) && !path.startsWith(sdkRoot + sep)) {
     const name = internal.text;
     const localPath = relative(root, path).replaceAll('\\', '/');
-    if (/^@gim\/gim-sdk\/(?:engineering|gim|shared)\//.test(name)) {
+    if (/^@gim\/gim-sdk\/(?:source|semantic|geometry|engineering|projection|adapters|shared)\//.test(name)) {
       failures.push(`${localPath}: use the SDK capability export instead of adding an internal import ${name}`);
     }
   }

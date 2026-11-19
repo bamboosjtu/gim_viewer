@@ -1,5 +1,6 @@
-import {observeMap} from '../measurement/mapMeasurement.js';
+import { logger } from '../utils/logger.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
+import type { LineMapEventTarget } from '../services/linePresentationPort.js';
 /**
  * MapLibre 底图层模块。
  *
@@ -39,7 +40,13 @@ import { reportBackgroundError } from '../utils/backgroundErrors.js';
  * 会引入 300~600m 的错误位移。故本层不做任何坐标偏移转换。
  */
 
-import type { Map as MapLibreMap, StyleSpecification, LngLatBoundsLike, ScaleControl, MapMouseEvent } from 'maplibre-gl';
+import type {
+  Map as MapLibreMap,
+  StyleSpecification,
+  LngLatBoundsLike,
+  ScaleControl,
+  MapMouseEvent,
+} from 'maplibre-gl';
 import type { LineBasemapMode } from '../config/features.js';
 import { isTiandituKeyAvailable } from '../config/tianditu.js';
 import {
@@ -109,6 +116,13 @@ export interface CreateMapLibreProbeOptions {
    * - 调用方负责销毁 probe + 回退 Canvas-only
    */
   onBasemapUnavailable?: (reason: unknown) => void;
+  /**
+   * 地图实例创建后的观测钩子（例如诊断/测量探针）。
+   *
+   * 由 services 侧注入，ui 不直接依赖 measurement 模块；
+   * 回调在 map 创建完成后、返回句柄之前同步调用。
+   */
+  onMapCreated?: (map: LineMapEventTarget) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -147,15 +161,19 @@ export async function createMapLibreProbe(
   const isTiandituTerrainMode = basemapMode === 'tianditu-terrain';
   const isTiandituVectorMode = basemapMode === 'tianditu-vector';
   // 在线 raster 模式（OSM + 天地图）都需要持续监听 tile error
-  const isOnlineRasterMode = isOsmMode || isTiandituSatelliteMode || isTiandituTerrainMode || isTiandituVectorMode;
+  const isOnlineRasterMode =
+    isOsmMode || isTiandituSatelliteMode || isTiandituTerrainMode || isTiandituVectorMode;
   // 在线 raster 模式启用 attributionControl（© OpenStreetMap / © 天地图）
   // MapLibre attributionControl 类型：false | AttributionControlOptions（不接受 true）
   // 在线 raster 模式传 { compact: false } 始终展开 attribution；其他模式传 false 禁用
 
   // ---- 天地图 key 检查（未配置时回退到 OSM） ----
   let effectiveBasemapMode = basemapMode;
-  if ((isTiandituSatelliteMode || isTiandituTerrainMode || isTiandituVectorMode) && !isTiandituKeyAvailable()) {
-    console.warn('[MapLibre probe] 未配置天地图 API Key，回退到 OSM online');
+  if (
+    (isTiandituSatelliteMode || isTiandituTerrainMode || isTiandituVectorMode) &&
+    !isTiandituKeyAvailable()
+  ) {
+    logger.warn('[MapLibre probe] 未配置天地图 API Key，回退到 OSM online');
     effectiveBasemapMode = 'osm-online';
   }
   const useOsmStyle = effectiveBasemapMode === 'osm-online';
@@ -183,14 +201,17 @@ export async function createMapLibreProbe(
   }
 
   // 挂载点 div（底图层，z-index:0 在 Canvas overlay 之下）
-  const mountDiv = document.createElement('div');  mountDiv.style.cssText = `
+  const mountDiv = document.createElement('div');
+  mountDiv.style.cssText = `
     position: absolute;
     inset: 0;
     width: 100%;
     height: 100%;
     z-index: 0;
   `;
-  if (options?.signal?.aborted) { options.signal.throwIfAborted(); }
+  if (options?.signal?.aborted) {
+    options.signal.throwIfAborted();
+  }
   container.appendChild(mountDiv);
 
   // 创建 MapLibre 实例
@@ -198,7 +219,10 @@ export async function createMapLibreProbe(
     container: mountDiv,
     style,
     center: options?.initialBounds
-      ? [(options.initialBounds[0] + options.initialBounds[2]) / 2, (options.initialBounds[1] + options.initialBounds[3]) / 2]
+      ? [
+          (options.initialBounds[0] + options.initialBounds[2]) / 2,
+          (options.initialBounds[1] + options.initialBounds[3]) / 2,
+        ]
       : [0, 0],
     zoom: options?.initialBounds ? 10 : 0,
     // 在线 raster 模式（OSM + 天地图）启用 attributionControl（许可要求）
@@ -209,7 +233,7 @@ export async function createMapLibreProbe(
     // empty 模式不发起瓦片请求；在线 raster 模式请求对应瓦片服务
     hash: false,
   });
-  observeMap(map);
+  options?.onMapCreated?.(map);
 
   // 地图容器可能在隐藏/零尺寸状态下创建；MapLibre 只在 window resize 时
   // 自动更新尺寸，容器自身变化会留下空白/只画一部分瓦片。观察容器并显式
@@ -219,7 +243,11 @@ export async function createMapLibreProbe(
   if (typeof ResizeObserver !== 'undefined') {
     mapResizeObserver = new ResizeObserver(() => {
       if (!mapAlive) return;
-      try { map.resize(); } catch (err) { console.warn('[MapLibre probe] resize 失败:', err); }
+      try {
+        map.resize();
+      } catch (err) {
+        logger.warn('[MapLibre probe] resize 失败:', err);
+      }
     });
     mapResizeObserver.observe(container);
   }
@@ -230,7 +258,7 @@ export async function createMapLibreProbe(
     scaleControl = new maplibre.ScaleControl({ maxWidth: 100, unit: 'metric' });
     map.addControl(scaleControl, 'bottom-right');
   } catch (err) {
-    console.warn('[MapLibre probe] ScaleControl 添加失败:', err);
+    logger.warn('[MapLibre probe] ScaleControl 添加失败:', err);
     scaleControl = null;
   }
 
@@ -250,116 +278,137 @@ export async function createMapLibreProbe(
     try {
       options?.onBasemapUnavailable?.(reason);
     } catch (err) {
-      console.warn('[MapLibre probe] onBasemapUnavailable 回调抛出异常:', err);
+      logger.warn('[MapLibre probe] onBasemapUnavailable 回调抛出异常:', err);
     }
   }
 
   let detachAbort = () => {};
   try {
     await new Promise<void>((resolve, reject) => {
-    let settled = false;
-    let loadTimer: ReturnType<typeof setTimeout> | null = null;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      if (loadTimer) clearTimeout(loadTimer);
-      resolve();
-    };
-    const abort = () => {
-      if (settled) return;
-      settled = true;
-      if (loadTimer) clearTimeout(loadTimer);
-      reject(new DOMException('Map session expired', 'AbortError'));
-    };
-    options?.signal?.addEventListener('abort', abort, { once: true });
-    detachAbort = () => options?.signal?.removeEventListener('abort', abort);
-    if (options?.signal?.aborted) { abort(); return; }
-    // Some WebView2/network combinations never deliver map `load` when raster
-    // tile requests stall. The map canvas and style already exist at this point;
-    // resolve after a bounded wait so the transparent overlay can still switch
-    // and show tiles as they arrive (instead of an opaque Canvas-only layer
-    // hiding MapLibre forever).
-    loadTimer = setTimeout(() => {
-      if (settled) return;
-      console.warn('[MapLibre probe] load event timeout; activating overlay without waiting for map.load');
-      // 瓦片慢时 load 可能永不触发；仍要按 bbox 定位并校正容器尺寸，
-      // 否则地图停在 (0,0)/zoom 0 或旧尺寸，看起来“打开不加载”。
-      try { map.resize(); } catch (err) { console.warn('[MapLibre probe] timeout resize 失败:', err); }
-      if (options?.initialBounds) {
-        try {
-          map.fitBounds([
-            options.initialBounds[0], options.initialBounds[1],
-            options.initialBounds[2], options.initialBounds[3],
-          ], { padding: 48, duration: 0 });
-        } catch (err) {
-          console.warn('[MapLibre probe] timeout fitBounds 失败:', err);
-        }
-      }
-      finish();
-    }, 5000);
-    const onLoad = () => {
-      // 在线 raster 模式下 load 后仍需监听 tile error
-      // 原因：style load 成功 ≠ 瓦片请求成功；瓦片请求在 load 后才大规模发起
-      // 场景：style JSON 解析完成 → load 事件触发 → 后续瓦片请求失败（net::ERR_CONNECTION_CLOSED / 401）
-      // 若此时移除 error listener，onBasemapUnavailable 永不触发，回退失效
-      // 仅 empty 模式在 load 后移除（首个 error 才致命，load 成功即不再需要）
-      if (!isOnlineRasterMode) {
-        map.off('error', onError);
-      }
-      // 容器尺寸在 map 构造后可能才稳定；先同步一次尺寸再 fitBounds，
-      // 否则首帧按旧的 0/小尺寸计算，表现为打开不加载、缩放后只显示一半。
-      try { map.resize(); } catch (err) { console.warn('[MapLibre probe] load resize 失败:', err); }
-      // 加载后 fitBounds（如果提供了初始边界），duration:0 无动画
-      if (options?.initialBounds) {
-        try {
-          const bounds: LngLatBoundsLike = [
-            options.initialBounds[0], // minLng
-            options.initialBounds[1], // minLat
-            options.initialBounds[2], // maxLng
-            options.initialBounds[3], // maxLat
-          ];
-          map.fitBounds(bounds, { padding: 48, duration: 0 });
-        } catch (err) {
-          console.warn('[MapLibre probe] fitBounds 失败:', err);
-        }
-      }
-      finish();
-    };
-    const onError = (e: unknown) => {
-      // Aborted requests during project switch are not a basemap outage.
-      if (options?.signal?.aborted) return;
-      if (/abort|cancel|ERR_ABORTED/i.test(formatMapEvent(e))) return;
-      if (isOnlineRasterMode) {
-        // 在线 raster 模式下瓦片 404 / 401 / 网络错误计数
-        // 达到阈值后触发 onBasemapUnavailable，让调用方回退 Canvas-only
-        // 注意：load 前后均会触发（onLoad 不移除在线 raster error listener）
-        onlineTileErrorCount++;
-        if (onlineTileErrorCount <= ONLINE_TILE_ERROR_THRESHOLD) {
-          console.warn(`[MapLibre probe] tile error (${onlineTileErrorCount}/${ONLINE_TILE_ERROR_THRESHOLD}, non-fatal):`, formatMapEvent(e));
-        }
-        if (onlineTileErrorCount >= ONLINE_TILE_ERROR_THRESHOLD) {
-          notifyBasemapUnavailable(e);
-        }
+      let settled = false;
+      let loadTimer: ReturnType<typeof setTimeout> | null = null;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (loadTimer) clearTimeout(loadTimer);
+        resolve();
+      };
+      const abort = () => {
+        if (settled) return;
+        settled = true;
+        if (loadTimer) clearTimeout(loadTimer);
+        reject(new DOMException('Map session expired', 'AbortError'));
+      };
+      options?.signal?.addEventListener('abort', abort, { once: true });
+      detachAbort = () => options?.signal?.removeEventListener('abort', abort);
+      if (options?.signal?.aborted) {
+        abort();
         return;
       }
-      map.off('load', onLoad);
-      settled = true;
-      if (loadTimer) clearTimeout(loadTimer);
-      reject(new Error(`MapLibre probe 初始化失败: ${formatMapEvent(e)}`));
-    };
-    void Promise.resolve(map.once('load', onLoad)).catch(reportBackgroundError);
-    // 在线 raster 模式：可能有多个 tile 错误，用 on 持续监听（计数 + 阈值）
-    //   - load 前的 error：style/supplier 初始化失败
-    //   - load 后的 error：瓦片请求失败（net::ERR_CONNECTION_CLOSED / 401 等）
-    //   - onLoad 不移除在线 raster error listener，保证 load 后仍计数
-    // empty 模式：仅首个 error 致命，用 once
-    if (isOnlineRasterMode) {
-      map.on('error', onError);
-      // 保存引用，destroy() 时显式 off（onLoad 不移除，需手动清理）
-      onlineErrorHandler = onError;
-    } else {
-      void Promise.resolve(map.once('error', onError)).catch(reportBackgroundError);
-    }
+      // Some WebView2/network combinations never deliver map `load` when raster
+      // tile requests stall. The map canvas and style already exist at this point;
+      // resolve after a bounded wait so the transparent overlay can still switch
+      // and show tiles as they arrive (instead of an opaque Canvas-only layer
+      // hiding MapLibre forever).
+      loadTimer = setTimeout(() => {
+        if (settled) return;
+        logger.warn(
+          '[MapLibre probe] load event timeout; activating overlay without waiting for map.load',
+        );
+        // 瓦片慢时 load 可能永不触发；仍要按 bbox 定位并校正容器尺寸，
+        // 否则地图停在 (0,0)/zoom 0 或旧尺寸，看起来“打开不加载”。
+        try {
+          map.resize();
+        } catch (err) {
+          logger.warn('[MapLibre probe] timeout resize 失败:', err);
+        }
+        if (options?.initialBounds) {
+          try {
+            map.fitBounds(
+              [
+                options.initialBounds[0],
+                options.initialBounds[1],
+                options.initialBounds[2],
+                options.initialBounds[3],
+              ],
+              { padding: 48, duration: 0 },
+            );
+          } catch (err) {
+            logger.warn('[MapLibre probe] timeout fitBounds 失败:', err);
+          }
+        }
+        finish();
+      }, 5000);
+      const onLoad = () => {
+        // 在线 raster 模式下 load 后仍需监听 tile error
+        // 原因：style load 成功 ≠ 瓦片请求成功；瓦片请求在 load 后才大规模发起
+        // 场景：style JSON 解析完成 → load 事件触发 → 后续瓦片请求失败（net::ERR_CONNECTION_CLOSED / 401）
+        // 若此时移除 error listener，onBasemapUnavailable 永不触发，回退失效
+        // 仅 empty 模式在 load 后移除（首个 error 才致命，load 成功即不再需要）
+        if (!isOnlineRasterMode) {
+          map.off('error', onError);
+        }
+        // 容器尺寸在 map 构造后可能才稳定；先同步一次尺寸再 fitBounds，
+        // 否则首帧按旧的 0/小尺寸计算，表现为打开不加载、缩放后只显示一半。
+        try {
+          map.resize();
+        } catch (err) {
+          logger.warn('[MapLibre probe] load resize 失败:', err);
+        }
+        // 加载后 fitBounds（如果提供了初始边界），duration:0 无动画
+        if (options?.initialBounds) {
+          try {
+            const bounds: LngLatBoundsLike = [
+              options.initialBounds[0], // minLng
+              options.initialBounds[1], // minLat
+              options.initialBounds[2], // maxLng
+              options.initialBounds[3], // maxLat
+            ];
+            map.fitBounds(bounds, { padding: 48, duration: 0 });
+          } catch (err) {
+            logger.warn('[MapLibre probe] fitBounds 失败:', err);
+          }
+        }
+        finish();
+      };
+      const onError = (e: unknown) => {
+        // Aborted requests during project switch are not a basemap outage.
+        if (options?.signal?.aborted) return;
+        if (/abort|cancel|ERR_ABORTED/i.test(formatMapEvent(e))) return;
+        if (isOnlineRasterMode) {
+          // 在线 raster 模式下瓦片 404 / 401 / 网络错误计数
+          // 达到阈值后触发 onBasemapUnavailable，让调用方回退 Canvas-only
+          // 注意：load 前后均会触发（onLoad 不移除在线 raster error listener）
+          onlineTileErrorCount++;
+          if (onlineTileErrorCount <= ONLINE_TILE_ERROR_THRESHOLD) {
+            logger.warn(
+              `[MapLibre probe] tile error (${onlineTileErrorCount}/${ONLINE_TILE_ERROR_THRESHOLD}, non-fatal):`,
+              formatMapEvent(e),
+            );
+          }
+          if (onlineTileErrorCount >= ONLINE_TILE_ERROR_THRESHOLD) {
+            notifyBasemapUnavailable(e);
+          }
+          return;
+        }
+        map.off('load', onLoad);
+        settled = true;
+        if (loadTimer) clearTimeout(loadTimer);
+        reject(new Error(`MapLibre probe 初始化失败: ${formatMapEvent(e)}`));
+      };
+      void Promise.resolve(map.once('load', onLoad)).catch(reportBackgroundError);
+      // 在线 raster 模式：可能有多个 tile 错误，用 on 持续监听（计数 + 阈值）
+      //   - load 前的 error：style/supplier 初始化失败
+      //   - load 后的 error：瓦片请求失败（net::ERR_CONNECTION_CLOSED / 401 等）
+      //   - onLoad 不移除在线 raster error listener，保证 load 后仍计数
+      // empty 模式：仅首个 error 致命，用 once
+      if (isOnlineRasterMode) {
+        map.on('error', onError);
+        // 保存引用，destroy() 时显式 off（onLoad 不移除，需手动清理）
+        onlineErrorHandler = onError;
+      } else {
+        void Promise.resolve(map.once('error', onError)).catch(reportBackgroundError);
+      }
     });
   } catch (error) {
     detachAbort();
@@ -367,11 +416,17 @@ export async function createMapLibreProbe(
     // 无法清理这个 mount。这里必须对 map、监听器、mount 和协议做回滚，
     // 否则线路→变电切换会留下不可见但仍占用 WebGL/DOM 的地理图层。
     if (onlineErrorHandler) {
-      try { map.off('error', onlineErrorHandler); } catch { /* best effort */ }
+      try {
+        map.off('error', onlineErrorHandler);
+      } catch {
+        /* best effort */
+      }
       onlineErrorHandler = null;
     }
-    try { map.remove(); } catch (cleanupError) {
-      console.warn('[MapLibre probe] 初始化失败后的 map.remove() 失败:', cleanupError);
+    try {
+      map.remove();
+    } catch (cleanupError) {
+      logger.warn('[MapLibre probe] 初始化失败后的 map.remove() 失败:', cleanupError);
     }
     if (mountDiv.parentNode) mountDiv.parentNode.removeChild(mountDiv);
     throw error;
@@ -427,16 +482,19 @@ export async function createMapLibreProbe(
         try {
           map.off('error', onlineErrorHandler);
         } catch (err) {
-          console.warn('[MapLibre probe] tile error listener 清理失败:', err);
+          logger.warn('[MapLibre probe] tile error listener 清理失败:', err);
         }
         onlineErrorHandler = null;
       }
       try {
         const glCanvas = mountDiv.querySelector('canvas');
-        if (glCanvas) { glCanvas.width = 0; glCanvas.height = 0; }
+        if (glCanvas) {
+          glCanvas.width = 0;
+          glCanvas.height = 0;
+        }
         map.remove();
       } catch (err) {
-        console.warn('[MapLibre probe] map.remove() 失败:', err);
+        logger.warn('[MapLibre probe] map.remove() 失败:', err);
       }
       if (mountDiv.parentNode) {
         mountDiv.parentNode.removeChild(mountDiv);
@@ -494,7 +552,7 @@ export async function createMapLibreProbe(
         // M4-A2：duration:0 无动画，确保 Canvas overlay 立即同步重绘
         map.fitBounds(llb, { padding: 48, duration: 0 });
       } catch (err) {
-        console.warn('[MapLibre probe] fitBounds 失败:', err);
+        logger.warn('[MapLibre probe] fitBounds 失败:', err);
       }
     },
     onPointerMove,

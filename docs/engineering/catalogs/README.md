@@ -4,11 +4,11 @@
 
 | 配置 | 内容 |
 |---|---|
-| [standardCatalog.json](../../../packages/gim-sdk/src/engineering/standardCatalog.json) | 模型条目、名称、别名及来源位置 |
-| [catalog.json](../../../packages/gim-sdk/src/engineering/catalog.json) | 公开目录类别及部件条目 |
-| [recognitionPolicy.json](../../../packages/gim-sdk/src/engineering/recognitionPolicy.json) | 内部识别角色、粒度和同名词的解释规则 |
-| [sourceCompatibilityPolicy.json](../../../packages/gim-sdk/src/engineering/sourceCompatibilityPolicy.json) | 格式类型、枚举和有条件的来源映射 |
-| [compositionPolicy.json](../../../packages/gim-sdk/src/engineering/compositionPolicy.json) | 整体边界、宿主和功能细分策略 |
+| [standardCatalog.json](../../../packages/gim-sdk/src/semantic/catalog/standardCatalog.json) | 模型条目、名称、别名及来源位置 |
+| [catalog.json](../../../packages/gim-sdk/src/semantic/catalog/catalog.json) | 公开目录类别及部件条目 |
+| [recognitionPolicy.json](../../../packages/gim-sdk/src/semantic/catalog/recognitionPolicy.json) | 内部识别角色、粒度和同名词的解释规则 |
+| [sourceCompatibilityPolicy.json](../../../packages/gim-sdk/src/semantic/catalog/sourceCompatibilityPolicy.json) | 格式类型、枚举和有条件的来源映射 |
+| [compositionPolicy.json](../../../packages/gim-sdk/src/semantic/catalog/compositionPolicy.json) | 整体边界、宿主和功能细分策略 |
 
 公开的 `category` 表示目录类别，`standardClass.id` 标识具体模型条目，内部 `recognitionCode` 用于语义判断。模型与设备部件分别检索词汇，成员归属按实际组成与对象角色决定。
 

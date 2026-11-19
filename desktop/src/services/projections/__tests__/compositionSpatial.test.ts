@@ -2,7 +2,7 @@ import {expect,it} from 'vitest';
 import {normalizeEngineeringModel} from '@gim/gim-sdk/semantic';
 import {type CompositionSpatialDiagnostics,fromIfcYUpBounds,projectSpatialComposition} from '../compositionSpatial.js';
 import type {CompositionAssignment} from '@gim/gim-sdk/projection';
-import {declaredObject} from '../../../../../packages/gim-sdk/src/engineering/__tests__/evidenceFixtures.js';
+import {declaredObject} from '../../../../../packages/gim-sdk/src/semantic/__tests__/evidenceFixtures.js';
 
 interface CompositionParityMismatch {entityId:string;sourceIds:string[];expectedPaths:string[];actualPaths:string[];}
 function compareCompositionAssignments(

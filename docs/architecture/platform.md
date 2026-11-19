@@ -48,7 +48,7 @@
 | 自动定位 | 默认开；`gim-auto-locate` 保存偏好；三维点击始终不自动定位 |
 | 底图 | 默认 OSM 在线；天地图可配置；PMTiles 未实现；Canvas 兜底 |
 | 设备 Worker | 按逻辑核约 60% 取 2–8；`gim-dev-workers` 可覆盖 |
-| 内存压力 | 6 GiB 的 80% 暂停预取/自动 L1，90% 回收未保护模板/空闲 Worker |
+| 内存压力 | 按进程树 private 提交量对限额的百分比分档：高档暂停预取/自动 L1，临界档回收未保护模板/空闲 Worker；限额与分档阈值以 [memoryPressure.ts](../../desktop/src/utils/memoryPressure.ts) 为准，不在本文复制 |
 | 调试开关 | `gim-debug-fragments-cache`、`gim-debug-substation-early-semantic`、`gim-debug-substation-parse-copy`、`gim-debug-substation-extraction-trace`、`gim-debug-dev-instancing` 只用于诊断，不改变正式默认策略 |
 
 完整配置代码在[features.ts](../../desktop/src/config/features.ts)；设置面板/底图选择另有持久化规则。

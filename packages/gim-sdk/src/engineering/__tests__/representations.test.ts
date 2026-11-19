@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeEngineeringModel } from '../normalize.js';
+import { normalizeEngineeringModel } from '../../semantic/normalize.js';
 import { EngineeringRepresentationIndex } from '../representations.js';
-import {declaredObject} from './evidenceFixtures.js';
+import {declaredObject} from '../../semantic/__tests__/evidenceFixtures.js';
 
 const source=(sourceId:string,name:string,assemblyParentId?:string)=>declaredObject(sourceId,name,{assemblyParentId});
 function fixture() {

@@ -33,4 +33,4 @@ const views = projection.projectEngineeringNavigation(inputs, snapshot);
 
 宿主负责容器读取、Worker、缓存、会话、几何编译和界面。IFC 解析结果作为对象证据传入。物理目录和来源实例可先于语义识别交付，组成投影引用已建立的实体。
 
-包内测试与夹具随源码维护。可从 `desktop/` 运行 `npm run test:module -- ../packages/gim-sdk/src/engineering`，同时检查 SDK 模块和 Viewer 消费者。实体盘点器使用独立 Python 实现，通过配置与共享契约用例核对结果。
+包内测试与夹具随源码维护。可从 `desktop/` 运行 `npm run test:module -- ../packages/gim-sdk/src/semantic`，同时检查 SDK 模块和 Viewer 消费者。实体盘点器使用独立 Python 实现，通过配置与共享契约用例核对结果。

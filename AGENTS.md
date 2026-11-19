@@ -17,7 +17,7 @@
 
 - `tools/` 中的小工具须独立运行和打包，不导入、调用或在运行/构建时读取 `gim_viewer` 主程序及 `desktop/` 资源。工具持有自己的实现和词典副本，通过数据版本、契约用例与本地结果对照验证一致性；不通过调用主程序验证主程序自身。
 
-- `packages/gim-sdk/src/engineering/` 是纯领域，`desktop/src/engineering/` 只保留有消费者的包入口转发；`gim/` 做来源解析与适配；`services/` 编排；`viewer/` 管理渲染；`ui/` 管理 DOM；`measurement/` 是探针和只读证据。测量核心在 `packages/measurement-core/`，不得依赖 DOM、Tauri 或 Three。新跨端能力先确认是否属于现有 `packages/` 或 `crates/` 契约。
+- `packages/gim-sdk/src/` 按七个顶层目录组织：`source/`（来源解析）、`semantic/`（纯领域与 `semantic/catalog/` 词典）、`geometry/`、`engineering/`（表示绑定）、`projection/`（只读投影）、`adapters/`（来源适配）、`shared/`（中立契约）；`desktop/src/engineering/` 与 `desktop/src/gim/engineering/` 只保留有消费者的包入口转发；`services/` 编排；`viewer/` 管理渲染；`ui/` 管理 DOM；`measurement/` 是探针和只读证据。测量核心在 `packages/measurement-core/`，不得依赖 DOM、Tauri 或 Three。新跨端能力先确认是否属于现有 `packages/` 或 `crates/` 契约。
 - 测试按被测模块归属组织：TS 单元测试放模块旁的 `__tests__/`，共享包测试归共享包；Node 脚本测试与脚本同目录，Python 工具区分 `tests/unit/` 与 `tests/local/`。源码搬迁或契约变更时，同步更新测试、夹具、发现入口和文档引用；用 `npm run test:module -- <模块路径>` 选择模块及其跨模块依赖测试，不能只跑新目录而遗漏消费者。具体规则见[测试组织](docs/validation.md#测试组织)。
 - 不为旧测试保留产品已不用的入口；测试组合器放在模块测试支持文件中，并调用实际生产路径。清理前核对动态导入、Worker、平台入口和公开数据契约；不能把故障回退或暂未被 UI 消费的约定接口直接当成死代码。
 - `gim/` 不依赖 services/viewer/ui；`viewer/` 不依赖 services/ui；`ui/` 不直接访问数据库或原生 IPC。入口与打开服务不能静态引入 Three、web-ifc、MapLibre。变更后运行 `desktop/` 下的 `npm run check:engineering-boundaries`。

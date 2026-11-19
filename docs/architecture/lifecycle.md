@@ -39,7 +39,7 @@
 - 设备重开复用提取源和 DEV/LOD 派生缓存，但重新建立小型设备树，不发布完整变电语义凭据。
 - 线路缓存以 `begin/chunks/finish` 三阶段提交，`finish` 才写入有效 parser 标记；半成品不能作为合法缓存。
 
-索引回归入口为 [entryResolver.test.ts](../../packages/gim-sdk/src/gim/__tests__/entryResolver.test.ts) 与 [cbmParser.test.ts](../../desktop/src/gim/__tests__/cbmParser.test.ts)：重复查询、多个装配 occurrence 不得增加索引构建次数；同时监测 `keys/entries/values/forEach/[Symbol.iterator]` 全清单枚举入口，避免换一种遍历写法绕过资源计数。
+索引回归入口为 [entryResolver.test.ts](../../packages/gim-sdk/src/source/__tests__/entryResolver.test.ts) 与 [cbmParser.test.ts](../../desktop/src/gim/__tests__/cbmParser.test.ts)：重复查询、多个装配 occurrence 不得增加索引构建次数；同时监测 `keys/entries/values/forEach/[Symbol.iterator]` 全清单枚举入口，避免换一种遍历写法绕过资源计数。
 
 ## 会话与取消
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { parseFileDevRelation } from '../fileDevParser.js';
 import { buildCbmTree } from '../cbmParser.js';
 import { discoverIfcFromCBM } from '../gimIndexer.js';
@@ -199,5 +199,64 @@ describe('Substation source evidence and normalized projections', () => {
     const doc = parseXmlMod(xml('<Boolean Type="xor" Entity1="1" Entity2="2"/>'), 'MOD/boolean.mod');
     expect(doc.entities[0].primitive).toEqual({ type: 'Unsupported', sourceType: 'Boolean', raw: { Type: 'xor', Entity1: '1', Entity2: '2' } });
     expect(loadXmlModFromText(xml('<Boolean Type="xor" Entity1="1" Entity2="2"/>'), 'MOD/boolean.mod').children).toHaveLength(0);
+  });
+
+  it('reuses whole-tree evidence indexes across repeated per-node lookups without re-enumerating the archive', async () => {
+    const uuid = '12345678-1234-1234-1234-123456789abc';
+    const files = filesOf({
+      'CBM/project.cbm': 'ENTITYNAME=F1System\nSUBSYSTEM=device.cbm\nIFC0=model.ifc',
+      'CBM/device.cbm': `ENTITYNAME=F4System\nOBJECTMODELPOINTER=${uuid}.dev\nSUBSYSTEM=part.cbm`,
+      'CBM/part.cbm': `ENTITYNAME=PartIndex\nOBJECTMODELPOINTER=${uuid}.dev`,
+      'CBM/FileDevRelation.cbm': 'FILES.NUM=1\nFILE0.NAME=design.DGN\nFILE0.DEVS.NUM=1\nFILE0.DEV0=device.cbm',
+      'CBM/model.ifc': 'ISO-10303-21;',
+      [`DEV/${uuid}.dev`]: 'SOLIDMODELS.NUM=0',
+      [`MOD/${uuid}.gl`]: xml('<Cuboid L="1" W="1" H="1"/>'),
+    });
+    const tree = await buildCbmTree(files);
+    const relations = await parseFileDevRelation(files);
+    const entries = await discoverIfcFromCBM(files);
+    const fresh = await buildCbmTree(files);
+    const device = tree!.children[0];
+    const part = device.children.find((n) => n.entityName.toUpperCase() === 'PARTINDEX')!;
+    // Watch every Map enumeration entrypoint before the first per-node query.
+    const scans = [vi.spyOn(files, 'keys'), vi.spyOn(files, 'entries'), vi.spyOn(files, 'values'),
+      vi.spyOn(files, 'forEach'), vi.spyOn(files, Symbol.iterator)];
+    const links = buildSubstationIfcEvidence(tree, entries);
+    const sidecars = discoverSubstationGlSidecars(files, tree);
+    const aliases = buildSubstationAliasIndex(tree);
+    const documents = findSubstationSourceDocuments(device, tree, relations);
+    // Repeated per-node queries reuse the cached whole-tree indexes by reference.
+    for (let round = 0; round < 5; round++) {
+      expect(buildSubstationIfcEvidence(tree, entries)).toBe(links);
+      expect(discoverSubstationGlSidecars(files, tree)).toBe(sidecars);
+      expect(buildSubstationAliasIndex(tree)).toBe(aliases);
+      expect(findSubstationSourceDocuments(device, tree, relations)).toBe(documents);
+      expect(findSubstationSourceDocuments(part, tree, relations)).toBe(findSubstationSourceDocuments(part, tree, relations));
+    }
+    // The cached alias/sidecar entry keeps serving the interaction path.
+    expect(aliases.partToRoot.get(part.path)).toBe(device);
+    expect(sidecars).toHaveLength(1);
+    // Constant archive enumeration regardless of repeated queries.
+    expect(scans[0]).toHaveBeenCalledTimes(1);
+    expect(scans.reduce((count, scan) => count + scan.mock.calls.length, 0)).toBe(1);
+    // A replaced auxiliary reference rebuilds that index (single slot, like
+    // the shared entry resolver); the other indexes keep their cached results.
+    const nextEntries = entries.slice();
+    expect(buildSubstationIfcEvidence(tree, nextEntries)).not.toBe(links);
+    expect(buildSubstationIfcEvidence(tree, nextEntries)).toEqual(links);
+    expect(buildSubstationIfcEvidence(tree, entries)).not.toBe(links);
+    expect(buildSubstationIfcEvidence(tree, entries)).toEqual(links);
+    const nextRelations = relations.slice();
+    expect(findSubstationSourceDocuments(device, tree, nextRelations)).toBe(findSubstationSourceDocuments(device, tree, nextRelations));
+    expect(findSubstationSourceDocuments(device, tree, nextRelations)).toEqual(documents);
+    expect(findSubstationSourceDocuments(device, tree, relations)).not.toBe(documents);
+    expect(findSubstationSourceDocuments(device, tree, relations)).toEqual(documents);
+    expect(buildSubstationAliasIndex(tree)).toBe(aliases);
+    expect(discoverSubstationGlSidecars(files, tree)).toBe(sidecars);
+    // Cached outputs stay identical to an independently rebuilt projection.
+    expect(buildSubstationIfcEvidence(fresh, entries)).toEqual(links);
+    expect(discoverSubstationGlSidecars(files, fresh)).toEqual(sidecars);
+    expect(buildSubstationAliasIndex(fresh).partToRoot.get(part.path)?.path).toBe(device.path);
+    expect(findSubstationSourceDocuments(device, fresh, relations)).toEqual(documents);
   });
 });

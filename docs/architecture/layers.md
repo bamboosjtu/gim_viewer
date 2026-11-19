@@ -81,11 +81,11 @@ bootstrap
 
 ## 五组能力入口
 
-桌面应用通过 `@gim/gim-sdk` 的 source / semantic / geometry / engineering / projection 五个能力出口及 source-adapter 接线。现有目录仅保留有生产消费者的转发入口：`gim/engineering/source.ts` 提供来源收集，`gim/engineering/semanticAdapter.ts` 将来源传入领域归一化，`gim/engineering/geometry.ts` 提供独立物理目录，`engineering/fusion.ts` 提供实体/表示绑定，`gim/engineering/projection.ts` 提供现有三视图投影。宿主 Worker 和工程装配通过这些入口接线；来源图和原始事实位于 gim，候选解释和归属位于 engineering，位置提示由几何能力显式提供。SDK 发布构建检验各入口的运行时依赖闭包。
+桌面应用通过 `@gim/gim-sdk` 的 source / semantic / geometry / engineering / projection 五个能力出口及 source-adapter 接线。现有目录仅保留有生产消费者的转发入口：`gim/engineering/source.ts` 提供来源收集，`gim/engineering/semanticAdapter.ts` 将来源传入领域归一化，`gim/engineering/geometry.ts` 提供独立物理目录，`engineering/fusion.ts` 提供实体/表示绑定，`gim/engineering/projection.ts` 提供现有三视图投影。宿主 Worker 和工程装配通过这些入口接线；SDK 内部按七个顶层目录组织——来源图和原始事实位于 `source/`，候选解释和归属位于 `semantic/`（词典在 `semantic/catalog/`），几何地址位于 `geometry/`，绑定在 `engineering/`，只读投影在 `projection/`，来源适配在 `adapters/`，中立契约在 `shared/`；位置提示由几何能力显式提供。SDK 发布构建检验各入口的运行时依赖闭包。
 
 SDK 的实现及模块测试归 `packages/gim-sdk/src/`，IFC 运行时解析器仍在桌面；其共享对象/空间类型由 SDK 的 ifcSpatialTypes 提供。桌面与 Vitest 使用 gim-source 条件读取当前源码，默认包 import 消费构建后的 ESM。
 
-构建按目录为模块分配能力角色，同目录历史混放模块采用显式角色。六个包入口的运行时闭包只能包含该入口允许的角色。SDK 包清单仅公开根入口与六个能力子路径。桌面分层门禁直接拒绝内部路径，隔离消费门禁核对包清单的完整出口集合。
+构建按七个顶层目录为模块分配能力角色（`semantic/catalog/` 为词典角色），未知路径直接失败。六个包入口的运行时闭包只能包含该入口允许的角色。SDK 包清单仅公开根入口与六个能力子路径。桌面分层门禁直接拒绝内部路径，隔离消费门禁核对包清单的完整出口集合。
 
 `core-boundaries.mjs` 补充职责检查：投影和绑定不得导入分类器/归一化运行值，几何入口和目录不得消费语义主归属。中立类型允许共享；SDK 的裸包出口和能力别名同样参与依赖检查，UI/Viewer 的 SDK 运行值调用经服务端口接线，展示格式器保持精确登记入口。负向用例纳入 `test:presentation-boundaries`。入口不意味着五个独立进程或串行执行，几何仍可先于实体完成。
 

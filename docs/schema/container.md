@@ -68,7 +68,7 @@ STL 不必存在，DEV/PHM/MOD 数量不必相等；SCH/STD/SLD 也不是所有�
 键和 ENTITYNAME 比较使用各 parser 的归一化规则；XML primitive 标签保留大小写敏感。
 数值先确认词法、有限性和范围，声明数量与实得记录分开。
 空串、占位哨兵与数值零按字段语义处理，零电压/零长度/零坐标不自动证明业务对象无效。
-空值入口见 [gimValueSemantics](../../packages/gim-sdk/src/gim/gimValueSemantics.ts)。
+空值入口见 [gimValueSemantics](../../packages/gim-sdk/src/source/gimValueSemantics.ts)。
 
 ## 完整性口径
 

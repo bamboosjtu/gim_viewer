@@ -1,7 +1,7 @@
-import {projectPresentation} from './projectPresentationPort.js';
+import { projectPresentation } from './projectPresentationPort.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
-import {hasErrorCode} from '@desktop/contracts.js';
-import {linePresentation} from './linePresentationPort.js';
+import { hasErrorCode } from '@desktop/contracts.js';
+import { linePresentation } from './linePresentationPort.js';
 import { scheduleHideLoading } from './gimOpenCore.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { LineParserWorkerResult } from './lineParserWorkerClient.js';
@@ -11,12 +11,9 @@ import { currentPerfSession, hideLoading, showLoading } from './gimOpenCore.js';
 
 import { isTauri } from '@desktop/runtime.js';
 import { DEBUG_GIM_CACHE, DEBUG_RUNTIME_LOGS } from '../config/debug.js';
-import { debugLog } from '../utils/logger.js';
-import {
-  perfBegin,
-  perfMark,
-  perfMarkProductMoment,
-} from '../utils/perfTimings.js';
+import { debugLog, logger } from '../utils/logger.js';
+import { observeMap } from '../measurement/mapMeasurement.js';
+import { perfBegin, perfMark, perfMarkProductMoment } from '../utils/perfTimings.js';
 import { setProjectIdentity, refreshNavigatorTitle } from './presentation/shell_projectBar.js';
 import { validateGimCache } from '@desktop/database.js';
 
@@ -55,17 +52,25 @@ export async function commitLineParserResult(
   if (!state.isCurrentSession(session)) return false;
   state.currentGimGraph = result.graph;
   state.currentFiles = files;
-  restoreLineAttributesToState({
-    fam_properties: result.attributes.famPayloads,
-    dev_properties: result.attributes.devPayloads,
-  }, state);
+  restoreLineAttributesToState(
+    {
+      fam_properties: result.attributes.famPayloads,
+      dev_properties: result.attributes.devPayloads,
+    },
+    state,
+  );
   return state.isCurrentSession(session);
 }
 
 export function buildLineSemanticWarmFiles(
   projectId: number,
   items: Array<{ entry_path: string; packed: boolean; size: number; bytes: Uint8Array | null }>,
-  createDiskFile: (projectId: number, entryPath: string, size: number, semanticPackBacked?: boolean) => File,
+  createDiskFile: (
+    projectId: number,
+    entryPath: string,
+    size: number,
+    semanticPackBacked?: boolean,
+  ) => File,
 ): { files: Map<string, File>; workerFiles: LineParserWorkerFile[] } {
   const files = new Map<string, File>();
   const workerFiles: LineParserWorkerFile[] = [];
@@ -76,9 +81,13 @@ export function buildLineSemanticWarmFiles(
     files.set(path, createDiskFile(projectId, path, item.size, item.packed));
     if (item.packed && item.bytes) {
       const bytes = item.bytes;
-      const buffer = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
-        ? bytes.buffer as ArrayBuffer
-        : bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+      const buffer =
+        bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
+          ? (bytes.buffer as ArrayBuffer)
+          : (bytes.buffer.slice(
+              bytes.byteOffset,
+              bytes.byteOffset + bytes.byteLength,
+            ) as ArrayBuffer);
       workerFiles.push({ path, bytes: buffer });
     } else {
       // Worker 只需要路径元数据来保持 filesByType（尤其 MOD/STL）统计，
@@ -102,144 +111,204 @@ export async function openPowerlineProject(context: GimRuntimeOpenContext): Prom
     try {
       validation = await validateGimCache(context.projectId, 'transmission_line');
     } catch (error) {
-      console.warn('[Powerline Runtime] cache validation failed, falling back to cold path:', error);
+      logger.warn('[Powerline Runtime] cache validation failed, falling back to cold path:', error);
     }
     if (!state.isCurrentSession(session)) return;
   }
 
   if (validation?.valid) {
     try {
-            state.currentProjectType = 'transmission_line';
-            setProjectIdentity(context.projectName || null, 'transmission_line');
-            refreshNavigatorTitle();
-            let graph!: Awaited<ReturnType<typeof import('./lineParserWorkerClient.js').parseLineInWorker>>['graph'];
-            let attrStats!: { famCount: number; devCount: number; famSources: number; devSources: number };
-            let usedSemanticFastPath = false;
+      state.currentProjectType = 'transmission_line';
+      setProjectIdentity(context.projectName || null, 'transmission_line');
+      refreshNavigatorTitle();
+      let graph!: Awaited<
+        ReturnType<typeof import('./lineParserWorkerClient.js').parseLineInWorker>
+      >['graph'];
+      let attrStats!: {
+        famCount: number;
+        devCount: number;
+        famSources: number;
+        devSources: number;
+      };
+      let usedSemanticFastPath = false;
 
-            if (validation.line_semantic_pack_status === 'valid') {
-              try {
-                showLoading('正在读取线路 semantic pack...');
-                const endPack = perfBegin('线路 semantic pack 读取（缓存命中）', undefined, perfSession);
-                const { readLineSemanticPackAll } = await import('@desktop/database.js');
-                const full = await readLineSemanticPackAll(context.projectId!);
-                if (!state.isCurrentSession(session)) return;
-                endPack(undefined, {
-                  entries: full.profile.entryCount,
-                  packed: full.profile.packedCount,
-                  bytes: full.profile.bytes,
-                  indexMs: full.profile.indexMs,
-                  resolveMs: full.profile.resolveMs,
-                  readMs: full.profile.readMs,
-                  encodeMs: full.profile.encodeMs,
-                  totalMs: full.profile.totalMs,
-                });
+      if (validation.line_semantic_pack_status === 'valid') {
+        try {
+          showLoading('正在读取线路 semantic pack...');
+          const endPack = perfBegin('线路 semantic pack 读取（缓存命中）', undefined, perfSession);
+          const { readLineSemanticPackAll } = await import('@desktop/database.js');
+          const full = await readLineSemanticPackAll(context.projectId!);
+          if (!state.isCurrentSession(session)) return;
+          endPack(undefined, {
+            entries: full.profile.entryCount,
+            packed: full.profile.packedCount,
+            bytes: full.profile.bytes,
+            indexMs: full.profile.indexMs,
+            resolveMs: full.profile.resolveMs,
+            readMs: full.profile.readMs,
+            encodeMs: full.profile.encodeMs,
+            totalMs: full.profile.totalMs,
+          });
 
-                const { createDiskBackedFile } = await import('@desktop/gimExtract.js');
-                const prepared = buildLineSemanticWarmFiles(context.projectId!, full.items, createDiskBackedFile);
-                showLoading('正在由 Worker 恢复线路图与属性...');
-                const endWorker = perfBegin('线路图构建+属性解析（semantic warm Worker）', undefined, perfSession);
-                const { parseLineInWorker } = await import('./lineParserWorkerClient.js');
-                const workerResult = await parseLineInWorker(prepared.workerFiles, session);
-                if (!state.isCurrentSession(session)) return;
-                endWorker(undefined, {
-                  nodes: workerResult.graph.stats.total,
-                  worker: workerResult.timings.worker,
-                  workerMs: Math.round(workerResult.timings.totalMs),
-                  graphMs: Math.round(workerResult.timings.graphMs),
-                  attributesMs: Math.round(workerResult.timings.attributesMs),
-                });
-                if (!await commitLineParserResult(state, workerResult, prepared.files, session)) return;
-                graph = workerResult.graph;
-                attrStats = {
-                  famCount: workerResult.attributes.famPayloads.length,
-                  devCount: workerResult.attributes.devPayloads.length,
-                  famSources: new Set(workerResult.attributes.famPayloads.map((item) => item.normalized_path)).size,
-                  devSources: new Set(workerResult.attributes.devPayloads.map((item) => item.normalized_path)).size,
-                };
-                usedSemanticFastPath = true;
-                if (import.meta.env.DEV) {
-                  (globalThis as { __GIM_DEV_LINE_SEMANTIC_FAST_PATH__?: boolean }).__GIM_DEV_LINE_SEMANTIC_FAST_PATH__ = true;
-                }
-              } catch (error) {
-                const integrityFailure = hasErrorCode(error,'PACK_INVALID','INDEX_INVALID','PACK_TRUNCATED',
-                  'PROTOCOL_INVALID','SOURCE_CHANGED','SESSION_SUPERSEDED','CANCELLED','RESOURCE_LIMIT','INVALID_PATH','UNAUTHORIZED');
-                if (integrityFailure) {
-                  // validation 后 pack 仍可能被外部删除/截断；整体失效，
-                  // 交给外层回退完整解压重建，禁止 SQLite partial Runtime。
-                  throw error;
-                }
-                console.warn('[Tauri] semantic pack fast path 不可用，回退 SQLite 线路缓存:', error);
-              }
-            }
+          const { createDiskBackedFile } = await import('@desktop/gimExtract.js');
+          const prepared = buildLineSemanticWarmFiles(
+            context.projectId!,
+            full.items,
+            createDiskBackedFile,
+          );
+          showLoading('正在由 Worker 恢复线路图与属性...');
+          const endWorker = perfBegin(
+            '线路图构建+属性解析（semantic warm Worker）',
+            undefined,
+            perfSession,
+          );
+          const { parseLineInWorker } = await import('./lineParserWorkerClient.js');
+          const workerResult = await parseLineInWorker(prepared.workerFiles, session);
+          if (!state.isCurrentSession(session)) return;
+          endWorker(undefined, {
+            nodes: workerResult.graph.stats.total,
+            worker: workerResult.timings.worker,
+            workerMs: Math.round(workerResult.timings.totalMs),
+            graphMs: Math.round(workerResult.timings.graphMs),
+            attributesMs: Math.round(workerResult.timings.attributesMs),
+          });
+          if (!(await commitLineParserResult(state, workerResult, prepared.files, session))) return;
+          graph = workerResult.graph;
+          attrStats = {
+            famCount: workerResult.attributes.famPayloads.length,
+            devCount: workerResult.attributes.devPayloads.length,
+            famSources: new Set(
+              workerResult.attributes.famPayloads.map((item) => item.normalized_path),
+            ).size,
+            devSources: new Set(
+              workerResult.attributes.devPayloads.map((item) => item.normalized_path),
+            ).size,
+          };
+          usedSemanticFastPath = true;
+          if (import.meta.env.DEV) {
+            (
+              globalThis as { __GIM_DEV_LINE_SEMANTIC_FAST_PATH__?: boolean }
+            ).__GIM_DEV_LINE_SEMANTIC_FAST_PATH__ = true;
+          }
+        } catch (error) {
+          const integrityFailure = hasErrorCode(
+            error,
+            'PACK_INVALID',
+            'INDEX_INVALID',
+            'PACK_TRUNCATED',
+            'PROTOCOL_INVALID',
+            'SOURCE_CHANGED',
+            'SESSION_SUPERSEDED',
+            'CANCELLED',
+            'RESOURCE_LIMIT',
+            'INVALID_PATH',
+            'UNAUTHORIZED',
+          );
+          if (integrityFailure) {
+            // validation 后 pack 仍可能被外部删除/截断；整体失效，
+            // 交给外层回退完整解压重建，禁止 SQLite partial Runtime。
+            throw error;
+          }
+          logger.warn('[Tauri] semantic pack fast path 不可用，回退 SQLite 线路缓存:', error);
+        }
+      }
 
-            if (!usedSemanticFastPath) {
-              showLoading('正在从本地缓存恢复线路工程索引...');
-              const endRestoreGraph = perfBegin('线路图恢复（SQLite 缓存命中）', undefined, perfSession);
-              const { getLineGraph, getLineAttributes } = await import('@desktop/database.js');
-              const { restoreLineGraphToState } = await import('./lineGraphRestoreService.js');
-              const { restoreLineAttributesToState } = await import('./lineAttrRestoreService.js');
-              const result = await getLineGraph(context.projectId!);
-              if (!state.isCurrentSession(session)) return;
-              graph = restoreLineGraphToState(state, result);
-              endRestoreGraph(undefined, { nodes: graph.stats.total });
-              showLoading('正在从本地缓存恢复线路 FAM/DEV 属性...');
-              const endRestoreAttrs = perfBegin('线路属性恢复（SQLite 缓存命中）', undefined, perfSession);
-              const attrResult = await getLineAttributes(context.projectId!);
-              if (!state.isCurrentSession(session)) return;
-              attrStats = restoreLineAttributesToState(attrResult, state);
-              endRestoreAttrs(undefined, { fam: attrStats.famCount, dev: attrStats.devCount });
-              if (import.meta.env.DEV) {
-                (globalThis as { __GIM_DEV_LINE_SEMANTIC_FAST_PATH__?: boolean }).__GIM_DEV_LINE_SEMANTIC_FAST_PATH__ = false;
-              }
-            }
-            if (!state.isCurrentSession(session)) return;
-            const endRestoreMap = perfBegin(
-              usedSemanticFastPath ? '线路面板+地图渲染（semantic warm）' : '线路面板+地图渲染（SQLite 缓存命中）',
-              undefined,
-              perfSession,
-            );
-            const view=await linePresentation().present(state,graph,showMessage,{
-              perfSession,
-              enableCatenary: getDevLineCatenaryMode(),
-            },()=>state.isCurrentSession(session));
-    if(view)state.sessionScope(session).own(()=>view.destroy());
-    if(!state.isCurrentSession(session))return;
-            endRestoreMap(undefined, {
-              nodes: graph.stats.total,
-              towers: graph.stats.Tower_Device,
-              wires: graph.stats.WIRE,
-              crosses: graph.stats.CROSS,
-            });
-            perfMarkProductMoment('navigationUiReady',{domain:'line',cache:true},perfSession);
-            perfMarkProductMoment('interactive',{domain:'line',cache:true},perfSession);
-            perfMark(
-              usedSemanticFastPath ? '线路工程可交互（semantic warm）' : '线路工程可交互（SQLite 缓存命中）',
-              undefined,
-              perfSession,
-            );
-            projectPresentation().hideEmptyState();
+      if (!usedSemanticFastPath) {
+        showLoading('正在从本地缓存恢复线路工程索引...');
+        const endRestoreGraph = perfBegin('线路图恢复（SQLite 缓存命中）', undefined, perfSession);
+        const { getLineGraph, getLineAttributes } = await import('@desktop/database.js');
+        const { restoreLineGraphToState } = await import('./lineGraphRestoreService.js');
+        const { restoreLineAttributesToState } = await import('./lineAttrRestoreService.js');
+        const result = await getLineGraph(context.projectId!);
+        if (!state.isCurrentSession(session)) return;
+        graph = restoreLineGraphToState(state, result);
+        endRestoreGraph(undefined, { nodes: graph.stats.total });
+        showLoading('正在从本地缓存恢复线路 FAM/DEV 属性...');
+        const endRestoreAttrs = perfBegin(
+          '线路属性恢复（SQLite 缓存命中）',
+          undefined,
+          perfSession,
+        );
+        const attrResult = await getLineAttributes(context.projectId!);
+        if (!state.isCurrentSession(session)) return;
+        attrStats = restoreLineAttributesToState(attrResult, state);
+        endRestoreAttrs(undefined, { fam: attrStats.famCount, dev: attrStats.devCount });
+        if (import.meta.env.DEV) {
+          (
+            globalThis as { __GIM_DEV_LINE_SEMANTIC_FAST_PATH__?: boolean }
+          ).__GIM_DEV_LINE_SEMANTIC_FAST_PATH__ = false;
+        }
+      }
+      if (!state.isCurrentSession(session)) return;
+      const endRestoreMap = perfBegin(
+        usedSemanticFastPath
+          ? '线路面板+地图渲染（semantic warm）'
+          : '线路面板+地图渲染（SQLite 缓存命中）',
+        undefined,
+        perfSession,
+      );
+      const view = await linePresentation().present(
+        state,
+        graph,
+        showMessage,
+        {
+          perfSession,
+          enableCatenary: getDevLineCatenaryMode(),
+          observeMapFrames: observeMap,
+        },
+        () => state.isCurrentSession(session),
+      );
+      if (view) state.sessionScope(session).own(() => view.destroy());
+      if (!state.isCurrentSession(session)) return;
+      endRestoreMap(undefined, {
+        nodes: graph.stats.total,
+        towers: graph.stats.Tower_Device,
+        wires: graph.stats.WIRE,
+        crosses: graph.stats.CROSS,
+      });
+      perfMarkProductMoment('navigationUiReady', { domain: 'line', cache: true }, perfSession);
+      perfMarkProductMoment('interactive', { domain: 'line', cache: true }, perfSession);
+      perfMark(
+        usedSemanticFastPath
+          ? '线路工程可交互（semantic warm）'
+          : '线路工程可交互（SQLite 缓存命中）',
+        undefined,
+        perfSession,
+      );
+      projectPresentation().hideEmptyState();
 
-            hideLoading();
-            state.lineCachePersistence = 'saved';
-            perfMarkProductMoment('lineCachePersistenceReady', { source: 'warm', status: 'saved' }, perfSession);
-            showLoading(usedSemanticFastPath ? '已从 semantic pack 恢复线路工程' : '已从本地缓存恢复线路工程索引');
-            scheduleHideLoading(() => state.isCurrentSession(session), 3000);
-            if (import.meta.env.DEV) {
-              (globalThis as { __GIM_DEV_LINE_CACHE_PERSIST_DONE__?: boolean }).__GIM_DEV_LINE_CACHE_PERSIST_DONE__ = true;
-            }
-            debugLog(DEBUG_GIM_CACHE, '[Tauri] 线路工程缓存短路生效：未读取原始 GIM，未执行解压', {
-              project_id: context.projectId!,
-              nodes: graph.stats.total,
-              famProperties: attrStats.famCount,
-              devProperties: attrStats.devCount,
-              famSources: attrStats.famSources,
-              devSources: attrStats.devSources,
-              semanticFastPath: usedSemanticFastPath,
-            });
-             return; // 线路工程缓存命中，短路完成
+      hideLoading();
+      state.lineCachePersistence = 'saved';
+      perfMarkProductMoment(
+        'lineCachePersistenceReady',
+        { source: 'warm', status: 'saved' },
+        perfSession,
+      );
+      showLoading(
+        usedSemanticFastPath ? '已从 semantic pack 恢复线路工程' : '已从本地缓存恢复线路工程索引',
+      );
+      scheduleHideLoading(() => state.isCurrentSession(session), 3000);
+      if (import.meta.env.DEV) {
+        (
+          globalThis as { __GIM_DEV_LINE_CACHE_PERSIST_DONE__?: boolean }
+        ).__GIM_DEV_LINE_CACHE_PERSIST_DONE__ = true;
+      }
+      debugLog(DEBUG_GIM_CACHE, '[Tauri] 线路工程缓存短路生效：未读取原始 GIM，未执行解压', {
+        project_id: context.projectId!,
+        nodes: graph.stats.total,
+        famProperties: attrStats.famCount,
+        devProperties: attrStats.devCount,
+        famSources: attrStats.famSources,
+        devSources: attrStats.devSources,
+        semanticFastPath: usedSemanticFastPath,
+      });
+      return; // 线路工程缓存命中，短路完成
     } catch (error) {
       if (!state.isCurrentSession(session)) return;
-      console.warn('[Powerline Runtime] warm cache restore failed, falling back to cold path:', error);
+      logger.warn(
+        '[Powerline Runtime] warm cache restore failed, falling back to cold path:',
+        error,
+      );
     }
   }
 
@@ -250,161 +319,192 @@ export async function openPowerlineProject(context: GimRuntimeOpenContext): Prom
   state.projectName = context.projectName;
   setProjectIdentity(context.projectName || null, 'transmission_line');
   refreshNavigatorTitle();
-    // 线路工程流程：先按批次准备可转移的文本输入，再由 Line Parser Worker
-    // 一次完成 GimGraph + FAM/DEV 属性解析；不走 IFC/Viewer 流程。
-    showLoading('正在批量读取线路 CBM/FAM/DEV 文件...');
-    const endInput = perfBegin('线路解析输入', undefined, perfSession);
-    const { readLineParserInput } = await import('./lineParserInput.js');
-    const lineBatchOptions = getDevLineBatchOptions();
-    const parserInput = await readLineParserInput(extracted, session.projectId, {
-      ...lineBatchOptions,
-      isCurrent: () => state.isCurrentSession(session),
-    });
-    if (parserInput.cancelled || !state.isCurrentSession(session)) return;
-    endInput(undefined, {
-      files: parserInput.files.length,
-      requested: parserInput.requested,
-      bytes: parserInput.bytes,
-      batches: parserInput.batches,
-      semanticPackReads: parserInput.semanticPackReads,
-      skippedLargeModFiles: parserInput.skippedLargeModFiles,
-      skippedLargeModBytes: parserInput.skippedLargeModBytes,
-      maxFiles: lineBatchOptions.maxFiles ?? 1024,
-      maxBytes: lineBatchOptions.maxBytes ?? 8 * 1024 * 1024,
-    });
-    showLoading('正在后台解析线路 CBM 与属性...');
-    const endGraph = perfBegin('线路图构建+属性解析', undefined, perfSession);
-    const { parseLineInWorker } = await import('./lineParserWorkerClient.js');
-    let workerResult: Awaited<ReturnType<typeof parseLineInWorker>>;
-    try {
-      workerResult = await parseLineInWorker(parserInput.files, session);
-    } catch (error) {
-      // 清理工程时主动终止旧 Worker 会拒绝其 promise；这是正常的取消，
-      // 不应被外层打开流程误报为“GIM 解析失败”。当前工程的真实错误仍上抛。
+  // 线路工程流程：先按批次准备可转移的文本输入，再由 Line Parser Worker
+  // 一次完成 GimGraph + FAM/DEV 属性解析；不走 IFC/Viewer 流程。
+  showLoading('正在批量读取线路 CBM/FAM/DEV 文件...');
+  const endInput = perfBegin('线路解析输入', undefined, perfSession);
+  const { readLineParserInput } = await import('./lineParserInput.js');
+  const lineBatchOptions = getDevLineBatchOptions();
+  const parserInput = await readLineParserInput(extracted, session.projectId, {
+    ...lineBatchOptions,
+    isCurrent: () => state.isCurrentSession(session),
+  });
+  if (parserInput.cancelled || !state.isCurrentSession(session)) return;
+  endInput(undefined, {
+    files: parserInput.files.length,
+    requested: parserInput.requested,
+    bytes: parserInput.bytes,
+    batches: parserInput.batches,
+    semanticPackReads: parserInput.semanticPackReads,
+    skippedLargeModFiles: parserInput.skippedLargeModFiles,
+    skippedLargeModBytes: parserInput.skippedLargeModBytes,
+    maxFiles: lineBatchOptions.maxFiles ?? 1024,
+    maxBytes: lineBatchOptions.maxBytes ?? 8 * 1024 * 1024,
+  });
+  showLoading('正在后台解析线路 CBM 与属性...');
+  const endGraph = perfBegin('线路图构建+属性解析', undefined, perfSession);
+  const { parseLineInWorker } = await import('./lineParserWorkerClient.js');
+  let workerResult: Awaited<ReturnType<typeof parseLineInWorker>>;
+  try {
+    workerResult = await parseLineInWorker(parserInput.files, session);
+  } catch (error) {
+    // 清理工程时主动终止旧 Worker 会拒绝其 promise；这是正常的取消，
+    // 不应被外层打开流程误报为“GIM 解析失败”。当前工程的真实错误仍上抛。
+    if (!state.isCurrentSession(session)) return;
+    throw error;
+  }
+  if (!state.isCurrentSession(session)) return;
+  const graph = workerResult.graph;
+  const attrResult = workerResult.attributes;
+  endGraph(undefined, {
+    nodes: graph.stats.total,
+    files: parserInput.files.length,
+    bytes: parserInput.bytes,
+    batches: parserInput.batches,
+    worker: workerResult.timings.worker,
+    workerMs: Math.round(workerResult.timings.totalMs),
+    graphMs: Math.round(workerResult.timings.graphMs),
+    attributesMs: Math.round(workerResult.timings.attributesMs),
+  });
+  perfMark('线路图就绪', { nodes: graph.stats.total }, perfSession);
+  // Worker 的属性结果与缓存命中结构同构；cold/warm 共用同一提交边界。
+  if (!(await commitLineParserResult(state, workerResult, extracted, session))) return;
+
+  // v5: 首次导入 → 解析 FAM/DEV 属性 → 恢复到 state → 渲染面板。
+  // 注意：render 必须在 restore attrs 之后，否则 extractLineMapData 拿不到
+  //       FAM/DEV 属性，塔位编号/塔型/呼高/转角等 tooltip 字段会缺失。
+  // SQLite 事务写入移到首帧之后，避免数万节点/属性的 JSON + IPC 把“可交互”
+  // 阻塞数秒；save_line_project_finish 仍是缓存提交点，写入失败不会把
+  // 半成品标记为有效缓存。
+  if (context.projectId != null && isTauri()) {
+    state.lineCachePersistence = 'saving';
+    if (import.meta.env.DEV) {
+      // 真实 Tauri 性能采集需要知道后台入库何时完成，才能在诊断快照中
+      // 同时看到该 span，并避免下一次 cold run 删除缓存时与旧写入交错。
+      (
+        globalThis as { __GIM_DEV_LINE_CACHE_PERSIST_DONE__?: boolean }
+      ).__GIM_DEV_LINE_CACHE_PERSIST_DONE__ = false;
+    }
+    const persistLineCache = async (): Promise<void> => {
       if (!state.isCurrentSession(session)) return;
-      throw error;
-    }
-    if (!state.isCurrentSession(session)) return;
-    const graph = workerResult.graph;
-    const attrResult = workerResult.attributes;
-    endGraph(undefined, {
-      nodes: graph.stats.total,
-      files: parserInput.files.length,
-      bytes: parserInput.bytes,
-      batches: parserInput.batches,
-      worker: workerResult.timings.worker,
-      workerMs: Math.round(workerResult.timings.totalMs),
-      graphMs: Math.round(workerResult.timings.graphMs),
-      attributesMs: Math.round(workerResult.timings.attributesMs),
-    });
-    perfMark('线路图就绪', { nodes: graph.stats.total }, perfSession);
-    // Worker 的属性结果与缓存命中结构同构；cold/warm 共用同一提交边界。
-    if (!await commitLineParserResult(state, workerResult, extracted, session)) return;
-
-    // v5: 首次导入 → 解析 FAM/DEV 属性 → 恢复到 state → 渲染面板。
-    // 注意：render 必须在 restore attrs 之后，否则 extractLineMapData 拿不到
-    //       FAM/DEV 属性，塔位编号/塔型/呼高/转角等 tooltip 字段会缺失。
-    // SQLite 事务写入移到首帧之后，避免数万节点/属性的 JSON + IPC 把“可交互”
-    // 阻塞数秒；save_line_project_finish 仍是缓存提交点，写入失败不会把
-    // 半成品标记为有效缓存。
-    if (context.projectId != null && isTauri()) {
-      state.lineCachePersistence = 'saving';
-      if (import.meta.env.DEV) {
-        // 真实 Tauri 性能采集需要知道后台入库何时完成，才能在诊断快照中
-        // 同时看到该 span，并避免下一次 cold run 删除缓存时与旧写入交错。
-        (globalThis as { __GIM_DEV_LINE_CACHE_PERSIST_DONE__?: boolean }).__GIM_DEV_LINE_CACHE_PERSIST_DONE__ = false;
-      }
-      const persistLineCache = async (): Promise<void> => {
+      try {
+        const { estimatePayloadSizeMB } = await import('./lineAttrPersistenceService.js');
+        const { buildLineGraphPayload } = await import('./lineGraphPersistenceService.js');
+        const { saveLineProjectCache } = await import('@desktop/database.js');
         if (!state.isCurrentSession(session)) return;
-        try {
-          const { estimatePayloadSizeMB } = await import('./lineAttrPersistenceService.js');
-          const { buildLineGraphPayload } = await import('./lineGraphPersistenceService.js');
-          const { saveLineProjectCache } = await import('@desktop/database.js');
-          if (!state.isCurrentSession(session)) return;
 
-          const graphPayload = buildLineGraphPayload(context.projectId!, graph, session.sourceSha256);
+        const graphPayload = buildLineGraphPayload(context.projectId!, graph, session.sourceSha256);
 
-          // 性能日志：payload 统计 + 风险评估。graphPayloadJson 同时作为
-          // invokeTimed 的已知 requestBytes，避免监控再次 JSON.stringify。
-          const graphPayloadJson = JSON.stringify(graphPayload);
-          const graphPayloadBytes = new TextEncoder().encode(graphPayloadJson).byteLength;
-          const estimatedMB = estimatePayloadSizeMB(
-            graphPayloadJson,
-            attrResult.famPayloads,
-            attrResult.devPayloads,
+        // 性能日志：payload 统计 + 风险评估。graphPayloadJson 同时作为
+        // invokeTimed 的已知 requestBytes，避免监控再次 JSON.stringify。
+        const graphPayloadJson = JSON.stringify(graphPayload);
+        const graphPayloadBytes = new TextEncoder().encode(graphPayloadJson).byteLength;
+        const estimatedMB = estimatePayloadSizeMB(
+          graphPayloadJson,
+          attrResult.famPayloads,
+          attrResult.devPayloads,
+        );
+        debugLog(DEBUG_GIM_CACHE, '[LineCache] 线路后台入库 payload 统计:', {
+          nodes: graphPayload.nodes.length,
+          children: graphPayload.children.length,
+          refs: graphPayload.refs.length,
+          fam_props: attrResult.famPayloads.length,
+          dev_props: attrResult.devPayloads.length,
+          estimatedJsonSizeMB: Math.round(estimatedMB * 100) / 100,
+        });
+        if (estimatedMB > 50) {
+          logger.warn(
+            `[LineCache] payload 较大 (${Math.round(estimatedMB * 100) / 100} MB)，后台一次性 invoke 可能较慢`,
           );
-          debugLog(DEBUG_GIM_CACHE, '[LineCache] 线路后台入库 payload 统计:', {
-            nodes: graphPayload.nodes.length,
-            children: graphPayload.children.length,
-            refs: graphPayload.refs.length,
-            fam_props: attrResult.famPayloads.length,
-            dev_props: attrResult.devPayloads.length,
-            estimatedJsonSizeMB: Math.round(estimatedMB * 100) / 100,
-          });
-          if (estimatedMB > 50) {
-            console.warn(
-              `[LineCache] payload 较大 (${Math.round(estimatedMB * 100) / 100} MB)，后台一次性 invoke 可能较慢`,
-            );
-          }
-
-          const endSave = perfBegin('线路 SQLite 入库（后台）', undefined, perfSession);
-          const t0 = performance.now();
-          if (!state.isCurrentSession(session)) return;
-          await saveLineProjectCache(
-            context.projectId!,
-            graphPayload,
-            attrResult.famPayloads,
-            attrResult.devPayloads,
-            undefined,
-            session.sourceSha256,
-            graphPayloadBytes,
-          );
-          if (!state.isCurrentSession(session)) return;
-          state.lineCachePersistence = 'saved';
-          perfMarkProductMoment('lineCachePersistenceReady', { source: 'cold', status: 'saved' }, perfSession);
-          const elapsedMs = Math.round(performance.now() - t0);
-          endSave(undefined, { ms: elapsedMs, background: true });
-          debugLog(DEBUG_GIM_CACHE, '[LineCache] 后台 save_line_project_cache 完成，耗时', elapsedMs, 'ms');
-        } catch (err) {
-          // 工程切换后的旧任务不应在新工程控制台制造错误噪声。
-          if (state.isCurrentSession(session)) {
-            state.lineCachePersistence = 'failed';
-            perfMarkProductMoment('lineCachePersistenceReady', { source: 'cold', status: 'failed' }, perfSession);
-            console.error('[Tauri] 线路工程缓存后台写入失败:', err);
-          }
-        } finally {
-          if (import.meta.env.DEV && state.isCurrentSession(session)) {
-            (globalThis as { __GIM_DEV_LINE_CACHE_PERSIST_DONE__?: boolean }).__GIM_DEV_LINE_CACHE_PERSIST_DONE__ = true;
-          }
         }
-      };
-      // 让浏览器先完成首帧绘制并返回可交互状态，再开始 JSON/SQLite IPC。
-      window.setTimeout(() => { void Promise.resolve(persistLineCache()).catch(reportBackgroundError); }, 0);
-    } else {
-      state.lineCachePersistence = 'not-applicable';
-      if (import.meta.env.DEV) (globalThis as { __GIM_DEV_LINE_CACHE_PERSIST_DONE__?: boolean }).__GIM_DEV_LINE_CACHE_PERSIST_DONE__ = true;
-    }
 
-    // 渲染面板（在属性恢复之后，确保地图 tooltip/标签有完整 FAM/DEV 属性）
-    if (!state.isCurrentSession(session)) return;
-    const endRender = perfBegin('线路面板+地图渲染', undefined, perfSession);
-    if (!state.isCurrentSession(session)) { endRender('（会话已失效）'); return; }
-    const view=await linePresentation().present(state,graph,showMessage,{
+        const endSave = perfBegin('线路 SQLite 入库（后台）', undefined, perfSession);
+        const t0 = performance.now();
+        if (!state.isCurrentSession(session)) return;
+        await saveLineProjectCache(
+          context.projectId!,
+          graphPayload,
+          attrResult.famPayloads,
+          attrResult.devPayloads,
+          undefined,
+          session.sourceSha256,
+          graphPayloadBytes,
+        );
+        if (!state.isCurrentSession(session)) return;
+        state.lineCachePersistence = 'saved';
+        perfMarkProductMoment(
+          'lineCachePersistenceReady',
+          { source: 'cold', status: 'saved' },
+          perfSession,
+        );
+        const elapsedMs = Math.round(performance.now() - t0);
+        endSave(undefined, { ms: elapsedMs, background: true });
+        debugLog(
+          DEBUG_GIM_CACHE,
+          '[LineCache] 后台 save_line_project_cache 完成，耗时',
+          elapsedMs,
+          'ms',
+        );
+      } catch (err) {
+        // 工程切换后的旧任务不应在新工程控制台制造错误噪声。
+        if (state.isCurrentSession(session)) {
+          state.lineCachePersistence = 'failed';
+          perfMarkProductMoment(
+            'lineCachePersistenceReady',
+            { source: 'cold', status: 'failed' },
+            perfSession,
+          );
+          logger.error('[Tauri] 线路工程缓存后台写入失败:', err);
+        }
+      } finally {
+        if (import.meta.env.DEV && state.isCurrentSession(session)) {
+          (
+            globalThis as { __GIM_DEV_LINE_CACHE_PERSIST_DONE__?: boolean }
+          ).__GIM_DEV_LINE_CACHE_PERSIST_DONE__ = true;
+        }
+      }
+    };
+    // 让浏览器先完成首帧绘制并返回可交互状态，再开始 JSON/SQLite IPC。
+    window.setTimeout(() => {
+      void Promise.resolve(persistLineCache()).catch(reportBackgroundError);
+    }, 0);
+  } else {
+    state.lineCachePersistence = 'not-applicable';
+    if (import.meta.env.DEV)
+      (
+        globalThis as { __GIM_DEV_LINE_CACHE_PERSIST_DONE__?: boolean }
+      ).__GIM_DEV_LINE_CACHE_PERSIST_DONE__ = true;
+  }
+
+  // 渲染面板（在属性恢复之后，确保地图 tooltip/标签有完整 FAM/DEV 属性）
+  if (!state.isCurrentSession(session)) return;
+  const endRender = perfBegin('线路面板+地图渲染', undefined, perfSession);
+  if (!state.isCurrentSession(session)) {
+    endRender('（会话已失效）');
+    return;
+  }
+  const view = await linePresentation().present(
+    state,
+    graph,
+    showMessage,
+    {
       perfSession,
       enableCatenary: getDevLineCatenaryMode(),
-    },()=>state.isCurrentSession(session));
-    if(view)state.sessionScope(session).own(()=>view.destroy());
-    if(!state.isCurrentSession(session))return;
-    endRender();
-    perfMarkProductMoment('navigationUiReady',{domain:'line',cache:false},perfSession);
-    perfMarkProductMoment('interactive',{domain:'line',cache:false},perfSession);
-    perfMark('线路工程可交互', undefined, perfSession);
+      observeMapFrames: observeMap,
+    },
+    () => state.isCurrentSession(session),
+  );
+  if (view) state.sessionScope(session).own(() => view.destroy());
+  if (!state.isCurrentSession(session)) return;
+  endRender();
+  perfMarkProductMoment('navigationUiReady', { domain: 'line', cache: false }, perfSession);
+  perfMarkProductMoment('interactive', { domain: 'line', cache: false }, perfSession);
+  perfMark('线路工程可交互', undefined, perfSession);
 
-    hideLoading();
-    // 轻量状态提示
-    showLoading('线路工程已加载，当前为地图浏览模式');
-    scheduleHideLoading(() => state.isCurrentSession(session), 3000);
-    debugLog(DEBUG_RUNTIME_LOGS, '[GIM] 线路工程已加载（地图浏览模式），跳过 IFC 模态框');
-    return;
-
+  hideLoading();
+  // 轻量状态提示
+  showLoading('线路工程已加载，当前为地图浏览模式');
+  scheduleHideLoading(() => state.isCurrentSession(session), 3000);
+  debugLog(DEBUG_RUNTIME_LOGS, '[GIM] 线路工程已加载（地图浏览模式），跳过 IFC 模态框');
+  return;
 }

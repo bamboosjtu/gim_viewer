@@ -1,6 +1,21 @@
-import type {LineRenderOptions,LineProjectViewHandle} from '../services/linePresentationPort.js';
+import type {
+  LineRenderOptions,
+  LineProjectViewHandle,
+  LineMapEventTarget,
+} from '../services/linePresentationPort.js';
 import { renderBasemapControls, isTiandituMode } from './lineBasemapControls.js';
-import { renderLineRawProperties, renderLineAttributeRecords, renderLineRelationGroups, relationSection, renderLineSourceRefs, buildLineNodeBuckets, nodeDisplayName, pathMatchesReference, formatNumber, renderLineModSources } from '../services/lineInspectorProjection.js';
+import {
+  renderLineRawProperties,
+  renderLineAttributeRecords,
+  renderLineRelationGroups,
+  relationSection,
+  renderLineSourceRefs,
+  buildLineNodeBuckets,
+  nodeDisplayName,
+  pathMatchesReference,
+  formatNumber,
+  renderLineModSources,
+} from '../services/lineInspectorProjection.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
 /**
  * 线路工程 UI 渲染层。
@@ -19,29 +34,49 @@ import type { AppState } from '../app/state.js';
 import type { GimGraph, GimGraphNode } from '@gim/powerline-core/gimGraphTypes.js';
 import type { LineMapData, WireSegment } from '../gim/lineMapData.js';
 import { escHtml } from '../shared/html.js';
-import { cbmTreePanel, fileDevPanel, modelListEl, propsDrawerBody, propsDrawer, emptyTipEl, container } from './dom.js';
+import {
+  cbmTreePanel,
+  fileDevPanel,
+  modelListEl,
+  propsDrawerBody,
+  propsDrawer,
+  emptyTipEl,
+  container,
+} from './dom.js';
 import { hideTabs } from './tabs.js';
 import type { LineMapRenderPhase, LineMapViewHandle } from './lineMapView.js';
 import type { LineMapBaseLayerHandle } from './lineMapBaseLayer.js';
 import type { LineMapProjection, GeoBBox } from './lineMapProjection.js';
 import { createMapLibreProjection } from './lineMapProjection.js';
 import { renderLineMap } from './lineMapView.js';
-import {buildLineMapProjection} from '../services/lineMapProjection.js';
+import { buildLineMapProjection } from '../services/lineMapProjection.js';
 import { buildLineAttributeIndex } from '../services/lineAttrRestoreService.js';
 import { buildWireSemanticInfo } from '../services/lineWireSemanticService.js';
 import type { WireSemanticInfo } from '../services/lineWireSemanticService.js';
 import type { LineCatenaryAuditExportPayload } from '../services/lineCatenaryAuditExportService.js';
 import { DEBUG_LINE_MAP } from '../config/debug.js';
-import { ENABLE_CATENARY, runtimeBasemapMode, setRuntimeBasemapMode, resetRuntimeBasemapMode } from '../config/features.js';
+import {
+  ENABLE_CATENARY,
+  runtimeBasemapMode,
+  setRuntimeBasemapMode,
+  resetRuntimeBasemapMode,
+} from '../config/features.js';
 import type { LineBasemapMode } from '../config/features.js';
 import { isTiandituKeyAvailable } from '../config/tianditu.js';
 import { setBasemapStatus, resetBasemapStatus } from '../services/basemapStatusService.js';
 import type { BasemapStatus } from '../services/basemapStatusService.js';
-import { debugLog, debugWarn } from '../utils/logger.js';
+import { debugLog, debugWarn, logger } from '../utils/logger.js';
 import { renderSearchBox } from './searchBox.js';
 import { setStatusRight } from './shell/statusBar.js';
-import { buildLineNavigationIndex, buildLineNavigationSearchIndex, resolveLineNavigationTarget } from '../services/lineNavigationProjection.js';
-import type { LineNavigationIndex, LineNavigationNode } from '../services/lineNavigationProjection.js';
+import {
+  buildLineNavigationIndex,
+  buildLineNavigationSearchIndex,
+  resolveLineNavigationTarget,
+} from '../services/lineNavigationProjection.js';
+import type {
+  LineNavigationIndex,
+  LineNavigationNode,
+} from '../services/lineNavigationProjection.js';
 import { renderLineNavigationTree, revealLineNavigationTarget } from './lineNavigationTreeView.js';
 import type { LineNavigationTreeHandle } from './lineNavigationTreeView.js';
 import {
@@ -50,9 +85,7 @@ import {
   type PropertyReferenceDetail,
 } from './propertyDictionary.js';
 import { renderInspectorTabs } from './propsDrawer.js';
-import {
-  loadLineModSourcesForNode,
-} from '../services/lineModRuntimeService.js';
+import { loadLineModSourcesForNode } from '../services/lineModRuntimeService.js';
 
 import { perfBegin, perfCurrentSession } from '../utils/perfTimings.js';
 
@@ -63,11 +96,16 @@ import { perfBegin, perfCurrentSession } from '../utils/perfTimings.js';
  */
 function basemapStatusFromMode(mode: LineBasemapMode): BasemapStatus {
   switch (mode) {
-    case 'osm-online': return 'osm-online';
-    case 'tianditu-satellite': return 'tianditu-satellite';
-    case 'tianditu-terrain': return 'tianditu-terrain';
-    case 'tianditu-vector': return 'tianditu-vector';
-    default: return 'empty';
+    case 'osm-online':
+      return 'osm-online';
+    case 'tianditu-satellite':
+      return 'tianditu-satellite';
+    case 'tianditu-terrain':
+      return 'tianditu-terrain';
+    case 'tianditu-vector':
+      return 'tianditu-vector';
+    default:
+      return 'empty';
   }
 }
 
@@ -191,7 +229,10 @@ function showLineInspector(
 }
 
 function activeInspectorTab(): string {
-  return propsDrawerBody.querySelector<HTMLElement>('[data-itab].active')?.getAttribute('data-itab') || 'overview';
+  return (
+    propsDrawerBody.querySelector<HTMLElement>('[data-itab].active')?.getAttribute('data-itab') ||
+    'overview'
+  );
 }
 
 let currentLineState: AppState | null = null;
@@ -221,24 +262,38 @@ function removeStaleLineDom(): void {
     element.remove();
   }
   for (const canvas of [...container.querySelectorAll<HTMLCanvasElement>('canvas')]) {
-    if (canvas.dataset.gimRenderer === 'three' || canvas.dataset.engine?.startsWith('three.js')) continue;
+    if (canvas.dataset.gimRenderer === 'three' || canvas.dataset.engine?.startsWith('three.js'))
+      continue;
     canvas.remove();
   }
 }
 function destroyLineMapResources(): void {
+  mapFrameObserver = undefined;
   mapCreationController?.abort();
   mapCreationController = null;
   maplibreProbeGeneration++;
   for (const fn of maplibreInteractionCleanup) {
-    try { fn(); } catch { /* ignore */ }
+    try {
+      fn();
+    } catch {
+      /* ignore */
+    }
   }
   maplibreInteractionCleanup = [];
   if (lineMapHandle) {
-    try { lineMapHandle.destroy(); } catch (error) { console.warn('[Cleanup] line map destroy failed:', error); }
+    try {
+      lineMapHandle.destroy();
+    } catch (error) {
+      logger.warn('[Cleanup] line map destroy failed:', error);
+    }
     lineMapHandle = null;
   }
   if (maplibreProbeHandle) {
-    try { maplibreProbeHandle.destroy(); } catch (error) { console.warn('[Cleanup] MapLibre destroy failed:', error); }
+    try {
+      maplibreProbeHandle.destroy();
+    } catch (error) {
+      logger.warn('[Cleanup] MapLibre destroy failed:', error);
+    }
     maplibreProbeHandle = null;
   }
   removeStaleLineDom();
@@ -252,7 +307,10 @@ export function handleLinePropertyReference(detail: PropertyReferenceDetail): bo
   if (!state || state.currentProjectType !== 'transmission_line' || !graph) return false;
   let sourceNode: GimGraphNode | null = null;
   if (detail.kind === 'cbm') {
-    sourceNode = Array.from(graph.nodesByPath.values()).find((node) => pathMatchesReference(node.path, detail.path)) || null;
+    sourceNode =
+      Array.from(graph.nodesByPath.values()).find((node) =>
+        pathMatchesReference(node.path, detail.path),
+      ) || null;
   } else {
     const refsForKind: Record<string, (node: GimGraphNode) => string[]> = {
       dev: (node) => node.refs.devFiles,
@@ -266,8 +324,10 @@ export function handleLinePropertyReference(detail: PropertyReferenceDetail): bo
     };
     const getRefs = refsForKind[detail.kind];
     if (getRefs) {
-      sourceNode = Array.from(graph.nodesByPath.values()).find((node) =>
-        getRefs(node).some((path) => pathMatchesReference(path, detail.path))) || null;
+      sourceNode =
+        Array.from(graph.nodesByPath.values()).find((node) =>
+          getRefs(node).some((path) => pathMatchesReference(path, detail.path)),
+        ) || null;
     }
   }
   if (!sourceNode || !lineNavigationIndex) {
@@ -275,9 +335,13 @@ export function handleLinePropertyReference(detail: PropertyReferenceDetail): bo
     // 直接 refs 持久化。它们的按钮是在当前检查器异步解析后生成的，
     // 因而可安全回到当前业务节点；仍要求路径命中当前检查器来源集合，
     // 避免旧面板按钮误跳到新节点。
-    if (currentLineInspectorNode
-      && currentLineInspectorSourcePaths.size > 0
-      && Array.from(currentLineInspectorSourcePaths).some((path) => pathMatchesReference(path, detail.path))) {
+    if (
+      currentLineInspectorNode &&
+      currentLineInspectorSourcePaths.size > 0 &&
+      Array.from(currentLineInspectorSourcePaths).some((path) =>
+        pathMatchesReference(path, detail.path),
+      )
+    ) {
       sourceNode = currentLineInspectorNode;
     }
   }
@@ -319,17 +383,19 @@ export function showLineNodeProperties(
   const title = displayLabel?.trim() || nodeDisplayName(node);
   showLineInspector(title, buildLineNodeBuckets(node, attrs));
   if (!state) return;
-  void loadLineModSourcesForNode(state, node).then((entries) => {
-    if (generation !== lineInspectorGeneration || currentLineState !== state) return;
-    for (const entry of entries) currentLineInspectorSourcePaths.add(entry.path);
-    const buckets = buildLineNodeBuckets(node, buildLineAttributeIndex(state), entries);
-    showLineInspector(title, buckets, activeInspectorTab());
-  }).catch((error) => {
-    if (generation !== lineInspectorGeneration || currentLineState !== state) return;
-    const buckets = buildLineNodeBuckets(node, buildLineAttributeIndex(state), []);
-    buckets.params += `<div class="props-note warning">读取线路 MOD 失败：${escHtml(error instanceof Error ? error.message : String(error))}</div>`;
-    showLineInspector(title, buckets, activeInspectorTab());
-  });
+  void loadLineModSourcesForNode(state, node)
+    .then((entries) => {
+      if (generation !== lineInspectorGeneration || currentLineState !== state) return;
+      for (const entry of entries) currentLineInspectorSourcePaths.add(entry.path);
+      const buckets = buildLineNodeBuckets(node, buildLineAttributeIndex(state), entries);
+      showLineInspector(title, buckets, activeInspectorTab());
+    })
+    .catch((error) => {
+      if (generation !== lineInspectorGeneration || currentLineState !== state) return;
+      const buckets = buildLineNodeBuckets(node, buildLineAttributeIndex(state), []);
+      buckets.params += `<div class="props-note warning">读取线路 MOD 失败：${escHtml(error instanceof Error ? error.message : String(error))}</div>`;
+      showLineInspector(title, buckets, activeInspectorTab());
+    });
 }
 
 /** 显示地图导线属性；保持同样的四页签结构和来源按钮约定。 */
@@ -349,45 +415,70 @@ function showWireProperties(wire: WireSegment, state: AppState | null = currentL
     ...node.refs.ifcFiles,
   ]);
   const component: PropertyComponent = 'line-wire';
-  const overview = renderPropertySection('导线语义', component, [
-    { key: 'WIRETYPE', value: info.wireType },
-    { key: 'ISJUMPER', value: info.isJumper ? '是' : '否' },
-    { key: 'SPLIT', value: info.split ?? '—' },
-    { key: 'KVALUE', value: info.kValue ?? '—' },
-    { key: 'spanMeters', value: info.spanMeters != null ? formatNumber(info.spanMeters, 1) : '—', unit: 'm' },
-  ]) + renderPropertySection('端点坐标', 'line-point-line', [
-    {
-      key: 'POINT0.BLHA',
-      value: [formatNumber(wire.startLat, 8), formatNumber(wire.startLng, 8),
-        wire.startElev == null ? '—' : formatNumber(wire.startElev, 3), '—'].join(','),
-    },
-    {
-      key: 'POINT1.BLHA',
-      value: [formatNumber(wire.endLat, 8), formatNumber(wire.endLng, 8),
-        wire.endElev == null ? '—' : formatNumber(wire.endElev, 3), '—'].join(','),
-    },
-  ]);
-  const params = (node ? renderLineRawProperties(node, component) : '')
-    + (node && state ? renderLineAttributeRecords(node, buildLineAttributeIndex(state)) : '')
-    + '<div class="props-note">POINT0/1.MATRIX0 等长矩阵已归入技术字段；需要时展开“技术字段”。</div>';
+  const overview =
+    renderPropertySection('导线语义', component, [
+      { key: 'WIRETYPE', value: info.wireType },
+      { key: 'ISJUMPER', value: info.isJumper ? '是' : '否' },
+      { key: 'SPLIT', value: info.split ?? '—' },
+      { key: 'KVALUE', value: info.kValue ?? '—' },
+      {
+        key: 'spanMeters',
+        value: info.spanMeters != null ? formatNumber(info.spanMeters, 1) : '—',
+        unit: 'm',
+      },
+    ]) +
+    renderPropertySection('端点坐标', 'line-point-line', [
+      {
+        key: 'POINT0.BLHA',
+        value: [
+          formatNumber(wire.startLat, 8),
+          formatNumber(wire.startLng, 8),
+          wire.startElev == null ? '—' : formatNumber(wire.startElev, 3),
+          '—',
+        ].join(','),
+      },
+      {
+        key: 'POINT1.BLHA',
+        value: [
+          formatNumber(wire.endLat, 8),
+          formatNumber(wire.endLng, 8),
+          wire.endElev == null ? '—' : formatNumber(wire.endElev, 3),
+          '—',
+        ].join(','),
+      },
+    ]);
+  const params =
+    (node ? renderLineRawProperties(node, component) : '') +
+    (node && state ? renderLineAttributeRecords(node, buildLineAttributeIndex(state)) : '') +
+    '<div class="props-note">POINT0/1.MATRIX0 等长矩阵已归入技术字段；需要时展开“技术字段”。</div>';
   const relations = node
-    ? renderLineRelationGroups(node)
-      + (info.warnings.length ? relationSection('解析告警', [['说明', info.warnings.join('；')]]) : '')
+    ? renderLineRelationGroups(node) +
+      (info.warnings.length
+        ? relationSection('解析告警', [['说明', info.warnings.join('；')]])
+        : '')
     : '';
   const source = node ? renderLineSourceRefs(node) : '';
   const generation = ++lineInspectorGeneration;
   showLineInspector(node ? nodeDisplayName(node) : '导线', { overview, params, relations, source });
   if (state && node) {
-    void loadLineModSourcesForNode(state, node).then((entries) => {
-      if (generation !== lineInspectorGeneration || currentLineState !== state) return;
-      for (const entry of entries) currentLineInspectorSourcePaths.add(entry.path);
-      showLineInspector(nodeDisplayName(node), {
-        overview,
-        params: params + renderLineModSources(entries, { includeSourceLink: false }),
-        relations,
-        source: renderLineSourceRefs(node, entries),
-      }, activeInspectorTab());
-    }).catch(() => { /* 基础属性已可用，解析失败由来源按钮继续排查 */ });
+    void loadLineModSourcesForNode(state, node)
+      .then((entries) => {
+        if (generation !== lineInspectorGeneration || currentLineState !== state) return;
+        for (const entry of entries) currentLineInspectorSourcePaths.add(entry.path);
+        showLineInspector(
+          nodeDisplayName(node),
+          {
+            overview,
+            params: params + renderLineModSources(entries, { includeSourceLink: false }),
+            relations,
+            source: renderLineSourceRefs(node, entries),
+          },
+          activeInspectorTab(),
+        );
+      })
+      .catch(() => {
+        /* 基础属性已可用，解析失败由来源按钮继续排查 */
+      });
   }
 }
 
@@ -415,7 +506,7 @@ function handleMapWireClick(wire: WireSegment): void {
 
 /** 当前地图视图 handle（模块级，避免重复打开 GIM 后残留） */
 let lineMapHandle: LineMapViewHandle | null = null;
-let lineNavigationHandle:LineNavigationTreeHandle|null=null;
+let lineNavigationHandle: LineNavigationTreeHandle | null = null;
 let lineSearchHandle: ReturnType<typeof renderSearchBox> | null = null;
 
 /** 当前地图数据（供左侧树点击定位地图时反查 TowerMarker nodePath 用） */
@@ -428,7 +519,6 @@ let lineNavigationIndex: LineNavigationIndex | null = null;
 let currentLineCatenaryEnabled = ENABLE_CATENARY;
 
 /** 线路面板渲染选项；默认值保持现有生产行为，额外字段仅供性能 A/B。 */
-
 
 /**
  * M4-B3A：最新悬链线参数审计导出 payload（模块级，供 Ctrl+Shift+C 复制使用）。
@@ -445,7 +535,8 @@ export async function getLatestCatenaryAuditPayload(): Promise<LineCatenaryAudit
   const context = latestCatenaryAuditContext;
   if (!context || latestCatenaryAuditPayload) return latestCatenaryAuditPayload;
 
-  const { buildLineCatenaryAuditExportPayload } = await import('../services/lineCatenaryAuditExportService.js');
+  const { buildLineCatenaryAuditExportPayload } =
+    await import('../services/lineCatenaryAuditExportService.js');
   if (context !== latestCatenaryAuditContext) return null;
   latestCatenaryAuditPayload ??= buildLineCatenaryAuditExportPayload(context);
   return latestCatenaryAuditPayload;
@@ -461,6 +552,8 @@ let maplibreProbeHandle: LineMapBaseLayerHandle | null = null;
  * 异步 probe 完成后检查代次是否匹配，不匹配则销毁新建的 probe。
  */
 let maplibreProbeGeneration = 0;
+/** Injected by services; ui must not import measurement directly. */
+let mapFrameObserver: ((map: LineMapEventTarget) => void) | undefined;
 
 /**
  * M4-A2：MapLibre pointer 事件取消函数列表。
@@ -480,7 +573,6 @@ let basemapLayerContext: { layerPanel: HTMLElement; mapData: LineMapData } | nul
 let removeBasemapSettingsListener: (() => void) | null = null;
 let lineViewGeneration = 0;
 
-
 /**
  * 销毁当前地图视图。
  *
@@ -492,12 +584,16 @@ let lineViewGeneration = 0;
  * 幂等：handle 为空时直接返回。
  */
 export function destroyLineMapView(): void {
-  lineSearchHandle?.destroy(); lineSearchHandle = null;
+  lineSearchHandle?.destroy();
+  lineSearchHandle = null;
   lineViewGeneration++;
-  removeBasemapSettingsListener?.(); removeBasemapSettingsListener = null;
+  removeBasemapSettingsListener?.();
+  removeBasemapSettingsListener = null;
   basemapLayerContext = null;
-  currentLineInspectorNode = null; currentLineInspectorSourcePaths.clear();
-  lineNavigationHandle?.destroy();lineNavigationHandle=null;
+  currentLineInspectorNode = null;
+  currentLineInspectorSourcePaths.clear();
+  lineNavigationHandle?.destroy();
+  lineNavigationHandle = null;
   // 使仍在读取线路 MOD 的异步检查器结果失效，避免旧工程覆盖新工程面板。
   lineInspectorGeneration++;
   currentLineState = null;
@@ -522,8 +618,9 @@ export function destroyLineMapView(): void {
 /** 选中并滚动到指定业务树行键；未找到时静默返回。 */
 function selectTreeRow(key: string): void {
   // 通过 dataset 精确比较，兼容业务键中的冒号、百分号和路径字符。
-  const row = Array.from(document.querySelectorAll<HTMLElement>('.tree-row'))
-    .find((candidate) => candidate.dataset.nodePath === key);
+  const row = Array.from(document.querySelectorAll<HTMLElement>('.tree-row')).find(
+    (candidate) => candidate.dataset.nodePath === key,
+  );
   if (!row) return;
   // 清除旧的 selected
   document.querySelectorAll('.tree-row.selected').forEach((r) => r.classList.remove('selected'));
@@ -552,7 +649,10 @@ function collectNavigationTowerPaths(node: LineNavigationNode): string[] {
   return paths;
 }
 
-function nearestNavigationAncestor(node: LineNavigationNode, kind: LineNavigationNode['kind']): LineNavigationNode | null {
+function nearestNavigationAncestor(
+  node: LineNavigationNode,
+  kind: LineNavigationNode['kind'],
+): LineNavigationNode | null {
   if (!lineNavigationIndex) return null;
   let key: string | undefined = node.key;
   const seen = new Set<string>();
@@ -575,9 +675,7 @@ function focusNavigationNode(node: LineNavigationNode): void {
   }
 
   // WIRE / 同塔连接 / 跨越物明细优先定位其所在档距或塔位。
-  const span = node.kind === 'span'
-    ? node
-    : nearestNavigationAncestor(node, 'span');
+  const span = node.kind === 'span' ? node : nearestNavigationAncestor(node, 'span');
   if (span?.span) {
     const endpointPaths = [
       span.span.startTower?.nodeRef?.path,
@@ -619,9 +717,10 @@ function handleLineNavigationNode(node: LineNavigationNode): void {
  * 3. 已渲染节点可滚动到可见区域；未渲染的懒加载节点不强求
  */
 function handleMapTowerClick(node: GimGraphNode): void {
-  const target = lineNavigationIndex && node.path
-    ? resolveLineNavigationTarget(lineNavigationIndex, node.path)
-    : null;
+  const target =
+    lineNavigationIndex && node.path
+      ? resolveLineNavigationTarget(lineNavigationIndex, node.path)
+      : null;
   showLineNodeProperties(node, currentLineState, target?.label);
   propsDrawer.classList.remove('collapsed');
   if (lineNavigationIndex && node.path) {
@@ -649,6 +748,7 @@ export function renderLineProjectPanels(
   const perfSession = options.perfSession ?? perfCurrentSession();
   const catenaryEnabled = options.enableCatenary ?? ENABLE_CATENARY;
   currentLineCatenaryEnabled = catenaryEnabled;
+  mapFrameObserver = options.observeMapFrames;
 
   // 确保 state 与 graph 同步（调用方可能已设置，此处幂等确认）
   state.currentGimGraph = graph;
@@ -660,15 +760,19 @@ export function renderLineProjectPanels(
   //    这样异步底图回调不会把旧线路的树键或地图句柄带入新工程。
   destroyLineMapView();
   const ownedGeneration = lineViewGeneration;
-  const handle = { destroy() { if (ownedGeneration === lineViewGeneration) destroyLineMapView(); } };
+  const handle = {
+    destroy() {
+      if (ownedGeneration === lineViewGeneration) destroyLineMapView();
+    },
+  };
 
   // destroyLineMapView 会使上一工程的状态失效；此处在清理完成后重新
   // 绑定当前线路，保证属性来源按钮和异步 MOD 解析能拿到当前 graph。
   currentLineState = state;
   const attrs = buildLineAttributeIndex(state);
   const endMapData = perfBegin('线路地图数据提取', undefined, perfSession);
-  const mapProjection=buildLineMapProjection(graph,attrs);
-  const {mapData}=mapProjection;
+  const mapProjection = buildLineMapProjection(graph, attrs);
+  const { mapData } = mapProjection;
   endMapData(undefined, {
     towers: mapData.stats.towerTotal,
     wires: mapData.stats.wireTotal,
@@ -678,16 +782,21 @@ export function renderLineProjectPanels(
   const endNavigationIndex = perfBegin('线路导航索引构建', undefined, perfSession);
   lineNavigationIndex = graph.root
     ? buildLineNavigationIndex(graph, mapData, {
-      projectName: state.projectName,
-      attrs,
-    })
+        projectName: state.projectName,
+        attrs,
+      })
     : null;
-  endNavigationIndex(undefined, lineNavigationIndex ? {
-    nodes: lineNavigationIndex.nodesByKey.size,
-    sections: lineNavigationIndex.stats.sectionCount,
-    strains: lineNavigationIndex.stats.strainSectionCount,
-    spans: lineNavigationIndex.stats.spanCount,
-  } : { nodes: 0 });
+  endNavigationIndex(
+    undefined,
+    lineNavigationIndex
+      ? {
+          nodes: lineNavigationIndex.nodesByKey.size,
+          sections: lineNavigationIndex.stats.sectionCount,
+          strains: lineNavigationIndex.stats.strainSectionCount,
+          spans: lineNavigationIndex.stats.spanCount,
+        }
+      : { nodes: 0 },
+  );
 
   // 2. 左侧树只渲染线路业务投影，不再把 F1/F2/F3/F4 和设备原始节点直接铺开。
   const endNavigationDom = perfBegin('线路导航树 DOM 渲染', undefined, perfSession);
@@ -695,7 +804,11 @@ export function renderLineProjectPanels(
   if (!lineNavigationIndex) {
     cbmTreePanel.innerHTML = '<div class="props-empty">线路工程未找到 CBM 层级树</div>';
   } else {
-    lineNavigationHandle = renderLineNavigationTree(lineNavigationIndex, cbmTreePanel, handleLineNavigationNode);
+    lineNavigationHandle = renderLineNavigationTree(
+      lineNavigationIndex,
+      cbmTreePanel,
+      handleLineNavigationNode,
+    );
   }
   endNavigationDom(undefined, {
     nodes: lineNavigationIndex?.nodesByKey.size ?? 0,
@@ -774,12 +887,18 @@ export function renderLineProjectPanels(
     container.appendChild(tip);
     // 临时 handle：destroy 时移除该提示节点
     lineMapHandle = {
-      fit() { /* 无地图可 fit */ },
+      fit() {
+        /* 无地图可 fit */
+      },
       destroy() {
         if (tip.parentNode === container) container.removeChild(tip);
       },
-      focusTowerByNodePath() { return false; },
-      focusBboxByNodePaths() { return false; },
+      focusTowerByNodePath() {
+        return false;
+      },
+      focusBboxByNodePaths() {
+        return false;
+      },
     };
   }
   endCanvasMap(undefined, {
@@ -805,7 +924,9 @@ export function renderLineProjectPanels(
   showMessage('线路工程已加载，当前为地图浏览模式');
   // 工程已可交互后，底图切换/瓦片提示不再拉起中央加载遮罩，只写底部状态栏。
   currentShowMessage = (text) => {
-    void Promise.resolve(import('./shell/statusBar.js').then(({ setStatus }) => setStatus(text))).catch(reportBackgroundError);
+    void Promise.resolve(
+      import('./shell/statusBar.js').then(({ setStatus }) => setStatus(text)),
+    ).catch(reportBackgroundError);
   };
   debugLog(DEBUG_LINE_MAP, '[GIM] 线路工程面板已渲染:', {
     type: graph.projectType,
@@ -851,11 +972,15 @@ export function renderLineProjectPanels(
       maplibreProbeHandle = null;
     }
     for (const fn of maplibreInteractionCleanup) {
-      try { fn(); } catch { /* ignore */ }
+      try {
+        fn();
+      } catch {
+        /* ignore */
+      }
     }
     maplibreInteractionCleanup = [];
     const myGen = ++maplibreProbeGeneration;
-    const creation = mapCreationController = new AbortController();
+    const creation = (mapCreationController = new AbortController());
     // 在线 raster 不可用时回退 Canvas-only
     //  - 只触发一次（fallbackToCanvasOnlyCalled 守卫）
     //  - 可能在 probe 创建期间（await 中）或之后触发
@@ -871,99 +996,116 @@ export function renderLineProjectPanels(
       const modeLabel = basemapModeLabel(runtimeBasemapMode);
       debugWarn(DEBUG_LINE_MAP, `[MapLibre overlay] ${modeLabel} tile errors`, reason);
       setBasemapStatus(
-        isTiandituMode(runtimeBasemapMode) ? 'tianditu-unavailable-fallback' : 'osm-unavailable-fallback',
+        isTiandituMode(runtimeBasemapMode)
+          ? 'tianditu-unavailable-fallback'
+          : 'osm-unavailable-fallback',
         {
           mode: runtimeBasemapMode,
           maplibreEnabled: true,
           fallbackReason: reason instanceof Error ? reason.message : String(reason),
         },
       );
-      try { showMessage(`${modeLabel}部分瓦片加载失败，地图仍可平移/缩放重试`); } catch { /* ignore */ }
-    }
-    void Promise.resolve((async () => {
       try {
-        const { createMapLibreProbe } = await import('./lineMapBaseLayer.js');
-        // 传入初始 bbox，让 MapLibre 加载后自动 fitBounds（duration:0）
-        const initialBounds: [number, number, number, number] = [
-          mapData.bbox.minLng, mapData.bbox.minLat, mapData.bbox.maxLng, mapData.bbox.maxLat,
-        ];
-        if (creation.signal.aborted) return;
-        const probe = await createMapLibreProbe(container, {
-          signal: creation.signal,
-          initialBounds,
-          basemapMode: runtimeBasemapMode,
-          onBasemapUnavailable: fallbackToCanvasOnly,
-        });
-        // 检查代次：若已过期（用户切换工程/清空场景），销毁并放弃
-        if (myGen !== maplibreProbeGeneration) {
-          probe.destroy();
-          return;
-        }
-        maplibreProbeHandle = probe;
-        const map = probe.getMap();
-        if (!map) throw new Error('MapLibre map 实例为 null');
-        // 构建 projection：project/unproject 来自 map，fitBounds 委托给 probe
-        const baseProjection = createMapLibreProjection(map);
-        const projection: LineMapProjection = {
-          ...baseProjection,
-          fitBounds(bbox: GeoBBox) {
-            probe.fitBounds([bbox.minLng, bbox.minLat, bbox.maxLng, bbox.maxLat]);
-          },
-        };
-        // 销毁 Canvas-only handle，用 overlay 模式重新渲染
-        // （Canvas 透明背景 + pointer-events:none，MapLibre 管理视图 + 交互）
-        if (lineMapHandle) {
-          lineMapHandle.destroy();
-          lineMapHandle = null;
-        }
-        let redrawFn: ((phase?: LineMapRenderPhase) => void) | null = null;
-        lineMapHandle = renderLineMap(mapData, container, handleMapTowerClick, {
-          projection,
-          onRequestRedraw: (draw) => { redrawFn = draw; },
-          // M4-B2：overlay 模式下也支持导线点击
-          onWireClick: handleMapWireClick,
-          enableCatenary: currentLineCatenaryEnabled,
-          perfSession: perfCurrentSession(),
-        });
-        // MapLibre 相机变化期间只请求 interactive frame；moveend/zoomend
-        // 才启动完整 settled progressive pass，避免拖动时等待旧 pass 或
-        // 每个 move 都重新开始完整渐进绘制。
-        const offView = probe.onViewChange((kind) => {
-          redrawFn?.('interactive');
-          // Resize 没有对应的 resizeend 事件；在尺寸变化完成后安排
-          // 一次 settled pass，保证标签/悬链线不会停留在轻量层。
-          if (kind === 'resize') redrawFn?.('settled');
-        });
-        const offSettled = probe.onViewSettled(() => {
-          redrawFn?.('settled');
-        });
-        // M4-A2：pointer 事件桥接（MapLibre → Canvas overlay）
-        // Canvas pointer-events:none，MapLibre 接收鼠标事件并转发给 Canvas handle
-        const offMove = probe.onPointerMove((p) => {
-          lineMapHandle?.handlePointerMove?.(p.x, p.y);
-        });
-        const offClick = probe.onPointerClick((p) => {
-          lineMapHandle?.handlePointerClick?.(p.x, p.y);
-        });
-        const offLeave = probe.onPointerLeave(() => {
-          lineMapHandle?.handlePointerLeave?.();
-        });
-        maplibreInteractionCleanup.push(offView, offSettled, offMove, offClick, offLeave);
-        // overlay handle 创建后，重新附加底图切换控件到新的图层面板
-        attachBasemapSwitcher(mapData);
-        // M4-A2 Finalization：MapLibre overlay 初始化成功，按当前底图模式上报状态
-        setBasemapStatus(basemapStatusFromMode(runtimeBasemapMode), {
-          mode: runtimeBasemapMode,
-          maplibreEnabled: true,
-        });
-        debugLog(DEBUG_LINE_MAP, '[MapLibre overlay] M4-A2：底图 + Canvas overlay + 交互桥接 初始化成功');
-      } catch (err) {
-        if (creation.signal.aborted) return;
-        debugWarn(DEBUG_LINE_MAP, '[MapLibre overlay] M4-A2：初始化失败，保持 Canvas-only', err);
-        // M4-A2 Finalization：初始化失败时状态保持为 Canvas-only（已在外层渲染时设置）
-        // 此处不显式 setBasemapStatus，避免覆盖外层的 'canvas-only' 状态
+        showMessage(`${modeLabel}部分瓦片加载失败，地图仍可平移/缩放重试`);
+      } catch {
+        /* ignore */
       }
-    })()).catch(reportBackgroundError);
+    }
+    void Promise.resolve(
+      (async () => {
+        try {
+          const { createMapLibreProbe } = await import('./lineMapBaseLayer.js');
+          // 传入初始 bbox，让 MapLibre 加载后自动 fitBounds（duration:0）
+          const initialBounds: [number, number, number, number] = [
+            mapData.bbox.minLng,
+            mapData.bbox.minLat,
+            mapData.bbox.maxLng,
+            mapData.bbox.maxLat,
+          ];
+          if (creation.signal.aborted) return;
+          const probe = await createMapLibreProbe(container, {
+            signal: creation.signal,
+            initialBounds,
+            basemapMode: runtimeBasemapMode,
+            onBasemapUnavailable: fallbackToCanvasOnly,
+            onMapCreated: mapFrameObserver,
+          });
+          // 检查代次：若已过期（用户切换工程/清空场景），销毁并放弃
+          if (myGen !== maplibreProbeGeneration) {
+            probe.destroy();
+            return;
+          }
+          maplibreProbeHandle = probe;
+          const map = probe.getMap();
+          if (!map) throw new Error('MapLibre map 实例为 null');
+          // 构建 projection：project/unproject 来自 map，fitBounds 委托给 probe
+          const baseProjection = createMapLibreProjection(map);
+          const projection: LineMapProjection = {
+            ...baseProjection,
+            fitBounds(bbox: GeoBBox) {
+              probe.fitBounds([bbox.minLng, bbox.minLat, bbox.maxLng, bbox.maxLat]);
+            },
+          };
+          // 销毁 Canvas-only handle，用 overlay 模式重新渲染
+          // （Canvas 透明背景 + pointer-events:none，MapLibre 管理视图 + 交互）
+          if (lineMapHandle) {
+            lineMapHandle.destroy();
+            lineMapHandle = null;
+          }
+          let redrawFn: ((phase?: LineMapRenderPhase) => void) | null = null;
+          lineMapHandle = renderLineMap(mapData, container, handleMapTowerClick, {
+            projection,
+            onRequestRedraw: (draw) => {
+              redrawFn = draw;
+            },
+            // M4-B2：overlay 模式下也支持导线点击
+            onWireClick: handleMapWireClick,
+            enableCatenary: currentLineCatenaryEnabled,
+            perfSession: perfCurrentSession(),
+          });
+          // MapLibre 相机变化期间只请求 interactive frame；moveend/zoomend
+          // 才启动完整 settled progressive pass，避免拖动时等待旧 pass 或
+          // 每个 move 都重新开始完整渐进绘制。
+          const offView = probe.onViewChange((kind) => {
+            redrawFn?.('interactive');
+            // Resize 没有对应的 resizeend 事件；在尺寸变化完成后安排
+            // 一次 settled pass，保证标签/悬链线不会停留在轻量层。
+            if (kind === 'resize') redrawFn?.('settled');
+          });
+          const offSettled = probe.onViewSettled(() => {
+            redrawFn?.('settled');
+          });
+          // M4-A2：pointer 事件桥接（MapLibre → Canvas overlay）
+          // Canvas pointer-events:none，MapLibre 接收鼠标事件并转发给 Canvas handle
+          const offMove = probe.onPointerMove((p) => {
+            lineMapHandle?.handlePointerMove?.(p.x, p.y);
+          });
+          const offClick = probe.onPointerClick((p) => {
+            lineMapHandle?.handlePointerClick?.(p.x, p.y);
+          });
+          const offLeave = probe.onPointerLeave(() => {
+            lineMapHandle?.handlePointerLeave?.();
+          });
+          maplibreInteractionCleanup.push(offView, offSettled, offMove, offClick, offLeave);
+          // overlay handle 创建后，重新附加底图切换控件到新的图层面板
+          attachBasemapSwitcher(mapData);
+          // M4-A2 Finalization：MapLibre overlay 初始化成功，按当前底图模式上报状态
+          setBasemapStatus(basemapStatusFromMode(runtimeBasemapMode), {
+            mode: runtimeBasemapMode,
+            maplibreEnabled: true,
+          });
+          debugLog(
+            DEBUG_LINE_MAP,
+            '[MapLibre overlay] M4-A2：底图 + Canvas overlay + 交互桥接 初始化成功',
+          );
+        } catch (err) {
+          if (creation.signal.aborted) return;
+          debugWarn(DEBUG_LINE_MAP, '[MapLibre overlay] M4-A2：初始化失败，保持 Canvas-only', err);
+          // M4-A2 Finalization：初始化失败时状态保持为 Canvas-only（已在外层渲染时设置）
+          // 此处不显式 setBasemapStatus，避免覆盖外层的 'canvas-only' 状态
+        }
+      })(),
+    ).catch(reportBackgroundError);
   }
   return handle;
 }
@@ -974,16 +1116,21 @@ export function renderLineProjectPanels(
 
 /** 判断是否为天地图模式 */
 
-
 /** 获取底图模式的人类可读标签 */
 function basemapModeLabel(mode: LineBasemapMode): string {
   switch (mode) {
-    case 'osm-online': return 'OpenStreetMap';
-    case 'tianditu-satellite': return '天地图卫星影像';
-    case 'tianditu-terrain': return '天地图地形图';
-    case 'tianditu-vector': return '天地图矢量图';
-    case 'empty': return '空白底图';
-    default: return mode;
+    case 'osm-online':
+      return 'OpenStreetMap';
+    case 'tianditu-satellite':
+      return '天地图卫星影像';
+    case 'tianditu-terrain':
+      return '天地图地形图';
+    case 'tianditu-vector':
+      return '天地图矢量图';
+    case 'empty':
+      return '空白底图';
+    default:
+      return mode;
   }
 }
 
@@ -1009,13 +1156,19 @@ function attachBasemapSwitcher(mapData: LineMapData): void {
     // 若当前正使用天地图模式，下一次切换会带上新 Key（无需重新打开工程）。
     const onSettingsChanged = () => {
       if (!basemapLayerContext) return;
-      renderBasemapSwitcherIntoLayerPanel(basemapLayerContext.layerPanel, basemapLayerContext.mapData);
-      currentShowMessage?.(isTiandituKeyAvailable()
-        ? '天地图 API Key 已生效，卫星/地形/矢量图层可用'
-        : '天地图 API Key 已清除');
+      renderBasemapSwitcherIntoLayerPanel(
+        basemapLayerContext.layerPanel,
+        basemapLayerContext.mapData,
+      );
+      currentShowMessage?.(
+        isTiandituKeyAvailable()
+          ? '天地图 API Key 已生效，卫星/地形/矢量图层可用'
+          : '天地图 API Key 已清除',
+      );
     };
     window.addEventListener('gim:settings-changed', onSettingsChanged);
-    removeBasemapSettingsListener = () => window.removeEventListener('gim:settings-changed', onSettingsChanged);
+    removeBasemapSettingsListener = () =>
+      window.removeEventListener('gim:settings-changed', onSettingsChanged);
   }
 }
 
@@ -1033,9 +1186,10 @@ function attachBasemapSwitcher(mapData: LineMapData): void {
  * @param mapData 当前线路地图数据（用于切换时复用）
  */
 
-
 function renderBasemapSwitcherIntoLayerPanel(layerPanel: HTMLElement, mapData: LineMapData): void {
-  renderBasemapControls(layerPanel, mapData, runtimeBasemapMode, (mode, container, data) => switchBasemap(mode, container, data));
+  renderBasemapControls(layerPanel, mapData, runtimeBasemapMode, (mode, container, data) =>
+    switchBasemap(mode, container, data),
+  );
 }
 
 /**
@@ -1058,7 +1212,11 @@ function switchBasemap(
   // 销毁旧 probe + 旧 overlay（图层面板 + 底图切换控件随之移除）
   maplibreProbeGeneration++;
   for (const fn of maplibreInteractionCleanup) {
-    try { fn(); } catch { /* ignore */ }
+    try {
+      fn();
+    } catch {
+      /* ignore */
+    }
   }
   maplibreInteractionCleanup = [];
   if (lineMapHandle) {
@@ -1084,87 +1242,120 @@ function switchBasemap(
   });
 
   const myGen = maplibreProbeGeneration;
-  const creation = mapCreationController = new AbortController();
+  const creation = (mapCreationController = new AbortController());
   let fallbackCalled = false;
   function fallback(reason: unknown): void {
     if (fallbackCalled) return;
     fallbackCalled = true;
     if (myGen !== maplibreProbeGeneration) return;
     const label = basemapModeLabel(newMode);
-    debugWarn(DEBUG_LINE_MAP, `[MapLibre overlay] ${label} unavailable, fallback to Canvas-only`, reason);
-    setBasemapStatus(isTiandituMode(newMode) ? 'tianditu-unavailable-fallback' : 'osm-unavailable-fallback', {
-      mode: newMode,
-      maplibreEnabled: false,
-      fallbackReason: reason instanceof Error ? reason.message : String(reason),
-    });
+    debugWarn(
+      DEBUG_LINE_MAP,
+      `[MapLibre overlay] ${label} unavailable, fallback to Canvas-only`,
+      reason,
+    );
+    setBasemapStatus(
+      isTiandituMode(newMode) ? 'tianditu-unavailable-fallback' : 'osm-unavailable-fallback',
+      {
+        mode: newMode,
+        maplibreEnabled: false,
+        fallbackReason: reason instanceof Error ? reason.message : String(reason),
+      },
+    );
     try {
       currentShowMessage?.(`${label}不可用，已切换为 Canvas 地图模式`);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
-  void Promise.resolve((async () => {
-    try {
-      const { createMapLibreProbe } = await import('./lineMapBaseLayer.js');
-      if (myGen !== maplibreProbeGeneration) return;
-      const initialBounds: [number, number, number, number] = [
-        mapData.bbox.minLng, mapData.bbox.minLat, mapData.bbox.maxLng, mapData.bbox.maxLat,
-      ];
-      const probe = await createMapLibreProbe(container, {
-        signal: creation.signal,
-        initialBounds,
-        basemapMode: newMode,
-        onBasemapUnavailable: fallback,
-      });
-      if (myGen !== maplibreProbeGeneration) {
-        try { probe.destroy(); } catch { /* ignore */ }
-        return;
-      }
-      maplibreProbeHandle = probe;
-      const map = probe.getMap();
-      if (!map) throw new Error('MapLibre map 实例为 null');
-      const baseProjection = createMapLibreProjection(map);
-      const projection: LineMapProjection = {
-        ...baseProjection,
-        fitBounds(bbox: GeoBBox) {
-          probe.fitBounds([bbox.minLng, bbox.minLat, bbox.maxLng, bbox.maxLat]);
-        },
-      };
-      if (lineMapHandle) {
-        lineMapHandle.destroy();
-        lineMapHandle = null;
-      }
-      let redrawFn: ((phase?: LineMapRenderPhase) => void) | null = null;
-      lineMapHandle = renderLineMap(mapData, container, handleMapTowerClick, {
-        projection,
-        onRequestRedraw: (draw) => { redrawFn = draw; },
-        onWireClick: handleMapWireClick,
-        enableCatenary: currentLineCatenaryEnabled,
-        perfSession: perfCurrentSession(),
-      });
-      const offView = probe.onViewChange((kind) => {
-        redrawFn?.('interactive');
-        if (kind === 'resize') redrawFn?.('settled');
-      });
-      const offSettled = probe.onViewSettled(() => { redrawFn?.('settled'); });
-      const offMove = probe.onPointerMove((p) => { lineMapHandle?.handlePointerMove?.(p.x, p.y); });
-      const offClick = probe.onPointerClick((p) => { lineMapHandle?.handlePointerClick?.(p.x, p.y); });
-      const offLeave = probe.onPointerLeave(() => { lineMapHandle?.handlePointerLeave?.(); });
-      maplibreInteractionCleanup.push(offView, offSettled, offMove, offClick, offLeave);
-      // overlay handle 创建后，重新附加底图切换控件到新的图层面板
-      attachBasemapSwitcher(mapData);
-      setBasemapStatus(basemapStatusFromMode(newMode), {
-        mode: newMode,
-        maplibreEnabled: true,
-      });
+  void Promise.resolve(
+    (async () => {
       try {
-        currentShowMessage?.(`已切换到${basemapModeLabel(newMode)}`);
-      } catch { /* ignore */ }
-    } catch (err) {
-      if (creation.signal.aborted) return;
-      debugWarn(DEBUG_LINE_MAP, '[MapLibre overlay] 切换底图失败，保持 Canvas-only', err);
-      try {
-        currentShowMessage?.(`切换到${basemapModeLabel(newMode)}失败`);
-      } catch { /* ignore */ }
-    }
-  })()).catch(reportBackgroundError);
+        const { createMapLibreProbe } = await import('./lineMapBaseLayer.js');
+        if (myGen !== maplibreProbeGeneration) return;
+        const initialBounds: [number, number, number, number] = [
+          mapData.bbox.minLng,
+          mapData.bbox.minLat,
+          mapData.bbox.maxLng,
+          mapData.bbox.maxLat,
+        ];
+        const probe = await createMapLibreProbe(container, {
+          signal: creation.signal,
+          initialBounds,
+          basemapMode: newMode,
+          onBasemapUnavailable: fallback,
+          onMapCreated: mapFrameObserver,
+        });
+        if (myGen !== maplibreProbeGeneration) {
+          try {
+            probe.destroy();
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
+        maplibreProbeHandle = probe;
+        const map = probe.getMap();
+        if (!map) throw new Error('MapLibre map 实例为 null');
+        const baseProjection = createMapLibreProjection(map);
+        const projection: LineMapProjection = {
+          ...baseProjection,
+          fitBounds(bbox: GeoBBox) {
+            probe.fitBounds([bbox.minLng, bbox.minLat, bbox.maxLng, bbox.maxLat]);
+          },
+        };
+        if (lineMapHandle) {
+          lineMapHandle.destroy();
+          lineMapHandle = null;
+        }
+        let redrawFn: ((phase?: LineMapRenderPhase) => void) | null = null;
+        lineMapHandle = renderLineMap(mapData, container, handleMapTowerClick, {
+          projection,
+          onRequestRedraw: (draw) => {
+            redrawFn = draw;
+          },
+          onWireClick: handleMapWireClick,
+          enableCatenary: currentLineCatenaryEnabled,
+          perfSession: perfCurrentSession(),
+        });
+        const offView = probe.onViewChange((kind) => {
+          redrawFn?.('interactive');
+          if (kind === 'resize') redrawFn?.('settled');
+        });
+        const offSettled = probe.onViewSettled(() => {
+          redrawFn?.('settled');
+        });
+        const offMove = probe.onPointerMove((p) => {
+          lineMapHandle?.handlePointerMove?.(p.x, p.y);
+        });
+        const offClick = probe.onPointerClick((p) => {
+          lineMapHandle?.handlePointerClick?.(p.x, p.y);
+        });
+        const offLeave = probe.onPointerLeave(() => {
+          lineMapHandle?.handlePointerLeave?.();
+        });
+        maplibreInteractionCleanup.push(offView, offSettled, offMove, offClick, offLeave);
+        // overlay handle 创建后，重新附加底图切换控件到新的图层面板
+        attachBasemapSwitcher(mapData);
+        setBasemapStatus(basemapStatusFromMode(newMode), {
+          mode: newMode,
+          maplibreEnabled: true,
+        });
+        try {
+          currentShowMessage?.(`已切换到${basemapModeLabel(newMode)}`);
+        } catch {
+          /* ignore */
+        }
+      } catch (err) {
+        if (creation.signal.aborted) return;
+        debugWarn(DEBUG_LINE_MAP, '[MapLibre overlay] 切换底图失败，保持 Canvas-only', err);
+        try {
+          currentShowMessage?.(`切换到${basemapModeLabel(newMode)}失败`);
+        } catch {
+          /* ignore */
+        }
+      }
+    })(),
+  ).catch(reportBackgroundError);
 }

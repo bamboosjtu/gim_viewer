@@ -104,7 +104,7 @@
 
 共享 JSON 契约夹具使用静态导入纳入依赖图；例如识别契约 JSON 改动可直接选择跨语言对照测试。动态文件读取和 Python 子进程内部依赖不属于 JS 导入图；独立算法修改仍同时执行工具 `unit/` 与对应 TS 模块门禁。
 
-在 `desktop/` 执行 `npm run test:module -- ../packages/gim-sdk/src/engineering ../packages/gim-sdk/src/gim/engineering` 可核对领域、来源适配及桌面消费者。单文件变更可指定对应 SDK 源文件，共享线路核心可传 `../packages/powerline-core/src`。识别和投影测试应按当前目录核对公开结果。
+在 `desktop/` 执行 `npm run test:module -- ../packages/gim-sdk/src/semantic ../packages/gim-sdk/src/source` 可核对领域、来源适配及桌面消费者。单文件变更可指定对应 SDK 源文件，共享线路核心可传 `../packages/powerline-core/src`。识别和投影测试应按当前目录核对公开结果。
 
 | 门禁命令（`desktop/` 下） | 证明什么 |
 |---|---|
@@ -222,7 +222,7 @@
 
 ### 分类与清册
 
-- `npm run test:recognition`：独立 Node 环境的实体识别专项；全量模型和部件、词汇冲突、显式宿主与独立边界，及 TS/Python 一致性。独立 CI 不启动几何编译和渲染。
+- `npm run test:recognition`：独立 Node 环境的实体识别专项；全量模型和部件、词汇冲突、显式宿主与独立边界，及 TS/Python 一致性。在 Windows Desktop CI 中运行，不启动几何编译和渲染，也不另设独立 workflow。
 
 - `npm run test:local`：对开发者登记的一变、一线、一设备运行原生打开与证据检查；缺样本不计通过。
 - `npm run check:engineering-catalog`：检查 JSON 目录、模型/部件词汇命名空间、宿主策略和独立工具副本；TypeScript/Python 行为一致性另由共享来源 DTO 对照测试验证，不能替代真实样本人工核对。
@@ -279,9 +279,9 @@ cargo test --manifest-path app/src-tauri/Cargo.toml six_native_imports -- --igno
 
 | 范围 | 行/语句 | 函数 | 分支 |
 |---|---|---|---|
-| `packages/gim-sdk/src/engineering/` | 95% | 95% | 90% |
-| `packages/gim-sdk/src/shared/` | 90% | 90% | 80% |
-| `gim/`（桌面与 SDK 按归属检查） | 90% | 90% | 80% |
+| `packages/gim-sdk/src/semantic/` | 95% | 95% | 90% |
+| `packages/gim-sdk/src/{source,geometry,engineering,projection,adapters,shared}/` | 90% | 90% | 80% |
+| `gim/`（桌面按归属检查） | 90% | 90% | 80% |
 | `services/openGimService.ts` | 70% | 80% | 50% |
 | `services/substationRuntime.ts` | 70% | 45% | 70% |
 | `services/viewerUIBinding.ts` | 80% | 50% | 70% |
