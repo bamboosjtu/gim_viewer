@@ -7,6 +7,7 @@ import { hydrateSubstationGeometryGraph } from '../geometry/substationSourceGrap
 import { discoverGeometriesFromNode } from '../../services/modGeometryDiscovery.js';
 import { parseFamSectionsWithDiagnostics, resolveSubstationBusinessIdentity } from '@gim/gim-sdk/source';
 import { buildGimIndexPayload } from '../../services/gimIndexPersistenceService.js';
+import { inspectAuxiliarySources } from '../../services/inspectorService.js';
 import { buildGeometryRefsPayload } from '../../services/__tests__/geometryRefsPayload.js';
 import { restoreGimIndexToState } from '../../services/gimIndexRestoreService.js';
 import { AppState } from '../../app/state.js';
@@ -258,5 +259,38 @@ describe('Substation source evidence and normalized projections', () => {
     expect(discoverSubstationGlSidecars(files, fresh)).toEqual(sidecars);
     expect(buildSubstationAliasIndex(fresh).partToRoot.get(part.path)?.path).toBe(device.path);
     expect(findSubstationSourceDocuments(device, fresh, relations)).toEqual(documents);
+  });
+
+  it('keeps repeated inspector auxiliary projections on the cached whole-tree indexes', async () => {
+    const uuid = '12345678-1234-1234-1234-123456789abc';
+    const files = filesOf({
+      'CBM/project.cbm': 'ENTITYNAME=F1System\nSUBSYSTEM=device.cbm\nIFC0=model.ifc',
+      'CBM/device.cbm': `ENTITYNAME=F4System\nOBJECTMODELPOINTER=${uuid}.dev\nSUBSYSTEM=part.cbm`,
+      'CBM/part.cbm': `ENTITYNAME=PartIndex\nOBJECTMODELPOINTER=${uuid}.dev`,
+      'CBM/FileDevRelation.cbm': 'FILES.NUM=1\nFILE0.NAME=design.DGN\nFILE0.DEVS.NUM=1\nFILE0.DEV0=device.cbm',
+      'CBM/model.ifc': 'ISO-10303-21;',
+      [`DEV/${uuid}.dev`]: 'SOLIDMODELS.NUM=0',
+      [`MOD/${uuid}.gl`]: xml('<Cuboid L="1" W="1" H="1"/>'),
+    });
+    const tree = await buildCbmTree(files);
+    const relations = await parseFileDevRelation(files);
+    const entries = await discoverIfcFromCBM(files);
+    const device = tree!.children[0];
+    const state = {
+      currentFiles: files,
+      currentCbmTree: tree,
+      currentIfcEntries: entries,
+      fileDevRelations: relations,
+      substationEntryPaths: [...files.keys()],
+    } as unknown as Parameters<typeof inspectAuxiliarySources>[0];
+    // Cache warm-up is part of the first projection; subsequent panel opens
+    // must not enumerate the archive again.
+    const scans = [vi.spyOn(files, 'keys'), vi.spyOn(files, 'entries'), vi.spyOn(files, 'values'),
+      vi.spyOn(files, 'forEach'), vi.spyOn(files, Symbol.iterator)];
+    const rows = inspectAuxiliarySources(state, device);
+    for (let round = 0; round < 5; round++)
+      expect(inspectAuxiliarySources(state, device)).toEqual(rows);
+    expect(scans.reduce((count, scan) => count + scan.mock.calls.length, 0)).toBe(1);
+    expect(buildSubstationAliasIndex(tree).partToRoot.get(device.children[0].path)).toBe(device);
   });
 });
