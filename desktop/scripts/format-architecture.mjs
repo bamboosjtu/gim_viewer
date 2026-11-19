@@ -26,6 +26,7 @@ export const architectureModules = [
   'src/gim/gimValueSemantics.ts',
   'src/gim/ifcOutwardProduct.ts',
   'src/gim/ifcSpatialParser.ts',
+  'src/gim/cbmParser.ts',
   'src/gim/sourceDocument.ts',
   'src/services/substationSpatialWorkerClient.ts',
   'src/app/state.ts',

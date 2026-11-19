@@ -684,6 +684,31 @@ SOLIDMODELS.NUM=0`, 'child.dev')],
     expect(subDevice.name).toBe('child');
   });
 
+  it('records a read-failed diagnostic for a missing child DEV instead of dropping it silently', async () => {
+    const files = new Map<string, File>([
+      ['CBM/project.cbm', textFile(
+        `ENTITYNAME=F1System
+SUBSYSTEM=root.cbm`, 'project.cbm')],
+      ['CBM/root.cbm', textFile(
+        `ENTITYNAME=F4System
+OBJECTMODELPOINTER=parent.dev`, 'root.cbm')],
+      ['DEV/parent.dev', textFile(
+        `SUBDEVICES.NUM=1
+SUBDEVICE0=missing.dev
+SOLIDMODELS.NUM=0`, 'parent.dev')],
+    ]);
+    const tree = await buildCbmTree(files, '变电工程');
+    const device = tree!.children[0];
+    expect(device.sourceDiagnostics).toContainEqual({
+      kind: 'read-failed',
+      path: 'missing.dev',
+      field: 'OBJECTMODELPOINTER',
+      lines: [],
+      values: ['missing.dev'],
+    });
+    expect(device.children[0].name).toBe('missing');
+  });
+
   it('DEV 文件不存在时不产生虚拟子节点', async () => {
     const files = new Map<string, File>([
       ['CBM/project.cbm', textFile(

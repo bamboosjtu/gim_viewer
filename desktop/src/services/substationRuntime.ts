@@ -273,6 +273,38 @@ function publishFamSourceRows(state: AppState, rows: readonly FamPropertyPayload
   state.properties.cachedFamSourceProperties = families;
 }
 
+/**
+ * A warm load can fail after it has already claimed the viewer/background
+ * resources but before it returns. Cold fallback creates a new attempt; release
+ * the partial warm owners first so the old coordinator, preview, monitor and
+ * station-overview closure cannot survive as leaked instances.
+ */
+function releaseWarmIfcAttempt(state: AppState): void {
+  const queue = state.substationFineQueue as unknown as { cancelPending?: () => void } | null;
+  state.substationFineQueue = null;
+  try {
+    queue?.cancelPending?.();
+  } catch (error) {
+    logger.warn('[Substation Runtime] warm background queue release failed:', error);
+  }
+  const preview = state.substationConnectionPreview;
+  state.substationConnectionPreview = null;
+  try {
+    preview?.release();
+  } catch (error) {
+    logger.warn('[Substation Runtime] warm connection preview release failed:', error);
+  }
+  const monitor = state.substationResourceMonitor;
+  state.substationResourceMonitor = null;
+  try {
+    monitor?.release();
+  } catch (error) {
+    logger.warn('[Substation Runtime] warm resource monitor release failed:', error);
+  }
+  state.viewState.stationOverview = null;
+  state.ifcLoading.pending = false;
+}
+
 export async function openSubstationProject(context: GimRuntimeOpenContext): Promise<void> {
   const scope = context.state.sessionScope(context.session);
   if (!scope.isCurrent()) return;
@@ -650,6 +682,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
         return; // 缓存命中，短路完成
       } catch (err) {
         if (!scope.isCurrent()) return;
+        releaseWarmIfcAttempt(state);
         logger.warn(
           '[Substation Runtime] warm cache restore failed, falling back to cold path:',
           err,

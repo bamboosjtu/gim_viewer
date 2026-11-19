@@ -2,6 +2,7 @@ import type { DevDocument } from './geometry/ir.js';
 import { getFileEntryResolver } from './entryResolver.js';
 import { readGimText } from '../shared/textDecode.js';
 import type { CbmNode, IfcEntry } from './types.js';
+import { logger } from '../utils/logger.js';
 import { resolveIfcModelId } from './modelIdentity.js';
 import { stripIfcExtension } from './modelIdentity.js';
 import { parseDev } from './geometry/devParser.js';
@@ -14,9 +15,15 @@ import {
   resolveBaseFamilyReferences,
 } from './gimValueSemantics.js';
 import { parseFamSections } from './famParser.js';
-import {readCbmSourceDocument}from'./cbmDocument.js';
-import {sourceScalarProperties, sourceScalar, sourceReferenceFields, sourceDiagnostic, parseSourceDocument, type SourceDiagnostic} from './sourceDocument.js';
-
+import { readCbmSourceDocument } from './cbmDocument.js';
+import {
+  sourceScalarProperties,
+  sourceScalar,
+  sourceReferenceFields,
+  sourceDiagnostic,
+  parseSourceDocument,
+  type SourceDiagnostic,
+} from './sourceDocument.js';
 
 /**
  * 判断 SYSTEMNAME 值是否为无意义占位符（应跳过，不参与名称拼接）。
@@ -54,7 +61,8 @@ function isPlaceholderSystemName(s: string): boolean {
  */
 export function readSubstationSystemNames(kv: Record<string, string>): string[] {
   const systemNames: string[] = [];
-  for (const key of Object.keys(kv).filter((key) => /^SYSTEMNAME\d+$/i.test(key))
+  for (const key of Object.keys(kv)
+    .filter((key) => /^SYSTEMNAME\d+$/i.test(key))
     .sort((a, b) => Number(a.match(/\d+$/)![0]) - Number(b.match(/\d+$/)![0]))) {
     const sn = getFirstNonEmptyKv(kv, [key]);
     if (sn && !isPlaceholderSystemName(sn)) systemNames.push(sn.trim());
@@ -62,7 +70,10 @@ export function readSubstationSystemNames(kv: Record<string, string>): string[] 
   return systemNames;
 }
 
-function extractDisplayName(kv: Record<string, string>, path: string): { name: string; systemNames: string[] } {
+function extractDisplayName(
+  kv: Record<string, string>,
+  path: string,
+): { name: string; systemNames: string[] } {
   const systemNames = readSubstationSystemNames(kv);
 
   const rawPartName = getFirstNonEmptyKv(kv, ['PARTNAME']);
@@ -71,7 +82,10 @@ function extractDisplayName(kv: Record<string, string>, path: string): { name: s
   const sysClassifyName = getFirstNonEmptyKv(kv, ['SYSCLASSIFYNAME']);
   // ENTITYNAME 大小写三态实证（PartIndex/F4SYSTEM 等），统一归一化（docs/schema/semantic-model.md）
   const entityName = normalizeEntityName(getFirstNonEmptyKv(kv, ['ENTITYNAME']));
-  const fileName = path.split('/').pop()!.replace(/\.cbm$/i, '');
+  const fileName = path
+    .split('/')
+    .pop()!
+    .replace(/\.cbm$/i, '');
 
   let name: string;
   if (systemNames.length > 0) {
@@ -97,7 +111,12 @@ function extractDisplayName(kv: Record<string, string>, path: string): { name: s
  * - DEV_SUBDEVICE：DEV SUBDEVICES 展开的虚拟子设备节点
  */
 function isDeviceLayer(entityName: string): boolean {
-  return entityName === 'F4System' || entityName === 'PARTINDEX' || entityName === 'DEV_SUBDEVICE' || entityName.toLowerCase() === 'device';
+  return (
+    entityName === 'F4System' ||
+    entityName === 'PARTINDEX' ||
+    entityName === 'DEV_SUBDEVICE' ||
+    entityName.toLowerCase() === 'device'
+  );
 }
 
 type DevDocumentReader = (path: string) => Promise<DevDocument | null>;
@@ -161,11 +180,15 @@ function enhanceF3Name(baseName: string, children: CbmNode[]): string {
 }
 
 /** 从文件集合递归构建 CBM 层级树（含 DEV SYMBOLNAME 回填与 SUBDEVICES 展开） */
-export async function buildCbmTree(files: Map<string, File>, projectTypeName?: string, equipmentEntry?: string): Promise<CbmNode | null> {
+export async function buildCbmTree(
+  files: Map<string, File>,
+  projectTypeName?: string,
+  equipmentEntry?: string,
+): Promise<CbmNode | null> {
   const resolve = getFileEntryResolver(files);
   const reference = (ref: string, owner = ''): string => {
     const path = resolve(ref, owner);
-    if (!path) console.warn('[CBM] 引用缺失或歧义', { ref, owner });
+    if (!path) logger.warn('[CBM] 引用缺失或歧义', { ref, owner });
     return path ?? '';
   };
   const visited = new Set<string>();
@@ -173,14 +196,18 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
   // A DEV source may occur under many CBMs/assemblies. Share the in-flight
   // read/parse as well as the completed document for this tree build only.
   const devDocuments = new Map<string, Promise<DevDocument | null>>();
-  const readDevDocument: DevDocumentReader = path => {
+  const readDevDocument: DevDocumentReader = (path) => {
     const key = path.replace(/\\/g, '/').toLowerCase();
     let pending = devDocuments.get(key);
     if (!pending) {
       pending = (async () => {
         const file = getFileByPath(files, path);
         if (!file) return null;
-        try { return parseDev(await readGimText(file), path); } catch { return null; }
+        try {
+          return parseDev(await readGimText(file), path);
+        } catch {
+          return null;
+        }
       })();
       devDocuments.set(key, pending);
     }
@@ -203,22 +230,25 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
     }
     const sourceDiagnostics: SourceDiagnostic[] = [];
     let document;
-    try { document = await readCbmSourceDocument(f,p,true); }
-    catch {
+    try {
+      document = await readCbmSourceDocument(f, p, true);
+    } catch {
       document = parseSourceDocument(p, '');
-      sourceDiagnostics.push({kind:'read-failed',path:p,field:'',lines:[],values:[]});
+      sourceDiagnostics.push({ kind: 'read-failed', path: p, field: '', lines: [], values: [] });
     }
     const kv = sourceScalarProperties(document);
     const devEntry = p === equipmentEntry && /\.dev$/i.test(p);
     // Report every conflicting scalar once, preserving the rows for inspection.
-    for (const key of new Set(document.fields.map(field => field.keys[0].toUpperCase()))) {
+    for (const key of new Set(document.fields.map((field) => field.keys[0].toUpperCase()))) {
       if (key === 'SUBSYSTEM') continue;
       if (devEntry && /^TRANSFORMMATRIX\d+$/.test(key)) continue;
-      const scalar = sourceScalar(document,key);
-      if (scalar.status === 'ambiguous') sourceDiagnostics.push(sourceDiagnostic(document,key,scalar.fields));
+      const scalar = sourceScalar(document, key);
+      if (scalar.status === 'ambiguous')
+        sourceDiagnostics.push(sourceDiagnostic(document, key, scalar.fields));
     }
     const en = devEntry ? 'Device' : normalizeEntityName(getFirstNonEmptyKv(kv, ['ENTITYNAME']));
-    let { name, systemNames } = extractDisplayName(kv, p);
+    const { name: initialName, systemNames } = extractDisplayName(kv, p);
+    let name = initialName;
     const cn = getFirstNonEmptyKv(kv, ['SYSCLASSIFYNAME', 'PARTNAME']);
     const devPath = devEntry ? normalizedPath : getFirstNonEmptyKv(kv, ['OBJECTMODELPOINTER']);
 
@@ -226,8 +256,15 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
     let devSymbolName = '';
     let devType = '';
     if (devPath) {
-      const info = await readDevDocument(reference(devPath,p) || normalizeDevReference(devPath));
-      if (!info) sourceDiagnostics.push({kind:'read-failed',path:devPath,field:'OBJECTMODELPOINTER',lines:[],values:[devPath]});
+      const info = await readDevDocument(reference(devPath, p) || normalizeDevReference(devPath));
+      if (!info)
+        sourceDiagnostics.push({
+          kind: 'read-failed',
+          path: devPath,
+          field: 'OBJECTMODELPOINTER',
+          lines: [],
+          values: [devPath],
+        });
       if (info?.sourceDiagnostics) sourceDiagnostics.push(...info.sourceDiagnostics);
       if (info) {
         devSymbolName = info.symbolName;
@@ -247,16 +284,39 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
 
     // Family sidecars may provide the only readable name (also for PARTINDEX).
     // Do not interpret classification codes as a standard discipline vocabulary.
-    for (const ref of (systemNames.length === 0 || en === 'PARTINDEX') ? resolveBaseFamilyReferences(kv) : []) {
+    for (const ref of systemNames.length === 0 || en === 'PARTINDEX'
+      ? resolveBaseFamilyReferences(kv)
+      : []) {
       const famPath = ref.path.replace(/\\/g, '/');
       const famFile = getFileByPath(files, reference(famPath, p));
       if (!famFile) continue;
       let sections;
-      try { sections = parseFamSections(await readGimText(famFile)); } catch { continue; }
+      try {
+        sections = parseFamSections(await readGimText(famFile));
+      } catch {
+        continue;
+      }
       const values = [...sections.values()].flatMap((section) => [...section.entries()]);
-      const readable = ['工程中名称', '系统名称', '设备名称', 'ShowName', 'LevelName', 'NAME', '名称'].map((key) =>
-        values.find(([k, v]) => k.toUpperCase() === key.toUpperCase() && !isPlaceholderSystemName(v))?.[1]).find(Boolean);
-      if (readable && (systemNames.length === 0 || en === 'PARTINDEX')) { name = readable; break; }
+      const readable = [
+        '工程中名称',
+        '系统名称',
+        '设备名称',
+        'ShowName',
+        'LevelName',
+        'NAME',
+        '名称',
+      ]
+        .map(
+          (key) =>
+            values.find(
+              ([k, v]) => k.toUpperCase() === key.toUpperCase() && !isPlaceholderSystemName(v),
+            )?.[1],
+        )
+        .find(Boolean);
+      if (readable && (systemNames.length === 0 || en === 'PARTINDEX')) {
+        name = readable;
+        break;
+      }
     }
 
     const children: CbmNode[] = [];
@@ -265,7 +325,7 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
     // 组装，visited/nodeBudget 仍是同步更新。
     const buildSiblings = async (refs: string[]): Promise<CbmNode[]> => {
       if (refs.length === 0) return [];
-      const results: (CbmNode | null)[] = new Array(refs.length).fill(null);
+      const results = new Array<CbmNode | null>(refs.length).fill(null);
       let next = 0;
       const workers = Array.from({ length: Math.min(32, refs.length) }, async () => {
         while (true) {
@@ -281,14 +341,27 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
     // Counts still enforce quotas; actual source rows define the edges in all consumers.
     parseBoundedCount(getFirstNonEmptyKv(kv, ['SUBSYSTEMS.NUM']), 'SUBSYSTEMS.NUM');
     if (!devEntry) parseBoundedCount(getFirstNonEmptyKv(kv, ['SUBDEVICES.NUM']), 'SUBDEVICES.NUM');
-    const refs = sourceReferenceFields(document, devEntry ? /^SUBSYSTEM\d*$/i : /^(?:SUBSYSTEM\d*|SUBDEVICE\d+)$/i)
-      .filter(field => /\.cbm$/i.test(field.value)).map(field => field.value);
-    children.push(...await buildSiblings(refs));
+    const refs = sourceReferenceFields(
+      document,
+      devEntry ? /^SUBSYSTEM\d*$/i : /^(?:SUBSYSTEM\d*|SUBDEVICE\d+)$/i,
+    )
+      .filter((field) => /\.cbm$/i.test(field.value))
+      .map((field) => field.value);
+    children.push(...(await buildSiblings(refs)));
 
     // 4. 方向 B：若此节点有 devPath，展开 DEV SUBDEVICES 块为虚拟子节点
     let devExpanded = false;
     if (devPath) {
-      const devChildren = await expandDevSubDevices(reference(devPath,p) || devPath, files, p, readDevDocument, undefined, depth + 1, nodeBudget);
+      const devChildren = await expandDevSubDevices(
+        reference(devPath, p) || devPath,
+        files,
+        p,
+        readDevDocument,
+        undefined,
+        depth + 1,
+        nodeBudget,
+        sourceDiagnostics,
+      );
       if (devChildren.length > 0) {
         children.push(...devChildren);
         devExpanded = true;
@@ -302,8 +375,11 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
     }
 
     return {
-      ...(sourceDiagnostics.length || document.fields.filter(field=>/^SUBSYSTEM$/i.test(field.keys[0])).length>1 ? {sourceFields:document.fields} : {}),
-      ...(sourceDiagnostics.length ? {sourceDiagnostics} : {}),
+      ...(sourceDiagnostics.length ||
+      document.fields.filter((field) => /^SUBSYSTEM$/i.test(field.keys[0])).length > 1
+        ? { sourceFields: document.fields }
+        : {}),
+      ...(sourceDiagnostics.length ? { sourceDiagnostics } : {}),
       rawProperties: kv,
       path: p,
       name,
@@ -345,13 +421,15 @@ async function expandDevSubDevices(
   devVisited?: Set<string>,
   depth = 0,
   nodeBudget: { count: number } = { count: 0 },
+  diagnostics?: SourceDiagnostic[],
 ): Promise<CbmNode[]> {
   if (depth > PARSER_LIMITS.maxRecursionDepth) {
     throw new Error(`DEV 子设备递归深度超过 ${PARSER_LIMITS.maxRecursionDepth}`);
   }
   if (!devVisited) devVisited = new Set<string>();
 
-  const normalizedDevPath = getFileEntryResolver(files)(devPath, parentCbmPath) ?? normalizeDevReference(devPath);
+  const normalizedDevPath =
+    getFileEntryResolver(files)(devPath, parentCbmPath) ?? normalizeDevReference(devPath);
   const devVisitKey = normalizedDevPath.toLowerCase();
   if (devVisited.has(devVisitKey)) return [];
   devVisited.add(devVisitKey);
@@ -367,7 +445,9 @@ async function expandDevSubDevices(
     }
     const subDevice = devDoc.subDevices[i];
     const childDevPath = subDevice.devPath;
-    const normalizedChildDevPath = normalizeDevReference(childDevPath);
+    const normalizedChildDevPath =
+      getFileEntryResolver(files)(childDevPath, parentCbmPath) ??
+      normalizeDevReference(childDevPath);
     const virtualPath = `${parentCbmPath}#dev:${subDevice.sourceIndex}:${childDevPath}`;
 
     // 从缓存获取子 DEV 的 SYMBOLNAME/TYPE
@@ -379,13 +459,37 @@ async function expandDevSubDevices(
       if (childInfo) {
         childSymbolName = childInfo.symbolName;
         childType = childInfo.type;
+      } else {
+        diagnostics?.push({
+          kind: 'read-failed',
+          path: childDevPath,
+          field: 'OBJECTMODELPOINTER',
+          lines: [],
+          values: [childDevPath],
+        });
       }
       // 递归展开孙 SUBDEVICES。
       // 每个 sibling 需要独立 visited 分支；同一个 child DEV 可被多次实例化，
       // 但矩阵不同，不能因为同名 DEV 被前一个 sibling 访问过就跳过。
-      grandChildren = await expandDevSubDevices(childDevPath, files, virtualPath, readDevDocument, new Set(devVisited), depth + 1, nodeBudget);
-    } catch {
-      // 子 DEV 解析失败，跳过
+      grandChildren = await expandDevSubDevices(
+        childDevPath,
+        files,
+        virtualPath,
+        readDevDocument,
+        new Set(devVisited),
+        depth + 1,
+        nodeBudget,
+        diagnostics,
+      );
+    } catch (error) {
+      // 保留失败原因：子 DEV 不能无声消失，否则与源本来没有子设备无法区分。
+      diagnostics?.push({
+        kind: 'read-failed',
+        path: childDevPath,
+        field: 'SUBDEVICES',
+        lines: [],
+        values: [error instanceof Error ? error.message : childDevPath],
+      });
     }
 
     // 虚拟子节点名称：SYMBOLNAME > TYPE > devPath 文件名
@@ -399,12 +503,11 @@ async function expandDevSubDevices(
     // 2. DB 直通：cbm_node.transform_matrix=NULL → cumulative_cbm_matrix 缺失 SUBDEVICE
     //    （BFS 路径会补充正确实例，但同一 DEV 会得到两个不同 placement，产生重复几何）
     // 3. 节点点击：loadModStlForNode → discoverGeometriesFromNode → rootTransform 缺失 SUBDEVICE
-    const childTransformMatrix = subDevice.transformMatrix.length === 16
-      ? subDevice.transformMatrix.join(',')
-      : '';
+    const childTransformMatrix =
+      subDevice.transformMatrix.length === 16 ? subDevice.transformMatrix.join(',') : '';
 
     children.push({
-      ...(devDoc.sourceDiagnostics?.length ? {sourceDiagnostics: devDoc.sourceDiagnostics} : {}),
+      ...(devDoc.sourceDiagnostics?.length ? { sourceDiagnostics: devDoc.sourceDiagnostics } : {}),
       path: virtualPath,
       name: childName,
       entityName: 'DEV_SUBDEVICE',
@@ -444,14 +547,20 @@ export function buildCbmNodeIndex(node: CbmNode | null): Map<string, CbmNode> {
 }
 
 /** 收集节点及其后代的所有 IFC 引用 → Map<modelId, Set<ifcGuid>> */
-export function collectIfcRefs(node: CbmNode, ifcEntries: readonly IfcEntry[] = []): Map<string, Set<string>> {
+export function collectIfcRefs(
+  node: CbmNode,
+  ifcEntries: readonly IfcEntry[] = [],
+): Map<string, Set<string>> {
   const refs = new Map<string, Set<string>>();
   function walk(n: CbmNode) {
     if (n.ifcFile && n.ifcGuid) {
-      const modelId = resolveIfcModelId(n.ifcFile, ifcEntries)
-        ?? (ifcEntries.length === 0
+      const modelId =
+        resolveIfcModelId(n.ifcFile, ifcEntries) ??
+        (ifcEntries.length === 0
           ? stripIfcExtension(n.ifcFile.split(/[\\/]/).pop() || n.ifcFile)
-          : (n.ifcFile.startsWith('ifc_') ? n.ifcFile : ''));
+          : n.ifcFile.startsWith('ifc_')
+            ? n.ifcFile
+            : '');
       // 重复 basename 且引用不含目录时不猜测模型，避免把 GUID 高亮到错误 IFC。
       if (!modelId) {
         for (const child of n.children) walk(child);
