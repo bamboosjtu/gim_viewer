@@ -438,6 +438,16 @@ describe('session-owned production engineering build', () => {
     expect([...store.keys()].filter(path=>!path.includes('source-geometry-v1')).every(path=>path.includes('b'.repeat(64)))).toBe(true);
   });
 
+  it('records a physical geometry cache encoding gap instead of returning silently', async () => {
+    const app = state();
+    app.currentProjectType = 'substation';
+    app.deviceLodRuntime = { diagnostics: { baseRepresentationsSettled: true, cacheWritesSettled: true, pending: 0, viewPendingOccurrences: 0 } } as never;
+    vi.spyOn(EngineeringWorkerClient.prototype, 'encodeGeometryCache').mockResolvedValueOnce(undefined);
+    await beginEngineeringBuild(app, sourceFiles(), { createWorker: portFactory(new LoopbackPort()) });
+    await expect.poll(() => app.sourceGeometry.cachePending).toBe(false);
+    expect(app.sourceGeometry.cacheError).toContain('编码未返回内容');
+  });
+
   it('keeps normalization available when cache encoding fails', async () => {
     vi.stubGlobal('CompressionStream', class { constructor() { throw Error('compression-unavailable'); } });
     const app = state();

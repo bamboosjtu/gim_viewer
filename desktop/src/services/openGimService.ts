@@ -1,11 +1,11 @@
-import {logger} from '../utils/logger.js';
+import { logger } from '../utils/logger.js';
 import type { ProjectLoadSession } from '../shared/projectSession.js';
-import {hasErrorCode} from '@desktop/contracts.js';
+import { hasErrorCode } from '@desktop/contracts.js';
 
 import { scheduleHideLoading } from './gimOpenCore.js';
 import { SUBSTATION_EARLY_SEMANTIC_DEFAULT } from '../config/features.js';
 import type { AppState } from '../app/state.js';
-import {projectOpenPresentation} from './projectOpenPresentationPort.js';
+import { projectOpenPresentation } from './projectOpenPresentationPort.js';
 import { isTauri } from '@desktop/runtime.js';
 import { openGimFilePath } from '@desktop/fileDialog.js';
 import { DEBUG_RUNTIME_LOGS } from '../config/debug.js';
@@ -44,9 +44,8 @@ export function canFallbackFromNativeExtraction(error: unknown): boolean {
   return hasErrorCode(error, 'BACKEND_UNAVAILABLE', 'UNSUPPORTED_FORMAT', 'IO');
 }
 export function canRecoverNativeExtractionReceipt(error: unknown): boolean {
-  return canFallbackFromNativeExtraction(error) || hasErrorCode(error,'RESPONSE_INVALID');
+  return canFallbackFromNativeExtraction(error) || hasErrorCode(error, 'RESPONSE_INVALID');
 }
-
 
 /**
  * 仅开发构建使用的本地性能采集入口。
@@ -72,23 +71,28 @@ function getDevPerformanceFilePath(): string | null {
  */
 function scheduleBaselineBeforeOpen(state: AppState, generation: number): void {
   const perfSession = perfCurrentSession();
-  void import('./substationResourceTelemetry.js').then(({ sampleSubstationRuntimeResources }) =>
-    sampleSubstationRuntimeResources(
-      state,
-      'baselineBeforeOpen',
-      perfSession,
-      undefined,
-      { requestGeneration: generation },
-      { isCurrent: () => state.projectGeneration === generation },
+  void import('./substationResourceTelemetry.js')
+    .then(({ sampleSubstationRuntimeResources }) =>
+      sampleSubstationRuntimeResources(
+        state,
+        'baselineBeforeOpen',
+        perfSession,
+        undefined,
+        { requestGeneration: generation },
+        { isCurrent: () => state.projectGeneration === generation },
+      ),
     )
-  ).catch(() => undefined);
+    .catch(() => undefined);
 }
 
 function describeType(type: GimRuntimeType | 'unknown'): string {
-  return type === 'transmission_line' ? 'transmission_line'
-    : type === 'equipment' ? 'equipment'
-    : type === 'substation' ? 'substation'
-    : 'unknown';
+  return type === 'transmission_line'
+    ? 'transmission_line'
+    : type === 'equipment'
+      ? 'equipment'
+      : type === 'substation'
+        ? 'substation'
+        : 'unknown';
 }
 
 /**
@@ -107,7 +111,8 @@ async function reuseExtractedSources(
   try {
     const { readExtractionManifest, createDiskBackedFile } = await import('@desktop/gimExtract.js');
     const manifest = await readExtractionManifest(projectId);
-    if (!manifest || manifest.source_sha256 !== sourceSha256 || manifest.entries.length === 0) return null;
+    if (!manifest || manifest.source_sha256 !== sourceSha256 || manifest.entries.length === 0)
+      return null;
     const files = new Map<string, File>();
     const cachePaths = new Map<string, string>();
     const packedPaths = new Set<string>();
@@ -135,7 +140,7 @@ interface OpenSourceInput {
   requestGeneration: number;
   nativeFilePath?: string;
   sourceBuffer?: ArrayBuffer;
-  onSession?: (session:ProjectLoadSession)=>void;
+  onSession?: (session: ProjectLoadSession) => void;
 }
 
 /**
@@ -203,56 +208,83 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
 
     if (nativeFilePath) {
       let endNative: ReturnType<typeof perfBegin> | null = null;
-      const earlyRequested = source.magic === 'GIMPKGS' && projectId != null
-        && (SUBSTATION_EARLY_SEMANTIC_DEFAULT || localStorage.getItem('gim-debug-substation-early-semantic') === '1');
+      const earlyRequested =
+        source.magic === 'GIMPKGS' &&
+        projectId != null &&
+        (SUBSTATION_EARLY_SEMANTIC_DEFAULT ||
+          localStorage.getItem('gim-debug-substation-early-semantic') === '1');
       try {
         const { extractGimArchiveNative } = await import('@desktop/gimExtract.js');
         // 上次解压成功但语义索引尚未提交时（首开期间切换/关闭工程），
         // 复用同一源 SHA 的已解压文件，避免再次解压 3.6 万条目。
         const reused = await reuseExtractedSources(projectId, session.sourceSha256, source.magic);
         if (reused) {
-          (await import('../utils/perfTimings.js')).perfMark('解压复用（已解压缓存，索引未提交）', {
-            files: reused.files.size,
-          }, perfSession);
+          (await import('../utils/perfTimings.js')).perfMark(
+            '解压复用（已解压缓存，索引未提交）',
+            {
+              files: reused.files.size,
+            },
+            perfSession,
+          );
           extracted = reused;
         } else {
-        endNative = perfBegin('解压（Rust 原生）', undefined, perfSession);
-        const early = earlyRequested;
-        const fullNative = () => extractGimArchiveNative(nativeFilePath, projectId ?? undefined,
-          {
-            ...(session.sourceSha256 ? {expectedSourceSha256: session.sourceSha256} : {}),
-            traceEntries: localStorage.getItem('gim-debug-substation-extraction-trace') === '1',
-            substationParseCopy: localStorage.getItem('gim-debug-substation-parse-copy') === '1',
+          endNative = perfBegin('解压（Rust 原生）', undefined, perfSession);
+          const early = earlyRequested;
+          const fullNative = () =>
+            extractGimArchiveNative(nativeFilePath, projectId ?? undefined, {
+              ...(session.sourceSha256 ? { expectedSourceSha256: session.sourceSha256 } : {}),
+              traceEntries: localStorage.getItem('gim-debug-substation-extraction-trace') === '1',
+              substationParseCopy: localStorage.getItem('gim-debug-substation-parse-copy') === '1',
+            });
+          let native: Awaited<ReturnType<typeof extractGimArchiveNative>> | ExtractedGimSource;
+          if (early) {
+            const policy = await import('./substationExtractionJob.js');
+            const capability = await policy.inspectEarlySemanticEligibility(
+              nativeFilePath,
+              projectId,
+              session.sourceSha256!,
+            );
+            (await import('../utils/perfTimings.js')).perfMark(
+              'early semantic eligibility',
+              { ...capability },
+              perfSession,
+            );
+            if (!state.isCurrentSession(session)) return { status: 'cancelled' };
+            native = await policy.withEarlySemanticCapability(
+              capability,
+              () => policy.startSubstationExtractionJob(state, session, nativeFilePath, projectId),
+              fullNative,
+            );
+          } else native = await fullNative();
+          if (!state.isCurrentSession(session)) {
+            endNative?.('（取消）');
+            return { status: 'cancelled' };
+          }
+          endNative(undefined, {
+            files: native.files.size,
+            extraction: native.extractionProfile ?? null,
+            entryTrace: native.entryTrace ?? null,
+            parseCopy: native.parseCopy ?? null,
+            earlySemantic: native.earlySemantic ?? false,
+            semanticCheckpoint: native.semanticCheckpoint ?? null,
           });
-        let native: Awaited<ReturnType<typeof extractGimArchiveNative>> | ExtractedGimSource;
-        if (early) {
-          const policy = await import('./substationExtractionJob.js');
-          const capability = await policy.inspectEarlySemanticEligibility(nativeFilePath, projectId!, session.sourceSha256!);
-          (await import('../utils/perfTimings.js')).perfMark('early semantic eligibility', {...capability}, perfSession);
-          if (!state.isCurrentSession(session)) return { status: 'cancelled' };
-          native = await policy.withEarlySemanticCapability(capability,
-            () => policy.startSubstationExtractionJob(state, session, nativeFilePath, projectId!), fullNative);
-        } else native = await fullNative();
-        if (!state.isCurrentSession(session)) {
-          endNative?.('（取消）');
-          return { status: 'cancelled' };
-        }
-        endNative(undefined, {
-          files: native.files.size,
-          extraction: native.extractionProfile ?? null,
-          entryTrace: native.entryTrace ?? null,
-          parseCopy: native.parseCopy ?? null,
-          earlySemantic: native.earlySemantic ?? false,
-          semanticCheckpoint: native.semanticCheckpoint ?? null,
-        });
-        recordNativeExtractionStages(native.extractionProfile, perfSession, source.magic === 'GIMPKGS');
-        if (source.magic === 'GIMPKGS' && !native.earlySemantic) {
-          (await import('../utils/perfTimings.js')).perfMark('sourceMaterializationComplete', { files: native.files.size }, perfSession);
-        }
-        extracted = native;
+          recordNativeExtractionStages(
+            native.extractionProfile,
+            perfSession,
+            source.magic === 'GIMPKGS',
+          );
+          if (source.magic === 'GIMPKGS' && !native.earlySemantic) {
+            (await import('../utils/perfTimings.js')).perfMark(
+              'sourceMaterializationComplete',
+              { files: native.files.size },
+              perfSession,
+            );
+          }
+          extracted = native;
         }
       } catch (nativeError) {
-        const nativeMessage = nativeError instanceof Error ? nativeError.message : String(nativeError);
+        const nativeMessage =
+          nativeError instanceof Error ? nativeError.message : String(nativeError);
         endNative?.('（失败）', { error: nativeMessage });
         if (earlyRequested) throw nativeError;
         // 资源配额是安全边界，不得通过 WASM 回退绕过。
@@ -262,30 +294,38 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
         // The native command may have committed its source cache before a
         // manifest transport error. Its SHA-bound receipt is authoritative;
         // do not decode the same archive again or abandon a reusable cache.
-        const recovered = await reuseExtractedSources(projectId, session.sourceSha256, source.magic);
+        const recovered = await reuseExtractedSources(
+          projectId,
+          session.sourceSha256,
+          source.magic,
+        );
         if (recovered) {
           extracted = recovered;
         } else {
-        if (!canFallbackFromNativeExtraction(nativeError)) throw nativeError;
-        logger.warn('[Shared Core] 原生解压不可用，回退 libarchive.js WASM 路径:', nativeError);
-        const { readFileBytes } = await import('@desktop/fileReader.js');
-        showLoading('正在读取 GIM 文件...');
-        const endRead = perfBegin('冷启动：读取 GIM 原始文件（WASM 回退）', undefined, perfSession);
-        const bytes = sourceBuffer ?? await readFileBytes(nativeFilePath);
-        if (!state.isCurrentSession(session)) return { status: 'cancelled' };
-        const observed = inspectGimSourceBuffer(source.fileName, bytes);
-        assertGimSourceMagicStable(source.magic, observed.magic);
-        endRead(undefined, { bytes: bytes.byteLength });
-        const endExtract = perfBegin('解压（WASM 回退）', undefined, perfSession);
-        const files = await extractGimFile(bytes);
-        if (!state.isCurrentSession(session)) return { status: 'cancelled' };
-        endExtract('（首开）', { files: files.size });
-        extracted = {
-          magic: observed.magic || source.magic,
-          projectId: observed.projectId || source.projectId,
-          projectName: observed.projectName || source.projectName,
-          files,
-        };
+          if (!canFallbackFromNativeExtraction(nativeError)) throw nativeError;
+          logger.warn('[Shared Core] 原生解压不可用，回退 libarchive.js WASM 路径:', nativeError);
+          const { readFileBytes } = await import('@desktop/fileReader.js');
+          showLoading('正在读取 GIM 文件...');
+          const endRead = perfBegin(
+            '冷启动：读取 GIM 原始文件（WASM 回退）',
+            undefined,
+            perfSession,
+          );
+          const bytes = sourceBuffer ?? (await readFileBytes(nativeFilePath));
+          if (!state.isCurrentSession(session)) return { status: 'cancelled' };
+          const observed = inspectGimSourceBuffer(source.fileName, bytes);
+          assertGimSourceMagicStable(source.magic, observed.magic);
+          endRead(undefined, { bytes: bytes.byteLength });
+          const endExtract = perfBegin('解压（WASM 回退）', undefined, perfSession);
+          const files = await extractGimFile(bytes);
+          if (!state.isCurrentSession(session)) return { status: 'cancelled' };
+          endExtract('（首开）', { files: files.size });
+          extracted = {
+            magic: observed.magic || source.magic,
+            projectId: observed.projectId || source.projectId,
+            projectName: observed.projectName || source.projectName,
+            files,
+          };
         }
       }
     } else {
@@ -315,12 +355,23 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
     if (nativeFilePath && extracted.cacheProjectId != null && !extracted.earlySemantic) {
       const endHydrate = perfBegin('工程类型判定前小文件批量物化', undefined, perfSession);
       const { hydrateNativeSmallFiles } = await import('./nativeSmallFileHydration.js');
-      const hydrated = await hydrateNativeSmallFiles(extracted.files, extracted.cacheProjectId,
-        { isCurrent: () => state.isCurrentSession(session), parseCopy: extracted.parseCopy });
+      const hydrated = await hydrateNativeSmallFiles(extracted.files, extracted.cacheProjectId, {
+        isCurrent: () => state.isCurrentSession(session),
+        parseCopy: extracted.parseCopy,
+      });
       if (hydrated.cancelled || !state.isCurrentSession(session)) return { status: 'cancelled' };
-      extracted = { ...extracted, files: hydrated.files, preHydrated: hydrated.requested === hydrated.hydrated };
-      endHydrate(undefined, { requested: hydrated.requested, hydrated: hydrated.hydrated,
-        bytes: hydrated.bytes, batches: hydrated.batches, misses: hydrated.misses });
+      extracted = {
+        ...extracted,
+        files: hydrated.files,
+        preHydrated: hydrated.requested === hydrated.hydrated,
+      };
+      endHydrate(undefined, {
+        requested: hydrated.requested,
+        hydrated: hydrated.hydrated,
+        bytes: hydrated.bytes,
+        batches: hydrated.batches,
+        misses: hydrated.misses,
+      });
     }
     context.projectName = resolveProjectName(
       extracted.projectName || source.projectName,
@@ -338,7 +389,7 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
       extracted.projectType = detectedType;
       if (detectedType === 'equipment') context.projectTypeName = '设备模型';
       endDetect(undefined, { type: projectTypeResult.type });
-      const endPostDetect=perfBegin('工程类型校验后调度',undefined,perfSession);
+      const endPostDetect = perfBegin('工程类型校验后调度', undefined, perfSession);
       if (DEBUG_RUNTIME_LOGS) {
         debugLog(true, '[GIM Runtime Detect]', {
           sourceMagic: source.magic,
@@ -346,18 +397,30 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
           sourceType: describeType(source.runtimeType),
           detectedType: projectTypeResult.type,
           details: projectTypeResult.details,
-          samplePaths: Array.from(extracted.files.keys()).slice(0, 80),
+          samplePaths: (() => {
+            const paths: string[] = [];
+            for (const path of extracted.files.keys()) {
+              if (paths.length >= 80) break;
+              paths.push(path);
+            }
+            return paths;
+          })(),
         });
         if (projectTypeResult.type !== 'transmission_line') {
           let sampled = 0;
           for (const [path, file] of extracted.files) {
             if (!/\.cbm$/i.test(path)) continue;
-            debugLog(true, '[GIM Runtime Detect] cbm sample', path, (await file.text()).slice(0, 500));
+            debugLog(
+              true,
+              '[GIM Runtime Detect] cbm sample',
+              path,
+              (await file.text()).slice(0, 500),
+            );
             if (++sampled === 5) break;
           }
         }
       }
-      endPostDetect(undefined,{diagnosticReads:DEBUG_RUNTIME_LOGS});
+      endPostDetect(undefined, { diagnosticReads: DEBUG_RUNTIME_LOGS });
     } catch (error) {
       endDetect('（失败）', { error: error instanceof Error ? error.message : String(error) });
       logger.warn('[GIM] 解压内容工程类型校验失败:', error);
@@ -367,7 +430,9 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
     if (source.runtimeType === 'unknown') {
       routingType = resolveGimRuntimeType(source.runtimeType, detectedType);
       if (detectedType === 'hybrid') {
-        logger.warn('[GIM] hybrid content detected; using Substation Runtime as the diagnostic fallback');
+        logger.warn(
+          '[GIM] hybrid content detected; using Substation Runtime as the diagnostic fallback',
+        );
       }
     } else if (source.runtimeType === 'substation' && detectedType === 'equipment') {
       // GIMPKGS is shared by stations and standalone equipment. This refines
@@ -383,7 +448,7 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
       logger.warn('[GIM] hybrid content detected; source magic selects the runtime');
     }
 
-    if (!state.isCurrentSession(session)) return {status:'cancelled'};
+    if (!state.isCurrentSession(session)) return { status: 'cancelled' };
     return { ...extracted, status: 'ok' };
   };
 
@@ -410,28 +475,33 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
   }
 }
 
-const openRequests=new WeakMap<AppState,symbol>();
-function beginOpenRequest(state:AppState):()=>boolean {
-  const request=Symbol('open');openRequests.set(state,request);return ()=>openRequests.get(state)===request;
+const openRequests = new WeakMap<AppState, symbol>();
+function beginOpenRequest(state: AppState): () => boolean {
+  const request = Symbol('open');
+  openRequests.set(state, request);
+  return () => openRequests.get(state) === request;
 }
 
 async function openTauriGim(
   state: AppState,
   showMessage: (text: string) => void,
   requestedPath?: string,
-  options: {rethrowError?: boolean} = {},
+  options: { rethrowError?: boolean } = {},
 ): Promise<void> {
-  const filePath = requestedPath ?? getDevPerformanceFilePath() ?? await openGimFilePath();
+  const filePath = requestedPath ?? getDevPerformanceFilePath() ?? (await openGimFilePath());
   if (!filePath) return;
 
   state.invalidatePendingLoads();
   const requestGeneration = state.projectGeneration;
-  const ownsRequest=beginOpenRequest(state);
-  let openedSession:ProjectLoadSession|null=null;
-  const ownsOpen=()=>openedSession ? state.isCurrentSession(openedSession) : state.projectGeneration===requestGeneration;
+  const ownsRequest = beginOpenRequest(state);
+  let openedSession: ProjectLoadSession | null = null;
+  const ownsOpen = () =>
+    openedSession
+      ? state.isCurrentSession(openedSession)
+      : state.projectGeneration === requestGeneration;
   perfReset({ generation: requestGeneration, projectId: null, sourceSha256: null });
   scheduleBaselineBeforeOpen(state, requestGeneration);
-  projectOpenPresentation().setBusy('gim',true);
+  projectOpenPresentation().setBusy('gim', true);
 
   try {
     showLoading('正在读取 GIM 文件信息...');
@@ -472,7 +542,9 @@ async function openTauriGim(
     void import('@desktop/database.js')
       .then(({ touchGimProjectOpened }) => touchGimProjectOpened(record.id))
       .then(() => window.dispatchEvent(new CustomEvent('gim:recent-projects-changed')))
-      .catch(() => { /* recency update is best effort */ });
+      .catch(() => {
+        /* recency update is best effort */
+      });
     showLoading('正在检查本地缓存...');
 
     const sourceWithIdentity: GimSourceDescriptor = {
@@ -493,54 +565,69 @@ async function openTauriGim(
       projectName,
       projectTypeName: getProjectTypeName(sourceWithIdentity.magic),
       requestGeneration,
-      onSession:session=>{openedSession=session;},
+      onSession: (session) => {
+        openedSession = session;
+      },
       nativeFilePath: filePath,
     });
     await opened;
   } catch (error) {
-    if(!ownsOpen())return;
+    if (!ownsOpen()) return;
     logger.error(error);
     showLoading(`GIM 解析失败: ${error instanceof Error ? error.message : String(error)}`);
     scheduleHideLoading(ownsOpen, 3000);
-    if(options.rethrowError)throw error;
+    if (options.rethrowError) throw error;
   } finally {
-    if(ownsRequest())projectOpenPresentation().setBusy('gim',false);
+    if (ownsRequest()) projectOpenPresentation().setBusy('gim', false);
   }
 }
 
-async function openBrowserGim(
-  state: AppState,
-  showMessage: (text: string) => void,
-): Promise<void> {
+async function openBrowserGim(state: AppState, showMessage: (text: string) => void): Promise<void> {
   const chooserGeneration = state.projectGeneration;
   const file = await projectOpenPresentation().chooseGim();
   if (!file || state.projectGeneration !== chooserGeneration) return;
   state.invalidatePendingLoads();
   const requestGeneration = state.projectGeneration;
-  const ownsRequest=beginOpenRequest(state);
-  let openedSession:ProjectLoadSession|null=null;
-  const ownsOpen=()=>openedSession ? state.isCurrentSession(openedSession) : state.projectGeneration===requestGeneration;
+  const ownsRequest = beginOpenRequest(state);
+  let openedSession: ProjectLoadSession | null = null;
+  const ownsOpen = () =>
+    openedSession
+      ? state.isCurrentSession(openedSession)
+      : state.projectGeneration === requestGeneration;
   perfReset({ generation: requestGeneration, projectId: null, sourceSha256: null });
   scheduleBaselineBeforeOpen(state, requestGeneration);
 
-  projectOpenPresentation().setBusy('gim',true);
+  projectOpenPresentation().setBusy('gim', true);
   try {
     const bytes = await file.arrayBuffer();
     if (state.projectGeneration !== requestGeneration) return;
-    const source = inspectGimSourceBuffer(file.name, bytes, { size: file.size, modifiedMs: file.lastModified, sha256: null });
+    const source = inspectGimSourceBuffer(file.name, bytes, {
+      size: file.size,
+      modifiedMs: file.lastModified,
+      sha256: null,
+    });
     await openInspectedSource({
-      state, showMessage, source, projectId: null, sourceSha256: null,
+      state,
+      showMessage,
+      source,
+      projectId: null,
+      sourceSha256: null,
       projectName: resolveProjectName(source.projectName, source.projectId, file.name),
-      projectTypeName: getProjectTypeName(source.magic), requestGeneration, onSession:session=>{openedSession=session;}, sourceBuffer: bytes,
+      projectTypeName: getProjectTypeName(source.magic),
+      requestGeneration,
+      onSession: (session) => {
+        openedSession = session;
+      },
+      sourceBuffer: bytes,
     });
   } catch (error) {
-    if(!ownsOpen())return;
+    if (!ownsOpen()) return;
     logger.error(error);
     showLoading(`GIM 解析失败: ${error instanceof Error ? error.message : String(error)}`);
     scheduleHideLoading(ownsOpen, 3000);
   } finally {
-    if(ownsRequest())projectOpenPresentation().resetInput('gim');
-    if(ownsRequest())projectOpenPresentation().setBusy('gim',false);
+    if (ownsRequest()) projectOpenPresentation().resetInput('gim');
+    if (ownsRequest()) projectOpenPresentation().setBusy('gim', false);
   }
 }
 
@@ -575,7 +662,7 @@ export async function openGimProjectFromId(
 }
 
 /** Path has already been checked against the private native benchmark manifest. */
-export async function openGimForBenchmark(state:AppState,path:string):Promise<void>{
-  if(import.meta.env.VITE_GIM_BENCHMARK !== '1')throw Error('benchmark-build-required');
-  await openTauriGim(state,()=>{},path,{rethrowError:true});
+export async function openGimForBenchmark(state: AppState, path: string): Promise<void> {
+  if (import.meta.env.VITE_GIM_BENCHMARK !== '1') throw Error('benchmark-build-required');
+  await openTauriGim(state, () => {}, path, { rethrowError: true });
 }

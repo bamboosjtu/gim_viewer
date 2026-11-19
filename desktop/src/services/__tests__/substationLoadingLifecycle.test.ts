@@ -83,6 +83,19 @@ function makeTree(): CbmNode {
 
 describe('Substation Loading readiness lifecycle', () => {
   afterEach(()=>{vi.restoreAllMocks();});
+  it('clears the pending barrier when viewer initialization rejects', async () => {
+    vi.clearAllMocks();
+    const state = new AppState();
+    state.currentCbmTree = makeTree();
+    const entries: IfcEntry[] = [{ path: 'a.ifc', name: 'a', modelId: 'a' } as IfcEntry];
+    state.currentIfcEntries = entries;
+    const session = state.activateProject(7, 'sha-substation');
+    perfReset({ generation: session.generation, projectId: session.projectId, sourceSha256: session.sourceSha256 });
+    mocks.getViewerRuntimeWithUI.mockRejectedValueOnce(new Error('viewer failed'));
+    await expect(loadAllIfcFiles(state, entries, vi.fn(), { session })).rejects.toThrow('viewer failed');
+    expect(state.ifcLoading.pending).toBe(false);
+  });
+
   it('returns at first usable IFC, isolates spatial failure, and keeps the IFC tail sequential', async () => {
     vi.clearAllMocks();
     mocks.frames.length=0;

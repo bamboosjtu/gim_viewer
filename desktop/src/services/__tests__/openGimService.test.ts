@@ -1,12 +1,14 @@
 import {beforeEach,afterEach,it,expect,vi} from 'vitest';
 import {AppState} from '../../app/state.js';
 import {openGimProjectFromId,openGimWithDialog} from '../openGimService.js';
-const m=vi.hoisted(()=>({native:true,info:vi.fn(),head:vi.fn(),register:vi.fn(),cleanup:vi.fn(),station:vi.fn(),line:vi.fn(),equipment:vi.fn(),extract:vi.fn(),choose:vi.fn(),detect:vi.fn(),hide:vi.fn(),show:vi.fn(),scheduleHide:vi.fn()}));
+const m=vi.hoisted(()=>({native:true,debugRuntime:false,info:vi.fn(),head:vi.fn(),register:vi.fn(),cleanup:vi.fn(),station:vi.fn(),line:vi.fn(),equipment:vi.fn(),extract:vi.fn(),choose:vi.fn(),detect:vi.fn(),hide:vi.fn(),show:vi.fn(),scheduleHide:vi.fn(),manifest:vi.fn(),diskFile:vi.fn((_id:number,path:string)=>new File(['reused'],path)),inspectEarly:vi.fn(),withEarly:vi.fn(),startSubstation:vi.fn()}));
+vi.mock('../../config/debug.js',()=>({get DEBUG_RUNTIME_LOGS(){return m.debugRuntime;}}));
 vi.mock('@desktop/runtime.js',()=>({isTauri:()=>m.native}));
 vi.mock('@desktop/fileDialog.js',()=>({openGimFilePath:async()=> 'tmp/open.gim'}));
 vi.mock('@desktop/fileReader.js',()=>({getFileInfo:m.info,readFileHead:m.head}));
 vi.mock('@desktop/database.js',()=>({authorizeCachedGimProject:async()=> 'tmp/open.gim',upsertGimProject:m.register,touchGimProjectOpened:async()=>{},readExtractionManifest:async()=>null}));
-vi.mock('@desktop/gimExtract.js',()=>({extractGimArchiveNative:m.extract}));
+vi.mock('@desktop/gimExtract.js',()=>({extractGimArchiveNative:m.extract,readExtractionManifest:m.manifest,createDiskBackedFile:m.diskFile}));
+vi.mock('../substationExtractionJob.js',()=>({inspectEarlySemanticEligibility:m.inspectEarly,withEarlySemanticCapability:m.withEarly,startSubstationExtractionJob:m.startSubstation}));
 vi.mock('../projectCleanupService.js',()=>({cleanupBeforeOpenNewProject:m.cleanup}));
 vi.mock('../substationRuntime.js',()=>({openSubstationProject:m.station,onGimExtracted:vi.fn(),loadAllIfcFiles:vi.fn()}));
 vi.mock('../powerlineRuntime.js',()=>({openPowerlineProject:m.line}));
@@ -29,9 +31,36 @@ beforeEach(async()=>{
   m.cleanup.mockImplementation(async(state:AppState)=>{state.invalidatePendingLoads();return true;});
   m.station.mockResolvedValue(undefined);m.line.mockResolvedValue(undefined);m.equipment.mockResolvedValue(undefined);
   m.extract.mockResolvedValue({magic:'GIMPKGS',files:sourceFiles()});m.detect.mockResolvedValue({type:'substation'});
+  m.manifest.mockResolvedValue(null);m.inspectEarly.mockResolvedValue({eligible:true});m.withEarly.mockImplementation(async(_capability:unknown,_start:unknown,full:()=>Promise<unknown>)=>full());m.startSubstation.mockResolvedValue(undefined);
+  localStorage.removeItem('gim-debug-substation-early-semantic');
 });
 afterEach(()=>{vi.restoreAllMocks();});
 async function button(){return loadButton;}
+it('reuses a same-SHA extraction manifest when the semantic index was not committed',async()=>{
+  m.manifest.mockResolvedValueOnce({source_sha256:'source-a',entries:[{path:'unit.cbm',size:7,packed:true,cache_path:'cache/unit.cbm'}]});
+  m.station.mockImplementationOnce(async (context:{getExtracted:()=>Promise<unknown>})=>{await context.getExtracted();});
+  const state=new AppState();
+  await openGimProjectFromId(state,vi.fn(),1);
+  expect(m.station).toHaveBeenCalledOnce();
+  expect(m.extract).not.toHaveBeenCalled();
+});
+
+it('exercises the early-semantic extraction policy branch',async()=>{
+  localStorage.setItem('gim-debug-substation-early-semantic','1');
+  m.station.mockImplementationOnce(async (context:{getExtracted:()=>Promise<unknown>})=>{await context.getExtracted();});
+  const state=new AppState();
+  await openGimProjectFromId(state,vi.fn(),1);
+  expect(m.inspectEarly).toHaveBeenCalledOnce();expect(m.withEarly).toHaveBeenCalledOnce();expect(m.station).toHaveBeenCalledOnce();
+});
+
+it('keeps debug path sampling bounded and still opens the project',async()=>{
+  m.debugRuntime=true;
+  const state=new AppState();
+  await openGimProjectFromId(state,vi.fn(),1);
+  expect(m.station).toHaveBeenCalledOnce();
+  m.debugRuntime=false;
+});
+
 it.each([['GIMPKGS','station'],['GIMPKGT','line']])('routes %s by source identity, activates after cleanup and always restores the button',async(magic,runtime)=>{
   const state=new AppState();m.head.mockResolvedValue(bytes(magic));
   await openGimProjectFromId(state,vi.fn(),1);

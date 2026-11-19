@@ -1,6 +1,6 @@
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { IfcEntry } from '../gim/types.js';
-import { getFileByPath } from '../gim/fileLookup.js';
+import { findMapKeyByPath, getFileByPath } from '../gim/fileLookup.js';
 import { isTauri } from '@desktop/runtime.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog, logger } from '../utils/logger.js';
@@ -37,7 +37,7 @@ export async function getIfcBufferForEntry(
   }
 
   // 2. Tauri 缓存命中
-  const cachedEntryPath = findCachedPath(state.properties.cachedIfcPaths, entry.path);
+  const cachedEntryPath = findMapKeyByPath(state.properties.cachedIfcPaths, entry.path);
   if (isTauri() && cachedEntryPath) {
     const projectId = session.projectId;
     if (projectId != null) {
@@ -88,14 +88,4 @@ export async function getIfcBufferForEntry(
   // 3. 找不到：始终输出（非 debug），便于定位
   logger.warn('[IFC Buffer] 找不到 IFC 文件内容或缓存:', entry);
   return null;
-}
-
-/** cachedIfcPaths 保留磁盘/SQLite 的原始 entry_path；查找时仍按 GIM 引用规则忽略大小写和分隔符。 */
-function findCachedPath(paths: Map<string, string>, requestedPath: string): string | undefined {
-  if (paths.has(requestedPath)) return requestedPath;
-  const normalized = requestedPath.replace(/\\/g, '/').toLowerCase();
-  for (const path of paths.keys()) {
-    if (path.replace(/\\/g, '/').toLowerCase() === normalized) return path;
-  }
-  return undefined;
 }

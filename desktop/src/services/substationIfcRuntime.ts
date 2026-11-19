@@ -84,6 +84,9 @@ export async function loadAllIfcFiles(
   const session = options.session ?? state.captureProjectSession();
   const perfSession = perfCurrentSession();
   const isCurrent = () => state.isCurrentSession(session);
+  const clearIfcPending = () => {
+    if (isCurrent()) state.ifcLoading.pending = false;
+  };
   if (!isCurrent()) return;
   const background = new SubstationBackgroundCoordinator({
     session: perfSession,
@@ -126,7 +129,11 @@ export async function loadAllIfcFiles(
 
   if (entries.length === 0) {
     // 无 IFC 但仍触发 MOD/STL 自动加载（纯 xml-mod 工程）
-    await autoLoadModStlPostIfc(state, showMessage, undefined, { session });
+    try {
+      await autoLoadModStlPostIfc(state, showMessage, undefined, { session });
+    } finally {
+      clearIfcPending();
+    }
     return;
   }
 
@@ -137,7 +144,13 @@ export async function loadAllIfcFiles(
     import('../viewer/ifcConnectionPreviewRuntime.js'),
   ]);
   if (!isCurrent()) return;
-  const runtime = await getViewerRuntimeWithUI(state, showMessage);
+  let runtime;
+  try {
+    runtime = await getViewerRuntimeWithUI(state, showMessage);
+  } catch (error) {
+    clearIfcPending();
+    throw error;
+  }
   if (!isCurrent()) return;
   const { ctx, modelCallbacks } = runtime;
   startSubstationResourceMonitor(state, ctx);
@@ -849,6 +862,7 @@ export async function loadAllIfcFiles(
       background.markAllIfcReady();
     } catch (err) {
       if (!isCurrent()) return;
+      clearIfcPending();
       state.engineering.ifcGeometryFinished = true;
       state.engineeringGeometryEvidenceChanged?.();
       logger.error('[GIM] IFC 加载失败 (outer)', {
@@ -894,6 +908,7 @@ export async function loadAllIfcFiles(
   try {
     await interactiveReady;
   } catch {
+    clearIfcPending();
     return;
   }
 }

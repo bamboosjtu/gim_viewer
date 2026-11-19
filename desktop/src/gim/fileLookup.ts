@@ -22,6 +22,7 @@ interface FilePathIndex {
 
 /** Map 通常在一次打开流程内保持不变；按 Map 身份缓存索引，避免递归查找反复 O(n) 扫描。 */
 const indexCache = new WeakMap<Map<string, File>, FilePathIndex>();
+const keyIndexCache = new WeakMap<object, { size: number; byLower: Map<string, string> }>();
 
 /** 统一分隔符并去掉引用值中常见的 `./` 前缀。 */
 
@@ -59,6 +60,27 @@ export function findFileByPath(files: Map<string, File>, path: string): FilePath
   const actualPath = getIndex(files).get(normalized.toLowerCase());
   const file = actualPath === undefined ? undefined : files.get(actualPath);
   return file && actualPath !== undefined ? { path: actualPath, file } : undefined;
+}
+
+/** Resolve a key in any path-keyed map with the same case/separator rules. */
+export function findMapKeyByPath<T>(
+  map: ReadonlyMap<string, T>,
+  requestedPath: string,
+): string | undefined {
+  if (map.has(requestedPath)) return requestedPath;
+  const normalized = normalizeFilePath(requestedPath);
+  if (map.has(normalized)) return normalized;
+  let index = keyIndexCache.get(map);
+  if (!index || index.size !== map.size) {
+    const byLower = new Map<string, string>();
+    for (const path of map.keys()) {
+      const key = normalizeFilePath(path).toLowerCase();
+      if (!byLower.has(key)) byLower.set(key, path);
+    }
+    index = { size: map.size, byLower };
+    keyIndexCache.set(map, index);
+  }
+  return index.byLower.get(normalized.toLowerCase());
 }
 
 /** 判断路径是否存在，路径分隔符和大小写均不敏感。 */

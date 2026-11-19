@@ -38,6 +38,13 @@ async function fixture(cache=true){
   if(cache)for(const domain of model.cachePlan??[])await client.encodeCache(model.buildId!,domain);
   return {client,ports,model,identity};
 }
+it('rejects a checkpoint entry whose coverage row is missing',async()=>{
+  const {client,model}=await fixture();
+  await client.releaseModel(model.buildId);
+  (client as unknown as {metadataCoverage:Map<string,unknown>}).metadataCoverage.delete('a.fam');
+  await expect(client.getEvidenceSnapshot(['a.fam'])).rejects.toThrow('Unknown evidence coverage');
+});
+
 it('terminates reconstructible Workers and serves metadata/bounded empty pages without restarting or parsing',async()=>{
   const {client,ports,model}=await fixture(),attach=vi.spyOn(ModelEvidenceProvider.prototype,'attachGraph');
   await client.releaseModel(model.buildId);expect(ports[0].terminate).toHaveBeenCalledOnce();
