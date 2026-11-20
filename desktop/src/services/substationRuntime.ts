@@ -4,9 +4,6 @@ import { reportBackgroundError } from '../utils/backgroundErrors.js';
 /** Substation cold/warm project orchestration and core semantic publication. */
 import type { IfcEntry } from '../gim/types.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
-import { scanIfcFiles, discoverIfcFromCBM, buildIfcGuidIndex } from '../gim/gimIndexer.js';
-import { buildCbmTree, buildCbmNodeIndex } from '../gim/cbmParser.js';
-import { parseFileDevRelation } from '../gim/fileDevParser.js';
 import { beginEngineeringBuild } from './engineeringService.js';
 import { isTauri } from '@desktop/runtime.js';
 import { DEBUG_GIM_CACHE } from '../config/debug.js';
@@ -42,6 +39,8 @@ import {
 import { createSpatialSemanticStarter } from './spatialSemanticStarter.js';
 import { buildAndCommitSubstationStdSld } from './substationDocumentRuntime.js';
 import { loadAllIfcFiles } from './substationIfcRuntime.js';
+import { publishSubstationColdCore } from './substationColdCore.js';
+import { releaseWarmIfcAttempt } from './substationWarmAttempt.js';
 export { createNodeClickHandler, setupSldGridIdInteraction } from './substationPresentation.js';
 export { loadAllIfcFiles } from './substationIfcRuntime.js';
 
@@ -78,95 +77,16 @@ export async function onGimExtracted(
   if (!scope.isCurrent()) return [];
   try {
     const perfSession = perfCurrentSession();
-    scope.withSession(() => {
-      state.currentFiles = files;
-      state.substationEntryPaths = [...files.keys()];
-      state.projectName = projectName || '';
-    });
-
-    // 发现 IFC 文件
-    const endIfcDiscovery = perfBegin('变电 IFC discovery', undefined, perfSession);
-    let ifcEntries = await scope.read(async () => discoverIfcFromCBM(files));
-
-    if (ifcEntries.length === 0) ifcEntries = scanIfcFiles(files);
-    endIfcDiscovery(undefined, { count: ifcEntries.length });
-    void sampleSubstationMemory(state, 'IFC discovery 后', perfSession, {
-      ifcCount: ifcEntries.length,
-    }).catch(reportBackgroundError);
-    scope.withSession(() => {
-      state.currentIfcEntries = ifcEntries;
-    });
-
-    // 构建 CBM 层级树（F1System 根节点名称由 projectTypeName 设置，F2System 保留原始分类码并使用可读来源名称）
-    const endCbmCore = perfBegin('变电 CBM/FAM/DEV/FileDevRelation', undefined, perfSession);
-    const cbmTree = await scope.read(async () => buildCbmTree(files, projectTypeName));
-
-    if (!cbmTree) return [];
-    // 解析结果先保存在局部变量；只有 await 返回后仍属于当前工程才提交。
-    scope.withSession(() => {
-      state.currentCbmTree = cbmTree;
-      state.ifcGuidIndex = buildIfcGuidIndex(cbmTree, ifcEntries);
-      state.cbmNodeIndex = buildCbmNodeIndex(cbmTree);
-    });
-
-    // FileDevRelation 是空间资产“来源图纸”证据的一部分，必须在构建空间索引
-    // 之前解析；否则 Bentley 的 DGN 设备列表和 BIMBase 的同条目 IFC 关系会
-    // 被空间视图遗漏。解析失败只影响来源标注，不阻断 IFC/CBM 主流程。
-    let fileDevRelations: Awaited<ReturnType<typeof parseFileDevRelation>> = [];
-    try {
-      fileDevRelations = await scope.read(async () => parseFileDevRelation(files));
-    } catch (err) {
-      // 旧工程的异常不能清空新工程已经提交的关系；失效会话直接放弃。
-      if (!scope.isCurrent()) return [];
-      logger.warn('[GIM] FileDevRelation 解析失败，保留空间/功能系统视图:', err);
-    }
-
-    scope.withSession(() => {
-      state.fileDevRelations = fileDevRelations;
-    });
-    scope.withSession(() => {
-      state.deviceToIfcFile.clear();
-    });
-    for (const entry of fileDevRelations) {
-      // DGN/非 IFC 来源的 modelId 为空，不能写入 deviceToIfcFile，避免把图纸
-      // 名称误当作可加载的 IFC 模型。
-      if (!entry.modelId || !/\.ifc$/i.test(entry.ifcFile)) continue;
-      for (const devCbm of entry.deviceCbms) {
-        scope.withSession(() => {
-          state.deviceToIfcFile.set(devCbm, entry.modelId);
-        });
-      }
-    }
-    endCbmCore(undefined, {
-      cbmNodes: collectCbmNodeCount(cbmTree),
-      fileDevRelations: fileDevRelations.length,
-      deviceIfcLinks: state.deviceToIfcFile.size,
-    });
-    // 诊断采样不能阻塞首屏：冷路径上 await/同步采样曾引入约 30 s 隐性等待。
-    void sampleSubstationMemory(state, 'CBM/FAM/DEV/FileDevRelation 后', perfSession, {
-      cbmNodes: collectCbmNodeCount(cbmTree),
-      fileDevRelations: fileDevRelations.length,
-    }).catch(reportBackgroundError);
-    scope.withSession(() => {
-      markSubstationCoreSemanticReady(state, perfSession);
-    });
-    await scope.read(async () =>
-      renderSubstationCoreUi(
-        state,
-        showMessage,
-        session,
-        perfSession,
-        '变电 navigation/UI（core semantic）',
-      ),
+    const core = await publishSubstationColdCore(
+      state,
+      files,
+      showMessage,
+      projectName,
+      projectTypeName,
+      session,
     );
-    void Promise.resolve(
-      sampleSubstationMemory(state, 'coreSemanticReady', perfSession, {
-        source: 'cold',
-        cbmNodes: collectCbmNodeCount(cbmTree),
-        ifcEntries: ifcEntries.length,
-        fileDevRelations: fileDevRelations.length,
-      }),
-    ).catch(reportBackgroundError);
+    if (!core) return [];
+    const { ifcEntries, cbmTree, fileDevRelations } = core;
 
     const spatialSemantic = createSpatialSemanticStarter((onIndexReady) =>
       buildAndCommitSubstationSpatialSemantic(
@@ -270,38 +190,6 @@ function publishFamSourceRows(state: AppState, rows: readonly FamPropertyPayload
       }
     }
   state.properties.cachedFamSourceProperties = families;
-}
-
-/**
- * A warm load can fail after it has already claimed the viewer/background
- * resources but before it returns. Cold fallback creates a new attempt; release
- * the partial warm owners first so the old coordinator, preview, monitor and
- * station-overview closure cannot survive as leaked instances.
- */
-function releaseWarmIfcAttempt(state: AppState): void {
-  const queue = state.substationFineQueue as unknown as { cancelPending?: () => void } | null;
-  state.substationFineQueue = null;
-  try {
-    queue?.cancelPending?.();
-  } catch (error) {
-    logger.warn('[Substation Runtime] warm background queue release failed:', error);
-  }
-  const preview = state.substationConnectionPreview;
-  state.substationConnectionPreview = null;
-  try {
-    preview?.release();
-  } catch (error) {
-    logger.warn('[Substation Runtime] warm connection preview release failed:', error);
-  }
-  const monitor = state.substationResourceMonitor;
-  state.substationResourceMonitor = null;
-  try {
-    monitor?.release();
-  } catch (error) {
-    logger.warn('[Substation Runtime] warm resource monitor release failed:', error);
-  }
-  state.viewState.stationOverview = null;
-  state.ifcLoading.pending = false;
 }
 
 export async function openSubstationProject(context: GimRuntimeOpenContext): Promise<void> {

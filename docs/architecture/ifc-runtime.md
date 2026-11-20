@@ -23,7 +23,7 @@
 
 ## 空间语义
 
-- Spatial Worker 使用两遍选择性 STEP 扫描，保留空间节点、对象、placement 闭包、宿主链和关联证据。
+- Spatial Worker 使用两遍选择性 STEP 扫描，保留空间节点、对象、placement 闭包、宿主链和关联证据。逐 IFC 的读取/解码由 `ifcSpatialSourceReader` 负责；调用方消费文本后不保留原始 ArrayBuffer 或下一模型文本。
 - 空间对象关联只使用来源模型内精确 GlobalId，保留大小写和合法尾部 `$`；重复产品身份视为歧义。
 - `IfcRelFillsElement` / `IfcRelVoidsElement` 保留门窗→洞口→墙的宿主链。
 - 属性集、材料、类型、数量和分类按需读取；推断空间链接保留来源和置信度，不填造确定归属。

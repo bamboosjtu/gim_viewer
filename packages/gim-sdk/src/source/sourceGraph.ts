@@ -12,11 +12,11 @@ import {
 } from "./entryResolver.js";
 export type { SourceDocument } from "./sourceDocuments.js";
 import { parseFamSectionsWithDiagnostics } from "./famParser.js";
-import { resolveBaseFamilyReferences } from "./gimValueSemantics.js";
 import { ENGINEERING_EVIDENCE_FIELDS } from "./recognitionFieldPolicy.js";
 import type { ObjectNameEvidence, SourceAlias } from "../shared/contracts.js";
 import type { SourceProperty, SourceRecord } from "./sourceEvidence.js";
 import { cbmRelationKind } from "./sourceComposition.js";
+import { SourceFamilyIndex } from "./sourceFamilyIndex.js";
 
 export interface SourceFileReader {
   /** Actual archive paths, including files not reached by CBM GUID references. */
@@ -218,62 +218,11 @@ export async function extractEngineeringSourceGraph(
     row.nameEvidence = names;
     row.name = names[0]?.value ?? "";
   }
-  const familyCache = new Map<string, Promise<SourceProperty[]>>();
-  const familyPaths = new Map<string, string[]>();
-  const assignedFamilies = new Set<string>();
-  function assignFamilies(doc: SourceDocument, sourceId: string): void {
-    for (const path of referencedFamilies(doc)) {
-      const key = JSON.stringify([sourceId, path]);
-      if (!assignedFamilies.has(key)) {
-        assignedFamilies.add(key);
-        result.familyAssignments!.push({ sourceId, path });
-      }
-    }
-  }
-  function referencedFamilies(doc: SourceDocument): string[] {
-    const cached = familyPaths.get(doc.path);
-    if (cached) return cached;
-    const paths: string[] = [];
-    for (const field of doc.fields)
-      for (const edge of resolveBaseFamilyReferences({
-        [field.keys[0]]: field.value,
-      })) {
-        const path = resolve(doc.path, edge.key, edge.path);
-        if (path && !paths.includes(path)) paths.push(path);
-      }
-    familyPaths.set(doc.path, paths);
-    return paths;
-  }
-  async function family(doc: SourceDocument): Promise<SourceProperty[]> {
-    let promise = familyCache.get(doc.path);
-    if (!promise) {
-      promise = (async () => {
-        const properties: SourceProperty[] = [];
-        for (const path of referencedFamilies(doc)) {
-          if (options.deferFamilies) continue;
-          const text = (await document(path)).rawLines.join("\n");
-          const parsed = parseFamSectionsWithDiagnostics(text, path);
-          (await document(path)).attributeStatus = parsed.diagnostics
-            .malformedLineCount
-            ? "partial"
-            : "complete";
-          const fields = parsed.properties.map((p) => ({
-            path,
-            line: p.sourceLine,
-            keys: [...new Set([p.label, p.rawKey])],
-            value: p.rawValue,
-            rawLine: p.rawLine,
-            section: p.section,
-          }));
-          (await document(path)).fields = fields;
-          properties.push(...fields);
-        }
-        return properties;
-      })();
-      familyCache.set(doc.path, promise);
-    }
-    return promise;
-  }
+  const families = new SourceFamilyIndex({
+    readDocument: document,
+    resolveReference: resolve,
+    deferFamilies: options.deferFamilies,
+  });
   let lastProgressCount = 0;
   function check(depth: number) {
     const count = result.records.length + result.cbmOccurrences.length;
@@ -324,11 +273,11 @@ export async function extractEngineeringSourceGraph(
     );
     prefetch(doc, edges);
     const cbmDoc = await document(cbm.documentPath);
-    assignFamilies(doc, id);
-    if (!parent) assignFamilies(cbmDoc, id);
+    families.assignFamilies(doc, id);
+    if (!parent) families.assignFamilies(cbmDoc, id);
     const props = [
-      ...(!parent ? await family(cbmDoc) : []),
-      ...(await family(doc)),
+      ...(!parent ? await families.family(cbmDoc) : []),
+      ...(await families.family(doc)),
       ...objectFields(doc),
       ...(!parent ? objectFields(cbmDoc) : []),
     ];
@@ -440,7 +389,7 @@ export async function extractEngineeringSourceGraph(
     const entityName = scalar(doc, "ENTITYNAME")?.trim() || undefined;
     // GUID is a scalar association fact, not a list or a first-value hint.
     scalar(doc, "IFCGUID");
-    referencedFamilies(doc);
+    families.referencedFamilies(doc);
     const node = {
       id,
       documentPath: path,
@@ -472,11 +421,11 @@ export async function extractEngineeringSourceGraph(
           });
           if (candidates.length === 1) {
             const row = candidates[0];
-            assignFamilies(doc, row.id);
+            families.assignFamilies(doc, row.id);
             row.sources = [...row.sources, path];
             row.properties = [
               ...row.properties,
-              ...(await family(doc)),
+              ...(await families.family(doc)),
               ...objectFields(doc),
             ];
             updateNames(row);
@@ -525,8 +474,8 @@ export async function extractEngineeringSourceGraph(
             name: "",
             parent: "",
             properties: [
-              ...(await family(doc)),
-              ...(await family(targetDoc)),
+              ...(await families.family(doc)),
+              ...(await families.family(targetDoc)),
               ...objectFields(targetDoc),
               ...objectFields(doc),
             ],
@@ -539,8 +488,8 @@ export async function extractEngineeringSourceGraph(
           };
           updateNames(row);
           (result.attributeRecords ??= []).push(row);
-          assignFamilies(doc, attributeId);
-          assignFamilies(targetDoc, attributeId);
+          families.assignFamilies(doc, attributeId);
+          families.assignFamilies(targetDoc, attributeId);
         } else {
           const subtree = await expandDev(
             target,
@@ -601,6 +550,7 @@ export async function extractEngineeringSourceGraph(
   options.onProgress?.("source-sort");
   result.documents.sort((a, b) => ordered(a.path, b.path));
   result.revision = 1;
+  result.familyAssignments!.push(...families.assignments);
   return result;
 }
 

@@ -30,6 +30,7 @@ export type {
 } from '@gim/gim-sdk/source';
 import type { CbmNode, FileDevEntry, IfcEntry } from './types.js';
 import { resolveIfcModelId } from './modelIdentity.js';
+import { readIfcSpatialSource } from './ifcSpatialSourceReader.js';
 import { isIfcInternalDefinitionType } from './ifcOutwardProduct.js';
 
 import {
@@ -673,56 +674,19 @@ export async function buildSubstationSpatialIndexFromFiles(
   );
   for (const entry of entries) {
     const file = byLowerPath.get(normalizePath(entry.path).toLowerCase());
-    // 逐条读取/解析，不让多个 IFC 原始文本同时驻留；addIfcModel 不保存 text。
-    const readStarted = performance.now();
-    let bytes: ArrayBuffer | null = null;
-    let fallbackText: string | null = null;
-    let readError: string | undefined;
-    if (file) {
-      try {
-        // 生产路径使用 Blob.arrayBuffer()，但保留 text-only File 兼容性：
-        // 样本回归和部分宿主会提供最小的 `text()` shim，而不是完整 Blob。
-        const readable = file as File & {
-          arrayBuffer?: () => Promise<ArrayBuffer>;
-          text?: () => Promise<string>;
-        };
-        if (typeof readable.arrayBuffer === 'function') {
-          bytes = await readable.arrayBuffer();
-        } else if (typeof readable.text === 'function') {
-          fallbackText = await readable.text();
-        } else {
-          throw new Error('IFC 文件对象不支持 arrayBuffer/text');
-        }
-      } catch (error) {
-        readError = error instanceof Error ? error.message : String(error);
-      }
-    }
-    const readMs = performance.now() - readStarted;
-    const decodeStarted = performance.now();
-    const text = fallbackText ?? (bytes == null ? null : new TextDecoder().decode(bytes));
-    const decodeMs = performance.now() - decodeStarted;
+    // Read and parse one model at a time; neither raw bytes nor decoded text
+    // is retained after addIfcModel. The reader only exposes timing facts.
+    const source = await readIfcSpatialSource(file);
     observer?.onModelRead?.({
       modelId: entry.modelId,
       entryPath: entry.path,
-      bytes:
-        bytes?.byteLength ??
-        (fallbackText == null
-          ? (file?.size ?? 0)
-          : new TextEncoder().encode(fallbackText).byteLength),
-      readMs,
-      decodeMs,
-      found: file != null,
-      ...(readError ? { error: readError } : {}),
+      bytes: source.sourceBytes,
+      readMs: source.readMs,
+      decodeMs: source.decodeMs,
+      found: source.found,
+      ...(source.error ? { error: source.error } : {}),
     });
-    const sourceBytes =
-      bytes?.byteLength ??
-      (fallbackText == null
-        ? (file?.size ?? 0)
-        : new TextEncoder().encode(fallbackText).byteLength);
-    // 释放此模型的原始 ArrayBuffer 引用，再进入下一个模型；解析器只保留
-    // 语义对象和 profile。
-    bytes = null;
-    builder.addIfcModel(entry, text, sourceBytes);
+    builder.addIfcModel(entry, source.text, source.sourceBytes);
   }
   return builder.finalize();
 }
