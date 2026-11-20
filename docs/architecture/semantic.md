@@ -13,7 +13,11 @@ semantic/
 │   └── ownershipResolver.ts # 递归归属和成员判断
 ├── recognition/
 │   ├── evidenceReader.ts    # 分类字段的 transient 读取器
-│   └── sourceTypeCandidates.ts # 原始 type/model 候选与字段读取
+│   ├── sourceTypeCandidates.ts # 原始 type/model 候选与字段读取
+│   ├── standardClassResolver.ts # 标准目录类别候选
+│   ├── componentResolver.ts # 组件/标准优先级
+│   ├── materialResolver.ts  # 材料宿主与成员判定
+│   └── recognitionPolicy.ts # 上下文规则与模型优先词
 ├── catalog/
 ├── normalize.ts             # 阶段编排
 └── semantic.ts              # 公共出口
@@ -60,5 +64,5 @@ semantic/
 
 1. 把 `ownershipResolver` 的设备/机柜/neutral-set 分支拆成策略函数，保留同一阶段入口。
 2. 提取 `entityFactory`（identity、boundary、classification details）和 `membershipResolver`。
-3. 已提取 `sourceTypeCandidates` 和 `contextualRecognition`（设备上下文只影响解释，不混入归属）；下一步拆 `standardClassResolver`、`componentResolver`、`materialResolver` 和 `objectEvidenceAdapter`，优先保持 83 例 parity。
+3. 已提取 `sourceTypeCandidates`、`standardClassResolver`、`componentResolver`、`materialResolver` 和 `contextualRecognition`；下一步拆 `objectEvidenceAdapter` 与角色/候选组装，优先保持 83 例 parity。
 4. `extractEngineeringSourceGraph()` 的 FAM 归属/读取已抽到 `sourceFamilyIndex`；继续拆遍历调度与 CBM 物理作用域，避免重复文档读取。

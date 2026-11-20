@@ -13,16 +13,15 @@ import type { ObjectEvidence } from "./types.js";
 import { ENGINEERING_RULES_VERSION } from "./classify.js";
 import { createValueReader } from "./recognition/evidenceReader.js";
 import { sourceTypeCandidates } from "./recognition/sourceTypeCandidates.js";
-import {
-  RECOGNITION_LABELS as ENGINEERING_CATEGORY_LABELS,
-  directoryRecognitionCode,
-} from "./catalogClassification.js";
-import { directoryDefinition } from "./catalog/catalogLabels.js";
+import { resolveMaterial } from "./recognition/materialResolver.js";
+import { resolveComponents } from "./recognition/componentResolver.js";
+import { resolveStandardClasses } from "./recognition/standardClassResolver.js";
+import { contextualRule as contextRule } from "./recognition/recognitionPolicy.js";
+import { RECOGNITION_LABELS as ENGINEERING_CATEGORY_LABELS } from "./catalogClassification.js";
 import proxyCategories from "./catalog/proxyCategories.json";
 import sourceVocabulary from "./catalog/sourceVocabulary.json";
 import {
   standardTerms,
-  standardCatalogItem,
   standardEquipmentId,
   STANDARD_CATALOG_VERSION,
 } from "./standardCatalog.js";
@@ -38,19 +37,6 @@ const vocabulary: Record<string, string> = {
   ...sourceVocabulary.equipmentAliases,
 };
 const components: Record<string, string> = sourceVocabulary.components;
-type ContextRule = {
-  componentId: string;
-  materialRecognitionCode?: string;
-  materialCatalogId?: string;
-  materialTerms?: readonly string[];
-  hostKind?: string;
-};
-const contextTerms: Readonly<Record<string, string>> =
-  recognitionPolicy.contextualTerms;
-const contextModels: Readonly<Record<string, ContextRule>> =
-  recognitionPolicy.contextualModels;
-const contextRule = (value: string) =>
-  contextModels[contextTerms[value.trim().toLowerCase()]];
 const componentWords = Object.keys(sourceVocabulary.componentDictionary.entries)
   .filter((word) => /[\u3400-\u9fff]/.test(word) && word.length >= 3)
   .sort((a, b) => b.length - a.length);
@@ -298,80 +284,42 @@ export function adaptSourceEvidence(
     const componentHint = chineseName
       ? componentEntries[chineseName.trim().toLowerCase()]
       : undefined;
-    const groundWord = (value: string) =>
-      !!contextRule(value)?.materialRecognitionCode;
-    const materialRule = declarations
-      .map((p) => contextRule(p.value))
-      .find((rule) => rule?.materialRecognitionCode);
-    const materialDeclarations = values(["MATERIALTYPE", "材料类型"]).filter(
-      (p) => groundWord(p.value),
-    );
-    const groundMaterial =
-      !!materialRule &&
-      ((componentContext && !independent) ||
-        materialDeclarations.length > 0 ||
-        declarations.some((p) =>
-          materialRule.materialTerms?.includes(p.value.trim()),
-        ) ||
-        !!componentHint?.componentIds.includes(materialRule.componentId));
-    const groundMember = groundMaterial && componentContext && !independent;
-    const materialItem =
-      groundMaterial && materialRule.materialCatalogId
-        ? standardCatalogItem(materialRule.materialCatalogId)
-        : undefined;
-    const modelTerms = (value: string) =>
-      groundMaterial && groundWord(value)
-        ? materialItem
-          ? [materialItem]
-          : []
-        : standardTerms(value);
-    const useComponent = (value: string) => {
-      const key = value.trim().toLowerCase(),
-        entry = componentEntries[key];
-      if (!entry || groundWord(value)) return false;
-      if (contextRule(value)?.hostKind === "cabinet")
-        return cabinetMember && !independent;
-      const items = modelTerms(value);
-      if (!items.length) return !independent;
-      if (independent) return false;
-      if (componentContext) return true;
-      if (contextRule(value))
-        return (
-          !!componentHint &&
-          componentHint.componentIds.some((id) =>
-            entry.componentIds.includes(id),
-          )
-        );
-      if (recognitionPolicy.modelPreferredTerms.includes(key))
-        return (
-          !!componentHint &&
-          componentHint.componentIds.some((id) =>
-            entry.componentIds.includes(id),
-          )
-        );
-      namespaceAmbiguities.push(value);
-      return false;
-    };
-    const componentDeclarations = declarations.filter((p) =>
-      useComponent(p.value),
-    );
+    const material = resolveMaterial({
+      declarations,
+      materialDeclarations: values(["MATERIALTYPE", "材料类型"]).filter(
+        (p) => !!contextRule(p.value)?.materialRecognitionCode,
+      ),
+      componentContext,
+      independent,
+      componentHint,
+      ruleFor: contextRule,
+    });
+    const {
+      groundWord,
+      materialRule,
+      groundMaterial,
+      groundMember,
+      modelTerms,
+    } = material;
+    const materialDeclarations = material.materialDeclarations;
+    const componentResolution = resolveComponents({
+      declarations,
+      componentEntries,
+      componentHint,
+      cabinetMember,
+      independent,
+      componentContext,
+      modelTerms,
+      groundWord,
+      ruleFor: contextRule,
+      namespaceAmbiguities,
+    });
+    const { componentDeclarations, componentIds } = componentResolution;
     const standardDeclarations = declarations.filter(
       (p) =>
         !componentDeclarations.includes(p) &&
         !namespaceAmbiguities.includes(p.value),
     );
-    const componentIds = (value: string) => {
-      const entry = componentEntries[value.trim().toLowerCase()];
-      if (!entry.defaultComponentId && componentHint) {
-        const ids = entry.componentIds.filter((id) =>
-          componentHint.componentIds.includes(id),
-        );
-        if (ids.length) return ids;
-      }
-      return entry.defaultComponentId
-        ? [entry.defaultComponentId]
-        : entry.componentIds;
-    };
     const cabinetNameCandidate =
       allowNameFallback &&
       type.trim().toLowerCase() === "secondarycabinet" &&
@@ -391,37 +339,10 @@ export function adaptSourceEvidence(
           },
         ]
       : standardDeclarations;
-    const standardClasses = catalogDeclarations.flatMap((p) => {
-      const items = modelTerms(p.value),
-        family = !items.length ? directoryDefinition(p.value) : undefined;
-      const matches = items.length
-        ? items
-        : family
-          ? [
-              {
-                id: "category:" + family.code,
-                kind: family.kind,
-                label: family.label,
-                term: family.code,
-                category: family.code,
-                recognitionCode: directoryRecognitionCode(family.code)!,
-                catalogCategory: family.label,
-                catalogGroup: family.groupLabel,
-              },
-            ]
-          : [];
-      return matches.map((item) => ({
-        ...p,
-        id: item.id,
-        kind: item.kind as "equipment" | "material" | "construction",
-        label: item.label,
-        term: item.term,
-        category: item.category,
-        recognitionCode: item.recognitionCode,
-        catalogCategory: item.catalogCategory,
-        catalogGroup: item.catalogGroup,
-      }));
-    });
+    const standardClasses = resolveStandardClasses(
+      catalogDeclarations,
+      modelTerms,
+    );
     const neutralAttachment = independent
       ? undefined
       : standardClasses.find(
@@ -693,7 +614,7 @@ export function adaptSourceEvidence(
               : [];
       }),
       componentTypeCandidates: [
-        ...(groundMember
+        ...(groundMember && materialRule
           ? [
               {
                 value: materialRule.componentId,
@@ -777,7 +698,7 @@ export function adaptSourceEvidence(
               ? ["C-A14", "C-A3", "C-A4", "C-B5", "C-B7"]
               : [],
       objectRoles: [
-        ...(groundMember
+        ...(groundMember && materialRule
           ? [
               {
                 value: "part",
@@ -876,7 +797,7 @@ export function adaptSourceEvidence(
     result.componentTypeCandidates?.some((p) => p.confidence !== "candidate");
   const rules = contextual
     .map((value) => contextRule(canonicalSourceType(value)))
-    .filter(Boolean);
+    .filter((rule) => rule !== undefined);
   if (!role.some((p) => /独立|independent/i.test(p.value))) {
     if (!resolvedPart && rules.some((rule) => !rule.hostKind))
       result.equipmentMemberVariant = adapt(true);
