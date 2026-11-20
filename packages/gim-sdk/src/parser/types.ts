@@ -6,7 +6,7 @@
  * These types deliberately have no runtime or environment dependencies.
  */
 
-export type ParseDiagnosticSeverity = "error" | "warning" | "info";
+type ParseDiagnosticSeverity = "error" | "warning" | "info";
 
 /** Parse lifecycle shared by streaming and document parsers. */
 export type ParseStatus = "ok" | "partial" | "empty" | "unsupported" | "failed";

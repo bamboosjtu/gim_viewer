@@ -82,7 +82,7 @@ GC 录制显式排除 Chromium 默认类别，仅保留 `v8` 与 `blink.user_tim
 
 普通 Benchmark 的 `geometryStructuralFingerprint` 仅覆盖网格数量、包围盒与变换，不能证明顶点或索引相同。DEV 基础表示已有每模板 GLB 字节 SHA；`contentEvidence` 将其按 occurrence 聚合，并核对 SHA 有效、ID 唯一及已显示根覆盖率。正式基线批准和 `gate` 要求该内容证据完整，同源候选的内容摘要或放置指纹变化返回 INCONCLUSIVE 等待复核；普通批量测量仍不遍历全量顶点重新计算 SHA。此证据仅覆盖 DEV L0 GLB，不宣称已校验 IFC 或 L2 顶点内容。
 
-新增采集当前默认 off；专用 Benchmark/诊断调用显式选择模式。已有 perfTimings 不受该开关影响。测量核心、桌面适配、CLI/Trace/Profile 与报告已落地；本地已取得十轮 lifecycle、三组冷暖与 CPU/Heap/Allocation/GPU 产物，仍有采样间隔和诊断普通明细容量缺口。进一步性能优化暂缓；开销复核及基线批准由开发者决定，数据以私有报告和重评记录为准。
+新增采集当前默认 off；专用 Benchmark/诊断调用显式选择模式。已有 perfTimings 不受该开关影响。测量核心、桌面适配、CLI/Trace/Profile 与报告已落地；本地已取得十轮 lifecycle、三组冷暖与 CPU/Heap/Allocation/GPU 产物，仍有采样间隔和诊断普通明细容量缺口。性能优化与基线批准由开发者按当前证据决定，数据以私有报告和重评记录为准。
 
 当前 CLI 的原生场景记录只有在正确性、缓存域、必要指标与任务闭环均证实时才允许门禁通过。未证实的字段保持 unverified/false，输出 INCONCLUSIVE；不能手工把汇总状态改成 PASS 代替缺少的证据。来源几何异常只有在全部失败均有明确 `source-invalid` 原始范围证据或 `missing-dependency` 原始引用证据、没有其他失败时记为 PARTIAL；容量/预算失败仍为产品 FAIL。工程来源覆盖不足只有在不完整原因限于来源图缺口、来源引用缺失/歧义或 IFC manifest 不完整，且对应计数与 IFC runtime/cache 一致性成立、无其他产品失败时记为 PARTIAL。判定细节见[本地批量 Benchmark](../performance/benchmark.md#工程来源-partial)。规则对所有样本相同，匿名缺口摘要由本次证据计算，冷暖及基线比较必须一致。SQLite 核心索引发布与 Engineering Worker 派生来源缓存分开测；来源图 partial 不自动判定 SQLite 缓存失效，也不冒充完整的工程来源缓存命中。`baseline` 默认一冷一暖，`-repeat 3` 可取得三组独立配对；完整迁移门禁还要求固定动作路线、探针开销对照和十轮资源回落验收。
 
