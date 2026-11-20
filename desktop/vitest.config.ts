@@ -40,7 +40,7 @@ export default defineConfig({
     },
     include: ['src/**/__tests__/**/*.test.ts', 'bridge/__tests__/**/*.test.ts', '../packages/powerline-core/src/**/__tests__/**/*.test.ts', ...(process.env.GIM_SDK_COVERAGE_OWNED ? [] : ['../packages/gim-sdk/src/**/__tests__/**/*.test.ts'])],
     // Native and private-sample suites use explicit local entry points.
-    exclude: ['src/services/__tests__/substationSqlite.integration.test.ts'],
+    exclude: ['src/features/substation/runtime/__tests__/substationSqlite.integration.test.ts'],
     setupFiles: ['./vitest.setup.ts'],
     coverage: {
       // 覆盖率配置（review0709.md §4.3：原项目未安装覆盖率工具，无法量化行/分支覆盖）
@@ -62,7 +62,7 @@ export default defineConfig({
       thresholds: {
         'src/gim/**': { statements:90, lines:90, functions:90, branches:80 },
         'src/services/openGimService.ts': {statements:70,lines:70,functions:80,branches:50},
-        'src/services/substationRuntime.ts': {statements:70,lines:70,functions:45,branches:70},
+        'src/features/substation/application/substationRuntime.ts': {statements:70,lines:70,functions:45,branches:70},
         'src/services/viewerUIBinding.ts': {statements:80,lines:80,functions:50,branches:70},
         'src/ui/lineProjectView.ts': {statements:70,lines:70,functions:60,branches:65},
         'src/ui/lineMapView.ts': {statements:65,lines:65,functions:65,branches:60},

@@ -1,11 +1,11 @@
 import { it, expect } from 'vitest';
-import { buildGimIndexPayload } from '../gimIndexPersistenceService.js';
-import { buildGeometryRefsPayload } from './geometryRefsPayload.js';
-import { restoreGimIndexToState } from '../gimIndexRestoreService.js';
+import { buildGimIndexPayload } from '../../../../services/gimIndexPersistenceService.js';
+import { buildGeometryRefsPayload } from '../../../../services/__tests__/geometryRefsPayload.js';
+import { restoreGimIndexToState } from '../../../../services/gimIndexRestoreService.js';
 import { parseFamSectionsWithDiagnostics } from '@gim/gim-sdk/source';
-import { buildCbmTree } from '../../gim/cbmParser.js';
-import { AppState } from '../../app/state.js';
-import { sqliteRoundTrip } from './sqliteHarness.js';
+import { buildCbmTree } from '../../../../gim/cbmParser.js';
+import { AppState } from '../../../../app/state.js';
+import { sqliteRoundTrip } from '../../../../services/__tests__/sqliteHarness.js';
 import { publicationFixture as fixture } from './substationPublicationFixture.js';
 
 it('retains every physical FAM row through production SQLite save/query/restore', async () => {

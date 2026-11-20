@@ -283,7 +283,7 @@ cargo test --manifest-path app/src-tauri/Cargo.toml six_native_imports -- --igno
 | `packages/gim-sdk/src/{source,geometry,engineering,projection,adapters,shared}/` | 90% | 90% | 80% |
 | `gim/`（桌面按归属检查） | 90% | 90% | 80% |
 | `services/openGimService.ts` | 70% | 80% | 50% |
-| `services/substationRuntime.ts` | 70% | 45% | 70% |
+| `features/substation/application/substationRuntime.ts` | 70% | 45% | 70% |
 | `services/viewerUIBinding.ts` | 80% | 50% | 70% |
 | `ui/lineProjectView.ts` | 70% | 60% | 65% |
 | `ui/lineMapView.ts` | 65% | 65% | 60% |

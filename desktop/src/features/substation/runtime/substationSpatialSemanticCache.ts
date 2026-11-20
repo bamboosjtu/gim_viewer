@@ -1,7 +1,18 @@
-import type {SubstationSpatialIndex} from '../gim/ifcSpatialParser.js';
-import {readCachedEntry,writeCacheFile} from '@desktop/database.js';
-import {SUBSTATION_PARSER_DOMAIN_VERSION,SUBSTATION_SPATIAL_SEMANTIC_VERSION,SUBSTATION_SPATIAL_SEMANTIC_CACHE_ENTRY,MAX_SUBSTATION_SPATIAL_SNAPSHOT_BYTES,
- validateSubstationSpatialSnapshot,hydrateSubstationSpatialIndex,encodeSubstationSpatialCache,spatialIndexCounts,type SubstationSpatialSemanticSnapshot,type SubstationSpatialCacheReadResult,type EncodedSpatialCache} from './substationSpatialCodec.js';
+import type { SubstationSpatialIndex } from '../../../gim/ifcSpatialParser.js';
+import { readCachedEntry, writeCacheFile } from '@desktop/database.js';
+import {
+  SUBSTATION_PARSER_DOMAIN_VERSION,
+  SUBSTATION_SPATIAL_SEMANTIC_VERSION,
+  SUBSTATION_SPATIAL_SEMANTIC_CACHE_ENTRY,
+  MAX_SUBSTATION_SPATIAL_SNAPSHOT_BYTES,
+  validateSubstationSpatialSnapshot,
+  hydrateSubstationSpatialIndex,
+  encodeSubstationSpatialCache,
+  spatialIndexCounts,
+  type SubstationSpatialSemanticSnapshot,
+  type SubstationSpatialCacheReadResult,
+  type EncodedSpatialCache,
+} from '../../../services/substationSpatialCodec.js';
 
 /** Try a derived cache without touching IFC files. All failures are misses. */
 export async function readSubstationSpatialSemanticCache(
@@ -49,7 +60,15 @@ export async function readSubstationSpatialSemanticCache(
   const readMs = Math.max(0, performance.now() - started);
   const snapshotBytes = bytes.byteLength;
   if (snapshotBytes <= 0 || snapshotBytes > MAX_SUBSTATION_SPATIAL_SNAPSHOT_BYTES) {
-    return { hit: false, source: 'cache', reason: 'size-invalid', readMs, deserializeMs: 0, hydrateMs: 0, snapshotBytes };
+    return {
+      hit: false,
+      source: 'cache',
+      reason: 'size-invalid',
+      readMs,
+      deserializeMs: 0,
+      hydrateMs: 0,
+      snapshotBytes,
+    };
   }
   const deserializeStarted = performance.now();
   let parsed: unknown;
@@ -72,11 +91,19 @@ export async function readSubstationSpatialSemanticCache(
     parserVersion,
   });
   if (!validation.valid) {
-    return { hit: false, source: 'cache', reason: validation.reason ?? 'snapshot-invalid', readMs, deserializeMs, hydrateMs: 0, snapshotBytes };
+    return {
+      hit: false,
+      source: 'cache',
+      reason: validation.reason ?? 'snapshot-invalid',
+      readMs,
+      deserializeMs,
+      hydrateMs: 0,
+      snapshotBytes,
+    };
   }
   const hydrateStarted = performance.now();
   try {
-    const index = hydrateSubstationSpatialIndex(parsed as SubstationSpatialSemanticSnapshot,true);
+    const index = hydrateSubstationSpatialIndex(parsed as SubstationSpatialSemanticSnapshot, true);
     const hydrateMs = Math.max(0, performance.now() - hydrateStarted);
     return {
       hit: true,
@@ -110,15 +137,29 @@ export async function writeSubstationSpatialSemanticCache(
   sourceSha256: string | null | undefined,
   index: SubstationSpatialIndex,
   parserVersion = SUBSTATION_PARSER_DOMAIN_VERSION,
-  prepared?:EncodedSpatialCache,
+  prepared?: EncodedSpatialCache,
 ): Promise<{ writeMs: number; snapshotBytes: number }> {
   if (projectId == null) throw new Error('空间语义缓存写入缺少 projectId');
   if (!sourceSha256?.trim()) throw new Error('空间语义缓存写入缺少 source SHA-256');
-  if(prepared&&(prepared.sourceSha256!==sourceSha256.trim()||prepared.parserVersion!==parserVersion||prepared.cacheVersion!==SUBSTATION_SPATIAL_SEMANTIC_VERSION))throw Error('空间语义缓存编码身份不匹配');
-  if(prepared?.error)throw Error(prepared.error);
-  if(prepared){const counts=spatialIndexCounts(index);if(prepared.indexCounts?.length!==counts.length||counts.some((v,i)=>v!==prepared.indexCounts![i]))throw Error('空间语义缓存索引结构不匹配');}
-  const encoded=prepared??encodeSubstationSpatialCache(index,{sourceSha256,parserVersion}),bytes=encoded.bytes;
-  if(!bytes?.byteLength)throw Error('空间语义缓存编码为空');
+  if (
+    prepared &&
+    (prepared.sourceSha256 !== sourceSha256.trim() ||
+      prepared.parserVersion !== parserVersion ||
+      prepared.cacheVersion !== SUBSTATION_SPATIAL_SEMANTIC_VERSION)
+  )
+    throw Error('空间语义缓存编码身份不匹配');
+  if (prepared?.error) throw Error(prepared.error);
+  if (prepared) {
+    const counts = spatialIndexCounts(index);
+    if (
+      prepared.indexCounts?.length !== counts.length ||
+      counts.some((v, i) => v !== prepared.indexCounts![i])
+    )
+      throw Error('空间语义缓存索引结构不匹配');
+  }
+  const encoded = prepared ?? encodeSubstationSpatialCache(index, { sourceSha256, parserVersion }),
+    bytes = encoded.bytes;
+  if (!bytes?.byteLength) throw Error('空间语义缓存编码为空');
   if (bytes.byteLength > MAX_SUBSTATION_SPATIAL_SNAPSHOT_BYTES) {
     throw new Error(`空间语义缓存过大: ${bytes.byteLength}`);
   }

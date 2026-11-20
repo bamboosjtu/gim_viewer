@@ -31,7 +31,7 @@ SQLite 共享 `gim_project`；变电表使用 `substation_*`，线路表使用 `
 | DEV 几何 | `geometry-cache-v1-source-bound-stl` | [db.rs](../../desktop/src-tauri/src/db.rs)、[DEV 目录](../../desktop/src/services/devSpatialCatalog.ts) | occurrence 引用、manifest、GLB 完整性、STL 共享矩阵、有限坐标和数值精度；不在首次/缓存加载时额外复核源字节 |
 | DEV LOD 派生 | 几何版本组合 `dev-spatial-catalog-v1`；有源 SHA 的浏览器上下文使用 IndexedDB `gim-dev-lod-v1` | [DEV 目录](../../desktop/src/services/devSpatialCatalog.ts)、[LOD 缓存](../../desktop/bridge/devLodCache.ts) | 源 SHA、DEV 路径、几何版本与 LOD；L0 持久化、仅热点 L1 选择性持久化、L2 默认内存；模板/目录逐条原子提交 |
 
-| 变电 Spatial | `substation-spatial-semantic-v1` | [Spatial codec](../../desktop/src/services/substationSpatialCodec.ts)、[缓存 I/O](../../desktop/src/services/substationSpatialSemanticCache.ts) | 精确大小写身份、宿主链、原始 IFC Name；缺失/损坏重建 |
+| 变电 Spatial | `substation-spatial-semantic-v1` | [Spatial codec](../../desktop/src/services/substationSpatialCodec.ts)、[缓存 I/O](../../desktop/src/features/substation/runtime/substationSpatialSemanticCache.ts) | 精确大小写身份、宿主链、原始 IFC Name；缺失/损坏重建 |
 | IFC Spatial parser | `gim-substation-parser-v1` | [Spatial codec](../../desktop/src/services/substationSpatialCodec.ts) | 独立于变电语义域 |
 | 来源物理目录 | `source-geometry-v1` | [独立物理遍历](../../packages/gim-sdk/src/geometry/physicalOccurrences.ts)、[物理目录缓存](../../desktop/src/services/sourceGeometryCache.ts) | 源 SHA、契约与载荷长度、实际 entry 路径及有效矩阵；字符串表复用身份/上下文/路径，按实际 UTF-8 字节判断 32 MiB 可选缓存上限；独立于分类/实体/导航，命中后不读完整语义图 |
 | 工程来源 | `engineering-source-v1` + 识别字段内容指纹 | [来源契约](../../packages/gim-sdk/src/source/buildSources.ts)、[编码](../../desktop/src/services/engineeringCacheCodec.ts)、[来源表](../../desktop/src/services/engineeringSourceCodec.ts) | 源 SHA、条目清单、来源/IFC parser 契约、完整性；识别字段清单变化仅经头契约失效，磁盘目录名保持稳定；保留实际 FAM 归属、属性对象/Pset/实例类型范围；独立原子文件 |
@@ -116,7 +116,7 @@ Engineering 输入载体限制为每批 8 MiB / 256 文件，批次数不是会�
 
 缓存状态至少区分：`none`、`miss`、`hit`、`partial`、`saving`、`saved`、`error`。诊断需包含域版本、源 SHA、条目/节点计数和失败原因，不能用一个布尔值代表全部恢复。
 
-相关实现：[projectCacheService](../../desktop/src/services/projectCacheService.ts)、[engineeringCacheCodec](../../desktop/src/services/engineeringCacheCodec.ts)、[substationSpatialSemanticCache](../../desktop/src/services/substationSpatialSemanticCache.ts)、[devSpatialCatalog](../../desktop/src/services/devSpatialCatalog.ts)。
+相关实现：[projectCacheService](../../desktop/src/services/projectCacheService.ts)、[engineeringCacheCodec](../../desktop/src/services/engineeringCacheCodec.ts)、[substationSpatialSemanticCache](../../desktop/src/features/substation/runtime/substationSpatialSemanticCache.ts)、[devSpatialCatalog](../../desktop/src/services/devSpatialCatalog.ts)。
 
 工程组成投影只持久化路径、归属引用与推断状态，不包含 `evidence` 投影依据数组。导航 JSON 位于工程导航派生文件，SQLite 提供工程身份授权，没有独立的投影依据列；原始来源证据与实体识别字段保持各自契约。
 

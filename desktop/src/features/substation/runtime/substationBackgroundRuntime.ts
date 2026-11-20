@@ -1,5 +1,5 @@
-import { reportBackgroundError } from '../utils/backgroundErrors.js';
-import type { PerfSession } from '../utils/perfTimings.js';
+import { reportBackgroundError } from '../../../utils/backgroundErrors.js';
+import type { PerfSession } from '../../../utils/perfTimings.js';
 
 export type SubstationBackgroundTaskName =
   | 'remainingIfc'
@@ -8,14 +8,11 @@ export type SubstationBackgroundTaskName =
   | 'stdSld'
   | 'cachePersistence'
   | 'devGeometry';
-export type SubstationBackgroundGate = 'interactive' | 'coordinateAnchorReady' | 'allIfcReady' | 'allIfcPreviewsReady';
+export type SubstationBackgroundGate =
+  'interactive' | 'coordinateAnchorReady' | 'allIfcReady' | 'allIfcPreviewsReady';
 
 export type SubstationBackgroundTaskState =
-  | 'queued'
-  | 'running'
-  | 'completed'
-  | 'cancelled'
-  | 'failed';
+  'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
 
 export interface SubstationBackgroundTaskEvent {
   task: SubstationBackgroundTaskName;
@@ -53,12 +50,25 @@ export interface SubstationBackgroundCoordinatorOptions {
   session: PerfSession;
   isCurrent: () => boolean;
   onEvent?: (event: SubstationBackgroundTaskEvent) => void;
-  onFineEvent?: (event: { key: string; state: 'queued'|'running'|'completed'|'failed'|'cancelled'; atMs: number; queueWaitMs?: number; durationMs?: number; checkpoint?: string }) => void;
-  onCheckpoint?: (unit: DevWorkCheckpoint & { serviced: boolean; resumeAtMs: number; pauseMs: number }) => void;
+  onFineEvent?: (event: {
+    key: string;
+    state: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+    atMs: number;
+    queueWaitMs?: number;
+    durationMs?: number;
+    checkpoint?: string;
+  }) => void;
+  onCheckpoint?: (
+    unit: DevWorkCheckpoint & { serviced: boolean; resumeAtMs: number; pauseMs: number },
+  ) => void;
 }
 
 /** Completed work only; duration excludes time servicing a user request. */
-export interface DevWorkCheckpoint { phase: 'cold-dev'|'warm-dev'|'warm-glb-read'|'raw-prepare'|'raw-commit'|'cache-repair'; path: string; durationMs: number }
+export interface DevWorkCheckpoint {
+  phase: 'cold-dev' | 'warm-dev' | 'warm-glb-read' | 'raw-prepare' | 'raw-commit' | 'cache-repair';
+  path: string;
+  durationMs: number;
+}
 export type DevCheckpointHandler = (unit: DevWorkCheckpoint) => Promise<void>;
 
 /**
@@ -79,9 +89,21 @@ export class SubstationBackgroundCoordinator {
   private lightRunning = false;
   private heavyRunning = false;
   private drainScheduled = false;
-  private priorityWork = new Map<string, {run:()=>Promise<void>;promise:Promise<void>;resolve:()=>void;reject:(error:unknown)=>void;priority:number;order:number;queuedAt:number;state:'queued'|'running'}>();
-  private priorityOrder=0;
-  private priorityRunning=false;
+  private priorityWork = new Map<
+    string,
+    {
+      run: () => Promise<void>;
+      promise: Promise<void>;
+      resolve: () => void;
+      reject: (error: unknown) => void;
+      priority: number;
+      order: number;
+      queuedAt: number;
+      state: 'queued' | 'running';
+    }
+  >();
+  private priorityOrder = 0;
+  private priorityRunning = false;
   private activeHeavyTask: SubstationBackgroundTaskName | null = null;
 
   constructor(private readonly options: SubstationBackgroundCoordinatorOptions) {}
@@ -133,57 +155,130 @@ export class SubstationBackgroundCoordinator {
     this.scheduleDrain();
   }
 
-  markAllIfcPreviewsReady():void {if(this.allIfcPreviewsReady)return;this.allIfcPreviewsReady=true;this.scheduleDrain();}
-
-  markCoordinateAnchorReady():void {if(this.coordinateAnchorReady)return;this.coordinateAnchorReady=true;this.scheduleDrain();}
-
-  enqueueUserIfcFine(key:string,run:()=>Promise<void>):{promise:Promise<void>;cancel:()=>boolean} {
-    const existing=this.priorityWork.get(key);
-    if(existing)return {promise:existing.promise,cancel:()=>this.cancelUserIfcFine(key)};
-    let resolve!:()=>void,reject!:(error:unknown)=>void;
-    const promise=new Promise<void>((res,rej)=>{resolve=res;reject=rej;});
-    this.priorityWork.set(key,{run,promise,resolve,reject,priority:0,order:this.priorityOrder++,queuedAt:performance.now(),state:'queued'});
-    this.options.onFineEvent?.({key,state:'queued',atMs:performance.now()});
+  markAllIfcPreviewsReady(): void {
+    if (this.allIfcPreviewsReady) return;
+    this.allIfcPreviewsReady = true;
     this.scheduleDrain();
-    return {promise,cancel:()=>this.cancelUserIfcFine(key)};
   }
 
-  cancelUserIfcFine(key:string):boolean {
-    const task=this.priorityWork.get(key);if(!task||task.state!=='queued')return false;
-    this.priorityWork.delete(key);const error=new Error('精细几何请求已取消排队');error.name='AbortError';task.reject(error);
-    this.options.onFineEvent?.({key,state:'cancelled',atMs:performance.now(),queueWaitMs:performance.now()-task.queuedAt});this.scheduleDrain();return true;
+  markCoordinateAnchorReady(): void {
+    if (this.coordinateAnchorReady) return;
+    this.coordinateAnchorReady = true;
+    this.scheduleDrain();
+  }
+
+  enqueueUserIfcFine(
+    key: string,
+    run: () => Promise<void>,
+  ): { promise: Promise<void>; cancel: () => boolean } {
+    const existing = this.priorityWork.get(key);
+    if (existing) return { promise: existing.promise, cancel: () => this.cancelUserIfcFine(key) };
+    let resolve!: () => void, reject!: (error: unknown) => void;
+    const promise = new Promise<void>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    this.priorityWork.set(key, {
+      run,
+      promise,
+      resolve,
+      reject,
+      priority: 0,
+      order: this.priorityOrder++,
+      queuedAt: performance.now(),
+      state: 'queued',
+    });
+    this.options.onFineEvent?.({ key, state: 'queued', atMs: performance.now() });
+    this.scheduleDrain();
+    return { promise, cancel: () => this.cancelUserIfcFine(key) };
+  }
+
+  cancelUserIfcFine(key: string): boolean {
+    const task = this.priorityWork.get(key);
+    if (!task || task.state !== 'queued') return false;
+    this.priorityWork.delete(key);
+    const error = new Error('精细几何请求已取消排队');
+    error.name = 'AbortError';
+    task.reject(error);
+    this.options.onFineEvent?.({
+      key,
+      state: 'cancelled',
+      atMs: performance.now(),
+      queueWaitMs: performance.now() - task.queuedAt,
+    });
+    this.scheduleDrain();
+    return true;
   }
 
   /** The DEV caller awaits this at an atomic boundary. Keep its heavy lease
    * held while servicing exactly one Fine request; no second heavy drain can
    * start. A subsequent DEV unit always gets a turn before another yield. */
   async servicePendingUserFineAtCheckpoint(unit: DevWorkCheckpoint): Promise<void> {
-    if (!this.options.isCurrent()) { this.cancelPending(); return; }
+    if (!this.options.isCurrent()) {
+      this.cancelPending();
+      return;
+    }
     const started = performance.now();
-    const next = this.interactive && this.heavyRunning && this.activeHeavyTask === 'devGeometry'
-      && !this.priorityRunning ? this.nextUserFine() : undefined;
+    const next =
+      this.interactive &&
+      this.heavyRunning &&
+      this.activeHeavyTask === 'devGeometry' &&
+      !this.priorityRunning
+        ? this.nextUserFine()
+        : undefined;
     if (next) await this.runUserFine(next[0], next[1], `${unit.phase}:${unit.path}`);
-    this.options.onCheckpoint?.({...unit,serviced:!!next,resumeAtMs:performance.now(),pauseMs:performance.now()-started});
+    this.options.onCheckpoint?.({
+      ...unit,
+      serviced: !!next,
+      resumeAtMs: performance.now(),
+      pauseMs: performance.now() - started,
+    });
   }
 
   private nextUserFine() {
-    return [...this.priorityWork.entries()].filter(([,task])=>task.state==='queued')
-      .sort((a,b)=>a[1].order-b[1].order)[0];
+    return [...this.priorityWork.entries()]
+      .filter(([, task]) => task.state === 'queued')
+      .sort((a, b) => a[1].order - b[1].order)[0];
   }
 
-  private async runUserFine(key:string, task: NonNullable<ReturnType<SubstationBackgroundCoordinator['nextUserFine']>>[1], checkpoint?:string):Promise<void> {
-    task.state='running';this.priorityRunning=true;
-    const started=performance.now();
+  private async runUserFine(
+    key: string,
+    task: NonNullable<ReturnType<SubstationBackgroundCoordinator['nextUserFine']>>[1],
+    checkpoint?: string,
+  ): Promise<void> {
+    task.state = 'running';
+    this.priorityRunning = true;
+    const started = performance.now();
     try {
-      this.options.onFineEvent?.({key,state:'running',atMs:started,queueWaitMs:started-task.queuedAt,checkpoint});
-      await task.run(); task.resolve();
-      this.options.onFineEvent?.({key,state:this.options.isCurrent()?'completed':'cancelled',atMs:performance.now(),durationMs:performance.now()-started,checkpoint});
-    } catch(error) {
+      this.options.onFineEvent?.({
+        key,
+        state: 'running',
+        atMs: started,
+        queueWaitMs: started - task.queuedAt,
+        checkpoint,
+      });
+      await task.run();
+      task.resolve();
+      this.options.onFineEvent?.({
+        key,
+        state: this.options.isCurrent() ? 'completed' : 'cancelled',
+        atMs: performance.now(),
+        durationMs: performance.now() - started,
+        checkpoint,
+      });
+    } catch (error) {
       task.reject(error);
-      this.options.onFineEvent?.({key,state:this.options.isCurrent()?'failed':'cancelled',atMs:performance.now(),durationMs:performance.now()-started,checkpoint});
+      this.options.onFineEvent?.({
+        key,
+        state: this.options.isCurrent() ? 'failed' : 'cancelled',
+        atMs: performance.now(),
+        durationMs: performance.now() - started,
+        checkpoint,
+      });
     } finally {
-      this.priorityWork.delete(key);this.priorityRunning=false;
-      if(!this.options.isCurrent())this.cancelPending();
+      this.priorityWork.delete(key);
+      this.priorityRunning = false;
+      if (!this.options.isCurrent()) this.cancelPending();
     }
   }
 
@@ -197,8 +292,9 @@ export class SubstationBackgroundCoordinator {
     this.cancelPendingUserIfcFine();
   }
 
-  cancelPendingUserIfcFine():void {
-    for(const [key,task] of this.priorityWork)if(task.state==='queued')this.cancelUserIfcFine(key);
+  cancelPendingUserIfcFine(): void {
+    for (const [key, task] of this.priorityWork)
+      if (task.state === 'queued') this.cancelUserIfcFine(key);
   }
 
   snapshot(): Array<SubstationBackgroundTaskEvent & { queuedMs?: number }> {
@@ -250,73 +346,103 @@ export class SubstationBackgroundCoordinator {
       return;
     }
     const candidates = Array.from(this.tasks.values())
-      .filter((record) => record.state === 'queued'
-        && !record.spec.heavy
-        && !record.spec.manual
-        && (record.spec.startAfter === 'interactive' || record.spec.startAfter === 'coordinateAnchorReady')
-        && this.gateReady(record.spec.startAfter))
+      .filter(
+        (record) =>
+          record.state === 'queued' &&
+          !record.spec.heavy &&
+          !record.spec.manual &&
+          (record.spec.startAfter === 'interactive' ||
+            record.spec.startAfter === 'coordinateAnchorReady') &&
+          this.gateReady(record.spec.startAfter),
+      )
       .sort((a, b) => a.spec.priority - b.spec.priority || a.queuedAt - b.queuedAt);
     const next = candidates[0];
     if (!next) return;
     this.lightRunning = true;
-    void Promise.resolve(this.run(next).finally(() => {
-      this.lightRunning = false;
-      this.scheduleDrain();
-    })).catch(reportBackgroundError);
+    void Promise.resolve(
+      this.run(next).finally(() => {
+        this.lightRunning = false;
+        this.scheduleDrain();
+      }),
+    ).catch(reportBackgroundError);
   }
 
   private drainHeavy(): void {
     if (this.heavyRunning || !this.options.isCurrent()) return;
-    if(this.interactive&&!this.priorityRunning&&this.priorityWork.size){
-      const next=this.nextUserFine();
-      if(next){this.heavyRunning=true;
-        void Promise.resolve(this.runUserFine(next[0],next[1]).finally(()=>{this.heavyRunning=false;this.scheduleDrain();})).catch(reportBackgroundError);return;}
+    if (this.interactive && !this.priorityRunning && this.priorityWork.size) {
+      const next = this.nextUserFine();
+      if (next) {
+        this.heavyRunning = true;
+        void Promise.resolve(
+          this.runUserFine(next[0], next[1]).finally(() => {
+            this.heavyRunning = false;
+            this.scheduleDrain();
+          }),
+        ).catch(reportBackgroundError);
+        return;
+      }
     }
     // Do not choose DEV geometry before a spatial cache restore has classified
     // hit/miss.  A miss queues the rebuild ahead of DEV geometry.
     const spatialRestore = this.tasks.get('spatialSemanticCacheRestore');
-    if (spatialRestore
-      && (spatialRestore.state === 'queued' || spatialRestore.state === 'running')
-      && spatialRestore.spec.blocksHeavy) return;
+    if (
+      spatialRestore &&
+      (spatialRestore.state === 'queued' || spatialRestore.state === 'running') &&
+      spatialRestore.spec.blocksHeavy
+    )
+      return;
     const candidates = Array.from(this.tasks.values())
-      .filter((record) => record.state === 'queued'
-        && record.spec.heavy
-        && this.gateReady(record.spec.startAfter))
+      .filter(
+        (record) =>
+          record.state === 'queued' && record.spec.heavy && this.gateReady(record.spec.startAfter),
+      )
       .sort((a, b) => a.spec.priority - b.spec.priority || a.queuedAt - b.queuedAt);
     const next = candidates[0];
     if (next) {
       this.heavyRunning = true;
       this.activeHeavyTask = next.spec.task;
-      void Promise.resolve(this.run(next).finally(() => {
-        this.activeHeavyTask = null;
-        this.heavyRunning = false;
-        this.scheduleDrain();
-      })).catch(reportBackgroundError);
+      void Promise.resolve(
+        this.run(next).finally(() => {
+          this.activeHeavyTask = null;
+          this.heavyRunning = false;
+          this.scheduleDrain();
+        }),
+      ).catch(reportBackgroundError);
       return;
     }
     this.drainLowPriority();
   }
 
   private drainLowPriority(): void {
-    if ((!this.allIfcReady&&!this.allIfcPreviewsReady) || this.heavyRunning || this.lightRunning || !this.options.isCurrent()) return;
+    if (
+      (!this.allIfcReady && !this.allIfcPreviewsReady) ||
+      this.heavyRunning ||
+      this.lightRunning ||
+      !this.options.isCurrent()
+    )
+      return;
     const candidates = Array.from(this.tasks.values())
-      .filter((record) => record.state === 'queued'
-        && !record.spec.heavy
-        && this.gateReady(record.spec.startAfter))
+      .filter(
+        (record) =>
+          record.state === 'queued' && !record.spec.heavy && this.gateReady(record.spec.startAfter),
+      )
       .sort((a, b) => a.spec.priority - b.spec.priority || a.queuedAt - b.queuedAt);
     const next = candidates[0];
     if (!next) return;
     this.lightRunning = true;
-    void Promise.resolve(this.run(next).finally(() => {
-      this.lightRunning = false;
-      this.scheduleDrain();
-    })).catch(reportBackgroundError);
+    void Promise.resolve(
+      this.run(next).finally(() => {
+        this.lightRunning = false;
+        this.scheduleDrain();
+      }),
+    ).catch(reportBackgroundError);
   }
 
-  private gateReady(gate:SubstationBackgroundGate):boolean {
-    if(gate==='interactive')return this.interactive;
-    if(gate==='coordinateAnchorReady')return (this.interactive||this.allIfcReady)&&this.coordinateAnchorReady;
-    if(gate==='allIfcPreviewsReady')return this.allIfcPreviewsReady||this.allIfcReady;
+  private gateReady(gate: SubstationBackgroundGate): boolean {
+    if (gate === 'interactive') return this.interactive;
+    if (gate === 'coordinateAnchorReady')
+      return (this.interactive || this.allIfcReady) && this.coordinateAnchorReady;
+    if (gate === 'allIfcPreviewsReady') return this.allIfcPreviewsReady || this.allIfcReady;
     return this.allIfcReady;
   }
 
@@ -353,7 +479,16 @@ export class SubstationBackgroundCoordinator {
       ...(record.startedAt != null && record.state !== 'queued'
         ? { durationMs: Math.max(0, now - record.startedAt) }
         : {}),
-      ...(error !== undefined ? { error: error instanceof Error ? error.message : String(error) } : {}),
+      ...(error !== undefined
+        ? {
+            error:
+              error instanceof Error
+                ? error.message
+                : typeof error === 'string'
+                  ? error
+                  : JSON.stringify(error),
+          }
+        : {}),
       sessionId: this.options.session.id,
     });
   }

@@ -1,9 +1,9 @@
-import type { AppState, ProjectLoadSession } from '../app/state.js';
-import type { IfcEntry } from '../gim/types.js';
-import { findMapKeyByPath, getFileByPath } from '../gim/fileLookup.js';
+import type { AppState, ProjectLoadSession } from '../../../app/state.js';
+import type { IfcEntry } from '../../../gim/types.js';
+import { findMapKeyByPath, getFileByPath } from '../../../gim/fileLookup.js';
 import { isTauri } from '@desktop/runtime.js';
-import { DEBUG_IFC_LOAD } from '../config/debug.js';
-import { debugLog, logger } from '../utils/logger.js';
+import { DEBUG_IFC_LOAD } from '../../../config/debug.js';
+import { debugLog, logger } from '../../../utils/logger.js';
 
 type IfcSourceState = Pick<
   AppState,

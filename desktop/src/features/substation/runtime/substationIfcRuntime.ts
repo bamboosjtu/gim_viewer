@@ -1,17 +1,17 @@
-import { projectPresentation } from './projectPresentationPort.js';
-import * as statusPresentation from './presentation/shell_statusBar.js';
-import { reportBackgroundError } from '../utils/backgroundErrors.js';
+import { projectPresentation } from '../../../services/projectPresentationPort.js';
+import * as statusPresentation from '../../../services/presentation/shell_statusBar.js';
+import { reportBackgroundError } from '../../../utils/backgroundErrors.js';
 
 import { setSubstationViewerInteractive } from './substationLoadingState.js';
 /** Sequential IFC loading, early geometry, cache profiles and background gates. */
 import {
   setConnectionStatus,
   setIfcStatus as publishIfcStatus,
-} from './presentation/shell_statusBar.js';
-import type { IfcEntry } from '../gim/types.js';
-import type { AppState, ProjectLoadSession } from '../app/state.js';
-import { getFileByPath } from '../gim/fileLookup.js';
-import { logger } from '../utils/logger.js';
+} from '../../../services/presentation/shell_statusBar.js';
+import type { IfcEntry } from '../../../gim/types.js';
+import type { AppState, ProjectLoadSession } from '../../../app/state.js';
+import { getFileByPath } from '../../../gim/fileLookup.js';
+import { logger } from '../../../utils/logger.js';
 import {
   SubstationBackgroundCoordinator,
   type SubstationBackgroundGate,
@@ -22,16 +22,19 @@ import {
   perfMark,
   perfMarkProductMoment,
   perfRecordIfcLoadProfile,
-} from '../utils/perfTimings.js';
-import { startSubstationResourceMonitor } from './substationResourceTelemetry.js';
-import { showLoading, hideLoading } from './gimOpenCore.js';
-import { planSubstationIfcLoad } from './ifcLoadOrder.js';
+} from '../../../utils/perfTimings.js';
+import { startSubstationResourceMonitor } from '../../../services/substationResourceTelemetry.js';
+import { showLoading, hideLoading } from '../../../services/gimOpenCore.js';
+import { planSubstationIfcLoad } from '../../../services/ifcLoadOrder.js';
 import { autoLoadModStlPostIfc } from './substationDevRuntime.js';
 
-import { renderSubstationCoreUi, showLoadingBeforeInteractive } from './substationPresentation.js';
+import {
+  renderSubstationCoreUi,
+  showLoadingBeforeInteractive,
+} from '../presentation/substationPresentation.js';
 import { sampleSubstationMemory } from './substationRuntimeTelemetry.js';
-import { stationViewPolicy } from './stationViewPolicy.js';
-import { observeFirstGeometry } from './geometryPresentationService.js';
+import { stationViewPolicy } from '../../../services/stationViewPolicy.js';
+import { observeFirstGeometry } from '../../../services/geometryPresentationService.js';
 import { getIfcBufferForEntry } from './substationIfcSource.js';
 
 const trackedIfcCanvases = new WeakSet<HTMLCanvasElement>();
@@ -120,7 +123,7 @@ export async function loadAllIfcFiles(
   // resetGimState 会清空 projectSourceToViewerMatrix，因此每次打开项目时重新解析。
   try {
     const { loadManualCoordOffsetFromLocalStorage } =
-      await import('./coordinateAlignmentService.js');
+      await import('../../../services/coordinateAlignmentService.js');
     if (!isCurrent()) return;
     loadManualCoordOffsetFromLocalStorage(state);
   } catch {
@@ -140,8 +143,8 @@ export async function loadAllIfcFiles(
   showLoading('正在加载 3D 引擎...');
   const endEngine = perfBegin('3D 引擎创建', undefined, perfSession);
   const [{ getViewerRuntimeWithUI }, { IfcConnectionPreviewRuntime }] = await Promise.all([
-    import('./viewerUIBinding.js'),
-    import('../viewer/ifcConnectionPreviewRuntime.js'),
+    import('../../../services/viewerUIBinding.js'),
+    import('../../../viewer/ifcConnectionPreviewRuntime.js'),
   ]);
   if (!isCurrent()) return;
   let runtime;
@@ -159,7 +162,7 @@ export async function loadAllIfcFiles(
   // authoritative Fragments model for that IFC is ready.
   const connectionPreview = new IfcConnectionPreviewRuntime(ctx, session, isCurrent);
   state.substationConnectionPreview = connectionPreview;
-  void import('./connectionOwnershipService.js')
+  void import('../../../services/connectionOwnershipService.js')
     .then(({ prepareConnectionOwnership }) => {
       if (isCurrent()) return prepareConnectionOwnership(state, session);
     })
@@ -190,7 +193,7 @@ export async function loadAllIfcFiles(
       return;
     state.viewState.cameraNavigationVersion++;
     void Promise.resolve(
-      import('../viewer/camera.js').then(({ fitCameraToStationOverview }) => {
+      import('../../../viewer/camera.js').then(({ fitCameraToStationOverview }) => {
         if (state.isCurrentSession(session))
           fitCameraToStationOverview(ctx, state.viewState, {
             force: true,
@@ -204,7 +207,7 @@ export async function loadAllIfcFiles(
   // DEV templates are local, independent of the first IFC's coordinate anchor.
   // Start their bounded worker pool now; the LOD owner delays scene commit.
   if (state.currentProjectType === 'substation' && typeof Worker !== 'undefined') {
-    const { startDeviceLod } = await import('./devLodRuntime.js');
+    const { startDeviceLod } = await import('../../../services/devLodRuntime.js');
     if (!isCurrent()) return;
     void startDeviceLod(state, ctx, session, (text, detail) => {
       if (isCurrent())
@@ -275,7 +278,7 @@ export async function loadAllIfcFiles(
     const endCoordinate = perfBegin(label, undefined, perfSession);
     try {
       const { syncProjectSourceToViewerFromFragments } =
-        await import('./coordinateAlignmentService.js');
+        await import('../../../services/coordinateAlignmentService.js');
       if (!isCurrent()) return;
       await syncProjectSourceToViewerFromFragments(state, ctx.fragments, { session });
       if (!isCurrent()) return;
@@ -321,7 +324,7 @@ export async function loadAllIfcFiles(
         )
           return;
         void Promise.resolve(
-          import('../viewer/camera.js').then(({ fitCameraToStationOverview }) => {
+          import('../../../viewer/camera.js').then(({ fitCameraToStationOverview }) => {
             if (
               !isCurrent() ||
               state.viewState.viewerUserInteracted ||
@@ -355,10 +358,10 @@ export async function loadAllIfcFiles(
     );
     if (!isCurrent()) return;
 
-    const { fitCameraToStationOverview } = await import('../viewer/camera.js');
+    const { fitCameraToStationOverview } = await import('../../../viewer/camera.js');
     if (!isCurrent()) return;
     // 变电默认打开为整站远景全景，不再恢复上次相机；层级树展开状态仍恢复。
-    const { restoreTreeState } = await import('./viewStateStore.js');
+    const { restoreTreeState } = await import('../../../services/viewStateStore.js');
     restoreTreeState(state);
     if (!isCurrent()) return;
     if (!state.selection.selectionRequest?.target && !state.viewState.viewerUserInteracted) {
@@ -475,9 +478,9 @@ export async function loadAllIfcFiles(
   const lifecycleTask = (async (): Promise<void> => {
     try {
       const [{ ensureEngineReady }, { loadIfcEntry }, { shouldSkipLargeIfc }] = await Promise.all([
-        import('../viewer/ifcLoader.js'),
-        import('../viewer/ifcEntryLoader.js'),
-        import('./appSettings.js'),
+        import('../../../viewer/ifcLoader.js'),
+        import('../../../viewer/ifcEntryLoader.js'),
+        import('../../../services/appSettings.js'),
       ]);
       if (!isCurrent()) return;
       const endEngineInit = perfBegin('web-ifc / Fragments engine 初始化', undefined, perfSession);
@@ -829,7 +832,7 @@ export async function loadAllIfcFiles(
       ).catch(reportBackgroundError);
 
       // buildIfcNameIndex 失败不应阻断 UI 渲染
-      const { buildIfcNameIndex } = await import('./ifcNameIndex.js');
+      const { buildIfcNameIndex } = await import('../../../services/ifcNameIndex.js');
       if (!isCurrent()) return;
       state.engineering.ifcGeometryFinished = true;
       state.engineeringGeometryEvidenceChanged?.();

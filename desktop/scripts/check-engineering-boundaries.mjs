@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
@@ -12,6 +12,7 @@ const sdkRoot = resolve(root, '../../packages/gim-sdk/src');
 const measurementCoreRoot = resolve(root, '../../packages/measurement-core/src');
 const measurementFacade = resolve(root, 'measurement/core.ts');
 function* files(dir) {
+  if (!existsSync(dir)) return;
   for (const entry of readdirSync(dir, {withFileTypes:true})) {
     if (entry.name === '__tests__') continue;
     const path = resolve(dir, entry.name);
@@ -74,7 +75,7 @@ const viewerSourceValues=new Map([
   ['gim/geometry/xmlModParser.ts',new Set(['parseXmlMod'])],
   ['gim/geometry/ir.ts',new Set(['DEFAULT_ANGULAR_SEGMENTS','DEFAULT_LINEAR_SEGMENTS'])],
 ]);
-for (const [layer,sourceRoot] of [...['engineering','gim','viewer','ui','services','app'].map(layer=>[layer,root]),...['engineering','semantic','source','geometry','projection','adapters','shared'].map(layer=>[layer,sdkRoot])]) for (const path of files(resolve(sourceRoot,layer))) {
+for (const [layer,sourceRoot] of [...['engineering','gim','viewer','ui','services','features','app'].map(layer=>[layer,root]),...['engineering','semantic','source','geometry','projection','adapters','shared'].map(layer=>[layer,sdkRoot])]) for (const path of files(resolve(sourceRoot,layer))) {
   const ast = ts.createSourceFile(path, readFileSync(path,'utf8'), ts.ScriptTarget.Latest, true);
   const localPath = relative(sourceRoot, path).replaceAll('\\', '/');
   failures.push(...coreBoundaryErrors(readFileSync(path,'utf8'),localPath));
@@ -158,7 +159,7 @@ for (const [layer,sourceRoot] of [...['engineering','gim','viewer','ui','service
         : layer === 'geometry' ? /^(?:app|semantic(?!\/catalog)|adapters|projection|engineering|services|viewer|ui|@desktop|@tauri-apps)/
         : layer === 'projection' ? /^(?:app|source|semantic(?!\/catalog)|adapters|geometry|engineering|services|viewer|ui|@desktop|@tauri-apps|three|web-ifc|maplibre)/
         : layer === 'adapters' ? /^(?:app|geometry|engineering|projection|services|viewer|ui|@desktop|@tauri-apps|three|web-ifc|maplibre)/
-        : layer==='ui'?/^(?:@desktop|@tauri-apps|measurement)/:layer==='services'?/^(?:ui)/:layer==='app'?/^(?:gim)/:/^(?:app|services|ui|@desktop|@tauri-apps)/;
+        : layer==='ui'?/^(?:@desktop|@tauri-apps|measurement)/:layer==='services'||layer==='features'?/^(?:ui)/:layer==='app'?/^(?:gim)/:/^(?:app|services|ui|@desktop|@tauri-apps)/;
       const exceptionKey = `${relative(root,path).replaceAll('\\','/')}:${name}`;
       const exception = viewerBridgeImports.has(exceptionKey);
       if (exception) viewerBridgeImports.set(exceptionKey, true);
@@ -187,14 +188,31 @@ for (const [entry, hit] of viewerBridgeImports) if (!hit)
 // An implementation must not regain its facade's whole dependency graph.
 // Check each runtime family independently: calling another family's public
 // runtime entry remains legal (for example IFC starting DEV LOD).
-const runtimeFamilies = [
-  ['substationRuntime', 'substationPresentation', 'substationRuntimeTelemetry', 'substationSpatialRuntime',
-    'substationDocumentRuntime', 'substationIfcRuntime', 'substationIfcSource', 'substationDevRuntime', 'substationLoadingState'],
-  ['devLodRuntime', 'devLodTemplateStore', 'devLodArtifactWriter', 'devLodSourceWorkset',
-    'devLodReadiness', 'devLodDiagnostics', 'devLodTypes'],
+const substationRuntimeFiles = [
+  resolve(root, 'features/substation/application/substationRuntime.ts'),
+  resolve(root, 'features/substation/runtime/substationBackgroundRuntime.ts'),
+  resolve(root, 'features/substation/runtime/substationColdCore.ts'),
+  resolve(root, 'features/substation/runtime/substationDevRuntime.ts'),
+  resolve(root, 'features/substation/runtime/substationDocumentRuntime.ts'),
+  resolve(root, 'features/substation/runtime/substationIfcRuntime.ts'),
+  resolve(root, 'features/substation/runtime/substationIfcSource.ts'),
+  resolve(root, 'features/substation/runtime/substationIndexPublication.ts'),
+  resolve(root, 'features/substation/runtime/substationSpatialRuntime.ts'),
+  resolve(root, 'features/substation/runtime/substationSpatialSemanticCache.ts'),
+  resolve(root, 'features/substation/runtime/substationWarmAttempt.ts'),
+  resolve(root, 'features/substation/runtime/substationWarmCore.ts'),
+  resolve(root, 'features/substation/runtime/substationLoadingState.ts'),
+  resolve(root, 'features/substation/presentation/substationPresentation.ts'),
+  resolve(root, 'features/substation/runtime/substationRuntimeTelemetry.ts'),
 ];
-for (const family of runtimeFamilies) {
-  const paths = family.map(name => resolve(root, 'services', `${name}.ts`));
+const runtimeFamilies = [
+  substationRuntimeFiles,
+  [
+    'devLodRuntime', 'devLodTemplateStore', 'devLodArtifactWriter', 'devLodSourceWorkset',
+    'devLodReadiness', 'devLodDiagnostics', 'devLodTypes',
+  ].map(name => resolve(root, 'services', `${name}.ts`)),
+];
+for (const paths of runtimeFamilies) {
   const graph = new Map(paths.map(path => [path, new Set()]));
   for (const path of paths) {
     const ast = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true);

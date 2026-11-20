@@ -1,19 +1,19 @@
 // @vitest-environment node
 import{beforeEach,it,expect,vi}from'vitest';
-import{AppState}from'../../app/state.js';
-import type{SubstationSpatialIndex}from'../../gim/ifcSpatialParser.js';
+import{AppState}from'../../../../app/state.js';
+import type{SubstationSpatialIndex}from'../../../../gim/ifcSpatialParser.js';
 import{buildAndCommitSubstationSpatialSemantic}from'../substationSpatialRuntime.js';
-import{createSpatialSemanticStarter}from'../spatialSemanticStarter.js';
-import{SUBSTATION_PARSER_DOMAIN_VERSION}from'../substationSpatialCodec.js';
-import{buildSubstationSpatialIndexInWorker}from'../substationSpatialWorkerClient.js';
+import{createSpatialSemanticStarter}from'../../../../services/spatialSemanticStarter.js';
+import{SUBSTATION_PARSER_DOMAIN_VERSION}from'../../../../services/substationSpatialCodec.js';
+import{buildSubstationSpatialIndexInWorker}from'../../../../services/substationSpatialWorkerClient.js';
 import{writeSubstationSpatialSemanticCache}from'../substationSpatialSemanticCache.js';
-import type{PerfSession}from'../../utils/perfTimings.js';
-vi.mock('../substationSpatialWorkerClient.js',()=>({buildSubstationSpatialIndexInWorker:vi.fn()}));
+import type{PerfSession}from'../../../../utils/perfTimings.js';
+vi.mock('../../../../services/substationSpatialWorkerClient.js',()=>({buildSubstationSpatialIndexInWorker:vi.fn()}));
 vi.mock('../substationSpatialSemanticCache.js',()=>({readSubstationSpatialSemanticCache:vi.fn(),writeSubstationSpatialSemanticCache:vi.fn()}));
-vi.mock('../engineeringService.js',()=>({notifyEngineeringIfcEvidence:vi.fn(),notifyEngineeringIfcFailure:vi.fn()}));
+vi.mock('../../../../services/engineeringService.js',()=>({notifyEngineeringIfcEvidence:vi.fn(),notifyEngineeringIfcFailure:vi.fn()}));
 vi.mock('../substationRuntimeTelemetry.js',()=>({createSubstationSpatialObserver:vi.fn(),sampleSubstationMemory:vi.fn()}));
-vi.mock('../substationPresentation.js',()=>({renderSubstationCoreUi:vi.fn()}));
-vi.mock('../../utils/perfTimings.js',()=>({perfBegin:()=>()=>{},perfMarkProductMoment:vi.fn()}));
+vi.mock('../../presentation/substationPresentation.js',()=>({renderSubstationCoreUi:vi.fn()}));
+vi.mock('../../../../utils/perfTimings.js',()=>({perfBegin:()=>()=>{},perfMarkProductMoment:vi.fn()}));
 const index={models:[],nodes:[],objects:[],links:[],coverage:{uncontainedIfcObjects:0}}as unknown as SubstationSpatialIndex;
 beforeEach(()=>{vi.clearAllMocks();vi.mocked(buildSubstationSpatialIndexInWorker).mockResolvedValue(index);vi.mocked(writeSubstationSpatialSemanticCache).mockResolvedValue({writeMs:1,snapshotBytes:1});});
 function start(state:AppState,beforeCacheWrite:Promise<void>){const session=state.captureProjectSession();return buildAndCommitSubstationSpatialSemantic(state,new Map(),[],{}as never,[],session,{}as PerfSession,()=>{},'fixture',

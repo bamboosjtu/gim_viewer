@@ -12,7 +12,7 @@
 
 | 目录 | 归属与新增代码位置 |
 |---|---|
-| `desktop/src/` | 桌面应用；`gim/` 宿主文件发现、Tree Builder 与空间语义、`engineering/` 纯领域、`services/` 编排、`viewer/` 渲染、`ui/` DOM、`measurement/` 产品探针、`app/` 启动与会话 |
+| `desktop/src/` | 桌面应用；`gim/` 宿主文件发现、Tree Builder 与空间语义、`engineering/` 纯领域、`features/` 业务纵向编排、`services/` 跨域端口、`viewer/` 渲染、`ui/` DOM、`measurement/` 产品探针、`app/` 启动与会话 |
 | `desktop/bridge/`、`desktop/src-tauri/` | 桌面 TS IPC 与 Rust 原生实现；平台读写不进入纯领域层 |
 | `desktop/scripts/benchmarks/` | 本地 Benchmark CLI、报告、Trace/Profile 与系统诊断、无样本协议测试；浏览器功能夹具在 `desktop/tests/` |
 | `desktop/local-tests/`、`benchmarks/l0/`、`benchmarks/l1/`、`benchmarks/l2/` | 开发者基础功能注册表与分级性能注册表；不存放 GIM 字节或运行报告 |

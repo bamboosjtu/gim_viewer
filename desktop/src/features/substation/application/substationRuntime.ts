@@ -1,43 +1,49 @@
-import { logger } from '../utils/logger.js';
-import { SUBSTATION_PARSER_DOMAIN_VERSION } from './substationSpatialCodec.js';
-import { reportBackgroundError } from '../utils/backgroundErrors.js';
+import { logger } from '../../../utils/logger.js';
+import { SUBSTATION_PARSER_DOMAIN_VERSION } from '../../../services/substationSpatialCodec.js';
+import { reportBackgroundError } from '../../../utils/backgroundErrors.js';
 /** Substation cold/warm project orchestration and core semantic publication. */
-import type { IfcEntry } from '../gim/types.js';
-import type { AppState, ProjectLoadSession } from '../app/state.js';
-import { beginEngineeringBuild } from './engineeringService.js';
+import type { IfcEntry } from '../../../gim/types.js';
+import type { AppState, ProjectLoadSession } from '../../../app/state.js';
+import { beginEngineeringBuild } from '../../../services/engineeringService.js';
 import { isTauri } from '@desktop/runtime.js';
-import { DEBUG_GIM_CACHE } from '../config/debug.js';
-import { debugLog } from '../utils/logger.js';
-import { setProjectIdentity, refreshNavigatorTitle } from './presentation/shell_projectBar.js';
-import type { GimRuntimeOpenContext } from './gimOpenCore.js';
+import { DEBUG_GIM_CACHE } from '../../../config/debug.js';
+import { debugLog } from '../../../utils/logger.js';
+import {
+  setProjectIdentity,
+  refreshNavigatorTitle,
+} from '../../../services/presentation/shell_projectBar.js';
+import type { GimRuntimeOpenContext } from '../../../services/gimOpenCore.js';
 import { validateGimCache, type FamPropertyPayload } from '@desktop/database.js';
-import { hydrateNativeSmallFiles } from './nativeSmallFileHydration.js';
-import { readSubstationSpatialSemanticCache } from './substationSpatialSemanticCache.js';
+import { hydrateNativeSmallFiles } from '../../../services/nativeSmallFileHydration.js';
+import { readSubstationSpatialSemanticCache } from '../runtime/substationSpatialSemanticCache.js';
 import {
   SubstationBackgroundCoordinator,
   type SubstationBackgroundGate,
-} from './substationBackgroundRuntime.js';
+} from '../runtime/substationBackgroundRuntime.js';
 import {
   perfCurrentSession,
   perfBegin,
   perfMark,
   perfMarkProductMoment,
-} from '../utils/perfTimings.js';
-import { showLoading, hideLoading } from './gimOpenCore.js';
-import { showLoadingBeforeInteractive } from './substationPresentation.js';
+} from '../../../utils/perfTimings.js';
+import { showLoading, hideLoading } from '../../../services/gimOpenCore.js';
+import { showLoadingBeforeInteractive } from '../presentation/substationPresentation.js';
 import {
   buildAndCommitSubstationSpatialSemantic,
   commitCachedSubstationSpatialSemantic,
   scheduleSubstationSpatialSemantic,
-} from './substationSpatialRuntime.js';
-import { createSpatialSemanticStarter } from './spatialSemanticStarter.js';
-import { buildAndCommitSubstationStdSld } from './substationDocumentRuntime.js';
-import { loadAllIfcFiles } from './substationIfcRuntime.js';
-import { publishSubstationColdCore } from './substationColdCore.js';
-import { publishSubstationWarmCore } from './substationWarmCore.js';
-import { releaseWarmIfcAttempt } from './substationWarmAttempt.js';
-export { createNodeClickHandler, setupSldGridIdInteraction } from './substationPresentation.js';
-export { loadAllIfcFiles } from './substationIfcRuntime.js';
+} from '../runtime/substationSpatialRuntime.js';
+import { createSpatialSemanticStarter } from '../../../services/spatialSemanticStarter.js';
+import { buildAndCommitSubstationStdSld } from '../runtime/substationDocumentRuntime.js';
+import { loadAllIfcFiles } from '../runtime/substationIfcRuntime.js';
+import { publishSubstationColdCore } from '../runtime/substationColdCore.js';
+import { publishSubstationWarmCore } from '../runtime/substationWarmCore.js';
+import { releaseWarmIfcAttempt } from '../runtime/substationWarmAttempt.js';
+export {
+  createNodeClickHandler,
+  setupSldGridIdInteraction,
+} from '../presentation/substationPresentation.js';
+export { loadAllIfcFiles } from '../runtime/substationIfcRuntime.js';
 
 interface SubstationSemanticOptions {
   sourcePublication?: Promise<unknown>;
@@ -171,13 +177,15 @@ function publishFamSourceRows(state: AppState, rows: readonly FamPropertyPayload
     state.properties.cachedFamSourceProperties.clear();
     return;
   }
-  const families = new Map<string, import('../gim/famParser.js').FamSourceProperty[]>();
+  const families = new Map<string, import('../../../gim/famParser.js').FamSourceProperty[]>();
   for (const row of rows)
     if (row.raw_property_json) {
       try {
         const list = families.get(row.source_path) ?? [];
         list.push(
-          JSON.parse(row.raw_property_json) as import('../gim/famParser.js').FamSourceProperty,
+          JSON.parse(
+            row.raw_property_json,
+          ) as import('../../../gim/famParser.js').FamSourceProperty,
         );
         families.set(row.source_path, list);
       } catch {
@@ -344,7 +352,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
             state.ifcLoading.pending = false;
           });
           const { startGeometryOnlyView } = await scope.read(
-            async () => import('./equipmentRuntime.js'),
+            async () => import('../../../services/equipmentRuntime.js'),
           );
 
           await scope.read(async () => startGeometryOnlyView(context));
@@ -369,13 +377,13 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
           void Promise.resolve(
             (async () => {
               const { publishSubstationRest } = await scope.read(
-                async () => import('./substationIndexPublication.js'),
+                async () => import('../runtime/substationIndexPublication.js'),
               );
               const { saveSubstationSemanticRest } = await scope.read(
                 async () => import('@desktop/database.js'),
               );
               const { createCachePublishStatus } = await scope.read(
-                async () => import('./cachePublishStatus.js'),
+                async () => import('../../../services/cachePublishStatus.js'),
               );
               const publication = createCachePublishStatus(() => scope.isCurrent());
               scope.own(publication.resetCachePublishStatus);
@@ -456,7 +464,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
 
     if (extractedSource.projectType === 'equipment') {
       const { openEquipmentProject } = await scope.read(
-        async () => import('./equipmentRuntime.js'),
+        async () => import('../../../services/equipmentRuntime.js'),
       );
       if (scope.isCurrent()) await scope.read(async () => openEquipmentProject(context));
       return;
@@ -572,7 +580,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
                 showLoadingBeforeInteractive('正在缓存 IFC 文件...');
                 try {
                   const { cacheIfcEntries } = await scope.read(
-                    async () => import('./gimExtractedCacheService.js'),
+                    async () => import('../../../services/gimExtractedCacheService.js'),
                   );
                   const cacheResult = await scope.read(async () =>
                     cacheIfcEntries(projectId, filesForPersist, ifcEntriesForPersist),
@@ -597,7 +605,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
                   showLoadingBeforeInteractive('正在缓存 GIM 来源文件...');
                   try {
                     const { cacheExtractedFiles } = await scope.read(
-                      async () => import('./gimExtractedCacheService.js'),
+                      async () => import('../../../services/gimExtractedCacheService.js'),
                     );
                     const geoCacheResult = await scope.read(async () =>
                       cacheExtractedFiles(projectId, filesForPersist, localCachePathMap),
@@ -620,7 +628,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
 
               if (!scope.isCurrent()) return;
               const { publishSubstationCore, publishSubstationRest } = await scope.read(
-                async () => import('./substationIndexPublication.js'),
+                async () => import('../runtime/substationIndexPublication.js'),
               );
               const {
                 saveGimIndex,
@@ -629,7 +637,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
                 validateGimCache,
               } = await scope.read(async () => import('@desktop/database.js'));
               const { createCachePublishStatus } = await scope.read(
-                async () => import('./cachePublishStatus.js'),
+                async () => import('../../../services/cachePublishStatus.js'),
               );
               const publication = createCachePublishStatus(() => scope.isCurrent());
               scope.own(publication.resetCachePublishStatus);
@@ -797,7 +805,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
         state.ifcLoading.pending = false;
       });
       const { startGeometryOnlyView } = await scope.read(
-        async () => import('./equipmentRuntime.js'),
+        async () => import('../../../services/equipmentRuntime.js'),
       );
 
       await scope.read(async () => startGeometryOnlyView(context));

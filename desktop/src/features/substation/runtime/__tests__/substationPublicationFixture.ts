@@ -1,4 +1,4 @@
-import { buildCbmTree } from '../../gim/cbmParser.js';
+import { buildCbmTree } from '../../../../gim/cbmParser.js';
 
 export async function publicationFixture() {
   const files = new Map(Object.entries({

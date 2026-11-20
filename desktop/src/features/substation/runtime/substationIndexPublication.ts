@@ -1,10 +1,10 @@
-import type { CbmNode, FileDevEntry, IfcEntry } from '../gim/types.js';
+import type { CbmNode, FileDevEntry, IfcEntry } from '../../../gim/types.js';
 import type { GimIndexPayload, GeometryRefsPayload } from '@desktop/database.js';
 import {
   buildGimIndexPayload,
   buildSubstationRestPayload,
   type SubstationRestPayload,
-} from './gimIndexPersistenceService.js';
+} from '../../../services/gimIndexPersistenceService.js';
 
 export interface SubstationPublicationInput {
   projectId: number;
@@ -19,18 +19,18 @@ export interface SubstationPublicationInput {
 }
 
 export interface CoreDependencies {
-  isCurrent(): boolean;
-  saveIndex(payload: GimIndexPayload): Promise<void>;
-  saveRefs(payload: GeometryRefsPayload): Promise<void>;
-  validate(): Promise<{ substation_semantic_cache_valid: boolean }>;
-  onPhase?(phase: string, counts?: Record<string, number>): void;
+  isCurrent: () => boolean;
+  saveIndex: (payload: GimIndexPayload) => Promise<void>;
+  saveRefs: (payload: GeometryRefsPayload) => Promise<void>;
+  validate: () => Promise<{ substation_semantic_cache_valid: boolean }>;
+  onPhase?: (phase: string, counts?: Record<string, number>) => void;
 }
 
 export interface RestDependencies {
-  isCurrent(): boolean;
-  saveRest(payload: SubstationRestPayload): Promise<void>;
-  onPhase?(phase: string, counts?: Record<string, number>): void;
-  onPublished?(payload: SubstationRestPayload): void;
+  isCurrent: () => boolean;
+  saveRest: (payload: SubstationRestPayload) => Promise<void>;
+  onPhase?: (phase: string, counts?: Record<string, number>) => void;
+  onPublished?: (payload: SubstationRestPayload) => void;
 }
 
 /**
@@ -157,7 +157,7 @@ function assertSemanticSourcesCached(
   if (missingSemanticPaths.length) {
     throw new Error(
       `语义源文件尚未完成缓存，拒绝发布索引: ${missingSemanticPaths.slice(0, 5).join('、')}` +
-      `${missingSemanticPaths.length > 5 ? ` 等 ${missingSemanticPaths.length} 个` : ''}`,
+        `${missingSemanticPaths.length > 5 ? ` 等 ${missingSemanticPaths.length} 个` : ''}`,
     );
   }
   if (missingPaths.length) onPhase?.('sourceCacheIncomplete', { count: missingPaths.length });

@@ -25,7 +25,8 @@
 | `desktop/src/gim/` | 宿主文件发现、CBM Tree Builder、来源树/索引、IFC 空间语义与平台适配；纯格式解析在 `packages/gim-sdk/src/parser/` | SDK parser/source 类型、共享纯库 | services、viewer、ui；不新增纯 Parser |
 | `desktop/src/viewer/` | Three.js、Fragments、web-ifc、MOD/STL 编译与渲染 | three、geometry 纯函数、类型 | services、ui、DB |
 | `desktop/src/ui/` | DOM shell、三视图、属性、搜索、地图、工具栏 | services 暴露的结果、纯类型、白名单展示选择器 | 数据库、原生 IPC |
-| `desktop/src/services/` | 打开、缓存、Worker、后台任务、选择与生命周期编排 | gim、viewer、bridge、注入的展示端口 | 把领域规则塞回 UI |
+| `desktop/src/features/substation/` | 变电打开工作流：application 编排、runtime 冷/暖/IFC/DEV/Spatial/遥测、presentation 导航与选择；跨域 Worker/codec/提取任务端口暂留 services | gim、viewer、bridge、注入的展示端口、services 端口 | 把共享缓存/Worker 协议复制成第二份实现 |
+| `desktop/src/services/` | 跨域缓存、Worker、后台任务、选择、生命周期与未迁移能力的端口 | gim、viewer、bridge、注入的展示端口 | 把领域规则塞回 UI |
 | `desktop/src/config/` | 功能与调试开关 | 无 | 业务状态 |
 | `desktop/src/measurement/` | 宿主与 Worker 探针、产品证据、Trace/Profile/GPU 采样适配 | measurement-core、只读运行时快照 | 把测量状态变成产品业务状态 |
 | `desktop/bridge/` | Tauri IPC DTO/命令封装 | `@tauri-apps/api` | UI、Viewer |
@@ -62,7 +63,7 @@ bootstrap
   ├─ viewerShell（空态、最近工程、菜单、属性抽屉）
   ├─ selectionToolbar（自动定位、清除选择）
   ├─ openGimService（文件入口、解压、类型分派）
-  │    ├─ substationRuntime（语义、IFC、DEV、Spatial）
+  │    ├─ features/substation（语义、IFC、DEV、Spatial）
   │    │    └─ engineeringService（来源/实体/导航 Worker）
   │    ├─ equipmentRuntime（DEV-only 设备）
   │    └─ line runtime（线路图/地图）
@@ -108,6 +109,7 @@ desktop/src/
 
 约束：
 
+- 变电打开工作流已迁入 `features/substation/{application,runtime,presentation}`；提取任务、Spatial codec/Worker、资源遥测等跨域端口仍留在 `services/`，避免 services 反向依赖 feature 内部实现。
 - 每次只迁一个纵向工作流，先固定其输入、输出、会话守卫和资源释放器，再移动文件。
 - `packages/powerline-core/` 是独立可复用线路能力包，不并入 `features/powerline`；桌面 feature 只保留应用编排、宿主状态和展示接线。
 - `services/` 中的跨域入口先保留转发，迁移完成后删除；测试跟随被测模块移动，不复制到新目录。

@@ -6,7 +6,7 @@
 
 | 入口 | 保留职责 | 实现位置 |
 |---|---|---|
-| `services/substationRuntime.ts` | 工程冷/暖打开、核心语义发布、各后台阶段接线 | `substation*Runtime.ts`、`substationPresentation.ts` |
+| `features/substation/application/substationRuntime.ts` | 工程冷/暖打开、核心语义发布、各后台阶段接线 | `features/substation/runtime/*`、`features/substation/presentation/substationPresentation.ts` |
 | `services/devLodRuntime.ts` | 相机/选择、occurrence、场景提交、坐标锚点和会话关闭 | `devLodTemplateStore.ts`、`devLodArtifactWriter.ts`、`devLodSourceWorkset.ts`、`devLodReadiness.ts` |
 | `src-tauri/src/db.rs` | 数据库连接、共享版本和基础查询、命令/DTO 导出 | `src-tauri/src/db/*.rs` |
 

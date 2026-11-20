@@ -1,9 +1,9 @@
 import { afterEach,describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
-import { AppState } from '../../app/state.js';
-import type { CbmNode, IfcEntry } from '../../gim/types.js';
-import { loadAllIfcFiles } from '../openGimService.js';
-import { perfMarkProductMoment, perfProductMomentSnapshot, perfReset } from '../../utils/perfTimings.js';
+import { AppState } from '../../../../app/state.js';
+import type { CbmNode, IfcEntry } from '../../../../gim/types.js';
+import { loadAllIfcFiles } from '../../../../services/openGimService.js';
+import { perfMarkProductMoment, perfProductMomentSnapshot, perfReset } from '../../../../utils/perfTimings.js';
 
 const mocks = vi.hoisted(() => ({
   frames:[] as Array<()=>void>,
@@ -21,27 +21,27 @@ const mocks = vi.hoisted(() => ({
   hideLoading: vi.fn(),
   setIfcStatus: vi.fn(),
 }));
-vi.mock('../geometryPresentationService.js',()=>({observeFirstGeometry:vi.fn(async(_state,_ctx,_root,_session,onPresented,perf)=>{
+vi.mock('../../../../services/geometryPresentationService.js',()=>({observeFirstGeometry:vi.fn(async(_state,_ctx,_root,_session,onPresented,perf)=>{
   mocks.frames.push(()=>{perfMarkProductMoment('firstVisibleGeometryReady',{test:true},perf);perfMarkProductMoment('firstGeometryReady',{test:true},perf);perfMarkProductMoment('interactive',{test:true},perf);onPresented?.();});
 })}));
 
-vi.mock('../presentation/shell_statusBar.js',async importOriginal=>({...(await importOriginal<typeof import('../presentation/shell_statusBar.js')>()),setIfcStatus:mocks.setIfcStatus,setConnectionStatus:vi.fn()}));
+vi.mock('../../../../services/presentation/shell_statusBar.js',async importOriginal=>({...(await importOriginal<typeof import('../../../../services/presentation/shell_statusBar.js')>()),setIfcStatus:mocks.setIfcStatus,setConnectionStatus:vi.fn()}));
 
-vi.mock('../../viewer/ifcLoader.js', () => ({ ensureEngineReady: mocks.ensureEngineReady }));
-vi.mock('../../viewer/ifcEntryLoader.js', () => ({ loadIfcEntry: mocks.loadIfcEntry }));
-vi.mock('.././ifcNameIndex.js', () => ({ buildIfcNameIndex: mocks.buildIfcNameIndex }));
-vi.mock('../../viewer/camera.js', () => ({
+vi.mock('../../../../viewer/ifcLoader.js', () => ({ ensureEngineReady: mocks.ensureEngineReady }));
+vi.mock('../../../../viewer/ifcEntryLoader.js', () => ({ loadIfcEntry: mocks.loadIfcEntry }));
+vi.mock('../../../../services/ifcNameIndex.js', () => ({ buildIfcNameIndex: mocks.buildIfcNameIndex }));
+vi.mock('../../../../viewer/camera.js', () => ({
   fitCameraToScene: mocks.fitCameraToScene,
   fitCameraToStationOverview: mocks.fitCameraToStationOverview,
 }));
-vi.mock('../viewerUIBinding.js', () => ({ getViewerRuntimeWithUI: mocks.getViewerRuntimeWithUI }));
-vi.mock('../coordinateAlignmentService.js', () => ({
+vi.mock('../../../../services/viewerUIBinding.js', () => ({ getViewerRuntimeWithUI: mocks.getViewerRuntimeWithUI }));
+vi.mock('../../../../services/coordinateAlignmentService.js', () => ({
   syncProjectSourceToViewerFromFragments: mocks.syncProjectSourceToViewerFromFragments,
   loadManualCoordOffsetFromLocalStorage: mocks.loadManualCoordOffsetFromLocalStorage,
 }));
-vi.mock('../../ui/cbmTreeView.js', () => ({ buildAndRenderCbmTree: mocks.buildAndRenderCbmTree }));
-vi.mock('../../ui/fileDevView.js', () => ({ renderFileDevPanel: mocks.renderFileDevPanel }));
-vi.mock('../gimOpenCore.js', () => ({
+vi.mock('../../../../ui/cbmTreeView.js', () => ({ buildAndRenderCbmTree: mocks.buildAndRenderCbmTree }));
+vi.mock('../../../../ui/fileDevView.js', () => ({ renderFileDevPanel: mocks.renderFileDevPanel }));
+vi.mock('../../../../services/gimOpenCore.js', () => ({
   showLoading: mocks.showLoading,
   hideLoading: mocks.hideLoading,
   recordNativeExtractionStages: vi.fn(),

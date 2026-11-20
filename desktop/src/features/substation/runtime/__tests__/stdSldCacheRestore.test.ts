@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { AppState } from '../../app/state.js';
-import { commitStdSldResult, type StdSldParseResult } from '../stdSldService.js';
+import { AppState } from '../../../../app/state.js';
+import { commitStdSldResult, type StdSldParseResult } from '../../../../services/stdSldService.js';
 import { buildAndCommitSubstationStdSld } from '../substationDocumentRuntime.js';
-import { bindDiagramPresentation } from '../diagramPresentationPort.js';
-import { buildCbmTree } from '../../gim/cbmParser.js';
-import { perfCurrentSession } from '../../utils/perfTimings.js';
+import { bindDiagramPresentation } from '../../../../services/diagramPresentationPort.js';
+import { buildCbmTree } from '../../../../gim/cbmParser.js';
+import { perfCurrentSession } from '../../../../utils/perfTimings.js';
 
 const { batchRead } = vi.hoisted(() => ({ batchRead: vi.fn() }));
 vi.mock('@desktop/database.js', () => ({ batchReadCachedFiles: batchRead }));
@@ -21,6 +21,7 @@ function result(overrides: Partial<StdSldParseResult> = {}): StdSldParseResult {
       groups: [{}],
     } as StdSldParseResult['sldDoc'],
     index: {} as StdSldParseResult['index'],
+    entryResults: [],
     ...overrides,
   };
 }
@@ -32,10 +33,14 @@ describe('STD/SLD cold and warm publication', () => {
     ['failed', '<STD>'],
     [null, null],
   ])('publishes the valid SLD when the accompanying STD is %s', async (status, stdText) => {
-    const sldText = '<svg xmlns="http://www.w3.org/2000/svg"><g gridId="bay"><circle r="1"/></g></svg>';
+    const sldText =
+      '<svg xmlns="http://www.w3.org/2000/svg"><g gridId="bay"><circle r="1"/></g></svg>';
     const files = new Map([
       ['Cbm/project.cbm', new File(['SCH=Diagrams/entry.sch'], 'project.cbm')],
-      ['Diagrams/entry.sch', new File(['SCH.NUM=2\nSCH0=topology.std\nSCH1=main.sld'], 'entry.sch')],
+      [
+        'Diagrams/entry.sch',
+        new File(['SCH.NUM=2\nSCH0=topology.std\nSCH1=main.sld'], 'entry.sch'),
+      ],
       ['Diagrams/main.sld', new File([sldText], 'main.sld')],
     ]);
     const documents = new Map([['Diagrams/main.sld', new TextEncoder().encode(sldText)]]);
@@ -44,7 +49,10 @@ describe('STD/SLD cold and warm publication', () => {
       documents.set('Diagrams/topology.std', new TextEncoder().encode(stdText));
     }
     batchRead.mockReset().mockResolvedValue(documents);
-    bindDiagramPresentation({ render: vi.fn().mockResolvedValue(undefined), onSelect: vi.fn().mockResolvedValue(() => {}) });
+    bindDiagramPresentation({
+      render: vi.fn().mockResolvedValue(undefined),
+      onSelect: vi.fn().mockResolvedValue(() => {}),
+    });
     const state = new AppState();
     state.currentProjectId = 42;
     state.currentCbmTree = await buildCbmTree(files);

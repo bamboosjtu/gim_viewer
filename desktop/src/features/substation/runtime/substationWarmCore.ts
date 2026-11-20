@@ -1,21 +1,24 @@
-import { logger } from '../utils/logger.js';
-import type { GimRuntimeOpenContext } from './gimOpenCore.js';
+import { logger } from '../../../utils/logger.js';
+import type { GimRuntimeOpenContext } from '../../../services/gimOpenCore.js';
 import { validateGimCache } from '@desktop/database.js';
 import type { GimIndexResult } from '@desktop/contracts.js';
-import type { CbmNode, FileDevEntry, IfcEntry } from '../gim/types.js';
-import { reportBackgroundError } from '../utils/backgroundErrors.js';
-import { DEBUG_GIM_CACHE } from '../config/debug.js';
-import { debugLog } from '../utils/logger.js';
-import { setProjectIdentity, refreshNavigatorTitle } from './presentation/shell_projectBar.js';
-import { perfBegin } from '../utils/perfTimings.js';
-import type { PerfSession } from '../utils/perfTimings.js';
-import { showLoading } from './gimOpenCore.js';
+import type { CbmNode, FileDevEntry, IfcEntry } from '../../../gim/types.js';
+import { reportBackgroundError } from '../../../utils/backgroundErrors.js';
+import { DEBUG_GIM_CACHE } from '../../../config/debug.js';
+import { debugLog } from '../../../utils/logger.js';
+import {
+  setProjectIdentity,
+  refreshNavigatorTitle,
+} from '../../../services/presentation/shell_projectBar.js';
+import { perfBegin } from '../../../utils/perfTimings.js';
+import type { PerfSession } from '../../../utils/perfTimings.js';
+import { showLoading } from '../../../services/gimOpenCore.js';
 import { sampleSubstationMemory } from './substationRuntimeTelemetry.js';
 import {
   collectCbmNodeCount,
   markSubstationCoreSemanticReady,
   renderSubstationCoreUi,
-} from './substationPresentation.js';
+} from '../presentation/substationPresentation.js';
 
 export interface WarmCoreResult {
   index: GimIndexResult;
@@ -46,10 +49,10 @@ export async function publishSubstationWarmCore(
     // This is a confirmed IFC-backed open. Start module loading while
     // the native index is being read; no Viewer or session state is created.
     void Promise.all([
-      import('./viewerUIBinding.js').then(({ prepareViewerBindingModules }) =>
+      import('../../../services/viewerUIBinding.js').then(({ prepareViewerBindingModules }) =>
         prepareViewerBindingModules(),
       ),
-      import('../viewer/modelPresentation.js'),
+      import('../../../viewer/modelPresentation.js'),
     ]).catch((error) => {
       if (scope.isCurrent()) reportBackgroundError(error);
     });
@@ -66,7 +69,7 @@ export async function publishSubstationWarmCore(
     showLoading('正在从本地缓存恢复 GIM 索引...');
   });
   const { restoreGimIndexToState } = await scope.read(
-    async () => import('./gimIndexRestoreService.js'),
+    async () => import('../../../services/gimIndexRestoreService.js'),
   );
 
   const endRestoreCore = perfBegin(

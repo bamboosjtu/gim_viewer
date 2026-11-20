@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { SubstationSpatialIndex } from '../../gim/ifcSpatialParser.js';
+import type { SubstationSpatialIndex } from '../../../../gim/ifcSpatialParser.js';
 import {
   hydrateSubstationSpatialIndex,
   encodeSubstationSpatialCache,
@@ -7,7 +7,7 @@ import {
   SUBSTATION_PARSER_DOMAIN_VERSION,
   SUBSTATION_SPATIAL_SEMANTIC_VERSION,
   validateSubstationSpatialSnapshot,
-} from '../substationSpatialCodec.js';
+} from '../../../../services/substationSpatialCodec.js';
 import {readSubstationSpatialSemanticCache,writeSubstationSpatialSemanticCache} from '../substationSpatialSemanticCache.js';
 import { readCachedEntry, writeCacheFile } from '@desktop/database.js';
 

@@ -26,4 +26,4 @@
 
 本地分别看来源目录等待、首批 bounds、几何提交到实际绘制间隔、主线程长任务和后台尾段，保留白屏观察。不要通过暂停正常编译/解析来获得漂亮首屏。
 
-代码：[来源编排](../../desktop/src/services/engineeringService.ts)、[首次绘制](../../desktop/src/services/geometryPresentationService.ts)、[IFC 启动](../../desktop/src/services/substationIfcRuntime.ts)。检查：[来源独立性](../../desktop/src/services/__tests__/engineeringService.test.ts)、[目录首批消费](../../desktop/src/services/__tests__/devLodRuntime.test.ts)、[模型绘制](../../desktop/src/viewer/__tests__/modelPresentation.test.ts)、[后台门禁](../../desktop/src/services/__tests__/substationBackgroundRuntime.test.ts)。
+代码：[来源编排](../../desktop/src/services/engineeringService.ts)、[首次绘制](../../desktop/src/services/geometryPresentationService.ts)、[IFC 启动](../../desktop/src/features/substation/runtime/substationIfcRuntime.ts)。检查：[来源独立性](../../desktop/src/services/__tests__/engineeringService.test.ts)、[目录首批消费](../../desktop/src/services/__tests__/devLodRuntime.test.ts)、[模型绘制](../../desktop/src/viewer/__tests__/modelPresentation.test.ts)、[后台门禁](../../desktop/src/features/substation/runtime/__tests__/substationBackgroundRuntime.test.ts)。

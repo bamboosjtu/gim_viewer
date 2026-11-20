@@ -36,7 +36,11 @@ import {
 import { extractGimFile, getProjectTypeName } from '../gim/gimExtractor.js';
 import { detectGimProjectType } from '../gim/projectType.js';
 import { openPowerlineProject } from './powerlineRuntime.js';
-import { openSubstationProject, onGimExtracted, loadAllIfcFiles } from './substationRuntime.js';
+import {
+  openSubstationProject,
+  onGimExtracted,
+  loadAllIfcFiles,
+} from '../features/substation/application/substationRuntime.js';
 
 export { onGimExtracted, loadAllIfcFiles };
 

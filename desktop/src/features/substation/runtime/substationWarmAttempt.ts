@@ -1,5 +1,5 @@
-import { logger } from '../utils/logger.js';
-import type { AppState } from '../app/state.js';
+import { logger } from '../../../utils/logger.js';
+import type { AppState } from '../../../app/state.js';
 
 /**
  * Release hosts claimed before a warm attempt can fail. Cold fallback creates

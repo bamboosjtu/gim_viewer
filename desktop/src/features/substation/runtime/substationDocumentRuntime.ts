@@ -1,10 +1,10 @@
-import { logger } from '../utils/logger.js';
-import { reportBackgroundError } from '../utils/backgroundErrors.js';
-import { diagramPresentation } from './diagramPresentationPort.js';
+import { logger } from '../../../utils/logger.js';
+import { reportBackgroundError } from '../../../utils/backgroundErrors.js';
+import { diagramPresentation } from '../../../services/diagramPresentationPort.js';
 /** Optional STD/SLD parsing and cache restore. */
-import type { AppState, ProjectLoadSession } from '../app/state.js';
-import { perfBegin, perfMarkProductMoment, type PerfSession } from '../utils/perfTimings.js';
-import { setupSldGridIdInteraction } from './substationPresentation.js';
+import type { AppState, ProjectLoadSession } from '../../../app/state.js';
+import { perfBegin, perfMarkProductMoment, type PerfSession } from '../../../utils/perfTimings.js';
+import { setupSldGridIdInteraction } from '../presentation/substationPresentation.js';
 
 export async function buildAndCommitSubstationStdSld(
   state: AppState,
@@ -20,7 +20,7 @@ export async function buildAndCommitSubstationStdSld(
   const endStdSld = perfBegin(label, undefined, perfSession);
   try {
     const { commitStdSldResult, parseStdSldOnGimExtracted, restoreStdSldFromCache } =
-      await import('./stdSldService.js');
+      await import('../../../services/stdSldService.js');
     if (!state.isCurrentSession(session)) return false;
 
     const result =
@@ -82,7 +82,7 @@ export async function buildAndCommitSubstationStdSld(
     // attempt visible.  This clears only the STD/SLD projection; IFC and core
     // semantic state remain intact.
     try {
-      const { commitStdSldResult } = await import('./stdSldService.js');
+      const { commitStdSldResult } = await import('../../../services/stdSldService.js');
       if (!state.isCurrentSession(session)) return false;
       commitStdSldResult(state, null);
     } catch (clearErr) {

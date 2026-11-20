@@ -345,7 +345,7 @@ it('search selection wins before lazy imports and a slow 3D raycast cannot steal
   runtime.ctx.fragments.raycast=vi.fn(() => {started.resolve();return ray.promise;});
   const {getViewerRuntimeWithUI}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../viewerUIBinding.js'); });await getViewerRuntimeWithUI(state,() => {});
   document.querySelector<HTMLCanvasElement>('canvas')!.click();await started.promise;
-  const {createNodeClickHandler}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../substationRuntime.js'); });
+  const {createNodeClickHandler}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../features/substation/application/substationRuntime.js'); });
   const {buildAndRenderCbmTree}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../ui/cbmTreeView.js'); });state.currentProjectType='equipment';
   buildAndRenderCbmTree(state,createNodeClickHandler(state,() => {}));
   const input=document.querySelector<HTMLInputElement>('[role="combobox"]')!;input.value='B';input.dispatchEvent(new Event('input'));
@@ -386,7 +386,7 @@ it('SLD topology A → 3D B invalidates A properties and the previous topology h
   state.currentStdDoc=parseStd('<STD><Substation name="Station"><VoltageLevel name="10kV"><Bay name="A" gridId="A0TEST*001"/></VoltageLevel></Substation></STD>');
   const {buildStdSldIndex}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/stdSldIndex.js'); });
   state.currentStdSldIndex=buildStdSldIndex(state.currentCbmTree,state.currentStdDoc,null);
-  const {setupSldGridIdInteraction}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../substationRuntime.js'); });await setupSldGridIdInteraction(state,() => {},state.captureProjectSession());
+  const {setupSldGridIdInteraction}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../features/substation/application/substationRuntime.js'); });await setupSldGridIdInteraction(state,() => {},state.captureProjectSession());
   const {renderSldView}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../ui/sldView.js'); });renderSldView(state);
   [...document.querySelectorAll<HTMLButtonElement>('#sld-panel button')].find((button) => button.textContent!.includes('拓扑'))!.click();
   [...document.querySelectorAll<HTMLElement>('.sld-topo-item')].find((item) => item.textContent!.includes('A0TEST*001'))!.click();

@@ -26,10 +26,16 @@ function fixture() {
   // stale-entry detection accepts the live entries.
   files('desktop/src/viewer/ifcBimLoader.ts',"import '@desktop/ifcLodCache.js';\nexport {};");
   files('desktop/src/viewer/ifcRegionalRuntime.ts',"import '@desktop/ifcLodCache.js';\nexport {};");
-  for(const name of ['substationRuntime','substationPresentation','substationRuntimeTelemetry','substationSpatialRuntime',
-    'substationDocumentRuntime','substationIfcRuntime','substationIfcSource','substationDevRuntime','substationLoadingState',
+  for(const name of [
     'devLodRuntime','devLodTemplateStore','devLodArtifactWriter','devLodSourceWorkset','devLodReadiness','devLodDiagnostics','devLodTypes'])
     files(`desktop/src/services/${name}.ts`,'export {};');
+  for(const name of ['substationBackgroundRuntime','substationColdCore','substationDevRuntime','substationDocumentRuntime',
+    'substationIfcRuntime','substationIfcSource','substationIndexPublication','substationSpatialRuntime',
+    'substationSpatialSemanticCache','substationWarmAttempt','substationWarmCore','substationLoadingState'])
+    files(`desktop/src/features/substation/runtime/${name}.ts`,'export {};');
+  files('desktop/src/features/substation/application/substationRuntime.ts','export {};');
+  files('desktop/src/features/substation/presentation/substationPresentation.ts','export {};');
+  files('desktop/src/features/substation/runtime/substationRuntimeTelemetry.ts','export {};');
   const run=()=>spawnSync(process.execPath,[join(folder,'desktop/scripts/check-engineering-boundaries.mjs')],{
     cwd:folder,encoding:'utf8',windowsHide:true,env:process.env,
   });
@@ -71,8 +77,8 @@ test('checker rejects SDK implementation imports',()=>{
 
 test('checker rejects a cycle within a runtime family through dynamic dependencies',()=>{
   const {files,run}=fixture();
-  files('desktop/src/services/substationPresentation.ts',"export const load=()=>import('./substationIfcRuntime.js');");
-  files('desktop/src/services/substationIfcRuntime.ts',"export const load=()=>import('./substationPresentation.js');");
+  files('desktop/src/features/substation/presentation/substationPresentation.ts',"export const load=()=>import('../runtime/substationIfcRuntime.js');");
+  files('desktop/src/features/substation/runtime/substationIfcRuntime.ts',"export const load=()=>import('../presentation/substationPresentation.js');");
   const rejected=run();
   assert.equal(rejected.status,1);
   assert.match(rejected.stderr,/Circular runtime module dependency/);

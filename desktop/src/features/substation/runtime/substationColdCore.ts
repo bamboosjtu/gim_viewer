@@ -1,18 +1,18 @@
-import { reportBackgroundError } from '../utils/backgroundErrors.js';
-import { logger } from '../utils/logger.js';
-import type { AppState, ProjectLoadSession } from '../app/state.js';
-import type { CbmNode } from '../gim/types.js';
-import type { IfcEntry } from '../gim/types.js';
-import { discoverIfcFromCBM, scanIfcFiles, buildIfcGuidIndex } from '../gim/gimIndexer.js';
-import { buildCbmTree, buildCbmNodeIndex } from '../gim/cbmParser.js';
-import { parseFileDevRelation } from '../gim/fileDevParser.js';
-import { perfBegin, perfCurrentSession } from '../utils/perfTimings.js';
+import { reportBackgroundError } from '../../../utils/backgroundErrors.js';
+import { logger } from '../../../utils/logger.js';
+import type { AppState, ProjectLoadSession } from '../../../app/state.js';
+import type { CbmNode } from '../../../gim/types.js';
+import type { IfcEntry } from '../../../gim/types.js';
+import { discoverIfcFromCBM, scanIfcFiles, buildIfcGuidIndex } from '../../../gim/gimIndexer.js';
+import { buildCbmTree, buildCbmNodeIndex } from '../../../gim/cbmParser.js';
+import { parseFileDevRelation } from '../../../gim/fileDevParser.js';
+import { perfBegin, perfCurrentSession } from '../../../utils/perfTimings.js';
 import { sampleSubstationMemory } from './substationRuntimeTelemetry.js';
 import {
   collectCbmNodeCount,
   markSubstationCoreSemanticReady,
   renderSubstationCoreUi,
-} from './substationPresentation.js';
+} from '../presentation/substationPresentation.js';
 
 export interface SubstationColdCore {
   ifcEntries: IfcEntry[];

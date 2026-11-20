@@ -1,10 +1,10 @@
 import { beforeEach, afterEach, it, expect, vi } from 'vitest';
-import { AppState } from '../../app/state.js';
-import type { GimRuntimeOpenContext, ExtractionResult } from '../gimOpenCore.js';
-import type { CbmNode } from '../../gim/types.js';
+import { AppState } from '../../../../app/state.js';
+import type { GimRuntimeOpenContext, ExtractionResult } from '../../../../services/gimOpenCore.js';
+import type { CbmNode } from '../../../../gim/types.js';
 import { openSubstationProject, onGimExtracted } from '../substationRuntime.js';
-vi.mock('../gimOpenCore.js', async (original) => ({
-  ...(await original<typeof import('../gimOpenCore.js')>()),
+vi.mock('../../../../services/gimOpenCore.js', async (original) => ({
+  ...(await original<typeof import('../../../../services/gimOpenCore.js')>()),
   showLoading: vi.fn(),
   hideLoading: vi.fn(),
 }));
@@ -35,35 +35,35 @@ vi.mock('@desktop/database.js', () => ({
   saveGeometryRefs: vi.fn(),
   saveSubstationSemanticRest: vi.fn(),
 }));
-vi.mock('../substationIndexPublication.js', () => ({
+vi.mock('../../runtime/substationIndexPublication.js', () => ({
   publishSubstationCore: m.core,
   publishSubstationRest: m.rest,
 }));
-vi.mock('../gimExtractedCacheService.js', () => ({
+vi.mock('../../../../services/gimExtractedCacheService.js', () => ({
   cacheIfcEntries: m.cacheIfc,
   cacheExtractedFiles: m.cacheSources,
 }));
 vi.mock('@desktop/gimExtract.js', () => ({
   createDiskBackedFile: (_id: number, path: string) => new File([''], path),
 }));
-vi.mock('../gimIndexRestoreService.js', () => ({ restoreGimIndexToState: m.restore }));
-vi.mock('../engineeringService.js', () => ({ beginEngineeringBuild: m.build }));
-vi.mock('../substationIfcRuntime.js', () => ({ loadAllIfcFiles: m.load }));
-vi.mock('../equipmentRuntime.js', () => ({
+vi.mock('../../../../services/gimIndexRestoreService.js', () => ({ restoreGimIndexToState: m.restore }));
+vi.mock('../../../../services/engineeringService.js', () => ({ beginEngineeringBuild: m.build }));
+vi.mock('../../runtime/substationIfcRuntime.js', () => ({ loadAllIfcFiles: m.load }));
+vi.mock('../../../../services/equipmentRuntime.js', () => ({
   startGeometryOnlyView: m.geometry,
   openEquipmentProject: m.geometry,
 }));
-vi.mock('../substationRuntimeTelemetry.js', () => ({ sampleSubstationMemory: async () => {} }));
-vi.mock('../substationSpatialSemanticCache.js', () => ({
+vi.mock('../../runtime/substationRuntimeTelemetry.js', () => ({ sampleSubstationMemory: async () => {} }));
+vi.mock('../../runtime/substationSpatialSemanticCache.js', () => ({
   readSubstationSpatialSemanticCache: m.semanticCache,
 }));
-vi.mock('../substationSpatialRuntime.js', () => ({
+vi.mock('../../runtime/substationSpatialRuntime.js', () => ({
   buildAndCommitSubstationSpatialSemantic: m.spatial,
   commitCachedSubstationSpatialSemantic: vi.fn(),
   scheduleSubstationSpatialSemantic: m.schedule,
 }));
-vi.mock('../substationDocumentRuntime.js', () => ({ buildAndCommitSubstationStdSld: m.documents }));
-vi.mock('../nativeSmallFileHydration.js', () => ({ hydrateNativeSmallFiles: m.hydrate }));
+vi.mock('../../runtime/substationDocumentRuntime.js', () => ({ buildAndCommitSubstationStdSld: m.documents }));
+vi.mock('../../../../services/nativeSmallFileHydration.js', () => ({ hydrateNativeSmallFiles: m.hydrate }));
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((r) => {
@@ -121,7 +121,7 @@ beforeEach(async () => {
     state.currentCbmTree = { path: 'cached.cbm', children: [] } as unknown as CbmNode;
     state.currentIfcEntries = [{ path: 'cached.ifc', name: 'cached', modelId: 'cached' }];
   });
-  const { bindProjectPresentation } = await import('../projectPresentationPort.js');
+  const { bindProjectPresentation } = await import('../../../../services/projectPresentationPort.js');
   bindProjectPresentation({
     renderNavigation: m.render,
     refreshDeviceBounds: vi.fn(),
