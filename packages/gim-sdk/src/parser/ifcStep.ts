@@ -39,6 +39,7 @@ export function scanIfcEntityBoundaries(
   // and avoids a JS callback for every quote. A malformed unclosed literal
   // falls back to the stateful scanner below.
   // High string density (property-heavy products) makes a span array large;
+  // The 1000/300k threshold is a shape fence, not a correctness condition.
   // sample three regions so clustered strings late in the file are still found.
   const sampleSize = 300_000;
   const maxOffset = Math.max(0, text.length - sampleSize);
