@@ -59,5 +59,5 @@ semantic/
 
 1. 把 `ownershipResolver` 的设备/机柜/neutral-set 分支拆成策略函数，保留同一阶段入口。
 2. 提取 `entityFactory`（identity、boundary、classification details）和 `membershipResolver`。
-3. 已提取 `sourceTypeCandidates`；下一步拆 `standardClassResolver`、`componentResolver`、`materialResolver`、`contextualRecognition` 和 `objectEvidenceAdapter`，优先保持 83 例 parity。
+3. 已提取 `sourceTypeCandidates` 和 `contextualRecognition`（设备上下文只影响解释，不混入归属）；下一步拆 `standardClassResolver`、`componentResolver`、`materialResolver` 和 `objectEvidenceAdapter`，优先保持 83 例 parity。
 4. 再处理 Source Core 的 `extractEngineeringSourceGraph()` 调度拆分，避免重复文档读取。

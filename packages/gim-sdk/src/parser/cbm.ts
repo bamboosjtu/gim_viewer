@@ -61,5 +61,9 @@ export function parseCbmResult(
 ): ParseResult<CbmDocumentRecord> {
   const value = parseCbmText(text, path);
   const diagnostics = value.diagnostics.map(fromSourceDiagnostic);
-  return { value, diagnostics, status: parseStatus(diagnostics, true) };
+  return {
+    value,
+    diagnostics,
+    status: parseStatus(diagnostics, value.fields.length > 0),
+  };
 }

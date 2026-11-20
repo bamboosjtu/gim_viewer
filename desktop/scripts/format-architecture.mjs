@@ -110,6 +110,7 @@ export const architectureModules = [
   '../packages/gim-sdk/src/semantic/normalize.ts',
   '../packages/gim-sdk/src/semantic/normalization/prepareEvidence.ts',
   '../packages/gim-sdk/src/semantic/normalization/transformerBank.ts',
+  '../packages/gim-sdk/src/semantic/normalization/contextualRecognition.ts',
   '../packages/gim-sdk/src/semantic/normalization/ownershipResolver.ts',
   '../packages/gim-sdk/src/semantic/recognition/evidenceReader.ts',
   '../packages/gim-sdk/src/semantic/recognition/sourceTypeCandidates.ts',

@@ -5,7 +5,6 @@ import {
   separateInstallation,
   unclassifiedAssemblyCandidate,
 } from "../compositionPolicy.js";
-import { interpretRecognitionObject as interpretObject } from "../classify.js";
 import type {
   EngineeringEntity,
   EngineeringSnapshot,
@@ -13,6 +12,7 @@ import type {
   ObjectInterpretation,
   PendingWhole,
 } from "../types.js";
+import { contextualInterpretation } from "./contextualRecognition.js";
 import {
   explicitIndependent,
   isTransformerCategory as transformer,
@@ -88,18 +88,15 @@ export function resolveOwnership({
         (parentMeaning && declaredEquipment(parentMeaning)))
     );
     const host = above ? entities.get(above) : undefined;
-    const cabinet =
-      host &&
-      ["二次屏柜", "开关柜"].includes(
-        host.standardClass?.catalogCategory ?? "",
-      );
-    const variant = parentEquipment
-      ? cabinet
-        ? (row.cabinetMemberVariant ?? row.equipmentMemberVariant)
-        : row.equipmentMemberVariant
-      : undefined;
-    if (variant) {
-      m = interpretObject(variant, parents.has(sourceId));
+    const contextual = contextualInterpretation(
+      row,
+      m,
+      parentEquipment,
+      host,
+      parents,
+    );
+    if (contextual !== m) {
+      m = contextual;
       meaning.set(sourceId, m);
     }
     const aboveCategory = above ? entities.get(above)?.category : undefined;
