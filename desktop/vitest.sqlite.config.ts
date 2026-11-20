@@ -8,7 +8,7 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./vitest.setup.ts'],
     globalSetup: ['./src/services/__tests__/sqliteGlobalSetup.ts'],
-    include: ['src/services/__tests__/substationSqlite.integration.test.ts'],
+    include: ['src/features/substation/runtime/__tests__/substationSqlite.integration.test.ts'],
     testTimeout: 60_000,
     fileParallelism: false,
     maxWorkers: 1,
