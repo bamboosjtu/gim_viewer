@@ -14,3 +14,6 @@ export * from "./mod.js";
 export * from "./ifcStep.js";
 export * from "./cbm.js";
 export * from "./sch.js";
+export * from "./xml.js";
+export * from "./std.js";
+export * from "./sld.js";

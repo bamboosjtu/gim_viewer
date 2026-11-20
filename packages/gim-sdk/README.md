@@ -4,7 +4,7 @@ GIM SDK 是仓库内的核心能力包，供桌面 Viewer 处理格式解析、�
 
 | 出口 | 能力 |
 |---|---|
-| `@gim/gim-sdk/parser` | CBM/FAM/DEV/PHM/MOD/IFC STEP/SCH 语法、原始值和诊断；不依赖五个 Core |
+| `@gim/gim-sdk/parser` | CBM/FAM/DEV/PHM/MOD/IFC STEP/SCH/STD/SLD 语法、原始值和诊断；不依赖五个 Core |
 | `@gim/gim-sdk/source` | 共享文档、来源图、引用实例、来源收集 |
 | `@gim/gim-sdk/semantic` | 中立证据的类别、整体身份和唯一主归属 |
 | `@gim/gim-sdk/geometry` | 独立物理 occurrence 目录、矩阵及表示地址索引 |

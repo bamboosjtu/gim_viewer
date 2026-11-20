@@ -1,4 +1,2 @@
-export interface DocumentParseInfo {
-  status: 'ok' | 'empty' | 'unsupported' | 'failed';
-  diagnostics: Array<{code: 'invalid-xml' | 'unsupported-root'; path: string; message: string}>;
-}
+/** Desktop compatibility entry; the parse status contract lives in gim-sdk parser. */
+export type { DocumentParseInfo } from '@gim/gim-sdk/parser';

@@ -17,6 +17,8 @@ test('new intermediary modules inherit their directory role and unknown paths fa
   assert.throws(()=>assertCapabilityInputs('projection',['src/semantic/newHelper.ts']),/newHelper/);
   assert.throws(()=>assertCapabilityInputs('projection',['src/source/newParser.ts']),/newParser/);
   assert.throws(()=>assertCapabilityInputs('engineering',['src/unowned/helper.ts']),/unowned/);
+  assert.throws(()=>assertCapabilityInputs('source',['src/unowned/helper.ts']),/unowned/);
+  assert.throws(()=>assertCapabilityInputs('parser',['src/unowned/helper.ts'],'type'),/unowned/);
   assert.doesNotThrow(()=>assertCapabilityInputs('source',['src/source/newParser.ts']));
   assert.doesNotThrow(()=>assertCapabilityInputs('parser',['src/parser/newGrammar.ts']));
   assert.throws(()=>assertCapabilityInputs('parser',['src/semantic/classify.ts']),/classify/);

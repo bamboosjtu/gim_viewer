@@ -51,6 +51,7 @@ FAM 的既有详细返回形状保留给当前 source/UI 消费者；新调用�
 - `parser/mod.ts`：MOD 格式族入口，明确区分变电 XML 与线路文本模式；线路实现仍由 `powerline-core` 共享格式源提供。
 - `parser/ifcStep.ts`：IFC STEP 实体边界、引号/括号扫描、参数拆分；空间归属、坐标解释和空间索引仍在桌面 Geometry。
 - `parser/sch.ts`：SCH 索引语法和 STD/SLD 条目分类；文件发现仍归桌面。
+- `parser/std.ts` / `parser/sld.ts`：STD 拓扑和 SLD SVG 语法、白名单净化；通过 `parser/xml.ts` 的宿主 XML 适配器注入 DOM，不在 Parser 内创建 DOMParser。
 - `parser/affineMatrix.ts`：来源矩阵可用性判断，供 DEV/PHM 和 Geometry 共用。
 - `parser/values.ts`：GIM 空值 sentinel 的纯格式判断。
 - `source/famBusinessIdentity.ts`：`resolveSubstationBusinessIdentity()` 留在 Source 层，Parser 不导出。
@@ -59,7 +60,8 @@ FAM 的既有详细返回形状保留给当前 source/UI 消费者；新调用�
 
 - `desktop/src/gim/cbmParser.ts` 的 `buildCbmTree()` 仍是来源树构建器；CBM 词法/原始字段已由 `parser/cbm.ts` 提供。
 - `desktop/src/gim/ifcSpatialParser.ts` 的 STEP 字符扫描已由 `parser/ifcStep.ts` 提供；`parseIfcModel` 的空间语义和索引不迁入 Parser。
-- STD/SLD 目前依赖 DOM；应先在宿主提供 XML 节点适配器，再把纯语法部分下沉。MOD/IFC 几何转换同理，不能在未适配前直接变成跨平台纯解析器。
+- STD/SLD 的 XML 适配器已完成：宿主只负责 DOMParser 和节点适配，语法/净化在 Parser。
+- IFC 的 STEP 词法已下沉；IFC 几何/语义的 web-ifc 适配属于宿主/adapters，不在 Parser 内直接绑定 WASM。
 
 ## 门禁
 
