@@ -129,6 +129,7 @@ export const architectureModules = [
   '../packages/gim-sdk/src/parser/substationMod.ts',
   '../packages/gim-sdk/src/parser/mod.ts',
   '../packages/gim-sdk/src/parser/ifcStep.ts',
+  '../packages/gim-sdk/src/parser/diagnostics.ts',
   '../packages/gim-sdk/src/parser/fileDevRelation.ts',
   '../packages/gim-sdk/src/parser/cbm.ts',
   '../packages/gim-sdk/src/parser/sch.ts',

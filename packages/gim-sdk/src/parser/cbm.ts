@@ -7,6 +7,8 @@
  * expansion remain source/tree-builder responsibilities.
  */
 import { normalizeEntityName } from "@gim/powerline-core/entityName.js";
+import type { ParseResult } from "./types.js";
+import { fromSourceDiagnostic, parseStatus } from "./diagnostics.js";
 import {
   parseSourceDocument,
   sourceConflicts,
@@ -50,4 +52,14 @@ export function parseCbmDocument(document: SourceDocument): CbmDocumentRecord {
 
 export function parseCbmText(text: string, path = ""): CbmDocumentRecord {
   return parseCbmDocument(parseSourceDocument(path, text));
+}
+
+/** Unified diagnostic envelope for new Browser/Validate consumers. */
+export function parseCbmResult(
+  text: string,
+  path = "",
+): ParseResult<CbmDocumentRecord> {
+  const value = parseCbmText(text, path);
+  const diagnostics = value.diagnostics.map(fromSourceDiagnostic);
+  return { value, diagnostics, status: parseStatus(diagnostics, true) };
 }

@@ -41,7 +41,7 @@ interface ParseResult<T> {
 }
 ```
 
-`ParseResult`/`ParseStatus` 是新 Parser 的统一契约；专用结果（CBM/DEV/PHM/MOD/STD/SLD）可以保留自己的 value 结构，但必须复用 `ParseDiagnostic`，用 `status`/诊断区分成功、部分成功、空输入、未知格式和不支持格式。IFC 流式扫描保留 `count + callback`，不强制物化全量结果。原始字段和行号只在 Parser 中读取并保留，不在这里解释业务含义。
+`ParseResult`/`ParseStatus` 是新 Parser 的统一契约，`parseCbmResult()`、`parseDevResult()`、`parsePhmResult()` 为已有专用结果提供同形诊断包装；专用结果（CBM/DEV/PHM/MOD/STD/SLD）可以保留自己的 value 结构，但必须复用 `ParseDiagnostic`，用 `status`/诊断区分成功、部分成功、空输入、未知格式和不支持格式。IFC 流式扫描保留 `count + callback`，不强制物化全量结果。原始字段和行号只在 Parser 中读取并保留，不在这里解释业务含义。
 
 ## 当前迁移范围
 
@@ -59,6 +59,7 @@ interface ParseResult<T> {
 - `parser/std.ts` / `parser/sld.ts`：STD 拓扑和 SLD SVG 语法、白名单净化；通过 `parser/xml.ts` 的宿主 XML 适配器注入 DOM，不在 Parser 内创建 DOMParser。
 - `parser/affineMatrix.ts`：来源矩阵可用性判断，供 DEV/PHM 和 Geometry 共用。
 - `parser/values.ts`：GIM 空值 sentinel 的纯格式判断。
+- `parser/diagnostics.ts`：把 `SourceDiagnostic` 映射为统一 `ParseDiagnostic`，并推导 `ok/partial/empty` 状态。
 - `source/famBusinessIdentity.ts`：`resolveSubstationBusinessIdentity()` 留在 Source 层，Parser 不导出。
 
 保留在各自所有者，后续按“纯函数先迁移”的顺序处理：

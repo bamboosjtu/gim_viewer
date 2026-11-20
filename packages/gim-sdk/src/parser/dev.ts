@@ -15,6 +15,8 @@ import {
   type SourceField,
 } from "@gim/powerline-core/sourceDocument.js";
 import { isUsableAffineMatrix } from "./affineMatrix.js";
+import type { ParseResult } from "./types.js";
+import { fromSourceDiagnostic, parseStatus } from "./diagnostics.js";
 import { isGimEmptyValue } from "./values.js";
 
 const identity = () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
@@ -104,5 +106,19 @@ function parseDevDocument(doc: SourceDocument): DevDocument {
     subDevices,
     isEmpty: solidModels.length === 0 && subDevices.length === 0,
     ...(diagnostics.length ? { sourceDiagnostics: diagnostics } : {}),
+  };
+}
+
+/** Unified diagnostic envelope for new Browser/Validate consumers. */
+export function parseDevResult(
+  text: string,
+  devPath: string,
+): ParseResult<DevDocument> {
+  const value = parseDev(text, devPath);
+  const diagnostics = (value.sourceDiagnostics ?? []).map(fromSourceDiagnostic);
+  return {
+    value,
+    diagnostics,
+    status: parseStatus(diagnostics, !value.isEmpty),
   };
 }

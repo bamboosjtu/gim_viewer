@@ -20,6 +20,8 @@ import {
 import { isUsableAffineMatrix } from "./affineMatrix.js";
 import { isGimEmptyValue } from "./values.js";
 
+import type { ParseResult } from "./types.js";
+import { fromSourceDiagnostic, parseStatus } from "./diagnostics.js";
 const IDENTITY_MATRIX: number[] = [
   1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1,
 ];
@@ -89,4 +91,18 @@ function parseColor(raw: string | undefined): XmlModColor | undefined {
     return undefined;
   if (a < 0 || a > 255) return undefined;
   return { r, g, b, a };
+}
+
+/** Unified diagnostic envelope for new Browser/Validate consumers. */
+export function parsePhmResult(
+  text: string,
+  phmPath: string,
+): ParseResult<PhmDocument> {
+  const value = parsePhm(text, phmPath);
+  const diagnostics = (value.sourceDiagnostics ?? []).map(fromSourceDiagnostic);
+  return {
+    value,
+    diagnostics,
+    status: parseStatus(diagnostics, !value.isEmpty),
+  };
 }
