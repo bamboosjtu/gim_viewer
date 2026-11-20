@@ -5,6 +5,7 @@ import type {
   XmlModPrimitive,
 } from "@gim/powerline-core/geometry/ir.js";
 import type { ParseDiagnostic, ParseStatus } from "./types.js";
+import { isUsableAffineMatrix } from "./affineMatrix.js";
 
 /** MOD 文件解析结果 */
 export interface XmlModDocument {
@@ -120,8 +121,18 @@ function parseEntity(
   diagnostics: ParseDiagnostic[],
   modPath: string,
 ): XmlModEntity | null {
-  const id = parseInt(node.attrs["ID"], 10);
-  if (Number.isNaN(id)) return null;
+  const idText = (node.attrs["ID"] ?? "").trim();
+  if (!/^\d+$/.test(idText)) {
+    diagnostics.push({
+      severity: "warning",
+      code: "invalid-entity-id",
+      message: "Entity ID must be a non-negative integer",
+      path: modPath,
+      ...(idText ? { rawValue: idText } : {}),
+    });
+    return null;
+  }
+  const id = Number(idText);
 
   // 当前样本 Entity.Type 全部为 "simple"，XmlModEntity.type 字段类型亦锁为 "simple" 字面量。
   // Unknown Entity.Type remains a non-fatal source fact; the parser keeps the
@@ -141,10 +152,38 @@ function parseEntity(
   const primitiveNode = node.children.find(
     (child) => child.tagName !== "TransformMatrix" && child.tagName !== "Color",
   );
-  if (!primitiveNode) return null;
-  const primitive = mapPrimitive(primitiveNode.tagName, primitiveNode.attrs);
-
-  if (!primitive) return null;
+  if (!primitiveNode) {
+    diagnostics.push({
+      severity: "warning",
+      code: "missing-primitive",
+      message: "Entity has no primitive child",
+      path: modPath,
+    });
+    return null;
+  }
+  let primitive = mapPrimitive(primitiveNode.tagName, primitiveNode.attrs);
+  if (!primitive) {
+    diagnostics.push({
+      severity: "warning",
+      code: "unsupported-primitive",
+      message: "Primitive is not supported by the host adapter",
+      path: modPath,
+      rawValue: `${primitiveNode.tagName} ${JSON.stringify(primitiveNode.attrs)}`,
+    });
+    primitive = {
+      type: "Unsupported",
+      sourceType: primitiveNode.tagName,
+      raw: primitiveNode.attrs,
+    };
+  } else if (primitive.type === "Unsupported") {
+    diagnostics.push({
+      severity: "warning",
+      code: "unsupported-primitive",
+      message: `Primitive <${primitiveNode.tagName}> is preserved as Unsupported`,
+      path: modPath,
+      rawValue: `${primitiveNode.tagName} ${JSON.stringify(primitiveNode.attrs)}`,
+    });
+  }
 
   return {
     id,
@@ -168,19 +207,32 @@ function parseTransformMatrix(entityNode: XmlModNode): {
   if (!tmNode)
     return { matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] };
   const rawValue = tmNode.attrs["Value"] || "";
-  const parts = rawValue
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s !== "");
-  const matrix = parts.map((p) => parseFloat(p));
-  if (parts.length !== 16 || matrix.some((n) => Number.isNaN(n))) {
+  // Do not filter empty tokens: a 17th empty/illegal slot is still malformed.
+  const tokens = rawValue.split(",").map((value) => value.trim());
+  const numberToken = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+  const strict =
+    tokens.length === 16 && tokens.every((token) => numberToken.test(token));
+  const matrix = strict ? tokens.map(Number) : [];
+  if (!strict || !matrix.every(Number.isFinite)) {
     return {
       matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
       rawValue,
       diagnostic: {
         severity: "warning",
         code: "invalid-source-matrix",
-        message: "TransformMatrix is not a finite 16-value column-major matrix",
+        message:
+          "TransformMatrix must contain exactly 16 complete finite numbers",
+      },
+    };
+  }
+  if (!isUsableAffineMatrix(matrix)) {
+    return {
+      matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+      rawValue,
+      diagnostic: {
+        severity: "warning",
+        code: "invalid-source-matrix",
+        message: "TransformMatrix is not a usable affine placement",
       },
     };
   }

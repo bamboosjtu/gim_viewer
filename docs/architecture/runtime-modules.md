@@ -12,6 +12,23 @@
 
 调用方可以继续从既有入口导入公开函数和类型；内部模块直接引用实际实现和小型契约，不反向依赖入口文件。Tauri 命令名、IPC 数据结构、缓存键和版本不因文件拆分而改变。
 
+## 巨型函数拆分队列
+
+以下函数仍以单函数承担多个阶段，按“输入/输出、会话守卫、资源释放”先拆纵向流程，再考虑文件搬迁。函数长度只作定位，不设行数门禁。
+
+| 归属 | 当前函数 | 先拆出的阶段 |
+|---|---|---|
+| 变电打开 | `openSubstationProject` | 暖缓存恢复、暖发布、冷回退编排 |
+| IFC 加载 | `loadAllIfcFiles` | 队列规划、逐模型装载、区域批次与终态诊断 |
+| IFC Spatial | `parseIfcModel` | 关系投影、空间对象投影、元数据/placement |
+| GLB 缓存 | `serializeDevToGlbDetailed` | 场景遍历、几何编码、诊断/预算 |
+| 工程实体 | `beginEngineeringBuild` | 输入准备、Worker 启动、发布与取消 |
+| 线路导航 | `buildLineNavigationIndex` | 来源/塔位索引、路径投影、诊断 |
+| 线路 UI | `renderLineMap` | 图层装配、交互绑定、生命周期释放 |
+| CBM 来源树 | `buildCbmTree` | 物理树、名称/DEV 关联、展示映射 |
+
+每个拆分保持现有读取次数、对象数量和结果形状；不在同一步同时移动业务目录。拆分完成后，函数入口保留或由 feature 层按纵向流程接管。
+
 ## 变电生命周期
 
 ```mermaid

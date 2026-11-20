@@ -1,3 +1,5 @@
+import type { ParseDiagnostic, ParseStatus } from "./types.js";
+
 /**
  * Host XML adapter contract for DOM-based formats (STD/SLD).
  *
@@ -32,10 +34,6 @@ export interface XmlDocument {
 export type XmlParseAdapter = (text: string, mime: string) => XmlDocument;
 
 export interface DocumentParseInfo {
-  status: "ok" | "empty" | "unsupported" | "failed";
-  diagnostics: Array<{
-    code: "invalid-xml" | "unsupported-root";
-    path: string;
-    message: string;
-  }>;
+  status: ParseStatus;
+  diagnostics: readonly ParseDiagnostic[];
 }

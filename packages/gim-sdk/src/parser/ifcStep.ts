@@ -34,8 +34,64 @@ export function scanIfcEntityBoundaries(
   text: string,
   onEntity: ScannedIfcEntityCallback,
 ): number {
-  // Assignments identify entity headers outside strings and comments. A
-  // comment is legal whitespace, including between a delimiter and a header.
+  // Collect literal spans with V8's native regexp engine, then find headers.
+  // The span list is small for normal IFC (hundreds to a few hundred thousand)
+  // and avoids a JS callback for every quote. A malformed unclosed literal
+  // falls back to the stateful scanner below.
+  // High string density (property-heavy products) makes a span array large;
+  // sample three regions so clustered strings late in the file are still found.
+  const sampleSize = 300_000;
+  const maxOffset = Math.max(0, text.length - sampleSize);
+  const literalPattern = /'(?:''|[^'])*'|"(?:[^"]*)"|\/\*[\s\S]*?\*\//g;
+  if (
+    [0, Math.floor(maxOffset / 2), maxOffset].some(
+      (offset) =>
+        (text.slice(offset, offset + sampleSize).match(literalPattern)
+          ?.length ?? 0) > 1000,
+    )
+  )
+    return scanIfcEntityBoundariesStateful(text, onEntity);
+
+  const spans: Array<[number, number]> = [];
+  // The trailing alternatives catch an unclosed quote/comment; complete
+  // literals are matched first so their contents are not scanned twice.
+  const literals = /'(?:''|[^'])*'|"(?:[^"]*)"|\/\*[\s\S]*?\*\/|['"]|\/\*/g;
+  let literal: RegExpExecArray | null;
+  while ((literal = literals.exec(text)) !== null) {
+    if (literal[0] === "'" || literal[0] === '"' || literal[0] === "/*")
+      return scanIfcEntityBoundariesStateful(text, onEntity);
+    spans.push([literal.index, literal.index + literal[0].length]);
+  }
+
+  const header = /(?:^|;|\*\/|\r?\n)\s*#(\d+)\s*=\s*([A-Za-z0-9_]+)\s*\(/g;
+  let count = 0;
+  let span = 0;
+  let match: RegExpExecArray | null;
+  while ((match = header.exec(text)) !== null) {
+    // Spans only need checking while the next candidate can overlap this
+    // header. Avoid a per-header `lastIndexOf` once all literals are behind.
+    if (
+      span < spans.length &&
+      spans[span][0] <= match.index + match[0].length
+    ) {
+      // The regexp may include a leading `;`, newline or comment terminator;
+      // validate the `#` position, not the delimiter position.
+      const headerIndex = match.index + match[0].lastIndexOf("#");
+      while (span < spans.length && spans[span][1] <= headerIndex) span++;
+      if (span < spans.length && spans[span][0] <= headerIndex) continue;
+    }
+    onEntity(Number(match[1]), match[2].toUpperCase(), header.lastIndex, -1);
+    count++;
+  }
+  if (count > 0) return count;
+  return scanIfcEntityBoundariesCharacter(text, onEntity);
+}
+
+/** Stateful fallback for malformed/unclosed literals. */
+function scanIfcEntityBoundariesStateful(
+  text: string,
+  onEntity: ScannedIfcEntityCallback,
+): number {
   const tokens = /\/\*|['"]|#(\d+)\s*=\s*([A-Za-z0-9_]+)\s*\(/g;
   let count = 0;
   let match: RegExpExecArray | null;
@@ -46,6 +102,61 @@ export function scanIfcEntityBoundaries(
     }
     onEntity(Number(match[1]), match[2].toUpperCase(), tokens.lastIndex, -1);
     count++;
+  }
+  return count;
+}
+
+/** Fallback for malformed/minified text where the header regexp finds nothing. */
+function scanIfcEntityBoundariesCharacter(
+  text: string,
+  onEntity: ScannedIfcEntityCallback,
+): number {
+  let cursor = 0;
+  let count = 0;
+  while (cursor < text.length) {
+    const hash = text.indexOf("#", cursor);
+    if (hash < 0) break;
+    let i = hash + 1;
+    while (i < text.length && /\d/.test(text[i])) i++;
+    if (i === hash + 1) {
+      cursor = hash + 1;
+      continue;
+    }
+    const expressId = Number(text.slice(hash + 1, i));
+    while (/\s/.test(text[i] || "")) i++;
+    if (text[i] !== "=") {
+      cursor = i + 1;
+      continue;
+    }
+    i++;
+    while (/\s/.test(text[i] || "")) i++;
+    const typeStart = i;
+    while (i < text.length && /[A-Za-z0-9_]/.test(text[i])) i++;
+    const ifcType = text.slice(typeStart, i).toUpperCase();
+    while (/\s/.test(text[i] || "")) i++;
+    if (!ifcType || text[i] !== "(") {
+      cursor = i + 1;
+      continue;
+    }
+    const bodyStart = ++i;
+    let depth = 1;
+    for (; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === "'" || ch === '"' || (ch === "/" && text[i + 1] === "*")) {
+        i = skipStepLiteral(text, i) - 1;
+        continue;
+      }
+      if (ch === "(") depth++;
+      else if (ch === ")") {
+        depth--;
+        if (depth === 0) break;
+      }
+    }
+    if (depth !== 0) break;
+    count++;
+    onEntity(expressId, ifcType, bodyStart, i);
+    const semi = text.indexOf(";", i);
+    cursor = semi >= 0 ? semi + 1 : i + 1;
   }
   return count;
 }

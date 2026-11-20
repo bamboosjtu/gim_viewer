@@ -163,6 +163,7 @@ export function parseStd(
       status: "failed",
       diagnostics: [
         {
+          severity: "error",
           code: "invalid-xml",
           path: sourcePath,
           message: parseError.textContent ?? "XML 解析失败",
@@ -180,9 +181,11 @@ export function parseStd(
         status: "unsupported",
         diagnostics: [
           {
+            severity: "warning",
             code: "unsupported-root",
             path: sourcePath,
             message: "SVG 合并文档没有独立 STD 拓扑",
+            rawValue: root.tagName,
           },
         ],
         version: root.getAttribute("version") || "",
@@ -196,9 +199,11 @@ export function parseStd(
       status: "unsupported",
       diagnostics: [
         {
+          severity: "warning",
           code: "unsupported-root",
           path: sourcePath,
           message: `根元素非 STD: ${root.tagName}`,
+          rawValue: root.tagName,
         },
       ],
     };

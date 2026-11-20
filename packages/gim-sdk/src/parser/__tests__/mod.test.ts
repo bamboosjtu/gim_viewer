@@ -103,6 +103,113 @@ describe("substation XML MOD parser diagnostics", () => {
       rawValue: "1,0,0",
     });
   });
+
+  it("reports id, missing and unsupported primitive failures without dropping unsupported objects", () => {
+    const entity = (
+      entityAttrs: Record<string, string>,
+      children: XmlModNode[] = [],
+    ) => ({
+      tagName: "Device",
+      attrs: {},
+      children: [
+        {
+          tagName: "Entities",
+          attrs: {},
+          children: [
+            {
+              tagName: "Entity",
+              attrs: entityAttrs,
+              children,
+            },
+          ],
+        },
+      ],
+    });
+    const mapper = () => null;
+    const invalidId = parseXmlModRoot(
+      entity({ ID: "1abc" }),
+      "MOD/id.mod",
+      mapper,
+    );
+    expect(invalidId.entities).toEqual([]);
+    expect(invalidId.diagnostics[0]).toMatchObject({
+      code: "invalid-entity-id",
+      rawValue: "1abc",
+    });
+
+    const missing = parseXmlModRoot(
+      entity({ ID: "1" }),
+      "MOD/missing.mod",
+      mapper,
+    );
+    expect(missing.entities).toEqual([]);
+    expect(missing.diagnostics[0].code).toBe("missing-primitive");
+
+    const unsupported = parseXmlModRoot(
+      entity({ ID: "1" }, [
+        { tagName: "Mystery", attrs: { A: "1" }, children: [] },
+      ]),
+      "MOD/unsupported.mod",
+      mapper,
+    );
+    expect(unsupported.entities[0].primitive).toMatchObject({
+      type: "Unsupported",
+      sourceType: "Mystery",
+      raw: { A: "1" },
+    });
+    expect(unsupported.diagnostics[0]).toMatchObject({
+      code: "unsupported-primitive",
+      rawValue: 'Mystery {"A":"1"}',
+    });
+    expect(unsupported.status).toBe("partial");
+  });
+
+  it.each([
+    ["1abc", "1abc" + ",0".repeat(15)],
+    ["Infinity", "Infinity" + ",0".repeat(15)],
+    ["NaN", "NaN" + ",0".repeat(15)],
+    ["empty slot", "1,,0" + ",0".repeat(13)],
+    ["projective", "1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,0"],
+  ])("rejects a malformed or unusable matrix token: %s", (_label, value) => {
+    const mapper = () => ({ type: "Cuboid" as const, l: 1, w: 1, h: 1 });
+    const doc = parseXmlModRoot(
+      {
+        tagName: "Device",
+        attrs: {},
+        children: [
+          {
+            tagName: "Entities",
+            attrs: {},
+            children: [
+              {
+                tagName: "Entity",
+                attrs: { ID: "1" },
+                children: [
+                  { tagName: "Cuboid", attrs: {}, children: [] },
+                  {
+                    tagName: "TransformMatrix",
+                    attrs: { Value: value },
+                    children: [],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      "MOD/strict.mod",
+      mapper,
+    );
+    expect(doc.entities[0].transformMatrix).toEqual([
+      1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1,
+    ]);
+    expect(doc.diagnostics[0]).toMatchObject({
+      severity: "warning",
+      code: "invalid-source-matrix",
+      path: "MOD/strict.mod",
+      rawValue: value,
+    });
+  });
 });
 
 describe("line MOD format family", () => {

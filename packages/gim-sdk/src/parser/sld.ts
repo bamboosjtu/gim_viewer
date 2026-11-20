@@ -136,6 +136,7 @@ export function parseSld(
       status: "failed",
       diagnostics: [
         {
+          severity: "error",
           code: "invalid-xml",
           path: sourcePath,
           message: parseError.textContent ?? "SVG 解析失败",
@@ -151,9 +152,11 @@ export function parseSld(
       status: "unsupported",
       diagnostics: [
         {
+          severity: "warning",
           code: "unsupported-root",
           path: sourcePath,
           message: `根元素非 svg: ${svg.tagName}`,
+          rawValue: svg.tagName,
         },
       ],
     };
