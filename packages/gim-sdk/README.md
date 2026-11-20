@@ -1,9 +1,10 @@
 # GIM SDK
 
-GIM SDK 是仓库内的核心能力包，供桌面 Viewer 处理来源、语义、物理目录、实体绑定和模型树投影。SDK 与应用各自维护版本，域契约使用 v1。
+GIM SDK 是仓库内的核心能力包，供桌面 Viewer 处理格式解析、来源、语义、物理目录、实体绑定和模型树投影。SDK 与应用各自维护版本，域契约使用 v1。
 
 | 出口 | 能力 |
 |---|---|
+| `@gim/gim-sdk/parser` | 格式语法、原始值/物理行和解析诊断；不依赖五个 Core |
 | `@gim/gim-sdk/source` | 共享文档、来源图、引用实例、来源收集 |
 | `@gim/gim-sdk/semantic` | 中立证据的类别、整体身份和唯一主归属 |
 | `@gim/gim-sdk/geometry` | 独立物理 occurrence 目录、矩阵及表示地址索引 |
@@ -11,7 +12,7 @@ GIM SDK 是仓库内的核心能力包，供桌面 Viewer 处理来源、语义�
 | `@gim/gim-sdk/projection` | 清册 / 工程组成 / 来源投影和成员树查询 |
 | `@gim/gim-sdk/source-adapter` | 来源证据到纯语义归一化的适配 |
 
-根出口提供这些能力的命名空间，桌面与外部消费者通过这七个公开入口消费 SDK。
+根出口提供这些能力的命名空间，桌面与外部消费者通过根入口和七个能力子路径消费 SDK。
 
 ## 构建与检查
 
@@ -20,7 +21,7 @@ GIM SDK 是仓库内的核心能力包，供桌面 Viewer 处理来源、语义�
 `npm test` 执行包内单元测试。`npm run test:consumer` 使用工作区 `tmp/` 中的隔离 Node 消费项目验证构建产物。
 
 ```js
-import {source, sourceAdapter, geometry, projection} from '@gim/gim-sdk';
+import {parser, source, sourceAdapter, geometry, projection} from '@gim/gim-sdk';
 
 // reader supplies actual entry paths and a bounded, deduplicated readText callback.
 const graph = await source.extractEngineeringSourceGraph(reader);

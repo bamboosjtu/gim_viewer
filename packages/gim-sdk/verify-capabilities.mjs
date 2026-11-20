@@ -4,12 +4,13 @@ import {fileURLToPath} from 'node:url';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 const manifest = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
-const capabilities = ['source','semantic','geometry','engineering','projection','source-adapter'];
+const capabilities = ['parser','source','semantic','geometry','engineering','projection','source-adapter'];
 
 // Directory ownership decides a module's role; every input path must resolve
 // through these prefixes and unknown paths fail closed.
 function inputRole(input) {
   const path = input.replaceAll('\\','/');
+  if (path.startsWith('src/parser/')) return 'parser';
   if (path.startsWith('src/source/')) return 'source';
   if (path.startsWith('src/semantic/catalog/')) return 'directory';
   if (path.startsWith('src/semantic/')) return 'semantic';
@@ -23,7 +24,8 @@ function inputRole(input) {
 }
 
 const allowed = {
-  source: ['source','format','shared'],
+  parser: ['parser','format','shared'],
+  source: ['parser','source','format','shared'],
   semantic: ['semantic','directory','shared'],
   // Geometry has always consumed the shared source-document readers; the tree
   // migration renames their role from 'format' to 'source', so the allowance
@@ -31,7 +33,7 @@ const allowed = {
   geometry: ['geometry','source','format','shared'],
   engineering: ['engineering','geometry','shared'],
   projection: ['projection','directory','shared'],
-  'source-adapter': ['source-adapter','source','format','shared','semantic','directory'],
+  'source-adapter': ['source-adapter','parser','source','format','shared','semantic','directory'],
 };
 
 export function assertCapabilityInputs(capability, inputs) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseFamSections, parseFamSectionsWithDiagnostics } from '../famParser.js';
+import { parseFamSections, parseFamSectionsWithDiagnostics, resolveSubstationBusinessIdentity } from '../famParser.js';
 
 describe('parseFamSections vendor-neutral contract', () => {
   it('keeps the first non-empty key candidate and the final segment as value', () => {
@@ -32,4 +32,14 @@ it('keeps physical FAM segments while applying the documented domain projections
   {line:3,segments:['Formula','Internal','A','B'],raw:'Formula=Internal=A=B'},
  ]);
  expect(parseLineFam(source).map(row=>[row.display_key,row.prop_key,row.prop_value])).toEqual([[null,'[Custom]',null],['A','B','C'],['Formula','Internal','A=B']]);
+});
+
+
+it('keeps business identity interpretation in the source layer', () => {
+  const parsed = parseFamSectionsWithDiagnostics('[属性]\n设备编码=ABC\n', 'ids.fam');
+  expect(resolveSubstationBusinessIdentity(parsed.properties)).toMatchObject({
+    value: 'ABC',
+    kind: '设备编码',
+    source: { path: 'ids.fam', key: '设备编码', section: '属性' },
+  });
 });

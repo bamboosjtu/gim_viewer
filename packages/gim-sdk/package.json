@@ -36,6 +36,11 @@
       "gim-source": "./src/projection/projection.ts",
       "import": "./dist/projection/projection.js"
     },
+    "./parser": {
+      "types": "./src/parser/parser.ts",
+      "gim-source": "./src/parser/parser.ts",
+      "import": "./dist/parser/parser.js"
+    },
     "./source-adapter": {
       "types": "./src/adapters/semanticAdapter.ts",
       "gim-source": "./src/adapters/semanticAdapter.ts",

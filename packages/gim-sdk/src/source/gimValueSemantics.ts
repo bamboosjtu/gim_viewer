@@ -9,22 +9,9 @@
 export type GimKv =
   Readonly<Record<string, unknown>> | ReadonlyMap<string, unknown>;
 
-/** GIM 中表示“没有有效值”的约定 sentinel（比较前 trim 且不区分大小写）。 */
-export const GIM_EMPTY_SENTINELS = Object.freeze(
-  new Set(["", "/", "-", "null"]),
-);
+export { GIM_EMPTY_SENTINELS, isGimEmptyValue } from "../parser/values.js";
 
-/**
- * 判断值是否为 GIM 空值。
- *
- * 注意 0、0.0 和 false 是有效业务值，不能按 JavaScript truthiness 过滤。
- */
-export function isGimEmptyValue(value: unknown): boolean {
-  if (value === null || value === undefined) return true;
-  if (typeof value === "string")
-    return GIM_EMPTY_SENTINELS.has(value.trim().toLowerCase());
-  return false;
-}
+import { isGimEmptyValue } from "../parser/values.js";
 
 /**
  * `kv instanceof Map` 会把联合类型收窄成 `ReadonlyMap & Map<any, any>`，

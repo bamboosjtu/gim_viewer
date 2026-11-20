@@ -100,6 +100,11 @@ export const architectureModules = [
   '../packages/gim-sdk/src/semantic/types.ts',
   '../packages/gim-sdk/src/adapters/objectEvidence.ts',
   '../packages/gim-sdk/src/source/buildSources.ts',
+  '../packages/gim-sdk/src/parser/parser.ts',
+  '../packages/gim-sdk/src/parser/types.ts',
+  '../packages/gim-sdk/src/parser/values.ts',
+  '../packages/gim-sdk/src/parser/fam.ts',
+  '../packages/gim-sdk/src/source/famBusinessIdentity.ts',
   '../packages/gim-sdk/src/source/source.ts',
   '../packages/gim-sdk/src/source/famParser.ts',
   // The SDK tree migration adopted every production module of the package.

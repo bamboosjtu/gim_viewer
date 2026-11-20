@@ -10,15 +10,16 @@ cpSync(join(root,'dist'),join(installed,'dist'),{recursive:true});
 cpSync(join(root,'package.json'),join(installed,'package.json'));
 const manifest=JSON.parse(readFileSync(join(installed,'dist/build-manifest.json'),'utf8'));
 const packageMetadata=JSON.parse(readFileSync(join(installed,'package.json'),'utf8'));
-const publicEntries=['.','./source','./semantic','./geometry','./engineering','./projection','./source-adapter'];
+const publicEntries=['.','./parser','./source','./semantic','./geometry','./engineering','./projection','./source-adapter'];
 if(JSON.stringify(Object.keys(packageMetadata.exports).sort())!==JSON.stringify(publicEntries.sort()))
   throw Error('Expected exactly the public SDK entry points');
-if(manifest.version!==packageMetadata.version||Object.keys(manifest.capabilities??{}).length!==6)
+if(manifest.version!==packageMetadata.version||Object.keys(manifest.capabilities??{}).length!==7)
   throw Error('SDK build manifest is stale or lacks capability verification. Run the SDK build first.');
 if(manifest.runtimeExternals.length)throw Error('SDK consumer needs external runtime dependencies');
 writeFileSync(join(target,'consumer.mjs'),`
 import assert from 'node:assert/strict';
 import * as sdk from '@gim/gim-sdk';
+import * as parser from '@gim/gim-sdk/parser';
 import * as source from '@gim/gim-sdk/source';
 import * as semantic from '@gim/gim-sdk/semantic';
 import * as geometry from '@gim/gim-sdk/geometry';
@@ -27,9 +28,10 @@ import * as projection from '@gim/gim-sdk/projection';
 import * as sourceAdapter from '@gim/gim-sdk/source-adapter';
 await assert.rejects(import('@gim/gim-sdk/engineering/classify.js'),{code:'ERR_PACKAGE_PATH_NOT_EXPORTED'});
 assert.equal(globalThis.window,undefined);
-const entrypoints={source,semantic,geometry,engineering,projection,sourceAdapter};
+const entrypoints={parser,source,semantic,geometry,engineering,projection,sourceAdapter};
 assert.deepEqual(Object.keys(sdk).sort(),Object.keys(entrypoints).sort());
 for(const [name,api] of Object.entries(entrypoints))assert.deepEqual({...sdk[name]},{...api});
+assert.equal(typeof parser.parseFamDocument,'function');
 assert.equal(typeof source.createEntryResolver,'function');
 assert.equal(typeof source.parseFamSectionsWithDiagnostics,'function');
 assert.ok(source.ENGINEERING_EVIDENCE_FIELDS.length);
@@ -57,7 +59,7 @@ assert.equal(view.inventory.rowsByEntity.size,1);assert.equal(view.composition.r
 assert.equal(projection.engineeringQuery(snapshot).tree(snapshot.entities[0].id).nodes.size,2);
 const controller=new AbortController();controller.abort();
 await assert.rejects(source.extractEngineeringSourceGraph({paths:Object.keys(text),readText:async path=>text[path]},{signal:controller.signal}),error=>error.name==='AbortError');
-console.log(JSON.stringify({contract:'gim-sdk-consumer-v1',capabilities:5,entrypoints:7,entities:1,members:2,physicalRoots:1,views:3,windowAvailable:false}));
+console.log(JSON.stringify({contract:'gim-sdk-consumer-v1',capabilities:5,entrypoints:8,entities:1,members:2,physicalRoots:1,views:3,windowAvailable:false}));
 `);
 const child=spawnSync(process.execPath,['consumer.mjs'],{cwd:target,encoding:'utf8',windowsHide:true,
  env:{...process.env,TEMP:target,TMP:target,TMPDIR:target}});

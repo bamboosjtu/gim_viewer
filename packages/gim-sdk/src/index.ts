@@ -1,3 +1,4 @@
+export * as parser from "./parser/parser.js";
 export * as source from "./source/source.js";
 export * as semantic from "./semantic/semantic.js";
 export * as geometry from "./geometry/geometry.js";

@@ -4,7 +4,7 @@ import {assertCapabilityInputs,verifyCapabilities} from './verify-capabilities.m
 
 test('real capability bundles satisfy closure boundaries', async () => {
   const capabilities=await verifyCapabilities();
-  assert.equal(Object.keys(capabilities).length,6);
+  assert.equal(Object.keys(capabilities).length,7);
   assert.ok(capabilities.source.inputs>0);
 });
 test('transitive imports of policy fail even through a format or projection adapter', () => {
@@ -18,4 +18,6 @@ test('new intermediary modules inherit their directory role and unknown paths fa
   assert.throws(()=>assertCapabilityInputs('projection',['src/source/newParser.ts']),/newParser/);
   assert.throws(()=>assertCapabilityInputs('engineering',['src/unowned/helper.ts']),/unowned/);
   assert.doesNotThrow(()=>assertCapabilityInputs('source',['src/source/newParser.ts']));
+  assert.doesNotThrow(()=>assertCapabilityInputs('parser',['src/parser/newGrammar.ts']));
+  assert.throws(()=>assertCapabilityInputs('parser',['src/semantic/classify.ts']),/classify/);
 });
