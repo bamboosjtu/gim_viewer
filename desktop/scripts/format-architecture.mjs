@@ -81,6 +81,7 @@ export const architectureModules = [
   'src/services/substationDocumentRuntime.ts',
   'src/services/substationIfcRuntime.ts',
   'src/services/substationIfcSource.ts',
+  'src/services/substationWarmCore.ts',
   'src/services/substationColdCore.ts',
   'src/services/substationWarmAttempt.ts',
   'src/services/substationRuntime.ts',
@@ -183,6 +184,7 @@ export const architectureModules = [
   '../packages/gim-sdk/src/source/sourceDocument.ts',
   '../packages/gim-sdk/src/source/sourceDocuments.ts',
   '../packages/gim-sdk/src/source/sourceEvidence.ts',
+  '../packages/gim-sdk/src/source/sourceDocumentReader.ts',
   '../packages/gim-sdk/src/source/sourceFamilyIndex.ts',
   '../packages/gim-sdk/src/source/sourceGraph.ts',
 ];

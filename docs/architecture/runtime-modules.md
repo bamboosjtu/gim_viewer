@@ -12,13 +12,17 @@
 
 调用方可以继续从既有入口导入公开函数和类型；内部模块直接引用实际实现和小型契约，不反向依赖入口文件。Tauri 命令名、IPC 数据结构、缓存键和版本不因文件拆分而改变。
 
+## 暖启动核心
+
+缓存校验通过后，`substationWarmCore.publishSubstationWarmCore()` 负责恢复索引、物化工程来源文件并发布 core navigation；`substationRuntime` 只保留工作流协调、冷回退和后台阶段接线。SessionScope 守卫、迟到会话返回和失败释放仍由 Runtime 统一处理。
+
 ## 巨型函数拆分队列
 
 以下函数仍以单函数承担多个阶段，按“输入/输出、会话守卫、资源释放”先拆纵向流程，再考虑文件搬迁。函数长度只作定位，不设行数门禁。
 
 | 归属 | 当前函数 | 先拆出的阶段 |
 |---|---|---|
-| 变电打开 | `openSubstationProject` | 暖缓存恢复、暖发布、冷回退编排 |
+| 变电打开 | `openSubstationProject` | 暖缓存恢复已移至 `substationWarmCore`；剩余冷回退编排与后台接线 |
 | IFC 加载 | `loadAllIfcFiles` | 队列规划、逐模型装载、区域批次与终态诊断 |
 | IFC Spatial | `parseIfcModel` | 关系投影、空间对象投影、元数据/placement |
 | GLB 缓存 | `serializeDevToGlbDetailed` | 场景遍历、几何编码、诊断/预算 |

@@ -65,4 +65,4 @@ semantic/
 1. 把 `ownershipResolver` 的设备/机柜/neutral-set 分支拆成策略函数，保留同一阶段入口。
 2. 提取 `entityFactory`（identity、boundary、classification details）和 `membershipResolver`。
 3. 已提取 `sourceTypeCandidates`、`standardClassResolver`、`componentResolver`、`materialResolver` 和 `contextualRecognition`；下一步拆 `objectEvidenceAdapter` 与角色/候选组装，优先保持 83 例 parity。
-4. `extractEngineeringSourceGraph()` 的 FAM 归属/读取已抽到 `sourceFamilyIndex`；继续拆遍历调度与 CBM 物理作用域，避免重复文档读取。
+4. `extractEngineeringSourceGraph()` 的 FAM 归属/读取已抽到 `sourceFamilyIndex`，文档读取集中到 `SourceDocumentReader` 的 promise 缓存；继续评估引用解析与 CBM/DEV 遍历拆分，读取次数以测试锁定。

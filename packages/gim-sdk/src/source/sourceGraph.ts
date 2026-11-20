@@ -1,5 +1,5 @@
 import { engineeringSourceRecords } from "../shared/sourceRecordSelectors.js";
-import { parseSourceDocument, type SourceDocument } from "./sourceDocuments.js";
+import type { SourceDocument } from "./sourceDocuments.js";
 import {
   sourceScalar,
   sourceReferenceFields,
@@ -17,6 +17,7 @@ import type { ObjectNameEvidence, SourceAlias } from "../shared/contracts.js";
 import type { SourceProperty, SourceRecord } from "./sourceEvidence.js";
 import { cbmRelationKind } from "./sourceComposition.js";
 import { SourceFamilyIndex } from "./sourceFamilyIndex.js";
+import { SourceDocumentReader } from "./sourceDocumentReader.js";
 
 export interface SourceFileReader {
   /** Actual archive paths, including files not reached by CBM GUID references. */
@@ -121,22 +122,10 @@ export async function extractEngineeringSourceGraph(
     });
     return target;
   }
-  const cache = new Map<string, Promise<SourceDocument>>();
-  function document(path: string): Promise<SourceDocument> {
-    let promise = cache.get(path);
-    if (!promise) {
-      promise = (
-        files.readDocument
-          ? files.readDocument(path)
-          : files.readText(path).then((text) => parseSourceDocument(path, text))
-      ).then((doc) => {
-        result.documents.push(doc);
-        return doc;
-      });
-      cache.set(path, promise);
-    }
-    return promise;
-  }
+  const reader = new SourceDocumentReader(files);
+  result.documents = reader.documents;
+  const document = (path: string): Promise<SourceDocument> =>
+    reader.document(path);
   const ambiguousFields = new WeakMap<SourceDocument, Set<string>>();
   const ambiguous = (
     doc: SourceDocument,
