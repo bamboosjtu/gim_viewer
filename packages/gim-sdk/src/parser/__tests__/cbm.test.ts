@@ -13,4 +13,10 @@ describe("independent CBM source-record parser", () => {
     expect(record.properties["SYSTEMNAME1"]).toBe("间隔一");
     expect(record.fields).toHaveLength(4);
   });
+
+  it("does not synthesize an entity name from a missing field", () => {
+    const record = parseCbmText("OBJECTMODELPOINTER=unit.dev", "CBM/empty.cbm");
+    expect(record.entityName).toBe("");
+    expect(record.objectModelPointer).toBe("unit.dev");
+  });
 });
