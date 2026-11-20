@@ -102,6 +102,8 @@ export const architectureModules = [
   '../packages/gim-sdk/src/projection/sourceProjection.ts',
   '../packages/gim-sdk/src/semantic/classify.ts',
   '../packages/gim-sdk/src/semantic/normalize.ts',
+  '../packages/gim-sdk/src/semantic/normalization/prepareEvidence.ts',
+  '../packages/gim-sdk/src/semantic/recognition/evidenceReader.ts',
   '../packages/gim-sdk/src/semantic/policyFingerprints.ts',
   '../packages/gim-sdk/src/semantic/recognizeSource.ts',
   '../packages/gim-sdk/src/semantic/sourceTypePolicy.ts',

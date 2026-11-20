@@ -9,8 +9,9 @@ import {
   type SourceRecord,
 } from "../shared/sourceRecord.js";
 import aliases from "./catalog/sourceCompatibilityPolicy.json";
-import type { EvidenceValue, ObjectEvidence } from "./types.js";
+import type { ObjectEvidence } from "./types.js";
 import { ENGINEERING_RULES_VERSION } from "./classify.js";
+import { createValueReader } from "./recognition/evidenceReader.js";
 import {
   RECOGNITION_LABELS as ENGINEERING_CATEGORY_LABELS,
   directoryRecognitionCode,
@@ -95,73 +96,9 @@ function keywordEvidence(evidence: KeywordSourceEvidence): string {
   return text;
 }
 
-const empty = new Set(["", "-", "/", "-100", "软件自动生成"]);
 // Only classification fields enter this transient index; raw properties stay intact.
 export { ENGINEERING_EVIDENCE_FIELDS };
 export type { SourceRecord, SourceProperty } from "../shared/sourceRecord.js";
-const recognitionKeys = new Set(ENGINEERING_EVIDENCE_FIELDS);
-function createValueReader(
-  record: SourceRecord,
-): (labels: readonly string[], skipDevFields?: boolean) => EvidenceValue[] {
-  const byKey = new Map<string, number[]>();
-  record.properties.forEach((property, index) => {
-    const keys = property.keys;
-    if (!keys) return;
-    for (const rawKey of keys) {
-      const key = rawKey.toUpperCase();
-      if (!recognitionKeys.has(key)) continue;
-      if (empty.has(property.value.trim())) continue;
-      const positions = byKey.get(key) ?? [];
-      if (positions[positions.length - 1] !== index) positions.push(index);
-      byKey.set(key, positions);
-    }
-  });
-  const evidence = new Map<number, EvidenceValue>();
-  return (labels, skipDevFields = false) => {
-    const matched = labels.flatMap(
-      (label) => byKey.get(label.toUpperCase()) ?? [],
-    );
-    if (!matched.length) return [];
-    const positions =
-      labels.length === 1
-        ? matched
-        : [...new Set(matched)].sort((a, b) => a - b);
-    const filtered = skipDevFields
-      ? positions.filter(
-          (index) =>
-            !/\.dev$/i.test(
-              record.properties[index].path ??
-                record.properties[index].source ??
-                "",
-            ),
-        )
-      : positions;
-    return filtered.map((index) => {
-      const p = record.properties[index];
-      let value = evidence.get(index);
-      if (!value) {
-        value = {
-          value: p.value,
-          evidenceId: JSON.stringify([
-            record.id,
-            p.path ?? p.source,
-            p.line ?? index,
-            p.keys,
-          ]),
-          context: {
-            section: p.section,
-            container: p.containerId ?? p.source,
-            rawContainerName: p.rawContainerName,
-            applicability: p.applicability,
-          },
-        };
-        evidence.set(index, value);
-      }
-      return value;
-    });
-  };
-}
-
 /** Format labels and type enums end here; the engineering core does not read them. */
 export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
   return adaptSourceEvidence(record, {
