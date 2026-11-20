@@ -65,6 +65,6 @@ FAM 的既有详细返回形状保留给当前 source/UI 消费者；新调用�
 
 ## 门禁
 
-- `verify-capabilities.mjs` 为 `parser` 分配独立角色，并拒绝 Parser 导入 Core。
+- `verify-capabilities.mjs` 为 `parser` 分配独立角色，并同时检查运行时和类型依赖闭包；未知 `src/` 目录直接失败，Parser 导入 Core 被拒绝。
 - `test-consumer.mjs` 检查根入口与 `parser` 子路径在无 `window` 环境可用。
 - 新增 Parser 纯函数必须配套 `parser/__tests__/` 测试和格式/类型检查。
