@@ -85,6 +85,7 @@ EngineeringEntity         GeometryAsset
 |---|---|
 | 分层、依赖与边界检查 | [分层与依赖](architecture/layers.md) |
 | Parser 基础层与迁移边界 | [Parser](architecture/parser.md) |
+| Semantic 阶段拆分与约束 | [Semantic Core](architecture/semantic.md) |
 | 源身份、打开、会话、首开与关闭 | [打开与生命周期](architecture/lifecycle.md) |
 | 存储面、缓存版本与失效 | [缓存域](architecture/caches.md) |
 | 工程实体 Worker、三视图发布 | [工程实体运行时](architecture/engineering-runtime.md) |
