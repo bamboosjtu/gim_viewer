@@ -5,6 +5,7 @@
  * the platform DOM and keeps the existing desktop export surface.
  */
 import { parseXmlModRoot, type XmlModDocument, type XmlModNode } from '@gim/gim-sdk/parser';
+import { mapXmlModPrimitive } from './xmlModPrimitiveAdapter.js';
 
 export type { XmlModDocument, XmlModNode } from '@gim/gim-sdk/parser';
 export { parseXmlModRoot } from '@gim/gim-sdk/parser';
@@ -16,7 +17,7 @@ export function parseXmlMod(text: string, modPath: string): XmlModDocument {
   if (errorNode) {
     throw new Error(`XML parse error in ${modPath}: ${errorNode.textContent?.slice(0, 200) ?? ''}`);
   }
-  return parseXmlModRoot(toXmlModNode(doc.documentElement), modPath);
+  return parseXmlModRoot(toXmlModNode(doc.documentElement), modPath, mapXmlModPrimitive);
 }
 
 function toXmlModNode(node: Element): XmlModNode {

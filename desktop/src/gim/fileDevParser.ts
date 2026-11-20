@@ -1,92 +1,51 @@
+/**
+ * Desktop FileDevRelation source adapter.
+ *
+ * Text parsing (vendor spellings/declarations) lives in the gim-sdk parser.
+ * This layer owns file discovery, path resolution, duplicate-basename policy
+ * and runtime model IDs.
+ */
 import type { FileDevEntry } from './types.js';
-import {parseKeyValue,keyValueDiagnostics} from '@gim/powerline-core/kvParser.js';
-import { parseBoundedCount } from '@gim/powerline-core/parserLimits.js';
-import {getFileEntryResolver} from './entryResolver.js';
+import { parseFileDevRelationText } from '@gim/gim-sdk/parser';
+import { getFileEntryResolver } from './entryResolver.js';
 import { createIfcModelId } from './modelIdentity.js';
 import { resolveIfcPath } from './gimIndexer.js';
-import { getCaseInsensitiveKv, getFirstNonEmptyKv, isGimEmptyValue } from './gimValueSemantics.js';
+import { logger } from '../utils/logger.js';
 
-/**
- * 解析 FileDevRelation.cbm。
- *
- * 现实样本存在三种互不等价的写法：
- * - JinQu：`FILE.NUM` + 偶数 FILE 设备列表、奇数 FILE 的 `IFC` 配对；
- * - Bentley：`FILES.NUM` + `FILEn.DEVS.NUM`，NAME 直接是 DGN 图纸名；
- * - BIMBase：`FILE.NUM` + `FILEn.DEV.NUM`，设备列表和 `FILEn.IFC` 在同一条目。
- *
- * 解析器不能依赖奇偶位置，也不能把 DGN 图纸伪装成 IFC 模型。没有实际
- * `.ifc` 目标时保留 `ifcFile/modelId` 为空，调用方仍可使用 ifcName 和设备列表
- * 作为“来源图纸”证据。
- */
 export async function parseFileDevRelation(files: Map<string, File>): Promise<FileDevEntry[]> {
-  const path=getFileEntryResolver(files)('FileDevRelation.cbm');
-  const f=path?files.get(path):undefined;
+  const path = getFileEntryResolver(files)('FileDevRelation.cbm');
+  const f = path ? files.get(path) : undefined;
   if (!f) return [];
-  const kv = parseKeyValue(await f.text(),path??f.name);
-  const diagnostics=keyValueDiagnostics(kv);
-  const countKey = !isGimEmptyValue(getCaseInsensitiveKv(kv, 'FILES.NUM')) ? 'FILES.NUM' : 'FILE.NUM';
-  const num = parseBoundedCount(getFirstNonEmptyKv(kv, ['FILES.NUM', 'FILE.NUM']), countKey);
+  const parsed = parseFileDevRelationText(await f.text(), path ?? f.name);
+  const records = parsed.value?.entries ?? [];
   const entries: FileDevEntry[] = [];
-
-  // 只有在“偶数条目全部带设备数、奇数条目全部只带 IFC”时，才判定为
-  // JinQu 的奇偶配对。BIMBase 的 FILE0 设备 + FILE1..N IFC 不能误配。
-  const isLegacyPair = countKey === 'FILE.NUM' && num > 1 && num % 2 === 0
-    && Array.from({ length: num / 2 }, (_, pair) => pair * 2).every((i) => hasDeviceCount(kv, i))
-    && Array.from({ length: num / 2 }, (_, pair) => pair * 2 + 1).every((i) => hasNonEmptyKv(kv, `FILE${i}.IFC`))
-    && Array.from({ length: num / 2 }, (_, pair) => pair * 2 + 1).every((i) => !hasDeviceCount(kv, i)
-      && !hasNonEmptyKv(kv, `FILE${i}.NAME`));
-
-  const appendEntry = (i: number, pairedIfc: string = ''): void => {
-    const sourceDiagnostics=diagnostics.filter(row=>row.field.startsWith(`FILE${i}.`));
-    const rawName = getFirstNonEmptyKv(kv, [`FILE${i}.NAME`]);
-    const directIfc = getFirstNonEmptyKv(kv, [`FILE${i}.IFC`]);
-    const devKey = hasDeviceCount(kv, i)
-      ? (hasNonEmptyKv(kv, `FILE${i}.DEVS.NUM`) ? `FILE${i}.DEVS.NUM` : `FILE${i}.DEV.NUM`)
-      : null;
-    const devNum = devKey ? parseBoundedCount(getFirstNonEmptyKv(kv, [devKey]), devKey) : 0;
-    const deviceCbms: string[] = [];
-    for (let j = 0; j < devNum; j++) {
-      // 当前样本的子键统一为 DEVj；保留 DEVSj 兼容少数导出器变体。
-      const dev = getFirstNonEmptyKv(kv, [`FILE${i}.DEV${j}`, `FILE${i}.DEVS${j}`]);
-      if (dev) deviceCbms.push(dev);
-    }
-
-    // NAME 带 .ifc 时可直接作为 IFC 来源；NAME 带 .dgn 只作为图纸名，
-    // 不填 ifcFile，避免后续懒加载把 DGN 名称当成 IFC modelId。
-    const nameAsIfc = /\.ifc$/i.test(rawName) ? rawName : '';
-    const ifcFile = directIfc || (isGimEmptyValue(pairedIfc) ? '' : pairedIfc.trim()) || nameAsIfc;
-    const ifcName = rawName.replace(/\.(?:ifc|dgn)$/i, '') || ifcFile.replace(/\.ifc$/i, '');
-    const resolvedIfc = /\.ifc$/i.test(ifcFile) ? resolveIfcPath(files, ifcFile) : { kind: 'not-found' as const };
-    // 只有实际存在且唯一解析到的 IFC 才生成 runtime hash；缺失或重复 basename
-    // 不猜测 modelId。ifcFile 仍保留原始引用，供来源面板诊断，但不会进入
-    // deviceToIfcFile，也不会让缓存入库引用一个不存在的模型。
-    const referenceConflict=sourceDiagnostics.some(row=>row.field===`FILE${i}.IFC`||(!directIfc&&row.field===`FILE${i}.NAME`));
-    const modelId = !referenceConflict&&resolvedIfc.kind === 'resolved'
-      ? createIfcModelId(resolvedIfc.path)
-      : '';
+  for (const record of records) {
+    const resolvedIfc = /\.ifc$/i.test(record.ifcFile)
+      ? resolveIfcPath(files, record.ifcFile)
+      : { kind: 'not-found' as const };
+    const referenceConflict = record.diagnostics.some(
+      (row) => row.field === `FILE${record.index}.IFC` || row.field === `FILE${record.index}.NAME`,
+    );
+    const modelId =
+      !referenceConflict && resolvedIfc.kind === 'resolved'
+        ? createIfcModelId(resolvedIfc.path)
+        : '';
     if (resolvedIfc.kind === 'ambiguous') {
-      console.warn('[GIM] FileDevRelation IFC 引用存在重复 basename，跳过模型关联:', ifcFile, resolvedIfc.candidates);
+      logger.warn(
+        '[GIM] FileDevRelation IFC 引用存在重复 basename，跳过模型关联:',
+        record.ifcFile,
+        resolvedIfc.candidates,
+      );
     }
-    // 有 NAME、IFC 或设备列表任一事实就保留条目；不要静默丢掉“仅 IFC 清单”行。
-    if (ifcName || ifcFile || devKey || sourceDiagnostics.length) {
-      entries.push({ sourceDesignFile: rawName, ifcName, ifcFile, modelId, deviceCount: devNum, deviceCbms,
-        ...(sourceDiagnostics.length?{sourceDiagnostics}:{}), });
-    }
-  };
-
-  if (isLegacyPair) {
-    for (let i = 0; i < num; i += 2) appendEntry(i, getFirstNonEmptyKv(kv, [`FILE${i + 1}.IFC`]));
-  } else {
-    for (let i = 0; i < num; i++) appendEntry(i);
+    entries.push({
+      sourceDesignFile: record.name,
+      ifcName: record.ifcName,
+      ifcFile: record.ifcFile,
+      modelId,
+      deviceCount: record.deviceCount,
+      deviceCbms: record.deviceCbms,
+      ...(record.diagnostics.length ? { sourceDiagnostics: [...record.diagnostics] } : {}),
+    });
   }
   return entries;
-}
-
-function hasDeviceCount(kv: Record<string, string>, index: number): boolean {
-  return hasNonEmptyKv(kv, `FILE${index}.DEVS.NUM`)
-    || hasNonEmptyKv(kv, `FILE${index}.DEV.NUM`);
-}
-
-function hasNonEmptyKv(kv: Record<string, string>, key: string): boolean {
-  return !isGimEmptyValue(getCaseInsensitiveKv(kv, key));
 }

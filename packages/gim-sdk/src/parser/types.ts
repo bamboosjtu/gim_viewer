@@ -8,6 +8,9 @@
 
 export type ParseDiagnosticSeverity = "error" | "warning" | "info";
 
+/** Parse lifecycle shared by streaming and document parsers. */
+export type ParseStatus = "ok" | "partial" | "empty" | "unsupported" | "failed";
+
 export interface ParseDiagnostic {
   severity: ParseDiagnosticSeverity;
   /** Stable machine-readable code, scoped to the parser that emitted it. */
@@ -17,11 +20,15 @@ export interface ParseDiagnostic {
   path?: string;
   /** One-based physical line in the source, when known. */
   line?: number;
+  /** Original value when the diagnostic refers to a bad field. */
+  rawValue?: string;
 }
 
 export interface ParseResult<T> {
   value: T | null;
   diagnostics: readonly ParseDiagnostic[];
+  /** Optional for compatibility; new parsers should set it. */
+  status?: ParseStatus;
 }
 
 export interface Parser<TInput, TOutput> {

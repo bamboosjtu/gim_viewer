@@ -12,6 +12,7 @@ import aliases from "./catalog/sourceCompatibilityPolicy.json";
 import type { ObjectEvidence } from "./types.js";
 import { ENGINEERING_RULES_VERSION } from "./classify.js";
 import { createValueReader } from "./recognition/evidenceReader.js";
+import { sourceTypeCandidates } from "./recognition/sourceTypeCandidates.js";
 import {
   RECOGNITION_LABELS as ENGINEERING_CATEGORY_LABELS,
   directoryRecognitionCode,
@@ -29,7 +30,6 @@ import {
   applyTypeDefaults,
   cabinetModelType,
   canonicalSourceType,
-  ifcModelType,
   isTypeDeclaration,
   roadPositionType,
 } from "./sourceTypePolicy.js";
@@ -119,82 +119,21 @@ export function adaptSourceEvidence(
     equipmentMember = false,
     cabinetMember = false,
   ): ObjectEvidence => {
-    const rawType = record.source_type;
-    const sourceTypeEvidenceId = `${record.id}:source_type:${rawType}`;
-    const type = completeNeutralAssembly
-      ? "NeutralPointEquipment"
-      : canonicalSourceType(rawType);
-    const devTypes: Readonly<Record<string, string>> = aliases.dev;
-    const ifcTypes: Readonly<Record<string, string>> = aliases.ifc;
-    const standardTypes = standardTerms(type);
-    const standardCategories = [
-      ...new Set(standardTypes.map((item) => item.recognitionCode)),
-    ];
-    const devCategory =
-      standardCategories.length === 1
-        ? standardCategories[0]
-        : (directoryRecognitionCode(type) ?? devTypes[type.toLowerCase()]);
-    const categoryValue = (value: string): string => {
-      const standard = standardTerms(value);
-      if (standard.length)
-        return standard.length === 1 ? standard[0].recognitionCode : "U-OBJECT";
-      const direct = directoryRecognitionCode(value);
-      const alias =
-        (aliases.structured as Record<string, string>)[value.trim()] ??
-        devTypes[value.toLowerCase()] ??
-        ifcTypes[value.toUpperCase()];
-      if (direct) return direct;
-      if (alias) return alias === "E01" ? "E-T" : alias;
-      // Model/spec strings are free text ("220kV变压器模型04_散热器"), not a
-      // category fact. Structured fields accept exact mappings only.
-      return "U-OBJECT";
-    };
-    const typeFields = [
-      "TYPE",
-      "类型",
-      "模型分类名称",
-      "装置名称",
-      "设备类型",
-      "设备类别",
-      "设备分类",
-      "材料类型",
-      "材料类别",
-      "构件类型",
-      "构件类别",
-      "DEVICETYPE",
-      "EQUIPMENTTYPE",
-      "MATERIALTYPE",
-      "CONSTRUCTIONTYPE",
-      "MATERIALSUBTYPE",
-      "EQUIPMENTSUBTYPE",
-      "材料子类",
-      "设备子类",
-      "设计类型",
-      "IFC.OBJECTTYPE",
-      "绝缘方式",
-    ];
-    const typeProperties = values(typeFields);
-    const modelKeys = ["屏柜型号", "设备型号", "型号", "MODEL", "MODELSPEC"];
-    if (record.track === "ifc")
-      modelKeys.push("类型名称", "族与类型", "族名称", "结构材料", "结构材质");
-    const typeModels = values(modelKeys).flatMap((p) => {
-      const value = standardTerms(p.value).length
-        ? p.value
-        : (cabinetModelType(p.value) ??
-          (record.track === "ifc" ? ifcModelType(type, p.value) : undefined));
-      return value ? [{ ...p, value }] : [];
-    });
-    const fineCabinetModel = typeModels.some(
-      (model) =>
-        model.value === "MeasurementAndControlCabinet" ||
-        model.value === "ProtectionCabinet",
-    );
-    const predefinedCategories = values(["IFC.PredefinedType"]).flatMap((p) => {
-      const value = (aliases.ifcPredefined as Record<string, string>)[
-        `${type}.${p.value.trim().toUpperCase()}`
-      ];
-      return value ? [{ ...p, value }] : [];
-    });
+    const {
+      rawType,
+      sourceTypeEvidenceId,
+      type,
+      devTypes,
+      ifcTypes,
+      standardTypes,
+      devCategory,
+      typeFields,
+      typeProperties,
+      typeModels,
+      fineCabinetModel,
+      predefinedCategories,
+      categoryValue,
+    } = sourceTypeCandidates(record, values, completeNeutralAssembly);
     const dictionary = sourceVocabulary.keywordDictionary;
     const keywordEntries = dictionary.entries as Record<
       string,

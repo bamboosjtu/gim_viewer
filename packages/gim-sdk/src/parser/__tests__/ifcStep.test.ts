@@ -51,4 +51,17 @@ describe("independent IFC STEP lexical parser", () => {
       "#4",
     ]);
   });
+
+  it("skips quoted and commented headers and finds the record after a comment", () => {
+    const text = "#1=IFCTEXT('it''s a label; #91=IFCWALL(example)');" +
+      "/* #92=IFCWALL(comment); */ #2=IFCLOCALPLACEMENT($,/* ) , */#3);" +
+      '#3=IFCBINARY("remark; #93=IFCWALL(example)");';
+    const entities: Array<ReturnType<typeof materializeIfcEntity>> = [];
+    expect(scanIfcEntityBoundaries(text, (expressId, ifcType, bodyStart, bodyEnd) => {
+      entities.push(materializeIfcEntity(text, { expressId, ifcType, bodyStart, bodyEnd }));
+    })).toBe(3);
+    expect(entities.map(entity => entity.expressId)).toEqual([1, 2, 3]);
+    expect(entities[0].args).toEqual(["'it''s a label; #91=IFCWALL(example)'"]);
+    expect(entities[1].args).toEqual(["$", "#3"]);
+  });
 });

@@ -13,6 +13,7 @@ export * from "./phm.js";
 export * from "./mod.js";
 export * from "./ifcStep.js";
 export * from "./cbm.js";
+export * from "./fileDevRelation.js";
 export * from "./sch.js";
 export * from "./xml.js";
 export * from "./std.js";

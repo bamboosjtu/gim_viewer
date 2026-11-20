@@ -1,5 +1,6 @@
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import { parseXmlModRoot, type XmlModNode } from '@gim/gim-sdk/parser';
+import { mapXmlModPrimitive } from './xmlModPrimitiveAdapter.js';
 
 const parser = new XMLParser({
   preserveOrder: true,
@@ -39,7 +40,7 @@ export function parseWorkerXmlMod(text: string, path: string, timings?: Record<s
   const parseStarted = performance.now();
   const roots = nodes(parser.parse(text) as Array<Record<string, unknown>>);
   if (roots.length !== 1) throw new Error(`Expected one XML root in ${path}`);
-  const doc = parseXmlModRoot(roots[0], path);
+  const doc = parseXmlModRoot(roots[0], path, mapXmlModPrimitive);
   if (timings) timings.parseMs = (timings.parseMs ?? 0) + performance.now() - parseStarted;
   return doc;
 }

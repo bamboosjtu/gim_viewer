@@ -132,5 +132,6 @@ export function parseFamDocument(
   return {
     value: { sections: parsed.sections, properties: parsed.properties },
     diagnostics,
+    status: diagnostics.length ? "partial" : "ok",
   };
 }

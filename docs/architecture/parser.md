@@ -23,21 +23,25 @@ Parser 不处理：
 公开入口为 `@gim/gim-sdk/parser`，同时通过根命名空间 `parser` 暴露。核心结果形状：
 
 ```ts
+type ParseStatus = 'ok' | 'partial' | 'empty' | 'unsupported' | 'failed';
+
 interface ParseDiagnostic {
   severity: 'error' | 'warning' | 'info';
   code: string;
   message: string;
   path?: string;
   line?: number;
+  rawValue?: string;
 }
 
 interface ParseResult<T> {
   value: T | null;
   diagnostics: readonly ParseDiagnostic[];
+  status?: ParseStatus;
 }
 ```
 
-FAM 的既有详细返回形状保留给当前 source/UI 消费者；新调用方使用 `parseFamDocument()` 获取 `ParseResult`。
+`ParseResult`/`ParseStatus` 是新 Parser 的统一契约；专用结果（CBM/DEV/PHM/MOD/STD/SLD）可以保留自己的 value 结构，但必须复用 `ParseDiagnostic`，用 `status`/诊断区分成功、部分成功、空输入、未知格式和不支持格式。IFC 流式扫描保留 `count + callback`，不强制物化全量结果。原始字段和行号只在 Parser 中读取并保留，不在这里解释业务含义。
 
 ## 当前迁移范围
 
@@ -47,9 +51,10 @@ FAM 的既有详细返回形状保留给当前 source/UI 消费者；新调用�
 - `parser/cbm.ts`：CBM 无损文档、原始属性、ENTITYNAME/OBJECTMODELPOINTER 记录；显示名和 Tree Builder 仍归 Source/Desktop。
 - `parser/dev.ts`：DEV 的 SOLIDMODEL/SUBDEVICE 槽位、块内矩阵与来源诊断。
 - `parser/phm.ts`：PHM 的 SOLIDS/SOLIDMODELS 槽位、矩阵和颜色。
-- `parser/substationMod.ts`：变电 XML MOD 的 Device/Entities/Entity 语法；桌面 DOM 适配和 Worker XML 读取在宿主。
+- `parser/substationMod.ts`：变电 XML MOD 的 Device/Entities/Entity 语法；primitive 标签/属性由 Parser 读取，别名/几何近似映射由宿主 `xmlModPrimitiveAdapter` 提供；缺失矩阵与无效矩阵分开记录，无效矩阵保留原始值并给出 `invalid-source-matrix` 诊断。
 - `parser/mod.ts`：MOD 格式族入口，明确区分变电 XML 与线路文本模式；线路实现仍由 `powerline-core` 共享格式源提供。
-- `parser/ifcStep.ts`：IFC STEP 实体边界、引号/括号扫描、参数拆分；空间归属、坐标解释和空间索引仍在桌面 Geometry。
+- `parser/ifcStep.ts`：IFC STEP 实体边界、引号/括号/注释扫描、参数拆分；字符串内的伪造实体头不会被识别，空间归属、坐标解释和空间索引仍在桌面 Geometry。
+- `parser/fileDevRelation.ts`：FileDevRelation 三种厂商写法的纯文本声明和诊断；文件发现、IFC 路径/重复 basename 与 modelId 生成留在桌面适配层。
 - `parser/sch.ts`：SCH 索引语法和 STD/SLD 条目分类；文件发现仍归桌面。
 - `parser/std.ts` / `parser/sld.ts`：STD 拓扑和 SLD SVG 语法、白名单净化；通过 `parser/xml.ts` 的宿主 XML 适配器注入 DOM，不在 Parser 内创建 DOMParser。
 - `parser/affineMatrix.ts`：来源矩阵可用性判断，供 DEV/PHM 和 Geometry 共用。

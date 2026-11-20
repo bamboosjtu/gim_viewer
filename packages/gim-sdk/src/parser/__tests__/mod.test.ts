@@ -45,12 +45,63 @@ describe("independent substation XML MOD parser", () => {
         },
       ],
     };
-    const doc = parseXmlModRoot(root, "MOD/cylinder.mod");
+    const doc = parseXmlModRoot(root, "MOD/cylinder.mod", (tagName, attrs) =>
+      tagName === "Cylinder"
+        ? { type: "Cylinder", r: Number(attrs.R), h: Number(attrs.H) }
+        : null,
+    );
     expect(doc.isEmpty).toBe(false);
     expect(doc.declaredEntityCount).toBe(1);
     expect(doc.entities[0].id).toBe(7);
     expect(doc.entities[0].transformMatrix[12]).toBe(4);
     expect(doc.entities[0].color).toEqual({ r: 200, g: 50, b: 50, a: 100 });
+  });
+});
+
+describe("substation XML MOD parser diagnostics", () => {
+  it("distinguishes a missing matrix from an invalid matrix", () => {
+    const mapper = () => ({ type: "Cuboid" as const, l: 1, w: 1, h: 1 });
+    const node = (matrix?: string): XmlModNode => ({
+      tagName: "Device",
+      attrs: {},
+      children: [
+        {
+          tagName: "Entities",
+          attrs: {},
+          children: [
+            {
+              tagName: "Entity",
+              attrs: { ID: "1" },
+              children: [
+                { tagName: "Cuboid", attrs: {}, children: [] },
+                ...(matrix === undefined
+                  ? []
+                  : [
+                      {
+                        tagName: "TransformMatrix",
+                        attrs: { Value: matrix },
+                        children: [],
+                      },
+                    ]),
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(
+      parseXmlModRoot(node(), "MOD/missing.mod", mapper).diagnostics,
+    ).toEqual([]);
+    const invalid = parseXmlModRoot(node("1,0,0"), "MOD/invalid.mod", mapper);
+    expect(invalid.entities[0].transformMatrix).toEqual([
+      1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1,
+    ]);
+    expect(invalid.diagnostics[0]).toMatchObject({
+      severity: "warning",
+      code: "invalid-source-matrix",
+      path: "MOD/invalid.mod",
+      rawValue: "1,0,0",
+    });
   });
 });
 
