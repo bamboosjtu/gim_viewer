@@ -7,7 +7,6 @@
 | [实体与来源模型](entities.md) | 来源身份、对象证据、整体边界和成员归属 |
 | [实体目录](catalogs/README.md) | 设备、材料、构件和部件的目录，以及配置维护方式 |
 | [工程组成与三视图](composition.md) | 工程分组、来源浏览、搜索和导出 |
-| [设备材料清册](inventory-template.md) | 类别、名称模板、实例计数和属性展示 |
 | [建筑推断](building-inference.md)与[空间推断](spatial-inference.md) | 建筑、楼层、房间和区域的投影依据 |
 
-桌面变电工程默认打开清册，可切换到工程组成和来源视图。独立设备使用装配来源树，线路使用线路树与地图。三视图共享来源与实体身份，实际几何按来源 occurrence 绑定。Worker、缓存和发布流程见[工程实体运行时](../architecture/engineering-runtime.md)。
+桌面变电工程默认打开清册，可切换到工程组成和来源视图。独立设备使用装配来源树，线路使用线路树与地图。清册的类别、名称模板、实例计数与属性展示见[工程组成与三视图](composition.md#清册模型树)。三视图共享来源与实体身份，实际几何按来源 occurrence 绑定。Worker、缓存和发布流程见[工程实体运行时](../architecture/engineering-runtime.md)。

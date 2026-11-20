@@ -26,4 +26,4 @@ npm run bench -- batch --build ../tmp/gim-bench/builds/<构建>/acceptance-build
 npm run bench -- batch --build ../tmp/gim-bench/builds/<构建>/acceptance-build.json --registry ../benchmarks/l2/directories.example.json --output ../output/l2-survey --preset baseline --anonymize true
 ```
 
-默认一轮冷开；`--preset baseline` 默认一冷一暖，需要重复三组时增加 `-repeat 3`。全部结果、错误码和测量完整性见 [Benchmark 使用说明](../docs/benchmark.md)。基础功能测试的可编辑三模型示例在 [`desktop/local-tests/`](../desktop/local-tests/)，它不是 L0/L1/L2 性能样本登记。
+默认一轮冷开；`--preset baseline` 默认一冷一暖，需要重复三组时增加 `-repeat 3`。全部结果、错误码和测量完整性见 [Benchmark 使用说明](../docs/performance/benchmark.md)。基础功能测试的可编辑三模型示例在 [`desktop/local-tests/`](../desktop/local-tests/)，它不是 L0/L1/L2 性能样本登记。

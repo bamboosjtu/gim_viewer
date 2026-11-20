@@ -84,7 +84,7 @@ GC 录制显式排除 Chromium 默认类别，仅保留 `v8` 与 `blink.user_tim
 
 新增采集当前默认 off；专用 Benchmark/诊断调用显式选择模式。已有 perfTimings 不受该开关影响。测量核心、桌面适配、CLI/Trace/Profile 与报告已落地；本地已取得十轮 lifecycle、三组冷暖与 CPU/Heap/Allocation/GPU 产物，仍有采样间隔和诊断普通明细容量缺口。进一步性能优化暂缓；开销复核及基线批准由开发者决定，数据以私有报告和重评记录为准。
 
-当前 CLI 的原生场景记录只有在正确性、缓存域、必要指标与任务闭环均证实时才允许门禁通过。未证实的字段保持 unverified/false，输出 INCONCLUSIVE；不能手工把汇总状态改成 PASS 代替缺少的证据。来源几何异常只有在全部失败均有明确 `source-invalid` 原始范围证据或 `missing-dependency` 原始引用证据、没有其他失败时记为 PARTIAL；容量/预算失败仍为产品 FAIL。工程来源覆盖不足只有在不完整原因限于来源图缺口、来源引用缺失/歧义或 IFC manifest 不完整，且对应计数与 IFC runtime/cache 一致性成立、无其他产品失败时记为 PARTIAL。判定细节见[本地批量 Benchmark](../benchmark.md#工程来源-partial)。规则对所有样本相同，匿名缺口摘要由本次证据计算，冷暖及基线比较必须一致。SQLite 核心索引发布与 Engineering Worker 派生来源缓存分开测；来源图 partial 不自动判定 SQLite 缓存失效，也不冒充完整的工程来源缓存命中。`baseline` 默认一冷一暖，`-repeat 3` 可取得三组独立配对；完整迁移门禁还要求固定动作路线、探针开销对照和十轮资源回落验收。
+当前 CLI 的原生场景记录只有在正确性、缓存域、必要指标与任务闭环均证实时才允许门禁通过。未证实的字段保持 unverified/false，输出 INCONCLUSIVE；不能手工把汇总状态改成 PASS 代替缺少的证据。来源几何异常只有在全部失败均有明确 `source-invalid` 原始范围证据或 `missing-dependency` 原始引用证据、没有其他失败时记为 PARTIAL；容量/预算失败仍为产品 FAIL。工程来源覆盖不足只有在不完整原因限于来源图缺口、来源引用缺失/歧义或 IFC manifest 不完整，且对应计数与 IFC runtime/cache 一致性成立、无其他产品失败时记为 PARTIAL。判定细节见[本地批量 Benchmark](../performance/benchmark.md#工程来源-partial)。规则对所有样本相同，匿名缺口摘要由本次证据计算，冷暖及基线比较必须一致。SQLite 核心索引发布与 Engineering Worker 派生来源缓存分开测；来源图 partial 不自动判定 SQLite 缓存失效，也不冒充完整的工程来源缓存命中。`baseline` 默认一冷一暖，`-repeat 3` 可取得三组独立配对；完整迁移门禁还要求固定动作路线、探针开销对照和十轮资源回落验收。
 
 批量 CLI 仅对 `open` 前的基础设施启动故障有限重试，尝试记录与最终测量分开；产品打开、解析、缓存或已开始测量后的故障不自动重试。锁屏和挂起日志同时存在、控制器观察又有长间隙时，渲染进程退出单列 `INFRA_SUSPEND` / INCONCLUSIVE，解锁后由开发者重跑；普通崩溃仍为 FAIL。报告区分计划轮次、有效轮次与实际尝试次数。原生启动诊断留在工作区私有目录，公开报告只含原因码和次数。
 
@@ -92,7 +92,7 @@ CDP 能力以固定运行时实测为准，协议参考 [Runtime](https://chrome
 
 ## CLI 与数据隔离
 
-批量入口、文件夹/JSON 注册表、CSV/HTML 报告与错误处理见 [本地批量 Benchmark](../benchmark.md)。默认先执行完整批次并收集失败，不在每个样本后停下来修改产品；基线模式与一轮摸底分开。
+批量入口、文件夹/JSON 注册表、CSV/HTML 报告与错误处理见 [本地批量 Benchmark](../performance/benchmark.md)。默认先执行完整批次并收集失败，不在每个样本后停下来修改产品；基线模式与一轮摸底分开。
 
 Windows 固定运行时的文件既需要 AppContainer 读取权限，也不能带 Low 完整性标签；沙箱镜像加载策略会拒绝 Low 标签的可执行映像，表现为子进程创建错误 18。构建工具在工作区副本上设置 AppContainer RX 和 Medium 标签，包含宿主与采样器可执行文件；不关闭 GPU 或 Chromium 沙箱。运行时启动标记绑定路径、镜像修改时间和权限策略，替换文件后重新检查。相关系统契约见 [Microsoft 镜像加载策略](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-process_mitigation_image_load_policy)。
 
@@ -114,7 +114,7 @@ DEV 模板额外保留每轮最慢 20 个槽位等待者和最久 20 个槽位�
 - **暖开校验。** 依据来源缓存数量、缺失数和 parser 版本；没有请求远景 LOD 的 `open` 场景不要求 `ifcFarHits`。
 - **几何失败。** 只汇总受控 reason/status 与数量，不输出 DEV 路径和原始诊断文本。
 
-子命令、参数、注册表、报告文件与退出码见[本地批量 Benchmark](../benchmark.md)。命令在 `desktop/` 执行，全部新产物位于工作区 `tmp/gim-bench/`。原始路径映射、运行授权 nonce、日志与 WebView profile 不属于可分享报告。分享报告默认使用匿名身份、数值与受控状态；显式 `--anonymize false` 的 survey 只允许保留标准方案号或已匿名验证样本的 `.gim` 文件名，不放开源 SHA、路径、原始 Profile 或批准记录。不从日志做简单文件名裁剪后当作脱敏。
+子命令、参数、注册表、报告文件与退出码见[本地批量 Benchmark](../performance/benchmark.md)。命令在 `desktop/` 执行，全部新产物位于工作区 `tmp/gim-bench/`。原始路径映射、运行授权 nonce、日志与 WebView profile 不属于可分享报告。分享报告默认使用匿名身份、数值与受控状态；显式 `--anonymize false` 的 survey 只允许保留标准方案号或已匿名验证样本的 `.gim` 文件名，不放开源 SHA、路径、原始 Profile 或批准记录。不从日志做简单文件名裁剪后当作脱敏。
 
 可分享派生汇总写入 `output/gim-bench/`；含来源身份的候选、冻结 Profile 和验收记录保存在 `tmp/gim-bench/`。Profile 按内容摘要命名，不覆盖已有冻结版本；样本与动作选择规则一起冻结。近景检查结束返回原相机位置，避免把未声明的持续近景精化混入后续场景。`doctor` 不需要工程样本，并拒绝任何源文件授权；它只检查原生启动、工作区缓存、模块单实例、读取 RPC、Worker 堆及进程树采样。
 
@@ -122,7 +122,7 @@ DEV 模板额外保留每轮最慢 20 个槽位等待者和最久 20 个槽位�
 
 `bench build` 显式构建并核验 Vite Benchmark 前端，再创建 Cargo `benchmark` feature 的原生产物；发布清单前核验 EXE 确实内嵌探针 chunk。运行器拒绝没有 `frontendProbeVerified` 凭据的旧构建，避免 CDP 已连接普通页面却重复等待 Benchmark API。原生命令只授权私有运行清单指定的匿名样本，并重新核对源 SHA；清单、源、缓存根必须在编译时绑定的工作区，清单/缓存在 `tmp/gim-bench` 下。普通产品构建拒绝 Benchmark 授权，且不导出 Benchmark UI 控制面。
 
-正式原生候选先由 `accept-measurement` 校验并绑定同构建、同机器和同运行时的 doctor、探针开销及十轮生命周期证据，输出新的候选文件；绑定包含候选摘要和可复核的精简证据，不依赖手工编辑 JSON。`approve-baseline` 要求明确的候选文件、认可者和完整冷暖配对；PARTIAL 候选针对绑定后的文件，由另一位复核者通过 `review-partial` 生成候选摘要绑定的私有记录，批准者再以 `--accept-partial --partial-review` 引用，原因使用受控代码。首次须指定 `--first-partial`，后续须提供上一份已批准基线，防止相同来源覆盖倒退；它只成为覆盖基线，不能自动升级成完整 PASS。run/report/compare 不调用批准命令。GLB 字节变化默认 INCONCLUSIVE，仅允许导入独立网格等价性证据后显式批准对应内容变更，放置与覆盖仍须一致；CLI 不实现网格等价算法。命令和证据契约见 [Benchmark CLI](../benchmark.md#比较与基线)。性能分析列出明显收益候选、回退和具体成本，不设置统一耗时、内存或增长比例验收线；相同机器/样本/场景的重复仍须完整，缺少可比证据保持 INCONCLUSIVE。开销技术证据与性能决定分开，是否接受及是否追加复测由开发者显式决定。协议/值单元测试进入 CI，样本、性能与内存曲线仅在本地执行。
+正式原生候选先由 `accept-measurement` 校验并绑定同构建、同机器和同运行时的 doctor、探针开销及十轮生命周期证据，输出新的候选文件；绑定包含候选摘要和可复核的精简证据，不依赖手工编辑 JSON。`approve-baseline` 要求明确的候选文件、认可者和完整冷暖配对；PARTIAL 候选针对绑定后的文件，由另一位复核者通过 `review-partial` 生成候选摘要绑定的私有记录，批准者再以 `--accept-partial --partial-review` 引用，原因使用受控代码。首次须指定 `--first-partial`，后续须提供上一份已批准基线，防止相同来源覆盖倒退；它只成为覆盖基线，不能自动升级成完整 PASS。run/report/compare 不调用批准命令。GLB 字节变化默认 INCONCLUSIVE，仅允许导入独立网格等价性证据后显式批准对应内容变更，放置与覆盖仍须一致；CLI 不实现网格等价算法。命令和证据契约见 [Benchmark CLI](../performance/benchmark.md#比较与基线)。性能分析列出明显收益候选、回退和具体成本，不设置统一耗时、内存或增长比例验收线；相同机器/样本/场景的重复仍须完整，缺少可比证据保持 INCONCLUSIVE。开销技术证据与性能决定分开，是否接受及是否追加复测由开发者显式决定。协议/值单元测试进入 CI，样本、性能与内存曲线仅在本地执行。
 
 ## Operation Trace 与定点诊断
 
@@ -160,8 +160,8 @@ DEV 分部结果到 Merge 的前置引用由实际 child 任务完成及 Merge �
 
 ## 相关文档
 
-- [Benchmark CLI](../benchmark.md)：命令、报告、Trace/Profile 用法与批准流程。
-- [性能测试指南](../performance-guide.md)：性能口径、冷暖步骤与手工验收路线。
+- [Benchmark CLI](../performance/benchmark.md)：命令、报告、Trace/Profile 用法与批准流程。
+- [性能测试指南](../performance/guide.md)：性能口径、冷暖步骤与手工验收路线。
 - [验证](../validation.md)：证据边界、门禁与本地性能复核规则。
 - [开发指南](../development.md)：构建、测试与工作区约定。
 

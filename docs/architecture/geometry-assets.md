@@ -50,4 +50,4 @@ L0/L1 的“全小构件保留一个真实轮廓”由整个 DEV 决定。Part �
 - [DEV 几何运行时](dev-geometry.md)
 - [工程实体运行时](engineering-runtime.md)
 - [缓存域](caches.md)
-- [Benchmark CLI](../benchmark.md)
+- [Benchmark CLI](../performance/benchmark.md)

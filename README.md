@@ -31,7 +31,7 @@ GIM Viewer 是一款面向电网工程信息模型（GIM）的开源本地浏览
 
 支持以独立 Device CBM 为入口的设备 GIM，包括带 GIMPKGS 头和裸 7z 容器；无需 project.cbm 或 IFC。设备层级、中文属性、搜索、三维选择和几何缓存复用现有浏览能力，无 IFC 的工程层级包也可自动显示 DEV 几何。拉伸体兼容单位方向和 304.8 mm 方向基矢，几何与范围计算采用同一解释。
 
-DEV 实例化仍为默认关闭的试点。v0.2 的工程实体/三视图链路尚未重跑同口径原生冷暖和持续交互矩阵，0.1.x 性能基线不能作为通过证据。本版不宣称全站性能已达标，也不提供编辑、碰撞或工程校核功能。实现、测量和限制分别见[架构](docs/architecture.md)、[Benchmark CLI](docs/benchmark.md)及[问题清单](docs/open-issues.md)；权威测量结果由开发者本地 `tmp/gim-bench/` 报告保存，`output/` 为默认匿名派生视图（显式非匿名 survey 例外）。
+DEV 实例化仍为默认关闭的试点。v0.2 的工程实体/三视图链路尚未重跑同口径原生冷暖和持续交互矩阵，0.1.x 性能基线不能作为通过证据。本版不宣称全站性能已达标，也不提供编辑、碰撞或工程校核功能。实现、测量和限制分别见[架构](docs/architecture.md)、[Benchmark CLI](docs/performance/benchmark.md)及[问题清单](docs/open-issues.md)；权威测量结果由开发者本地 `tmp/gim-bench/` 报告保存，`output/` 为默认匿名派生视图（显式非匿名 survey 例外）。
 
 ### Windows 桌面版
 
@@ -93,7 +93,7 @@ DEV 实例化仍为默认关闭的试点。v0.2 的工程实体/三视图链路�
 | [docs](docs/README.md) | 当前规格、架构、验证、性能、格式、问题与限制 |
 | [demo](demo/) | 本地 GIM 包及解包样本，大型文件由 Git 忽略 |
 | [research](research/) | 原始研究材料，使用前需复核 |
-| [benchmarks](benchmarks/README.md) | L0/L1/L2 本地样本登记，不含 GIM 文件；测量 CLI 见 [Benchmark](docs/benchmark.md) |
+| [benchmarks](benchmarks/README.md) | L0/L1/L2 本地样本登记，不含 GIM 文件；测量 CLI 见 [Benchmark](docs/performance/benchmark.md) |
 | [tools](tools/README.md) | 独立 Python 辅助工具及其界面，不属于桌面或 Android 应用前端 |
 | [contracts](contracts/) | 跨语言资源限制等共享契约 |
 
@@ -129,7 +129,7 @@ npm run tauri:dev
 - [GIM 格式与匿名样本](docs/schema/README.md)
 - [XML primitive](docs/schema/xml-primitives.md)
 - [正确性验证](docs/validation.md)
-- [性能测试指南](docs/performance-guide.md) / [Benchmark CLI](docs/benchmark.md)
+- [性能测试指南](docs/performance/guide.md) / [Benchmark CLI](docs/performance/benchmark.md)
 - [移动端规格](docs/mobile-spec.md)
 - [问题与限制](docs/open-issues.md)
 

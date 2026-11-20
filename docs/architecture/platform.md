@@ -71,9 +71,9 @@
 - IFC 诊断包含读取/转换/源模型、远景/区域/属性、连接批次和缓存命中；阶段可重叠，不能相加为整源耗时。
 - 资源诊断包含进程树 private、RSS、JS heap、GPU 资源计数和可选 WebView2 内存；采样窗口有限，不代表瞬时峰值。
 - 选择诊断区分导航、属性摘要/参数、几何收集、高亮提交、下一帧；外层跨度包含调用方恢复间隙。
-- WPR/PMC 系统录制入口当前关闭并返回 `authenticated-system-helper-required`；CPU/GPU Trace 与已采集 ETL 的离线 WPA 摘要仍可用，边界见 [Benchmark CLI](../benchmark.md#详细-trace-与-profile)。
+- WPR/PMC 系统录制入口当前关闭并返回 `authenticated-system-helper-required`；CPU/GPU Trace 与已采集 ETL 的离线 WPA 摘要仍可用，边界见 [Benchmark CLI](../performance/benchmark.md#详细-trace-与-profile)。
 
-导出字段与判定口径见[性能测试指南](../performance-guide.md)；Trace/Profile、WPR/PMC/WPA 与 GPU 采集的配置和边界见 [Benchmark CLI](../benchmark.md#详细-trace-与-profile)。
+导出字段与判定口径见[性能测试指南](../performance/guide.md)；Trace/Profile、WPR/PMC/WPA 与 GPU 采集的配置和边界见 [Benchmark CLI](../performance/benchmark.md#详细-trace-与-profile)。
 
 ## 发布边界
 
@@ -86,4 +86,4 @@
 - 命令与工作区：[开发指南](../development.md)
 - 安全相关门禁与证据：[验证](../validation.md)
 - 缓存版本与失效：[缓存域](caches.md)
-- 性能测量：[性能测试指南](../performance-guide.md)
+- 性能测量：[性能测试指南](../performance/guide.md)

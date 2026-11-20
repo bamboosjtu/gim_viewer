@@ -4,9 +4,9 @@
 
 读者包括按步骤验收的用户/验收人员，以及用固定构建、样本、缓存状态和结构化 JSON 复现的 Agent/开发者。
 
-三条路线的分工见下节；测量协议、采集面和完整性口径见[测量与本地 Benchmark](architecture/measurement.md)。
+三条路线的分工见下节；测量协议、采集面和完整性口径见[测量与本地 Benchmark](../architecture/measurement.md)。
 
-本页定义怎么测；开发中需要保留的优化及防回退约束见[性能门禁](performance/gates.md)和[方向索引](performance/README.md)。
+本页定义怎么测；开发中需要保留的优化及防回退约束见[性能门禁](gates.md)和[方向索引](README.md)。
 
 ## 目录
 
@@ -542,10 +542,10 @@ Invoke-RestMethod 'http://127.0.0.1:9222/json' | Select-Object title, url, webSo
 - 本地 `tmp/gim-bench/`：权威私有报告与 Trace/Profile；`output/`：默认匿名派生视图（显式非匿名 survey 例外），均不随仓库分发；
 - [benchmark.md](benchmark.md)：批量 `npm run bench -- batch/matrix` 路线、注册表、报告字段、状态与退出码；
 - [详细 Trace 与 Profile](benchmark.md#详细-trace-与-profile)：单样本深挖、CPU/Allocation/Heap、GPU 与离线 WPA 摘要；WPR/PMC 录制入口当前关闭；
-- [architecture/measurement.md](architecture/measurement.md)：测量协议、采集面、完整性口径与原生门禁；
-- [validation.md](validation.md)：验证证据边界和验收规则；
-- [open-issues.md](open-issues.md)：未关闭缺陷与已知限制；
-- [development.md](development.md)：构建、测试和本地样本命令；
-- [架构索引](architecture.md)：运行主干与主题文档入口；
-- [DEV 几何](architecture/dev-geometry.md)、[IFC 运行时](architecture/ifc-runtime.md)：分级、Worker 与缓存设计；
-- 变电工程组成与来源：[工程实体模型](engineering/README.md)、[工程实体运行时](architecture/engineering-runtime.md)；
+- [architecture/measurement.md](../architecture/measurement.md)：测量协议、采集面、完整性口径与原生门禁；
+- [validation.md](../validation.md)：验证证据边界和验收规则；
+- [open-issues.md](../open-issues.md)：未关闭缺陷与已知限制；
+- [development.md](../development.md)：构建、测试和本地样本命令；
+- [架构索引](../architecture.md)：运行主干与主题文档入口；
+- [DEV 几何](../architecture/dev-geometry.md)、[IFC 运行时](../architecture/ifc-runtime.md)：分级、Worker 与缓存设计；
+- 变电工程组成与来源：[工程实体模型](../engineering/README.md)、[工程实体运行时](../architecture/engineering-runtime.md)；

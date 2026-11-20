@@ -121,7 +121,7 @@ substation04 的 STD 实际为 SVG，不能据扩展名补造 STD 电气层级�
 
 ## 扩展变电工程样本
 
-以下五个工程包用于九个变电工程（4 基础 + 5 扩展）的性能矩阵，不重排原 10 包基线，也不并入原台账计数。源文件均位于 `demo/`；`B1-3` 没有 GIMPKG 头，按裸 7z 工程包登记。逐包文件清单和递归统计不在这张身份表重复，性能口径见[性能测试指南](../performance-guide.md)。
+以下五个工程包用于九个变电工程（4 基础 + 5 扩展）的性能矩阵，不重排原 10 包基线，也不并入原台账计数。源文件均位于 `demo/`；`B1-3` 没有 GIMPKG 头，按裸 7z 工程包登记。逐包文件清单和递归统计不在这张身份表重复，性能口径见[性能测试指南](../performance/guide.md)。
 
 | ID | 源包 | 大小 B | SHA-256 | magic | 载荷偏移 | IFC |
 |---|---|---|---:|---|---:|---:|
@@ -190,5 +190,5 @@ line03 的两个 LINELENGTH 都有原值，不能当作长度缺省样本。
 - [GIM 格式与样本复核](README.md)
 - [容器与文件角色](container.md)
 - [语义模型](semantic-model.md)
-- [Benchmark CLI](../benchmark.md)
+- [Benchmark CLI](../performance/benchmark.md)
 - [测量与 Benchmark](../architecture/measurement.md)

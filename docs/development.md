@@ -2,7 +2,7 @@
 
 修改性能相关路径前先读[性能门禁](performance/gates.md)及[对应方向](performance/README.md)。现有 CI 负责结构、协议与计数；开发者选择本地性能复核范围。没有明确失效依据和成本说明，不新增高成本浏览器运行时校验。
 
-本页是开发环境、命令、工作区约定和文档维护的唯一入口。运行时结构与模块边界见[系统架构](architecture.md)及[分层与依赖](architecture/layers.md)；门禁语义与证据规则见[验证](validation.md)；Benchmark 参数见 [Benchmark CLI](benchmark.md)。
+本页是开发环境、命令、工作区约定和文档维护的唯一入口。运行时结构与模块边界见[系统架构](architecture.md)及[分层与依赖](architecture/layers.md)；门禁语义与证据规则见[验证](validation.md)；Benchmark 参数见 [Benchmark CLI](performance/benchmark.md)。
 
 ## 目录
 
@@ -85,7 +85,7 @@ CI Action 版本由 `.github/action-versions.json` 单一策略约束：每个 A
 
 完整命令清单与逐项门禁条件见[验证](validation.md)。远程 CI 只运行无工程样本的单元测试、静态检查和构建；真实与合成工程样本、性能矩阵只在开发者本地运行。
 
-批量冷暖、比较与报告使用 `npm run bench -- ...`，命令、注册表与报告约定见 [Benchmark CLI](benchmark.md)；单机验收步骤见[性能测试指南](performance-guide.md)。详细 Trace、CPU/Allocation/Heap Profile 和 GPU Query 需要显式 `--diagnostics` 配置；WPR/PMC 系统录制入口当前关闭（`authenticated-system-helper-required`），离线 WPA 摘要另需本地 WPAExporter 与冻结 `.wpaProfile`，Perfetto 只用于查看导出的私有 Trace。
+批量冷暖、比较与报告使用 `npm run bench -- ...`，命令、注册表与报告约定见 [Benchmark CLI](performance/benchmark.md)；单机验收步骤见[性能测试指南](performance/guide.md)。详细 Trace、CPU/Allocation/Heap Profile 和 GPU Query 需要显式 `--diagnostics` 配置；WPR/PMC 系统录制入口当前关闭（`authenticated-system-helper-required`），离线 WPA 摘要另需本地 WPAExporter 与冻结 `.wpaProfile`，Perfetto 只用于查看导出的私有 Trace。
 
 原生侧：
 
@@ -148,8 +148,8 @@ Markdown 文档不作为 CI 测试输入；事实正确性仍需对照源码和�
 - [系统架构](architecture.md)：系统边界、目录归属与运行时主干。
 - [分层与依赖](architecture/layers.md)：目录所有权与依赖规则。
 - [验证](validation.md)：证据边界、不变量与门禁选择。
-- [Benchmark CLI](benchmark.md)：批量冷暖、比较与报告。
-- [性能测试指南](performance-guide.md)：单机验收的 测量口径与步骤。
+- [Benchmark CLI](performance/benchmark.md)：批量冷暖、比较与报告。
+- [性能测试指南](performance/guide.md)：单机验收的 测量口径与步骤。
 - [文档首页](README.md)：文档地图、写作约定与单一权威表。
 
 仅核对来源按需输入的真实 Worker 协议时，可在 desktop/ 执行 `node scripts/with-workspace-temp.mjs scripts/engineering/check-worker-browser.mjs "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" 14358 source-input`。使用自有无头浏览器及内存 DTO，检查批量输入、物理/语义复用及测量控制消息，不读取工程样本或执行性能验收；结果在 output/log/source-input-browser.json。

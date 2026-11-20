@@ -9,6 +9,7 @@ semantic/
 ├── normalization/
 │   ├── prepareEvidence.ts   # composition 归一化、环校验、parents/meaning
 │   ├── transformerBank.ts   # 单相主变成组
+│   ├── contextualRecognition.ts # 设备/屏柜上下文中的成员解释
 │   └── ownershipResolver.ts # 递归归属和成员判断
 ├── recognition/
 │   ├── evidenceReader.ts    # 分类字段的 transient 读取器
@@ -38,7 +39,7 @@ semantic/
 
 ### ownershipResolver
 
-集中处理递归父级、设备上下文、部件/机柜成员、neutral set、未分类装配候选和独立对象。当前仍是最大的单一阶段（约 320 行），后续可按分支继续拆成策略函数，但必须保持现有 parity 结果。
+集中处理递归父级、部件/机柜成员、neutral set、未分类装配候选和独立对象；设备/屏柜上下文解释已移到 `contextualRecognition`。当前仍是最大的单一阶段，后续可按分支继续拆成策略函数，但必须保持现有 parity 结果。
 
 ### recognition/evidenceReader
 

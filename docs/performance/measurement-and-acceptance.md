@@ -1,6 +1,6 @@
 # 测量可信度与性能接受
 
-本页约束如何证明改动有效，复用现有 Benchmark、Trace、Profile。命令见 [Benchmark](../benchmark.md)，细节见[测量架构](../architecture/measurement.md)，不再建立另一套采集体系。
+本页约束如何证明改动有效，复用现有 Benchmark、Trace、Profile。命令见 [Benchmark](benchmark.md)，细节见[测量架构](../architecture/measurement.md)，不再建立另一套采集体系。
 
 ## 时刻与工作量
 

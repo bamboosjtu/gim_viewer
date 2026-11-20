@@ -105,4 +105,4 @@ EngineeringEntity         GeometryAsset
 
 ## 验证边界
 
-本文件描述结构与不变量，不证明任一构建已满足性能或完整交互。正确性门禁、证据分层和真实复核范围见[验证](validation.md)；性能测量方法见[Benchmark CLI](benchmark.md)，实测结果保存在开发者本地报告；未关闭项见[问题与限制](open-issues.md)。
+本文件描述结构与不变量，不证明任一构建已满足性能或完整交互。正确性门禁、证据分层和真实复核范围见[验证](validation.md)；性能测量方法见[Benchmark CLI](performance/benchmark.md)，实测结果保存在开发者本地报告；未关闭项见[问题与限制](open-issues.md)。

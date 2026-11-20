@@ -1,6 +1,6 @@
 # 本地批量 Benchmark
 
-本页说明本地批量 Benchmark 的命令、输入注册、报告文件、状态判定和基线流程。覆盖 `npm run bench -- ...` 的批量与单样本命令、L0/L1/L2 输入登记、报告与匿名化规则；测量指标定义见[测量与 Benchmark](architecture/measurement.md)，手工步骤见[性能测试指南](performance-guide.md)。权威结果以 CLI 打印的 `privateResults` 和 `tmp/gim-bench/` 私有报告为准；`output/` 是派生视图，可按配置展示样本别名或文件名。
+本页说明本地批量 Benchmark 的命令、输入注册、报告文件、状态判定和基线流程。覆盖 `npm run bench -- ...` 的批量与单样本命令、L0/L1/L2 输入登记、报告与匿名化规则；测量指标定义见[测量与 Benchmark](../architecture/measurement.md)，手工步骤见[性能测试指南](guide.md)。权威结果以 CLI 打印的 `privateResults` 和 `tmp/gim-bench/` 私有报告为准；`output/` 是派生视图，可按配置展示样本别名或文件名。
 
 Benchmark 使用固定 WebView2 的原生 Release 应用，每次运行启动独立进程，顺序执行注册的工程；不以 Node 微基准代替产品加载。目录或 JSON 注册表可以直接作为输入，不需要逐个手动调用。
 
@@ -24,8 +24,8 @@ Benchmark 使用固定 WebView2 的原生 Release 应用，每次运行启动独
 
 - 实际工程、性能与内存测试只在开发者本地运行；远程 CI 不运行真实或合成工程样本。
 - 性能结论必须同时记录构建（源码指纹/EXE/运行时）、样本 SHA 和运行环境；缺任一项不能作为复核依据，也不把不同条件的结果合并。
-- 开发者基础功能集合由 [`test:local`](../desktop/local-tests/README.md) 验证：仓库跟踪 [mini-samples.example.json](../desktop/local-tests/mini-samples.example.json)，开发者可直接修改为自己的变电、线路、设备 GIM 路径及 SHA。缺失样本显式跳过，已有来源的 SHA 或运行时工程类型不符则失败；跳过不构成通过。
-- `test:local` 不是 L0/L1/L2 性能样本登记；性能样本沿用[性能样本登记](../benchmarks/README.md)的独立登记。
+- 开发者基础功能集合由 [`test:local`](../../desktop/local-tests/README.md) 验证：仓库跟踪 [mini-samples.example.json](../../desktop/local-tests/mini-samples.example.json)，开发者可直接修改为自己的变电、线路、设备 GIM 路径及 SHA。缺失样本显式跳过，已有来源的 SHA 或运行时工程类型不符则失败；跳过不构成通过。
+- `test:local` 不是 L0/L1/L2 性能样本登记；性能样本沿用[性能样本登记](../../benchmarks/README.md)的独立登记。
 - 所有输入必须位于工作区内；产物只能写入工作区根目录的 `tmp/`、`output/`。样本目录仅被读取，系统 TEMP/TMP 不作为测试目录。
 
 ## 命令行
@@ -50,7 +50,7 @@ npm run bench -- batch --build ../tmp/gim-bench/builds/<构建>/acceptance-build
 npm run bench -- doctor --build ../tmp/gim-bench/builds/<构建>/acceptance-build.json
 ```
 
-L0/L1 的逐文件 SHA 注册表与 L2 目录清单见[性能样本登记](../benchmarks/README.md)。
+L0/L1 的逐文件 SHA 注册表与 L2 目录清单见[性能样本登记](../../benchmarks/README.md)。
 
 Windows 也可在 `desktop/` 手动执行 `powershell -ExecutionPolicy Bypass -File .\run-bench-survey.ps1`：构建一次后依次运行变电、线路和通用设计批次，分别保存输出。已完成批次中的 FAIL、PARTIAL、INPUT_ERROR 或 INCONCLUSIVE 保留在报告中，不中断后续批次；构建失败、未正常完成或缺少完成凭据才报执行异常。全部执行后输出总体状态数量，以及按工程类型、变电电压等级和冷暖状态分组的时间最短/最长值。包装脚本退出 0 表示执行及汇总完成，不表示全部样本通过；直接调用 `bench batch` 的退出码契约保持下表定义。此脚本不进入远程 CI。脚本使用带 BOM 的 UTF-8，兼容 Windows PowerShell 5.1 的中文目录解析，修改时须保留该编码。
 
@@ -172,7 +172,7 @@ CLI 支持以下子命令。参数只列关键项；完整格式以 `npm run ben
 - 现有 `gim-samples-v1` 私有注册表可直接输入；它的 `paths` 沿用相对工作区的语义，每个路径都列入结果。去掉路径后的匿名注册表不能用来打开源文件。
 - 注册表中列出的样本路径必须位于工作区内；样本文件缺失、SHA 不符或路径越界会记录为输入错误，其余输入继续执行。
 
-L2 可使用 `gim-batch-directories-v1`：`sampleTier` 固定为 `L2`，`directories` 列出工作区内的目录和通用组名。CLI 递归发现 GIM、计算本次 SHA 并冻结到 Profile；目录缺失、为空、链接、不可读或位于工作区外会作为输入错误报告。目录内容变化会改变 Profile，不能与原基线直接比较。参见[目录示例](../benchmarks/l2/directories.example.json)。
+L2 可使用 `gim-batch-directories-v1`：`sampleTier` 固定为 `L2`，`directories` 列出工作区内的目录和通用组名。CLI 递归发现 GIM、计算本次 SHA 并冻结到 Profile；目录缺失、为空、链接、不可读或位于工作区外会作为输入错误报告。目录内容变化会改变 Profile，不能与原基线直接比较。参见[目录示例](../../benchmarks/l2/directories.example.json)。
 
 默认场景为打开工程并等待自动请求的表示与缓存任务结束，不自动请求全部 L2。需要精化的条目可在按路径注册表的对应样本对象上显式加入 `actions`：
 
@@ -338,7 +338,7 @@ npm run bench -- gate --baseline ../tmp/gim-bench/<已批准基线>.approved.jso
 - 比较输出绝对耗时、百分比、节省秒数和内存字节代价，不以统一耗时、内存或增长比例自动裁决。是否明显提升、功能成本是否过大及是否需要复测由开发者决定。详见[性能决策原则](#性能决策原则)。
 - 摸底批次的 `PASS`/`PARTIAL` 仅表示该次计划执行结果。`baseline` 批次要求冷暖等价、来源缺口摘要及工作量一致；正式认可仍需探针开销、十轮生命周期与测量能力等验收。
 - 完整正确性基线只接受 `PASS`。`PARTIAL` 是显式接受的覆盖基线：来源复核者先运行 `review-partial`，其记录绑定候选摘要、复核身份、时间和受控原因；另一位批准者再引用该记录，不能仅在批准命令中自报已复核。原因只接受与候选证据相符的 `source-geometry`、`engineering-coverage`、`combined-source` 或 `mixed-source`。首次须显式 `--first-partial`；本地已有同来源批准记录时 CLI 拒绝再次声明首次，后续须提供上一份已批准基线，相同来源从 PASS 退到 PARTIAL 或缺口签名变化会被拒绝。复核和批准文件以候选摘要及时间命名，保存在工作区私有 `tmp/`，不覆盖上一份记录，也不存自由文本工程名或路径。工具核对记录与身份不同，仍无法替代实际人工审阅。
-- SDK 迁移不在本轮 Benchmark 范围内。完整指标口径见[测量架构](architecture/measurement.md)。
+- SDK 迁移不在本轮 Benchmark 范围内。完整指标口径见[测量架构](../architecture/measurement.md)。
 
 ### 测量验收与正式批准
 
@@ -364,9 +364,9 @@ npm run bench -- gate --baseline <approved基线文件> --candidate <下一版�
 
 几何编译器使 GLB 字节发生变化时，开发者先用独立网格验证器比较对应构建、来源和场景中的全部变更 occurrence，再由另一位批准者导入验证结果。Benchmark CLI 提供验证结果导入和审批，不实现网格等价算法，也不从包围盒、计数或提速推断等价。没有独立验证报告时保持 INCONCLUSIVE。
 
-验证器输出 `gim-geometry-equivalence-v1` JSON：`outcome: PASS`、`method: independent-mesh-equivalence-v1`、`verifier`、`baselineDigest`、`candidateDigest` 和 `checks`。两个摘要使用 [evidence.mjs](../desktop/scripts/benchmarks/evidence.mjs) 的 `digest` 对完整输入 JSON 计算。每组变更场景的检查包含：
+验证器输出 `gim-geometry-equivalence-v1` JSON：`outcome: PASS`、`method: independent-mesh-equivalence-v1`、`verifier`、`baselineDigest`、`candidateDigest` 和 `checks`。两个摘要使用 [evidence.mjs](../../desktop/scripts/benchmarks/evidence.mjs) 的 `digest` 对完整输入 JSON 计算。每组变更场景的检查包含：
 
-- `transitionDigest`：对 [geometry-review.mjs](../desktop/scripts/benchmarks/geometry-review.mjs) 的 `geometryTransition(基线run, 候选run)` 计算摘要，绑定双方构建、内容 SHA、来源、场景、冷暖状态、Profile、工作量与放置指纹。
+- `transitionDigest`：对 [geometry-review.mjs](../../desktop/scripts/benchmarks/geometry-review.mjs) 的 `geometryTransition(基线run, 候选run)` 计算摘要，绑定双方构建、内容 SHA、来源、场景、冷暖状态、Profile、工作量与放置指纹。
 - `coveredOccurrences`：必须等于报告中全部已显示 occurrence 数；`evidenceSha256` 指向验证器明细证据的 SHA，明细由开发者私有保存并人工核验。
 - `positions`、`topology`、`normals`、`materials`、`transforms`、`sourceBindings`：每项均须通过。单纯相同包围盒不满足此契约。
 
@@ -425,9 +425,9 @@ npm run bench -- export-trace --input ../tmp/gim-bench/runs/<本轮runId>/report
 npm run bench -- report --input ../tmp/gim-bench/runs/<本轮runId>/report.json
 ```
 
-诊断配置的 captures 支持 kind=cpu/allocations/heap、target=main/worker、family/executorId/taskId/spanId/operationTraceId、受控 stage 阶段名、trigger=operation-start/external/slow-span。external 由控制器按 delayMs 触发；slow-span 必须提供 thresholdMs。单次诊断最多 8 个 capture，默认 CPU 窗口 5 秒、上限 30 秒，单产物容量上限 256 MiB；不能捕获已结束 Span 的历史栈。可使用 captures=[] 仅采详细 Trace，gpu=true 请求可用的 GPU Query。示例见 [`benchmarks/diagnostics/`](../benchmarks/diagnostics/)：`cpu-main.json`、`cpu-worker-slow.json`、`trace-gpu-system.json`。
+诊断配置的 captures 支持 kind=cpu/allocations/heap、target=main/worker、family/executorId/taskId/spanId/operationTraceId、受控 stage 阶段名、trigger=operation-start/external/slow-span。external 由控制器按 delayMs 触发；slow-span 必须提供 thresholdMs。单次诊断最多 8 个 capture，默认 CPU 窗口 5 秒、上限 30 秒，单产物容量上限 256 MiB；不能捕获已结束 Span 的历史栈。可使用 captures=[] 仅采详细 Trace，gpu=true 请求可用的 GPU Query。示例见 [`benchmarks/diagnostics/`](../../benchmarks/diagnostics)：`cpu-main.json`、`cpu-worker-slow.json`、`trace-gpu-system.json`。
 
-`analyze` 将摘要写入输入报告同目录的 `analysis.private.json`，原始事件留在 `events.jsonl`，终端只打印覆盖摘要；逐任务阻塞链只分析 duration 最大的前 16 个依赖终点，省略数量见 `taskPathSelection`。Pipeline 是可重叠 span duration 之和，不等于墙钟。内部 HTML 只内嵌有界概览；`export-trace` 写入同目录的 `trace.private.json`（Chrome Trace Event JSON，Perfetto 可读）。生命周期归并、冲突、阻塞链和未归因区间的判定见[测量架构](architecture/measurement.md#operation-trace-与定点诊断)。
+`analyze` 将摘要写入输入报告同目录的 `analysis.private.json`，原始事件留在 `events.jsonl`，终端只打印覆盖摘要；逐任务阻塞链只分析 duration 最大的前 16 个依赖终点，省略数量见 `taskPathSelection`。Pipeline 是可重叠 span duration 之和，不等于墙钟。内部 HTML 只内嵌有界概览；`export-trace` 写入同目录的 `trace.private.json`（Chrome Trace Event JSON，Perfetto 可读）。生命周期归并、冲突、阻塞链和未归因区间的判定见[测量架构](../architecture/measurement.md#operation-trace-与定点诊断)。
 
 system 配置仍校验 durationMs 与 bufferMiB，但当前录制入口关闭，返回 `authenticated-system-helper-required`，不启动提权或 WPR。Benchmark 构建不附带不可执行的采集脚本；独立原生内存采样器仍随构建提供。已有 ETL 可由本地受控脚本调用 `system-diagnostics.mjs` 的 `exportSystemTables` 做离线 WPA 摘要，原生 `run` 不自动导出：需 exporter（可省略并从 PATH 查找）、wpaProfile、profileSha256 以及 tables 列/单位契约。表契约 columns 指定 pid/created/start/end/value，可选 tid，并单独指定时间列的 timeUnit（ns/us/ms/s）和数值列的 unit；创建时间必须与独立采样器的 windows-filetime-100ns 身份一致，没有匹配的 owned process 实例时返回 `owned-process-instance-not-matched` 并标 unavailable，不能用进程名称或 PID 猜配。缺少 WPA Profile 时保留原始 ETL，摘要标 unavailable。
 
@@ -435,12 +435,12 @@ system 配置仍校验 durationMs 与 bufferMiB，但当前录制入口关闭，
 
 ## 相关文档
 
-- [性能测试指南](performance-guide.md)：性能口径、冷/暖步骤与手工测试路线。
-- [测量与 Benchmark](architecture/measurement.md)：采集面、完整性口径、Trace/Profile 与 SDK 前置门禁。
-- [性能样本登记](../benchmarks/README.md)：L0/L1/L2 目录、SHA 与运行示例。
-- [本地功能测试](../desktop/local-tests/README.md)：`test:local` 基础功能样本。
-- [开发指南](development.md)：环境、命令、工作区与临时目录。
-- [验证](validation.md)：证据分层、自动门禁与真实复核。
+- [性能测试指南](guide.md)：性能口径、冷/暖步骤与手工测试路线。
+- [测量与 Benchmark](../architecture/measurement.md)：采集面、完整性口径、Trace/Profile 与 SDK 前置门禁。
+- [性能样本登记](../../benchmarks/README.md)：L0/L1/L2 目录、SHA 与运行示例。
+- [本地功能测试](../../desktop/local-tests/README.md)：`test:local` 基础功能样本。
+- [开发指南](../development.md)：环境、命令、工作区与临时目录。
+- [验证](../validation.md)：证据分层、自动门禁与真实复核。
 
 项目自有开发契约固定 v1。当前比较器不把缺失的可见几何时点换算为旧的模型提交时点；旧开发报告、策略格式和派生缓存不作兼容迁移。历史原始日志保留供人工核对，当前基线需重新构建并显式批准。
 
