@@ -365,14 +365,15 @@ function parseBay(
   };
   if (gridId) gridIdIndex.set(gridId, node);
 
-  for (const ceEl of findChildElements(el, "ConductingEquipment")) {
-    const ce = parseConductingEquipment(
-      ceEl,
-      gridIdIndex,
-      `${path}/${ceEl.getAttribute("name") || ""}`,
-    );
-    node.conductingEquipments.push(ce);
-    node.children.push(ce);
+  for (const child of Array.from(el.children)) {
+    const childPath = `${path}/${child.getAttribute("name") || ""}`;
+    if (child.tagName === "ConductingEquipment") {
+      const equipment = parseConductingEquipment(child, gridIdIndex, childPath);
+      node.conductingEquipments.push(equipment);
+      node.children.push(equipment);
+    } else if (child.tagName === "Group") {
+      node.children.push(parseGroup(child, gridIdIndex, childPath));
+    }
   }
   return node;
 }
@@ -399,6 +400,17 @@ function parseGroup(
     type,
   };
   if (gridId) gridIdIndex.set(gridId, node);
+  for (const child of Array.from(el.children)) {
+    if (child.tagName === "ConductingEquipment") {
+      node.children.push(
+        parseConductingEquipment(
+          child,
+          gridIdIndex,
+          `${path}/${child.getAttribute("name") || ""}`,
+        ),
+      );
+    }
+  }
   return node;
 }
 

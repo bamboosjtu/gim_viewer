@@ -54,10 +54,10 @@ export function buildPowerlineProject(files: LineParserTextFile[], identity: Pro
   const graph = buildLineGimGraphFromTexts(files, cache);
   if (!graph.root) throw new Error('工程没有可达的 project.cbm 入口');
   const nodes = [...graph.nodesByPath.values()];
-  const nodeMap = new Map(nodes.map(n => [pathKey(n.path), n]));
-  const byName = new Map<string, GimGraphNode[]>();
-  for (const n of nodes) { const k = pathKey(n.path).split('/').pop()!; byName.set(k, [...(byName.get(k) ?? []), n]); }
-  const resolveNode = (ref: string) => nodeMap.get(pathKey(ref)) ?? (byName.get(pathKey(ref).split('/').pop()!)?.length === 1 ? byName.get(pathKey(ref).split('/').pop()!)![0] : undefined);
+  const resolveNode = (ref: string, owner?: string) => {
+    const path = cache.resolveOriginalPath(ref, owner);
+    return path ? graph.nodesByPath.get(path) : undefined;
+  };
   const findings: Finding[] = [];
   const missing = new Set<string>();
   const resolveFile = (ref: string, sourcePath?: string): string | undefined => {
@@ -65,10 +65,15 @@ export function buildPowerlineProject(files: LineParserTextFile[], identity: Pro
     if (!path && !missing.has(ref)) { missing.add(ref); findings.push({ severity: 'WARNING', code: 'missing-reference', message: '引用文件缺失或存在歧义', source: ref }); }
     return path ?? undefined;
   };
-  for (const node of nodes) for (const ref of node.refs.cbmFiles) if (!resolveNode(ref)) findings.push({ severity: 'WARNING', code: 'missing-cbm-reference', message: '结构引用目标缺失或存在歧义', source: node.path });
+  for (const node of nodes) for (const ref of node.refs.cbmFiles) if (!cache.resolveOriginalPath(ref)) findings.push({ severity: 'WARNING', code: 'missing-cbm-reference', message: '结构引用目标缺失或存在歧义', source: node.path });
   // Reconstruct explicit containment, including a tower referenced by multiple strain sections.
   const children = (n: GimGraphNode): GimGraphNode[] => {
-    const refs = Object.entries(n.rawProps).filter(([k, v]) => /^(SUBSYSTEM|SECTION\d+|STRAINSECTION\d+|GROUP\d+|TOWER\d+|BASE\d+|SUBDEVICE\d+|STRING\d+\.STRING)$/.test(k) && /\.cbm$/i.test(v)).map(([, v]) => resolveNode(v)).filter((v): v is GimGraphNode => !!v);
+    const refs = [...(n.refs.rawRefs.SUBSYSTEM ?? []), ...Object.entries(n.rawProps)
+      .filter(([key]) => /^(SECTION\d+|STRAINSECTION\d+|GROUP\d+|TOWER\d+|BASE\d+|SUBDEVICE\d+|STRING\d+\.STRING)$/.test(key))
+      .map(([, value]) => value)]
+      .filter(ref => /\.cbm$/i.test(ref))
+      .map(ref => resolveNode(ref, n.path))
+      .filter((node): node is GimGraphNode => !!node);
     return unique([...n.children, ...refs]);
   };
   const attrMemo = new Map<string, { attrs: Attribute[]; refs: string[]; mods: string[] }>();
@@ -78,7 +83,7 @@ export function buildPowerlineProject(files: LineParserTextFile[], identity: Pro
     const mods: string[] = [];
     const attrs: Attribute[] = Object.entries(n.rawProps).map(([key, value]) => ({ label: key, key, value, source: n.path }));
     const visited = new Map<string, boolean>();
-    const follow = (ref: string, depth = 0, ownAttributes = true, sourcePath = n.path) => {
+    const follow = (ref: string, depth = 0, ownAttributes = true, sourcePath?: string) => {
       if (depth > 32) return;
       const actual = resolveFile(ref, sourcePath); if (!actual) return;
       const seen = visited.get(pathKey(actual)); if (seen === true || (seen === false && !ownAttributes)) return;
@@ -124,7 +129,7 @@ export function buildPowerlineProject(files: LineParserTextFile[], identity: Pro
   for (const n of towerNodes) {
     const obj = make(n, 'tower');
     const devices = children(n).filter(c => entity(c) === 'TOWER_DEVICE');
-    const towerRefs = new Set(Object.entries(n.rawProps).filter(([key]) => /^TOWER\d+$/.test(key)).map(([,ref]) => resolveNode(ref)?.path).filter(Boolean));
+    const towerRefs = new Set(Object.entries(n.rawProps).filter(([key]) => /^TOWER\d+$/.test(key)).map(([,ref]) => resolveNode(ref, n.path)?.path).filter(Boolean));
     for (const c of devices) {
       const ev = evidence(c); obj.sourceRefs.push(...ev.refs);
       const isTower = towerRefs.size ? towerRefs.has(c.path) : ev.attrs.some(a => a.key === 'DEVICETYPE' && a.value.toUpperCase() === 'TOWER') || ev.mods.some(p => /^\uFEFF?\s*HNum\s*,/im.test(cache.getText(p) ?? ''));
@@ -138,7 +143,9 @@ export function buildPowerlineProject(files: LineParserTextFile[], identity: Pro
     const mods = unique([evidence(n).mods, ...children(n).filter(c => entity(c) === 'TOWER_DEVICE').map(c => evidence(c).mods)].flat());
     obj.previewRef = mods.find(p => /^\uFEFF?\s*HNum\s*,/im.test(cache.getText(p) ?? ''));
     for (const [k, ref] of Object.entries(n.rawProps)) if (/^STRING\d+\.STRING$/.test(k)) {
-      const key = pathKey(ref).split('/').pop()!; const owners = stringTowers.get(key) ?? new Set(); owners.add(obj.id); stringTowers.set(key, owners);
+      const path = cache.resolveOriginalPath(ref, n.path);
+      if (!path) continue;
+      const owners = stringTowers.get(path) ?? new Set(); owners.add(obj.id); stringTowers.set(path, owners);
     }
     if (!obj.coordinate) findings.push({ severity: 'WARNING', code: 'tower-coordinate', message: '杆塔缺少有效 BLHA，仍可在对象列表查阅', objectId: obj.id });
   }
@@ -164,8 +171,9 @@ export function buildPowerlineProject(files: LineParserTextFile[], identity: Pro
   const towerByCoordinate = new Map<string, string[]>();
   const coordKey = (c: Coordinate) => `${c[0].toFixed(7)},${c[1].toFixed(7)}`;
   for (const t of objects.filter(o => o.kind === 'tower' && o.coordinate)) { const k = coordKey(t.coordinate!); towerByCoordinate.set(k, [...(towerByCoordinate.get(k) ?? []), t.id]); }
-  const owner = (ref?: string, coord?: Coordinate) => {
-    const owners = ref ? stringTowers.get(pathKey(ref).split('/').pop()!) : undefined;
+  const owner = (ref: string | undefined, sourcePath: string, coord?: Coordinate) => {
+    const path = ref && cache.resolveOriginalPath(ref, sourcePath);
+    const owners = path ? stringTowers.get(path) : undefined;
     if (owners?.size === 1) return [...owners][0];
     const candidates = coord ? towerByCoordinate.get(coordKey(coord)) : undefined;
     return candidates?.length === 1 ? candidates[0] : undefined;
@@ -178,7 +186,8 @@ export function buildPowerlineProject(files: LineParserTextFile[], identity: Pro
     const ev = evidence(n), parent = wireParent.get(pathKey(n.path));
     const props = { ...parent?.rawProps, ...n.rawProps };
     let start = coordinateFromBlha(props['POINT0.BLHA']), end = coordinateFromBlha(props['POINT1.BLHA']);
-    const startId = owner(props.BACKSTRING ?? props['POINT0.STRING'], start), endId = owner(props.FRONTSTRING ?? props['POINT1.STRING'], end);
+    const startId = owner(props.BACKSTRING ?? props['POINT0.STRING'], n.rawProps.BACKSTRING == null && parent?.rawProps.BACKSTRING != null ? parent.path : n.path, start);
+    const endId = owner(props.FRONTSTRING ?? props['POINT1.STRING'], n.rawProps.FRONTSTRING == null && parent?.rawProps.FRONTSTRING != null ? parent.path : n.path, end);
     start ??= startId ? objectById.get(startId)?.coordinate : undefined;
     end ??= endId ? objectById.get(endId)?.coordinate : undefined;
     const jumper = props.ISJUMPER === '1' || (!!startId && startId === endId) || (!!start && !!end && horizontalDistance(start, end) < 0.01);
@@ -205,7 +214,7 @@ export function buildPowerlineProject(files: LineParserTextFile[], identity: Pro
   }
   for (const n of nodes.filter(n => entity(n) === 'CROSS')) {
     const obj = make(n, 'cross'); inherit(obj, n); const ev = evidence(n);
-    const ownFamPaths = new Set(n.refs.famFiles.map(ref => cache.resolveOriginalPath(ref, n.path)).filter((p): p is string => !!p).map(pathKey));
+    const ownFamPaths = new Set(n.refs.famFiles.map(pathKey));
     obj.crossing = classifyCrossing(ev.attrs.filter(a => ownFamPaths.has(pathKey(a.source))));
     obj.type = obj.crossing.label;
     obj.businessCode = pick(ev.attrs, ['CODE']);

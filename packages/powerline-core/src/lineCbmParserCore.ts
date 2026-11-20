@@ -46,11 +46,6 @@ function suffixOf(value: string): string | null {
   return null;
 }
 
-function extractFileName(value: string): string {
-  const normalized = normalizeGimPath(value.trim());
-  return normalized.split('/').pop() ?? normalized;
-}
-
 function emptyGraph(filesByType: GimGraph['filesByType']): GimGraph {
   return {
     projectType: 'transmission_line',
@@ -87,11 +82,7 @@ export function buildLineGimGraphFromTexts(
     else filesByType.other.push(path);
   }
 
-  let entryPath: string | null = null;
-  for (const candidate of ['Cbm/project.cbm', 'CBM/project.cbm', 'cbm/project.cbm']) {
-    const resolved = cache.resolveOriginalPath(candidate);
-    if (resolved) { entryPath = resolved; break; }
-  }
+  let entryPath = cache.resolveOriginalPath('Cbm/project.cbm') ?? cache.resolveOriginalPath('project.cbm');
   if (!entryPath) {
     entryPath = filesByType.cbm[0] ?? null;
     if (entryPath) console.warn('[GIM] 未找到 project.cbm，回退使用第一个 .cbm 作为入口:', entryPath);
@@ -114,17 +105,20 @@ export function buildLineGimGraphFromTexts(
     return cache.parse('kv',path,text=>parseKeyValue(text,path));
   }
 
-  function resolveCrossCode(ompValue: string): string | null {
+  function resolveCrossCode(ompValue: string, owner: string): string | null {
     try {
-      const devName = extractFileName(ompValue);
-      if (!devName.toLowerCase().endsWith('.dev')) return null;
-      const dev = parseKv(devName);
+      const devPath = cache.resolveOriginalPath(ompValue, owner);
+      if (!devPath?.toLowerCase().endsWith('.dev')) return null;
+      const dev = parseKv(devPath);
       const phmRaw = dev?.['SOLIDMODEL0'];
       if (!phmRaw || !phmRaw.toLowerCase().endsWith('.phm')) return null;
-      const phm = parseKv(extractFileName(phmRaw));
+      const phmPath = cache.resolveOriginalPath(phmRaw, devPath);
+      if (!phmPath) return null;
+      const phm = parseKv(phmPath);
       const modRaw = phm?.['SOLIDMODEL0'];
       if (!modRaw || !modRaw.toLowerCase().endsWith('.mod')) return null;
-      const modText = cache.getText(extractFileName(modRaw));
+      const modPath = cache.resolveOriginalPath(modRaw, phmPath);
+      const modText = modPath && cache.getText(modPath);
       if (!modText) return null;
       for (const line of modText.split(/\r?\n/)) {
         if (line.toUpperCase().startsWith('CODE=')) {
@@ -137,12 +131,10 @@ export function buildLineGimGraphFromTexts(
     }
   }
 
-  function build(nodePath: string, depth = 0): GimGraphNode | null {
+  function build(actualPath: string, depth = 0): GimGraphNode | null {
     if (depth > PARSER_LIMITS.maxRecursionDepth) {
       throw new Error(`线路 CBM 引用递归深度超过 ${PARSER_LIMITS.maxRecursionDepth}`);
     }
-    const actualPath = cache.resolveOriginalPath(nodePath);
-    if (!actualPath) return null;
     const visitKey = normalizeGimPath(actualPath).toLowerCase();
     if (visited.has(visitKey)) return null;
     visited.add(visitKey);
@@ -166,24 +158,25 @@ export function buildLineGimGraphFromTexts(
     };
     const children: GimGraphNode[] = [];
 
-    function recordRef(value: string, rawKey?: string): void {
-      const fn = extractFileName(value);
-      if (!fn) return;
-      const suffix = suffixOf(fn);
-      if (suffix && REF_SUFFIX_MAP[suffix]) {
+    function recordRef(value: string, rawKey: string, recursive = false): void {
+      const ref = value.trim();
+      if (!ref) return;
+      const suffix = suffixOf(ref);
+      if (suffix) {
         const field = REF_SUFFIX_MAP[suffix];
-        if (!refs[field].includes(fn)) refs[field].push(fn);
+        const resolved = cache.resolveOriginalPath(ref, actualPath);
+        const target = resolved ?? ref;
+        if (!refs[field].includes(target)) refs[field].push(target);
+        if (recursive && resolved && field === 'cbmFiles') {
+          const child = build(resolved, depth + 1);
+          if (child) children.push(child);
+        }
       }
-      if (rawKey) {
-        if (!refs.rawRefs[rawKey]) refs.rawRefs[rawKey] = [];
-        if (!refs.rawRefs[rawKey].includes(value)) refs.rawRefs[rawKey].push(value);
-      }
+      const raw = refs.rawRefs[rawKey] ??= [];
+      if (!raw.includes(value)) raw.push(value);
     }
 
-    for(const field of keyValueListFields(kv)) {
-      if(!field.value)continue;recordRef(field.value,'SUBSYSTEM');
-      const child=build(field.value,depth+1);if(child)children.push(child);
-    }
+    for (const field of keyValueListFields(kv)) recordRef(field.value, 'SUBSYSTEM', true);
     for(const diagnostic of keyValueDiagnostics(kv))refs.rawRefs[diagnostic.field]=[...diagnostic.values];
     for (const key of NON_RECURSIVE_SINGLE_KEYS) {
       const v = kv[key];
@@ -194,22 +187,14 @@ export function buildLineGimGraphFromTexts(
       for (let i = 0; i < num; i++) {
         const v = kv[`${spec.prefix}${i}`];
         if (!v) continue;
-        recordRef(v, `${spec.prefix}${i}`);
-        if (spec.recursive) {
-          const child = build(v, depth + 1);
-          if (child) children.push(child);
-        }
+        recordRef(v, `${spec.prefix}${i}`, spec.recursive);
       }
     }
     const stringsNum = parseBoundedCount(kv[STRING_NUM_KEY], STRING_NUM_KEY);
     for (let i = 0; i < stringsNum; i++) {
       const strVal = kv[`STRING${i}.STRING`];
       const gpoint = kv[`STRING${i}.GPOINT`];
-      if (strVal) {
-        recordRef(strVal, `STRING${i}.STRING`);
-        const child = build(strVal, depth + 1);
-        if (child) children.push(child);
-      }
+      if (strVal) recordRef(strVal, `STRING${i}.STRING`, true);
       if (gpoint) {
         if (!refs.rawRefs[`STRING${i}.GPOINT`]) refs.rawRefs[`STRING${i}.GPOINT`] = [];
         refs.rawRefs[`STRING${i}.GPOINT`].push(gpoint);
@@ -223,19 +208,10 @@ export function buildLineGimGraphFromTexts(
       if (ARRAY_REF_SPECS.some((s) => s.num === k)) continue;
       if (arrayPrefixes.some((p) => k.startsWith(p))) continue;
       if (k === STRING_NUM_KEY || k.startsWith('STRING')) continue;
-      const suffix = suffixOf(v);
-      if (suffix) {
-        const fn = extractFileName(v);
-        const field = REF_SUFFIX_MAP[suffix];
-        if (fn && !refs[field].includes(fn)) {
-          refs[field].push(fn);
-          if (!refs.rawRefs[k]) refs.rawRefs[k] = [v];
-          else if (!refs.rawRefs[k].includes(v)) refs.rawRefs[k].push(v);
-        }
-      }
+      if (suffixOf(v)) recordRef(v, k);
     }
     if (entityName === 'CROSS') {
-      const code = resolveCrossCode(kv['OBJECTMODELPOINTER'] || '');
+      const code = resolveCrossCode(kv['OBJECTMODELPOINTER'] || '', actualPath);
       if (code) kv['CODE'] = code;
     }
 

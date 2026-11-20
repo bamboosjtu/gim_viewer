@@ -20,6 +20,7 @@ type ParserKind = 'kv' | 'fam' | 'dev';
 /** 解析器函数由调用方传入，避免 cache 层依赖具体解析器造成循环引用。 */
 export class LineParserTextCache {
   private readonly filesByPath = new Map<string, LineParserTextFile>();
+  private readonly ambiguousPaths = new Set<string>();
   private readonly filesByName = new Map<string, string[]>();
   private readonly parsed = new Map<string, Map<ParserKind, unknown>>();
 
@@ -28,40 +29,53 @@ export class LineParserTextCache {
       const normalizedPath = normalizeGimPath(file.path);
       if (!normalizedPath) continue;
       const key = normalizedPath.toLowerCase();
-      // 归档内路径大小写变体视为同一文件，保留第一次出现的原始路径。
-      if (!this.filesByPath.has(key)) {
-        this.filesByPath.set(key, { path: file.path, text: file.text });
+      if (this.filesByPath.has(key)) {
+        this.ambiguousPaths.add(key);
+        continue;
       }
-      const name = normalizedPath.split('/').pop()?.toLowerCase() ?? '';
-      if (!name) continue;
+      this.filesByPath.set(key, { path: file.path, text: file.text });
+      const name = key.slice(key.lastIndexOf('/') + 1);
       const list = this.filesByName.get(name) ?? [];
-      if (!list.includes(key)) list.push(key);
+      list.push(key);
       this.filesByName.set(name, list);
     }
   }
 
   /** 按完整路径查找，路径分隔符和大小写均不敏感。 */
   resolvePath(path: string): string | null {
-    const normalized = normalizeGimPath(path);
+    const normalized = normalizeGimPath(path.trim()).replace(/^\.\//, '');
     if (!normalized) return null;
     const exactKey = normalized.toLowerCase();
-    if (this.filesByPath.has(exactKey)) return exactKey;
-    const name = normalized.split('/').pop()?.toLowerCase() ?? '';
+    if (this.filesByPath.has(exactKey)) return this.ambiguousPaths.has(exactKey) ? null : exactKey;
+    const name = exactKey.slice(exactKey.lastIndexOf('/') + 1);
     const matches = this.filesByName.get(name);
-    return matches?.length === 1 ? matches[0] : null;
+    return matches?.length === 1 && !this.ambiguousPaths.has(matches[0]) ? matches[0] : null;
   }
 
   /** 取得引用对应的实际原始路径（用于 payload/source_path）。 */
   resolveOriginalPath(path: string, sourcePath?: string): string | null {
-    // A bare reference first addresses a sibling of its source file. Keep global ambiguity
-    // rejection when no source context is supplied; never choose the first duplicate basename.
-    const ref = normalizeGimPath(path).replace(/^\.\//, '');
-    if (sourcePath && !ref.includes('/')) {
-      const folder = normalizeGimPath(sourcePath).split('/').slice(0, -1).join('/');
-      const sibling = this.filesByPath.get((folder ? `${folder}/${ref}` : ref).toLowerCase());
-      if (sibling) return sibling.path;
+    const ref = normalizeGimPath(path.trim()).replace(/^\.\//, '');
+    if (!ref) return null;
+    // Prefer explicit archive paths, then resolve relative to the source.
+    // The shared basename index only accepts a unique archive entry.
+    if (ref.includes('/')) {
+      const exactKey = ref.toLowerCase();
+      const exact = this.filesByPath.get(exactKey);
+      if (exact) return this.ambiguousPaths.has(exactKey) ? null : exact.path;
     }
-    const key = this.resolvePath(path);
+    if (sourcePath) {
+      const relative = normalizeGimPath(sourcePath).split('/').slice(0, -1);
+      for (const part of ref.split('/')) {
+        if (part === '..') {
+          if (!relative.length) return null;
+          relative.pop();
+        } else if (part !== '.') relative.push(part);
+      }
+      const relativeKey = relative.join('/').toLowerCase();
+      const match = this.filesByPath.get(relativeKey);
+      if (match) return this.ambiguousPaths.has(relativeKey) ? null : match.path;
+    }
+    const key = this.resolvePath(ref);
     return key ? this.filesByPath.get(key)?.path ?? null : null;
   }
 

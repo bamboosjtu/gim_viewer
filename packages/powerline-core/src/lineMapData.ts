@@ -330,7 +330,7 @@ function lookupFamPropMap(refs: string[], attrs: LineAttributeIndex) {
     }
     // 2. 文件名小写 → famByFileNameLower
     const fnl = getFileNameLower(ref);
-    if (fnl) {
+    if (fnl && !norm.includes('/')) {
       const m = attrs.famByFileNameLower.get(fnl);
       if (m) return { propMap: m, source: fnl };
     }
@@ -348,7 +348,7 @@ function lookupDevPropMap(refs: string[], attrs: LineAttributeIndex) {
       if (m) return { propMap: m, source: norm };
     }
     const fnl = getFileNameLower(ref);
-    if (fnl) {
+    if (fnl && !norm.includes('/')) {
       const m = attrs.devByFileNameLower.get(fnl);
       if (m) return { propMap: m, source: fnl };
     }

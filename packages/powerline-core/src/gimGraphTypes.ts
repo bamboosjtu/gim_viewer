@@ -24,7 +24,7 @@ export interface GimGraphNode {
   rawProps: Record<string, string>;
   /** 子节点（递归构建） */
   children: GimGraphNode[];
-  /** 引用清单（按文件类型归类，值为文件相对名如 xxx.dev） */
+  /** 引用清单（按类型归类，命中时为实际包内路径，未命中时保留引用值） */
   refs: {
     cbmFiles: string[];
     devFiles: string[];

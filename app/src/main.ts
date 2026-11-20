@@ -45,6 +45,7 @@ class MobileApp {
   private previewSession = 0;
   private pendingImport?: { id: string; newlyCreated: boolean };
   private importing = false;
+  private cancellingImport = false;
   private gpsBusy = false;
   private gpsPosition?: { lon: number; lat: number; accuracy: number; timestamp: number };
   private toastTimer?: ReturnType<typeof setTimeout>;
@@ -201,30 +202,65 @@ class MobileApp {
     this.bind('import-cancel', () => void this.abortImport()); return token;
   }
   private async abortImport() {
-    ++this.session; this.parser.cancel(); await bridge.cancelImport();
-    if (this.pendingImport?.newlyCreated) await bridge.deleteProject(this.pendingImport.id).catch(() => {});
-    this.pendingImport = undefined; this.importing = false; this.closeModal(); this.notify('导入已取消');
+    if (this.cancellingImport) return;
+    this.cancellingImport = true;
+    const cancelledSession = ++this.session;
+    const pending = this.pendingImport;
+    this.pendingImport = undefined;
+    this.parser.cancel();
+    try {
+      await bridge.cancelImport();
+      if (pending?.newlyCreated) await bridge.deleteProject(pending.id).catch(() => {});
+    } finally {
+      this.cancellingImport = false;
+    }
+    if (cancelledSession !== this.session) return;
+    this.importing = false; this.closeModal(); this.notify('导入已取消');
   }
   private async importNative() {
     const token = this.beginImport(); let remove = () => {}; let started = performance.now();
     try {
       remove = await bridge.importProgress(p => { if (token === this.session) this.progress(p); });
+      if (token !== this.session) return;
       const input = await bridge.chooseNativeFile(p => { if (token === this.session) this.progress(p); }); if (token !== this.session) { await bridge.discardImport(input.path); return; }
       started = performance.now() - input.copyMs;
-      const prepared = await bridge.prepareNative(input); this.pendingImport = { id: prepared.meta.id, newlyCreated: !prepared.duplicate };
+      const prepared = await bridge.prepareNative(input);
       if (token !== this.session) { if (!prepared.duplicate) await bridge.deleteProject(prepared.meta.id); return; }
+      this.pendingImport = { id: prepared.meta.id, newlyCreated: !prepared.duplicate };
       let p = prepared.cache ?? undefined;
-      if (!p) { const files = await bridge.readEntries(prepared.meta.id); p = await this.parser.project(files, { id: prepared.meta.id, name: prepared.meta.name, sha256: prepared.meta.sha256, size: prepared.meta.size }, v => this.progress(v)); this.progress({ stage: '保存本地缓存' }); if (token !== this.session) return; await bridge.commit(p); }
+      if (!p) {
+        const files = await bridge.readEntries(prepared.meta.id);
+        if (token !== this.session) return;
+        const { id, name, sha256, size } = prepared.meta;
+        p = await this.parser.project(files, { id, name, sha256, size }, value => {
+          if (token === this.session) this.progress(value);
+        });
+        if (token !== this.session) return;
+        this.progress({ stage: '保存本地缓存' });
+        await bridge.commit(p);
+      }
       if (token !== this.session) return; this.activate(p); this.timings.push({ kind: prepared.cache ? 'duplicate-warm-open' : 'cold-import', durationMs: performance.now() - started, phases: [...this.phases, ...(this.phase ? [{ stage: this.phase.stage, durationMs: performance.now() - this.phase.started }] : [])].map(p => p.stage === "复制文件与 SHA 校验" ? { ...p, durationMs: input.copyMs } : p) }); this.pendingImport = undefined; this.importing = false; this.closeModal(); if (prepared.duplicate) this.notify('已存在相同源包，打开本地工程');
-    } catch (error) { if (token === this.session) { if (this.pendingImport?.newlyCreated) await bridge.deleteProject(this.pendingImport.id).catch(() => {}); this.pendingImport = undefined; this.importing = false; this.closeModal(); this.notify(String(error)); } }
+    } catch (error) {
+      if (token !== this.session) return;
+      const pending = this.pendingImport;
+      this.pendingImport = undefined;
+      if (pending?.newlyCreated) await bridge.deleteProject(pending.id).catch(() => {});
+      if (token !== this.session) return;
+      this.importing = false; this.closeModal(); this.notify(String(error));
+    }
     finally { remove(); }
   }
   private async importSample(name: string) {
     const token = this.beginImport(), started = performance.now();
     try {
       this.progress({ stage: '读取本地预览输入' }); const data = await bridge.prepareSample(name); if (token !== this.session) return;
-      const cached = await bridge.loadCache(data.identity.id); const project = cached ?? await this.parser.project(data.files, data.identity, p => this.progress(p));
+      const cached = await bridge.loadCache(data.identity.id);
+      if (token !== this.session) return;
+      const project = cached ?? await this.parser.project(data.files, data.identity, p => {
+        if (token === this.session) this.progress(p);
+      });
       if (token !== this.session) return; if (!cached) { this.progress({ stage: '保存预览缓存' }); await bridge.commit(project); }
+      if (token !== this.session) return;
       this.activate(project); this.timings.push({ kind: cached ? 'browser-warm-preview' : 'browser-cold-preview', durationMs: performance.now() - started }); this.importing = false; this.closeModal();
     } catch (error) { if (token === this.session) { this.importing = false; this.closeModal(); this.notify(String(error)); } }
   }
@@ -232,7 +268,18 @@ class MobileApp {
     this.persist(); const token = this.beginImport(), start = performance.now();
     try {
       this.progress({ stage: '恢复本地缓存' }); let project = await bridge.loadCache(meta.id);
-      if (!project) { this.progress({ stage: '更新工程索引' }); const files = await bridge.readEntries(meta.id); project = await this.parser.project(files, { id: meta.id, name: meta.name, sha256: meta.sha256, size: meta.size }, p => this.progress(p)); if (token !== this.session) return; await bridge.commit(project); }
+      if (token !== this.session) return;
+      if (!project) {
+        this.progress({ stage: '更新工程索引' });
+        const files = await bridge.readEntries(meta.id);
+        if (token !== this.session) return;
+        const { id, name, sha256, size } = meta;
+        project = await this.parser.project(files, { id, name, sha256, size }, value => {
+          if (token === this.session) this.progress(value);
+        });
+        if (token !== this.session) return;
+        await bridge.commit(project);
+      }
       if (token !== this.session) return; this.activate(project); this.timings.push({ kind: 'warm-open', durationMs: performance.now() - start }); this.importing = false; this.closeModal();
     } catch (error) { if (token === this.session) { this.importing = false; this.closeModal(); this.notify(`打开失败：${String(error)}`); } }
   }

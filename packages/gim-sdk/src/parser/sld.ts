@@ -318,7 +318,7 @@ const ALLOWED_ATTRS = new Set([
 ]);
 
 /** URL 型属性：仅允许 # 开头的文档内本地引用 */
-const URL_ATTRS = new Set(["xlink:href"]);
+const URL_ATTRS = new Set(["href", "xlink:href"]);
 
 /** 危险内容模式：任意属性值命中即整属性剔除 */
 const DANGEROUS_VALUE_RE =
@@ -457,7 +457,7 @@ function parseGroup(
 
 function parseUse(el: XmlElement, parentPath: string): SldUse {
   const attrs = extractAttributes(el);
-  const href = attrs["xlink:href"] || attrs["href"] || "";
+  const href = (attrs["href"] || attrs["xlink:href"] || "").trim();
   const symbolId = href.replace(/^#/, "");
 
   const xStr = attrs.x || "";
