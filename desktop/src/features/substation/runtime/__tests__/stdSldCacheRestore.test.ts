@@ -21,9 +21,8 @@ function result(overrides: Partial<StdSldParseResult> = {}): StdSldParseResult {
       groups: [{}],
     } as StdSldParseResult['sldDoc'],
     index: {} as StdSldParseResult['index'],
-    entryResults: [],
     ...overrides,
-  };
+  } as StdSldParseResult;
 }
 
 describe('STD/SLD cold and warm publication', () => {

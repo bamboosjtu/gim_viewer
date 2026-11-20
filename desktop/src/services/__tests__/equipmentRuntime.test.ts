@@ -8,7 +8,7 @@ const runtime=vi.hoisted(()=>({viewer:vi.fn(),lod:vi.fn(),fit:vi.fn(),hide:vi.fn
 vi.mock('../viewerUIBinding.js',()=>({getViewerRuntimeWithUI:runtime.viewer}));
 vi.mock('../devLodRuntime.js',()=>({startDeviceLod:runtime.lod}));
 vi.mock('../../viewer/camera.js',()=>({fitCameraToScene:runtime.fit}));
-vi.mock('../substationPresentation.js',()=>({createNodeClickHandler:()=>vi.fn()}));
+vi.mock('../../features/substation/presentation/substationPresentation.js',()=>({createNodeClickHandler:()=>vi.fn()}));
 vi.mock('../gimOpenCore.js',()=>({showLoading:runtime.show,hideLoading:runtime.hide}));
 
 function deferred<T>() {

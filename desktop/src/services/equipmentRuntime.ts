@@ -33,7 +33,8 @@ export async function openEquipmentProject(
   const tree = await buildCbmTree(files, undefined, entry);
   if (!current()) return;
   if (!tree) throw new Error('无法构建设备模型层级');
-  const { createNodeClickHandler } = await import('./substationPresentation.js');
+  const { createNodeClickHandler } =
+    await import('../features/substation/presentation/substationPresentation.js');
   scope.withSession(() => {
     state.currentProjectType = 'equipment';
     state.currentFiles = files;
