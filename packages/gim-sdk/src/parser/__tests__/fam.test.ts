@@ -32,6 +32,14 @@ describe("independent FAM parser", () => {
     ]);
   });
 
+  it("returns no diagnostics for a clean FAM document", () => {
+    const result = parser.parseFamDocument("[属性]\n设备编码=ABC\n");
+    expect(result.value?.sections.get("属性")).toEqual(
+      new Map([["设备编码", "ABC"]]),
+    );
+    expect(result.diagnostics).toEqual([]);
+  });
+
   it("does not expose source-layer business identity interpretation", () => {
     expect("resolveSubstationBusinessIdentity" in parser).toBe(false);
   });
