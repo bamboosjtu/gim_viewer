@@ -388,14 +388,15 @@ it('warm open materializes deferred STD/SLD and spatial callbacks', async () => 
   await options.startStdSld();
   expect(m.documents).toHaveBeenCalledOnce();
   options.scheduleSpatialSemantic({} as never, {} as never);
-  const startSpatial = m.schedule.mock.calls[0].at(-1) as () => Promise<boolean>;
+  const scheduleCall = m.schedule.mock.calls[0];
+  const startSpatial = scheduleCall[scheduleCall.length - 1] as () => Promise<boolean>;
   await startSpatial();
   expect(m.spatial).toHaveBeenCalledOnce();
   expect(state.currentCbmTree?.path).toBe('cached.cbm');
 });
 
 it('warm open with no cached IFC enters geometry-only view', async () => {
-  const { state, context } = fixture();
+  const { context } = fixture();
   m.native = true;
   context.projectId = 1;
   m.restore.mockImplementation((current: AppState) => {
