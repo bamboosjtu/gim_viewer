@@ -24,6 +24,8 @@ const m = vi.hoisted(() => ({
   rest: vi.fn(),
   cacheIfc: vi.fn(),
   cacheSources: vi.fn(),
+  semanticCache: vi.fn(),
+  schedule: vi.fn(),
 }));
 vi.mock('@desktop/runtime.js', () => ({ isTauri: () => m.native }));
 vi.mock('@desktop/database.js', () => ({
@@ -52,10 +54,13 @@ vi.mock('../equipmentRuntime.js', () => ({
   openEquipmentProject: m.geometry,
 }));
 vi.mock('../substationRuntimeTelemetry.js', () => ({ sampleSubstationMemory: async () => {} }));
+vi.mock('../substationSpatialSemanticCache.js', () => ({
+  readSubstationSpatialSemanticCache: m.semanticCache,
+}));
 vi.mock('../substationSpatialRuntime.js', () => ({
   buildAndCommitSubstationSpatialSemantic: m.spatial,
   commitCachedSubstationSpatialSemantic: vi.fn(),
-  scheduleSubstationSpatialSemantic: vi.fn(),
+  scheduleSubstationSpatialSemantic: m.schedule,
 }));
 vi.mock('../substationDocumentRuntime.js', () => ({ buildAndCommitSubstationStdSld: m.documents }));
 vi.mock('../nativeSmallFileHydration.js', () => ({ hydrateNativeSmallFiles: m.hydrate }));
@@ -371,6 +376,35 @@ it('warm property repair clears cached FAM rows when source files are present', 
   await openSubstationProject(context);
   await vi.waitFor(() => expect(m.rest).toHaveBeenCalledOnce());
   expect(state.properties.cachedFamSourceProperties.size).toBe(0);
+});
+
+it('warm open materializes deferred STD/SLD and spatial callbacks', async () => {
+  const { state, context } = fixture();
+  m.native = true;
+  context.projectId = 1;
+  m.semanticCache.mockResolvedValue({ hit: false, reason: 'missing' });
+  await openSubstationProject(context);
+  const options = m.load.mock.calls[0][3];
+  await options.startStdSld();
+  expect(m.documents).toHaveBeenCalledOnce();
+  options.scheduleSpatialSemantic({} as never, {} as never);
+  const startSpatial = m.schedule.mock.calls[0].at(-1) as () => Promise<boolean>;
+  await startSpatial();
+  expect(m.spatial).toHaveBeenCalledOnce();
+  expect(state.currentCbmTree?.path).toBe('cached.cbm');
+});
+
+it('warm open with no cached IFC enters geometry-only view', async () => {
+  const { state, context } = fixture();
+  m.native = true;
+  context.projectId = 1;
+  m.restore.mockImplementation((current: AppState) => {
+    current.currentCbmTree = { path: 'cached.cbm', children: [] } as unknown as CbmNode;
+    current.currentIfcEntries = [];
+  });
+  await openSubstationProject(context);
+  expect(m.geometry).toHaveBeenCalledOnce();
+  expect(m.load).not.toHaveBeenCalled();
 });
 
 it('warm property repair preserves the warm path and owns publication callbacks', async () => {
