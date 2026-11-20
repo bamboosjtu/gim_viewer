@@ -1,13 +1,13 @@
 import {beforeEach,afterEach,it,expect,vi} from 'vitest';
 import {AppState} from '../../app/state.js';
 import {openGimProjectFromId,openGimWithDialog} from '../openGimService.js';
-const m=vi.hoisted(()=>({native:true,debugRuntime:false,info:vi.fn(),head:vi.fn(),register:vi.fn(),cleanup:vi.fn(),station:vi.fn(),line:vi.fn(),equipment:vi.fn(),extract:vi.fn(),choose:vi.fn(),detect:vi.fn(),hide:vi.fn(),show:vi.fn(),scheduleHide:vi.fn(),manifest:vi.fn(),diskFile:vi.fn((_id:number,path:string)=>new File(['reused'],path)),inspectEarly:vi.fn(),withEarly:vi.fn(),startSubstation:vi.fn()}));
+const m=vi.hoisted(()=>({native:true,debugRuntime:false,info:vi.fn(),head:vi.fn(),register:vi.fn(),cleanup:vi.fn(),station:vi.fn(),line:vi.fn(),equipment:vi.fn(),extract:vi.fn(),choose:vi.fn(),detect:vi.fn(),hide:vi.fn(),show:vi.fn(),scheduleHide:vi.fn(),manifest:vi.fn(),batchRead:vi.fn(),inspectEarly:vi.fn(),withEarly:vi.fn(),startSubstation:vi.fn()}));
 vi.mock('../../config/debug.js',()=>({get DEBUG_RUNTIME_LOGS(){return m.debugRuntime;}}));
 vi.mock('@desktop/runtime.js',()=>({isTauri:()=>m.native}));
 vi.mock('@desktop/fileDialog.js',()=>({openGimFilePath:async()=> 'tmp/open.gim'}));
 vi.mock('@desktop/fileReader.js',()=>({getFileInfo:m.info,readFileHead:m.head}));
-vi.mock('@desktop/database.js',()=>({authorizeCachedGimProject:async()=> 'tmp/open.gim',upsertGimProject:m.register,touchGimProjectOpened:async()=>{},readExtractionManifest:async()=>null}));
-vi.mock('@desktop/gimExtract.js',()=>({extractGimArchiveNative:m.extract,readExtractionManifest:m.manifest,createDiskBackedFile:m.diskFile}));
+vi.mock('@desktop/database.js',()=>({authorizeCachedGimProject:async()=> 'tmp/open.gim',upsertGimProject:m.register,touchGimProjectOpened:async()=>{},readExtractionManifest:async()=>null,batchReadCachedFiles:m.batchRead}));
+vi.mock('@desktop/gimExtract.js',async original=>({...await original<typeof import('@desktop/gimExtract.js')>(),extractGimArchiveNative:m.extract,readExtractionManifest:m.manifest}));
 vi.mock('../substationExtractionJob.js',()=>({inspectEarlySemanticEligibility:m.inspectEarly,withEarlySemanticCapability:m.withEarly,startSubstationExtractionJob:m.startSubstation}));
 vi.mock('../projectCleanupService.js',()=>({cleanupBeforeOpenNewProject:m.cleanup}));
 vi.mock('../substationRuntime.js',()=>({openSubstationProject:m.station,onGimExtracted:vi.fn(),loadAllIfcFiles:vi.fn()}));
@@ -37,11 +37,22 @@ beforeEach(async()=>{
 afterEach(()=>{vi.restoreAllMocks();});
 async function button(){return loadButton;}
 it('reuses a same-SHA extraction manifest when the semantic index was not committed',async()=>{
-  m.manifest.mockResolvedValueOnce({source_sha256:'source-a',entries:[{path:'unit.cbm',size:7,packed:true,cache_path:'cache/unit.cbm'}]});
-  m.station.mockImplementationOnce(async (context:{getExtracted:()=>Promise<unknown>})=>{await context.getExtracted();});
+  const source = new TextEncoder().encode('ENTITYNAME=PROJECT');
+  m.manifest.mockResolvedValueOnce({source_sha256:'source-a',entries:[{path:'unit.cbm',size:source.byteLength,packed:true,cache_path:'cache/unit.cbm'}]});
+  m.batchRead.mockResolvedValueOnce(new Map([['unit.cbm', source]]));
+  const onExtracted = vi.fn();
+  m.station.mockImplementationOnce(async (context:{getExtracted:()=>Promise<unknown>})=>{
+    onExtracted(await context.getExtracted());
+  });
   const state=new AppState();
   await openGimProjectFromId(state,vi.fn(),1);
   expect(m.station).toHaveBeenCalledOnce();
+  expect(m.batchRead).toHaveBeenCalledWith(1, ['unit.cbm']);
+  expect(onExtracted).toHaveBeenCalledOnce();
+  const extracted = onExtracted.mock.calls[0][0];
+  expect(extracted.preHydrated).toBe(true);
+  expect([...extracted.files.keys()]).toEqual(['unit.cbm']);
+  await expect(extracted.files.get('unit.cbm').text()).resolves.toBe('ENTITYNAME=PROJECT');
   expect(m.extract).not.toHaveBeenCalled();
 });
 

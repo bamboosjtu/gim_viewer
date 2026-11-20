@@ -2,12 +2,24 @@
 import type { GimGraphNode } from '@gim/powerline-core/gimGraphTypes.js';
 import { escHtml } from '../shared/html.js';
 import { getFileNameLower, normalizeGimPath } from '@gim/powerline-core/linePathNormalize.js';
-import { fileReferenceValue, getPropertyDefinition, getPropertyReferenceKind, renderPropertySection, renderTechnicalSection,
-  type FileReferenceValue, type PropertyComponent, type PropertyDefinition, type PropertyRow } from './propertyPresentation.js';
+import {
+  fileReferenceValue,
+  getPropertyDefinition,
+  getPropertyReferenceKind,
+  renderPropertySection,
+  renderTechnicalSection,
+  type FileReferenceValue,
+  type PropertyComponent,
+  type PropertyDefinition,
+  type PropertyRow,
+} from './propertyPresentation.js';
 import type { LineModRuntimeEntry } from './lineModRuntimeService.js';
-import type { BoltModFile, HNumModFile, KeyValueModFile, PointLineModFile, RRecord, LineTextModGeometrySource, TowerDeviceModFile, UnknownKvModFile, WireModFile } from '../gim/geometry/ir.js';
+import type { HNumModFile, RRecord, LineTextModGeometrySource } from '../gim/geometry/ir.js';
 import type { LineAttributeIndex } from '@gim/powerline-core/lineAttributeTypes.js';
-import type { LineFamPropertyRecord, LineDevPropertyRecord } from '@gim/powerline-core/attributeRecords.js';
+import type {
+  LineFamPropertyRecord,
+  LineDevPropertyRecord,
+} from '@gim/powerline-core/attributeRecords.js';
 
 export function nodeDisplayName(node: GimGraphNode): string {
   const fn = node.path.split('/').pop() || node.path;
@@ -19,16 +31,24 @@ export function pathMatchesReference(candidate: string, reference: string): bool
   const a = normalizeGimPath(candidate).toLowerCase();
   const b = normalizeGimPath(reference).toLowerCase();
   if (!a || !b) return false;
-  return a === b || getFileNameLower(a) === getFileNameLower(b);
+  return (
+    a === b ||
+    ((!a.includes('/') || !b.includes('/')) && getFileNameLower(a) === getFileNameLower(b))
+  );
 }
 
 function lineComponentForNode(node: GimGraphNode): PropertyComponent {
   switch (node.entityName.toUpperCase()) {
-    case 'WIRE': return 'line-wire';
-    case 'CROSS': return 'line-point-line';
-    case 'TOWER_DEVICE': return 'line-tower-device';
-    case 'WIRE_DEVICE': return 'line-wire-params';
-    default: return 'line-node';
+    case 'WIRE':
+      return 'line-wire';
+    case 'CROSS':
+      return 'line-point-line';
+    case 'TOWER_DEVICE':
+      return 'line-tower-device';
+    case 'WIRE_DEVICE':
+      return 'line-wire-params';
+    default:
+      return 'line-node';
   }
 }
 
@@ -37,10 +57,9 @@ function isLineTowerNode(node: GimGraphNode): boolean {
   const entity = node.entityName.trim().toUpperCase();
   const classify = node.classifyName.trim().toUpperCase();
   const groupType = (node.rawProps['GROUPTYPE'] || '').trim().toUpperCase();
-  return groupType === 'TOWER'
-    || classify === 'TOWER'
-    || entity === 'TOWER'
-    || entity === 'TOWER_DEVICE';
+  return (
+    groupType === 'TOWER' || classify === 'TOWER' || entity === 'TOWER' || entity === 'TOWER_DEVICE'
+  );
 }
 
 /** 键值对 → 字典渲染的属性分节；来源值可由 fileReferenceValue 提供按钮。 */
@@ -51,10 +70,12 @@ function sectionHtml(
   component: PropertyComponent = 'line-node',
 ): string {
   const rows: PropertyRow[] = pairs
-    .filter(([, value]) => typeof value === 'string' ? Boolean(value) : Boolean(value?.text))
-    .map(([key, value]) => typeof value === 'string'
-      ? { key, value, mono: monoValue }
-      : { key, value: value.text, valueHtml: value.html, valueText: value.text, mono: monoValue });
+    .filter(([, value]) => (typeof value === 'string' ? Boolean(value) : Boolean(value?.text)))
+    .map(([key, value]) =>
+      typeof value === 'string'
+        ? { key, value, mono: monoValue }
+        : { key, value: value.text, valueHtml: value.html, valueText: value.text, mono: monoValue },
+    );
   // 关系/来源字段本身可能不是工程字典键（如“DEV 1”“来源文件”），
   // 不能按未知键的 P2 默认级别过滤，否则可读来源按钮会整段消失。
   return renderPropertySection(title, component, rows);
@@ -67,9 +88,12 @@ function rawRows(
   options: { excludeReferences?: boolean } = {},
 ): { primary: PropertyRow[]; technical: PropertyRow[] } {
   const rows = Object.entries(raw)
-    .filter(([key, value]) => Boolean(value)
-      && !excluded.has(key)
-      && !(options.excludeReferences && Boolean(getPropertyReferenceKind(component, key, value))))
+    .filter(
+      ([key, value]) =>
+        Boolean(value) &&
+        !excluded.has(key) &&
+        !(options.excludeReferences && Boolean(getPropertyReferenceKind(component, key, value))),
+    )
     .map(([key, value]) => ({
       key,
       value,
@@ -77,18 +101,38 @@ function rawRows(
     }));
   return {
     primary: rows.filter((row) => (getPropertyDefinition(component, row.key)?.priority ?? 2) < 2),
-    technical: rows.filter((row) => (getPropertyDefinition(component, row.key)?.priority ?? 2) >= 2),
+    technical: rows.filter(
+      (row) => (getPropertyDefinition(component, row.key)?.priority ?? 2) >= 2,
+    ),
   };
 }
 
-export function renderLineRawProperties(node: GimGraphNode, component = lineComponentForNode(node)): string {
-  const excluded = new Set(['ENTITYNAME', 'GROUPTYPE', 'WIRETYPE', 'DEVICETYPE', 'SYSCLASSIFYNAME', 'PARTNAME']);
-  const { primary, technical } = rawRows(component, node.rawProps, excluded, { excludeReferences: true });
-  return renderPropertySection('工程字段', component, primary, { includeTechnical: false, allowReferences: false })
-    + renderTechnicalSection('技术字段', component, technical, { allowReferences: false });
+export function renderLineRawProperties(
+  node: GimGraphNode,
+  component = lineComponentForNode(node),
+): string {
+  const excluded = new Set([
+    'ENTITYNAME',
+    'GROUPTYPE',
+    'WIRETYPE',
+    'DEVICETYPE',
+    'SYSCLASSIFYNAME',
+    'PARTNAME',
+  ]);
+  const { primary, technical } = rawRows(component, node.rawProps, excluded, {
+    excludeReferences: true,
+  });
+  return (
+    renderPropertySection('工程字段', component, primary, {
+      includeTechnical: false,
+      allowReferences: false,
+    }) + renderTechnicalSection('技术字段', component, technical, { allowReferences: false })
+  );
 }
 
-function sourceRecordsForRef<T extends { source_path: string; normalized_path: string; file_name_lower: string }>(
+function sourceRecordsForRef<
+  T extends { source_path: string; normalized_path: string; file_name_lower: string },
+>(
   refs: string[],
   bySource: Map<string, Map<string, T[]>>,
   byFile: Map<string, Map<string, T[]>>,
@@ -104,14 +148,11 @@ function sourceRecordsForRef<T extends { source_path: string; normalized_path: s
     }
   };
   // Enumerate every property bucket for a matched source so no FAM/DEV key is lost.
-  const enumerate = (map: Map<string, Map<string, T[]>>, key: string): void => {
-    const bucket = map.get(key);
-    if (!bucket) return;
-    for (const records of bucket.values()) add(records);
-  };
   for (const ref of refs) {
-    enumerate(bySource, normalizeGimPath(ref));
-    enumerate(byFile, getFileNameLower(ref));
+    const path = normalizeGimPath(ref);
+    const bucket =
+      bySource.get(path) ?? (path.includes('/') ? undefined : byFile.get(getFileNameLower(ref)));
+    for (const records of bucket?.values() ?? []) add(records);
   }
   return result.sort((a, b) => a.source_path.localeCompare(b.source_path));
 }
@@ -145,7 +186,10 @@ function childForReference(node: GimGraphNode, reference: string): GimGraphNode 
   return node.children.find((child) => pathMatchesReference(child.path, reference));
 }
 
-function indexedRawReferences(node: GimGraphNode, pattern: RegExp): Array<{ index: number; value: string }> {
+function indexedRawReferences(
+  node: GimGraphNode,
+  pattern: RegExp,
+): Array<{ index: number; value: string }> {
   return Object.entries(node.rawProps)
     .map(([key, value]) => {
       const match = key.match(pattern);
@@ -160,11 +204,13 @@ function indexedRawReferences(node: GimGraphNode, pattern: RegExp): Array<{ inde
  * FAM/DEV；不会把同一 F4 下数十个来源文件各自生成一整块“查看引用”。
  */
 function lineAttributeScopes(node: GimGraphNode): LineAttributeScope[] {
-  const scopes: LineAttributeScope[] = [{
-    label: '当前对象',
-    famRefs: node.refs.famFiles,
-    devRefs: node.refs.devFiles,
-  }];
+  const scopes: LineAttributeScope[] = [
+    {
+      label: '当前对象',
+      famRefs: node.refs.famFiles,
+      devRefs: node.refs.devFiles,
+    },
+  ];
   const entity = node.entityName.trim().toUpperCase();
   const groupType = (node.rawProps['GROUPTYPE'] || '').trim().toUpperCase();
   if (entity !== 'F4SYSTEM' || groupType !== 'TOWER') return scopes;
@@ -229,7 +275,9 @@ function renderAttributeBucket(
     });
   }
   for (const [group, rows] of technicalByGroup) {
-    html += renderTechnicalSection(`${title} · ${group}`, component, rows, { allowReferences: false });
+    html += renderTechnicalSection(`${title} · ${group}`, component, rows, {
+      allowReferences: false,
+    });
   }
   return html;
 }
@@ -241,8 +289,16 @@ export function renderLineAttributeRecords(
   if (!attrs) return '';
   let html = '';
   for (const scope of lineAttributeScopes(node)) {
-    const fam = sourceRecordsForRef<LineFamPropertyRecord>(scope.famRefs, attrs.famBySourcePath, attrs.famByFileNameLower);
-    const dev = sourceRecordsForRef<LineDevPropertyRecord>(scope.devRefs, attrs.devBySourcePath, attrs.devByFileNameLower);
+    const fam = sourceRecordsForRef<LineFamPropertyRecord>(
+      scope.famRefs,
+      attrs.famBySourcePath,
+      attrs.famByFileNameLower,
+    );
+    const dev = sourceRecordsForRef<LineDevPropertyRecord>(
+      scope.devRefs,
+      attrs.devBySourcePath,
+      attrs.devByFileNameLower,
+    );
     html += renderAttributeBucket(`${scope.label} · 属性族`, 'line-node', fam);
     html += renderAttributeBucket(`${scope.label} · 设备`, 'line-node', dev);
   }
@@ -251,7 +307,10 @@ export function renderLineAttributeRecords(
 
 export function formatNumber(value: number, digits = 2): string {
   if (!Number.isFinite(value)) return '—';
-  return value.toFixed(digits).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
+  return value
+    .toFixed(digits)
+    .replace(/\.0+$/, '')
+    .replace(/(\.\d*?)0+$/, '$1');
 }
 
 /**
@@ -261,7 +320,10 @@ export function formatNumber(value: number, digits = 2): string {
  * 因此不能再使用 points.slice(0, N)。先按 Z 高度分桶，再在每个桶内均匀
  * 取样，并显式保留最低/中部/最高点，保证预览覆盖完整高度层级。
  */
-function sampleTowerPointsByHeight(points: HNumModFile['bodySections'][number]['points'], maxMarkers: number): typeof points {
+function sampleTowerPointsByHeight(
+  points: HNumModFile['bodySections'][number]['points'],
+  maxMarkers: number,
+): typeof points {
   const valid = points.filter((point) => Number.isFinite(point.x) && Number.isFinite(point.z));
   if (valid.length <= maxMarkers) return valid;
 
@@ -271,9 +333,12 @@ function sampleTowerPointsByHeight(points: HNumModFile['bodySections'][number]['
   const maxZ = sorted[sorted.length - 1].z;
   const range = Math.max(maxZ - minZ, 1);
   const bucketCount = Math.max(3, Math.min(target, Math.ceil(Math.sqrt(sorted.length))));
-  const buckets: typeof sorted[] = Array.from({ length: bucketCount }, () => []);
+  const buckets: (typeof sorted)[] = Array.from({ length: bucketCount }, () => []);
   for (const point of sorted) {
-    const index = Math.min(bucketCount - 1, Math.max(0, Math.floor(((point.z - minZ) / range) * bucketCount)));
+    const index = Math.min(
+      bucketCount - 1,
+      Math.max(0, Math.floor(((point.z - minZ) / range) * bucketCount)),
+    );
     buckets[index].push(point);
   }
 
@@ -311,7 +376,8 @@ function sampleTowerPointsByHeight(points: HNumModFile['bodySections'][number]['
 
 function renderHNumPreview(source: HNumModFile): string {
   const points = source.bodySections.flatMap((body) => body.points);
-  if (points.length === 0) return '<div class="props-note">MOD 未提供 P 节点，无法生成骨架预览。</div>';
+  if (points.length === 0)
+    return '<div class="props-note">MOD 未提供 P 节点，无法生成骨架预览。</div>';
   const width = 280;
   // 使用正方形视口，并对 X/Z 使用同一缩放因子；此前分别拉伸 X、Z
   // 造成塔身比例失真，尤其是窄高塔型难以阅读。
@@ -337,19 +403,21 @@ function renderHNumPreview(source: HNumModFile): string {
     pointMap.set(point.id, [x, y]);
   }
   const sampledPoints = sampleTowerPointsByHeight(points, 1800);
-  const pointPath = sampledPoints.map((point) => {
-    const projected = pointMap.get(point.id);
-    if (!projected) return '';
-    const [x, y] = projected;
-    // 小十字比 1800 个 circle 节点更轻量，同时在缩放后仍可辨认。
-    return `M${formatNumber(x - 0.7, 1)} ${formatNumber(y, 1)}h1.4M${formatNumber(x, 1)} ${formatNumber(y - 0.7, 1)}v1.4`;
-  }).join('');
+  const pointPath = sampledPoints
+    .map((point) => {
+      const projected = pointMap.get(point.id);
+      if (!projected) return '';
+      const [x, y] = projected;
+      // 小十字比 1800 个 circle 节点更轻量，同时在缩放后仍可辨认。
+      return `M${formatNumber(x - 0.7, 1)} ${formatNumber(y, 1)}h1.4M${formatNumber(x, 1)} ${formatNumber(y - 0.7, 1)}v1.4`;
+    })
+    .join('');
   const rodPathParts: string[] = [];
   let drawnRodCount = 0;
   let skippedRodCount = 0;
   let unknownRodCount = 0;
   let unknownDrawnRodCount = 0;
-  for (const rod of source.bodySections.flatMap((body) => body.rods) as RRecord[]) {
+  for (const rod of source.bodySections.flatMap<RRecord>((body) => body.rods)) {
     if (rod.kind === 'unknown') unknownRodCount += 1;
     const id1 = 'id1' in rod ? rod.id1 : undefined;
     const id2 = 'id2' in rod ? rod.id2 : undefined;
@@ -363,13 +431,16 @@ function renderHNumPreview(source: HNumModFile): string {
       skippedRodCount += 1;
       continue;
     }
-    rodPathParts.push(`M${formatNumber(a[0], 1)} ${formatNumber(a[1], 1)}L${formatNumber(b[0], 1)} ${formatNumber(b[1], 1)}`);
+    rodPathParts.push(
+      `M${formatNumber(a[0], 1)} ${formatNumber(a[1], 1)}L${formatNumber(b[0], 1)} ${formatNumber(b[1], 1)}`,
+    );
     drawnRodCount += 1;
     if (rod.kind === 'unknown') unknownDrawnRodCount += 1;
   }
   const rodPath = rodPathParts.join('');
   const skippedNote = skippedRodCount > 0 ? `，${skippedRodCount} 根杆件因端点/变体异常未绘制` : '';
-  const unknownNote = unknownRodCount > 0 ? `，未知变体 ${unknownDrawnRodCount}/${unknownRodCount} 已按端点绘制` : '';
+  const unknownNote =
+    unknownRodCount > 0 ? `，未知变体 ${unknownDrawnRodCount}/${unknownRodCount} 已按端点绘制` : '';
   return `<div class="line-mod-preview" aria-label="杆塔形状（局部骨架预览）"><svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img"><g class="line-mod-rods"><path d="${rodPath}" vector-effect="non-scaling-stroke" /></g><g class="line-mod-points"><path d="${pointPath}" vector-effect="non-scaling-stroke" /></g></svg><span>局部骨架预览 · X/Z 投影（等比例，单位：mm） · P ${points.length}（点标记 ${sampledPoints.length}） · R ${drawnRodCount}${unknownNote}${skippedNote}</span></div>`;
 }
 
@@ -378,13 +449,20 @@ interface LineModRenderOptions {
   includeSourceLink?: boolean;
 }
 
-function appendLineModSource(html: string, entry: LineModRuntimeEntry, options: LineModRenderOptions): string {
+function appendLineModSource(
+  html: string,
+  entry: LineModRuntimeEntry,
+  options: LineModRenderOptions,
+): string {
   return options.includeSourceLink === false
     ? html
     : html + sectionHtml('来源', [['MOD 文件', fileReferenceValue('mod', entry.path, '查看 MOD')]]);
 }
 
-export function renderLineModSource(entry: LineModRuntimeEntry, options: LineModRenderOptions = {}): string {
+export function renderLineModSource(
+  entry: LineModRuntimeEntry,
+  options: LineModRenderOptions = {},
+): string {
   if (!entry.source) {
     return appendLineModSource(
       `<div class="props-section"><div class="props-section-title">线路 MOD</div><div class="props-note warning">${escHtml(entry.error || 'MOD 解析失败')}</div></div>`,
@@ -395,99 +473,152 @@ export function renderLineModSource(entry: LineModRuntimeEntry, options: LineMod
   const source: LineTextModGeometrySource = entry.source;
   const records = source.records;
   if ('hNum' in records) {
-    const hnum = records as HNumModFile;
+    const hnum = records;
     const rows: PropertyRow[] = [
       { key: 'hNum', value: hnum.hNum },
       { key: 'hRecords', value: hnum.hRecords.length },
       { key: 'bodySections', value: hnum.bodySections.length },
-      { key: 'points', value: hnum.bodySections.reduce((sum, body) => sum + body.points.length, 0) },
+      {
+        key: 'points',
+        value: hnum.bodySections.reduce((sum, body) => sum + body.points.length, 0),
+      },
       { key: 'rods', value: hnum.bodySections.reduce((sum, body) => sum + body.rods.length, 0) },
-      { key: 'groundPoints', value: hnum.bodySections.reduce((sum, body) => sum + body.groundPoints.length, 0) },
+      {
+        key: 'groundPoints',
+        value: hnum.bodySections.reduce((sum, body) => sum + body.groundPoints.length, 0),
+      },
       { key: 'hSubLegs', value: hnum.hSubLegs.length },
       { key: 'hLegs', value: hnum.hLegs.length },
     ];
-    return appendLineModSource(renderPropertySection('杆塔骨架', 'line-hnum', rows, { allowReferences: false }), entry, options);
+    return appendLineModSource(
+      renderPropertySection('杆塔骨架', 'line-hnum', rows, { allowReferences: false }),
+      entry,
+      options,
+    );
   }
   if ('boltNum' in records) {
-    const bolt = records as BoltModFile;
+    const bolt = records;
     let html = renderPropertySection(
       '连接件摘要',
       'line-bolt',
-      [{ key: 'boltNum', value: bolt.boltNum }, { key: 'count', value: bolt.bolts.length }],
+      [
+        { key: 'boltNum', value: bolt.boltNum },
+        { key: 'count', value: bolt.bolts.length },
+      ],
       { allowReferences: false },
     );
     const visibleBolts = bolt.bolts.slice(0, 64);
     if (visibleBolts.length > 0) {
-      const rows = visibleBolts.map((item) => `<tr><td class="prop-key">${item.index}</td><td>${escHtml(item.spec || '—')}</td><td>${escHtml(formatNumber(item.length))} mm</td><td>${escHtml(item.restFields[0] || '—')}</td><td>${escHtml(String(item.position.code))}</td><td>${escHtml(formatNumber(item.position.x))} mm</td><td>${escHtml(formatNumber(item.position.y))} mm</td><td>${escHtml(formatNumber(item.position.z))} mm</td></tr>`).join('');
+      const rows = visibleBolts
+        .map(
+          (item) =>
+            `<tr><td class="prop-key">${item.index}</td><td>${escHtml(item.spec || '—')}</td><td>${escHtml(formatNumber(item.length))} mm</td><td>${escHtml(item.restFields[0] || '—')}</td><td>${escHtml(String(item.position.code))}</td><td>${escHtml(formatNumber(item.position.x))} mm</td><td>${escHtml(formatNumber(item.position.y))} mm</td><td>${escHtml(formatNumber(item.position.z))} mm</td></tr>`,
+        )
+        .join('');
       html += `<div class="props-section"><div class="props-section-title">螺栓明细（表格）</div><table class="props-table props-bolt-table"><thead><tr><th>序号</th><th>规格</th><th>长度</th><th>材质/等级</th><th>方位码</th><th>X</th><th>Y</th><th>Z</th></tr></thead><tbody>${rows}</tbody></table></div>`;
     }
-    const extraRows: PropertyRow[] = visibleBolts.flatMap((item) => item.restFields.slice(1).map((value, index) => ({
-      key: `螺栓 ${item.index} · 字段 ${index + 2}`,
-      value,
-    })));
-    if (extraRows.length > 0) html += renderTechnicalSection('螺栓 · 未确认字段', 'line-bolt', extraRows, { allowReferences: false });
-    if (bolt.bolts.length > 64) html += '<div class="props-note">螺栓记录较多，仅显示前 64 条；完整来源仍可通过“查看 MOD”打开。</div>';
+    const extraRows: PropertyRow[] = visibleBolts.flatMap((item) =>
+      item.restFields.slice(1).map((value, index) => ({
+        key: `螺栓 ${item.index} · 字段 ${index + 2}`,
+        value,
+      })),
+    );
+    if (extraRows.length > 0)
+      html += renderTechnicalSection('螺栓 · 未确认字段', 'line-bolt', extraRows, {
+        allowReferences: false,
+      });
+    if (bolt.bolts.length > 64)
+      html +=
+        '<div class="props-note">螺栓记录较多，仅显示前 64 条；完整来源仍可通过“查看 MOD”打开。</div>';
     return appendLineModSource(html, entry, options);
   }
   if ('pointNum' in records) {
-    const pointLine = records as PointLineModFile;
+    const pointLine = records;
     let html = renderPropertySection('跨越物点线摘要', 'line-point-line', [
       { key: 'code', value: pointLine.code },
       { key: 'pointNum', value: pointLine.pointNum },
       { key: 'lineNum', value: pointLine.lineNum },
     ]);
-    const pointSections = pointLine.points.slice(0, 64).map((point) => renderPropertySection(
-      `跨越点 ${point.id}`,
-      'line-point-line',
-      [
-        { key: 'id', value: point.id },
-        {
-          key: 'BLHA',
-          value: [formatNumber(point.lat, 8), formatNumber(point.lon, 8), formatNumber(point.alt, 3), '—'].join(','),
-          definition: {
-            key: 'BLHA', label: '坐标', description: '跨越点纬度、经度、高程', group: '跨越点',
-            priority: 0, dataType: 'coordinate',
+    const pointSections = pointLine.points
+      .slice(0, 64)
+      .map((point) =>
+        renderPropertySection(`跨越点 ${point.id}`, 'line-point-line', [
+          { key: 'id', value: point.id },
+          {
+            key: 'BLHA',
+            value: [
+              formatNumber(point.lat, 8),
+              formatNumber(point.lon, 8),
+              formatNumber(point.alt, 3),
+              '—',
+            ].join(','),
+            definition: {
+              key: 'BLHA',
+              label: '坐标',
+              description: '跨越点纬度、经度、高程',
+              group: '跨越点',
+              priority: 0,
+              dataType: 'coordinate',
+            },
           },
-        },
-        { key: 'type', value: point.type },
-      ],
-    )).join('');
-    if (pointSections) html += `<div class="props-note">跨越点（前 ${Math.min(pointLine.points.length, 64)} 个）</div>${pointSections}`;
-    const lineRows = pointLine.lines.slice(0, 64).map((line, index) => `<tr><td class="prop-key">LINE${index + 1}</td><td class="prop-val">${line.fromId} → ${line.toId}</td></tr>`).join('');
-    if (lineRows) html += `<div class="props-section"><div class="props-section-title">跨越边（前 ${Math.min(pointLine.lines.length, 64)} 条）</div><table class="props-table">${lineRows}</table></div>`;
+          { key: 'type', value: point.type },
+        ]),
+      )
+      .join('');
+    if (pointSections)
+      html += `<div class="props-note">跨越点（前 ${Math.min(pointLine.points.length, 64)} 个）</div>${pointSections}`;
+    const lineRows = pointLine.lines
+      .slice(0, 64)
+      .map(
+        (line, index) =>
+          `<tr><td class="prop-key">LINE${index + 1}</td><td class="prop-val">${line.fromId} → ${line.toId}</td></tr>`,
+      )
+      .join('');
+    if (lineRows)
+      html += `<div class="props-section"><div class="props-section-title">跨越边（前 ${Math.min(pointLine.lines.length, 64)} 条）</div><table class="props-table">${lineRows}</table></div>`;
     return appendLineModSource(html, entry, options);
   }
-  const kv = records as KeyValueModFile;
+  const kv = records;
   if ('signature' in kv && kv.signature === 'unknown') {
-    const unknown = kv as UnknownKvModFile;
+    const unknown = kv;
     const rows = Object.entries(unknown.raw).map(([key, value]) => ({ key, value }));
     return appendLineModSource(
-      renderTechnicalSection('未识别 MOD 字段', 'line-node', rows, { allowReferences: false })
-        + '<div class="props-note warning">此 MOD 的键集合尚未纳入属性字典，已保留原值，未推断工程含义。</div>',
+      renderTechnicalSection('未识别 MOD 字段', 'line-node', rows, { allowReferences: false }) +
+        '<div class="props-note warning">此 MOD 的键集合尚未纳入属性字典，已保留原值，未推断工程含义。</div>',
       entry,
       options,
     );
   }
   if ('TYPE' in kv) {
-    const wire = kv as WireModFile;
+    const wire = kv;
     const rows: PropertyRow[] = Object.entries(wire)
       .filter(([key]) => key !== 'signature')
       .map(([key, value]) => ({ key, value: value as string }));
     return appendLineModSource(
-      renderPropertySection('导线参数', 'line-wire-params', rows, { includeTechnical: false, allowReferences: false })
-        + renderTechnicalSection('导线技术字段', 'line-wire-params', rows, { allowReferences: false }),
+      renderPropertySection('导线参数', 'line-wire-params', rows, {
+        includeTechnical: false,
+        allowReferences: false,
+      }) +
+        renderTechnicalSection('导线技术字段', 'line-wire-params', rows, {
+          allowReferences: false,
+        }),
       entry,
       options,
     );
   }
   if ('type' in kv) {
-    const tower = kv as TowerDeviceModFile;
+    const tower = kv;
     const rows: PropertyRow[] = Object.entries(tower)
       .filter(([key]) => key !== 'signature')
       .map(([key, value]) => ({ key, value: value as string }));
     return appendLineModSource(
-      renderPropertySection('塔基参数', 'line-tower-device', rows, { includeTechnical: false, allowReferences: false })
-        + renderTechnicalSection('塔基技术字段', 'line-tower-device', rows, { allowReferences: false }),
+      renderPropertySection('塔基参数', 'line-tower-device', rows, {
+        includeTechnical: false,
+        allowReferences: false,
+      }) +
+        renderTechnicalSection('塔基技术字段', 'line-tower-device', rows, {
+          allowReferences: false,
+        }),
       entry,
       options,
     );
@@ -495,10 +626,21 @@ export function renderLineModSource(entry: LineModRuntimeEntry, options: LineMod
   return appendLineModSource('', entry, options);
 }
 
-export function renderLineModSources(entries: LineModRuntimeEntry[], options: LineModRenderOptions = {}): string {
-  if (entries.length === 0) return '<div class="props-note">当前节点没有可解析的线路 MOD 引用。</div>';
-  return entries.slice(0, 32).map((entry) => renderLineModSource(entry, options)).join('')
-    + (entries.length > 32 ? '<div class="props-note">MOD 来源较多，仅展示前 32 个；请通过来源按钮逐个打开原文件。</div>' : '');
+export function renderLineModSources(
+  entries: LineModRuntimeEntry[],
+  options: LineModRenderOptions = {},
+): string {
+  if (entries.length === 0)
+    return '<div class="props-note">当前节点没有可解析的线路 MOD 引用。</div>';
+  return (
+    entries
+      .slice(0, 32)
+      .map((entry) => renderLineModSource(entry, options))
+      .join('') +
+    (entries.length > 32
+      ? '<div class="props-note">MOD 来源较多，仅展示前 32 个；请通过来源按钮逐个打开原文件。</div>'
+      : '')
+  );
 }
 
 /**
@@ -516,9 +658,8 @@ export function renderLineTowerShapeSource(
   if (!isLineTowerNode(node)) return '';
   const hnumEntries = entries.filter((entry) => entry.source && 'hNum' in entry.source.records);
   if (hnumEntries.length === 0) {
-    const note = entries.length === 0
-      ? '正在读取塔型来源…'
-      : '当前塔位未找到可预览的 HNum 杆塔形状。';
+    const note =
+      entries.length === 0 ? '正在读取塔型来源…' : '当前塔位未找到可预览的 HNum 杆塔形状。';
     return `<div class="props-section"><div class="props-section-title">杆塔形状</div><div class="props-note">${note}</div></div>`;
   }
 
@@ -526,13 +667,17 @@ export function renderLineTowerShapeSource(
   for (const [index, entry] of hnumEntries.slice(0, 3).entries()) {
     const source = entry.source!;
     if (!('hNum' in source.records)) continue;
-    const title = index === 0 ? '杆塔形状（局部骨架预览）' : `杆塔形状 ${index + 1}（局部骨架预览）`;
-    html += `<div class="props-section"><div class="props-section-title">${title}</div>`
-      + renderHNumPreview(source.records as HNumModFile)
-      + (options.includeSourceLink === false
+    const title =
+      index === 0 ? '杆塔形状（局部骨架预览）' : `杆塔形状 ${index + 1}（局部骨架预览）`;
+    html +=
+      `<div class="props-section"><div class="props-section-title">${title}</div>` +
+      renderHNumPreview(source.records) +
+      (options.includeSourceLink === false
         ? ''
-        : sectionHtml('形状来源', [['HNum MOD', fileReferenceValue('mod', entry.path, '查看塔型 MOD')]]))
-      + '</div>';
+        : sectionHtml('形状来源', [
+            ['HNum MOD', fileReferenceValue('mod', entry.path, '查看塔型 MOD')],
+          ])) +
+      '</div>';
   }
   if (hnumEntries.length > 3) {
     html += `<div class="props-note">检测到 ${hnumEntries.length} 个塔型来源，仅预览前 3 个。</div>`;
@@ -576,17 +721,26 @@ function lineSourceContext(node: GimGraphNode, fallback = '当前对象'): strin
 }
 
 function childSourceContext(parent: GimGraphNode, child: GimGraphNode, inherited: string): string {
-  const tower = indexedRawReferences(parent, /^TOWER(\d+)$/i).find(({ value }) => pathMatchesReference(child.path, value));
+  const tower = indexedRawReferences(parent, /^TOWER(\d+)$/i).find(({ value }) =>
+    pathMatchesReference(child.path, value),
+  );
   if (tower) return `杆塔实例 ${tower.index + 1}`;
-  const base = indexedRawReferences(parent, /^BASE(\d+)$/i).find(({ value }) => pathMatchesReference(child.path, value));
+  const base = indexedRawReferences(parent, /^BASE(\d+)$/i).find(({ value }) =>
+    pathMatchesReference(child.path, value),
+  );
   if (base) return `基础 ${base.index + 1}`;
-  const string = indexedRawReferences(parent, /^STRING(\d+)\.STRING$/i).find(({ value }) => pathMatchesReference(child.path, value));
+  const string = indexedRawReferences(parent, /^STRING(\d+)\.STRING$/i).find(({ value }) =>
+    pathMatchesReference(child.path, value),
+  );
   if (string) return `导线串 ${string.index + 1}`;
   return inherited;
 }
 
 /** 收集当前业务节点及其子树的全部来源，供“来源”页签集中展示。 */
-function collectLineSourceEntries(node: GimGraphNode, modEntries: LineModRuntimeEntry[] = []): LineSourceEntry[] {
+function collectLineSourceEntries(
+  node: GimGraphNode,
+  modEntries: LineModRuntimeEntry[] = [],
+): LineSourceEntry[] {
   const entries: LineSourceEntry[] = [];
   const seen = new Set<string>();
   const add = (kind: LineSourceKind, path: string, context: string): void => {
@@ -601,7 +755,9 @@ function collectLineSourceEntries(node: GimGraphNode, modEntries: LineModRuntime
     const context = lineSourceContext(current, inheritedContext);
     add('cbm', current.path, context);
     for (const path of current.refs.cbmFiles) {
-      const child = current.children.find((candidate) => pathMatchesReference(candidate.path, path));
+      const child = current.children.find((candidate) =>
+        pathMatchesReference(candidate.path, path),
+      );
       add('cbm', path, child ? childSourceContext(current, child, context) : context);
     }
     for (const path of current.refs.devFiles) add('dev', path, context);
@@ -623,7 +779,10 @@ function collectLineSourceEntries(node: GimGraphNode, modEntries: LineModRuntime
 }
 
 /** 文件引用只在来源页签显示，正文使用关联对象名称而非 GUID 文件名。 */
-export function renderLineSourceRefs(node: GimGraphNode, modEntries: LineModRuntimeEntry[] = []): string {
+export function renderLineSourceRefs(
+  node: GimGraphNode,
+  modEntries: LineModRuntimeEntry[] = [],
+): string {
   const entries = collectLineSourceEntries(node, modEntries);
   if (entries.length === 0) return '';
   const labels: Record<LineSourceKind, string> = {
@@ -679,7 +838,10 @@ export function relationSection(title: string, pairs: Array<[string, string]>): 
       value,
       definition: definitionWithDisplayLabel('line-node', key, key),
     }));
-  return renderPropertySection(title, 'line-node', rows, { includeTechnical: false, allowReferences: false });
+  return renderPropertySection(title, 'line-node', rows, {
+    includeTechnical: false,
+    allowReferences: false,
+  });
 }
 
 function relationTargetStatus(node: GimGraphNode, reference: string): string {
@@ -707,23 +869,35 @@ function renderTowerRelationGroups(node: GimGraphNode): string {
   if (towerRefs.length > 0 || node.rawProps['TOWERS.NUM']) {
     html += relationSection('杆塔', [
       ['数量', `${relationCount(node, 'TOWERS.NUM', towerRefs.length)} 个`],
-      ...towerRefs.map(({ index, value }) => [`塔身 ${index + 1}`, relationTargetStatus(node, value)] as [string, string]),
+      ...towerRefs.map(
+        ({ index, value }) =>
+          [`塔身 ${index + 1}`, relationTargetStatus(node, value)] as [string, string],
+      ),
     ]);
   }
   if (baseRefs.length > 0 || node.rawProps['BASES.NUM']) {
     html += relationSection('基础', [
       ['数量', `${relationCount(node, 'BASES.NUM', baseRefs.length)} 个`],
-      ...baseRefs.map(({ index, value }) => [`基础 ${index + 1}`, relationTargetStatus(node, value)] as [string, string]),
+      ...baseRefs.map(
+        ({ index, value }) =>
+          [`基础 ${index + 1}`, relationTargetStatus(node, value)] as [string, string],
+      ),
     ]);
   }
   if (stringRefs.length > 0 || node.rawProps['STRINGS.NUM']) {
     html += relationSection('导线', [
       ['导线串数量', `${relationCount(node, 'STRINGS.NUM', stringRefs.length)} 个`],
-      ...stringRefs.map(({ index, value }) => [`导线串 ${index + 1}`, relationTargetStatus(node, value)] as [string, string]),
+      ...stringRefs.map(
+        ({ index, value }) =>
+          [`导线串 ${index + 1}`, relationTargetStatus(node, value)] as [string, string],
+      ),
     ]);
   }
   if (gpoints.length > 0) {
-    html += relationSection('导线挂点', gpoints.map(({ index, value }) => [`挂点 ${index + 1}`, value] as [string, string]));
+    html += relationSection(
+      '导线挂点',
+      gpoints.map(({ index, value }) => [`挂点 ${index + 1}`, value] as [string, string]),
+    );
   }
   return html;
 }
@@ -739,15 +913,23 @@ export function renderLineRelationGroups(node: GimGraphNode): string {
   if (subdeviceRefs.length > 0 || node.rawProps['SUBDEVICES.NUM']) {
     html += relationSection('导线', [
       ['子设备数量', `${relationCount(node, 'SUBDEVICES.NUM', subdeviceRefs.length)} 个`],
-      ...subdeviceRefs.map(({ index, value }) => [`导线设备 ${index + 1}`, relationTargetStatus(node, value)] as [string, string]),
+      ...subdeviceRefs.map(
+        ({ index, value }) =>
+          [`导线设备 ${index + 1}`, relationTargetStatus(node, value)] as [string, string],
+      ),
     ]);
   }
   const endpointRows: Array<[string, string]> = [];
-  for (const [key, label] of [['BACKSTRING', '后侧挂点'], ['FRONTSTRING', '前侧挂点']] as const) {
-    if (node.rawProps[key]) endpointRows.push([label, childForReference(node, node.rawProps[key]) ? '已关联' : '已记录']);
+  for (const [key, label] of [
+    ['BACKSTRING', '后侧挂点'],
+    ['FRONTSTRING', '前侧挂点'],
+  ] as const) {
+    if (node.rawProps[key])
+      endpointRows.push([label, childForReference(node, node.rawProps[key]) ? '已关联' : '已记录']);
   }
   if (endpointRows.length > 0) html += relationSection('导线挂点', endpointRows);
-  if (!html && node.children.length > 0) html = relationSection('子对象', [['数量', `${node.children.length} 个`]]);
+  if (!html && node.children.length > 0)
+    html = relationSection('子对象', [['数量', `${node.children.length} 个`]]);
   return html || '<div class="props-note">暂无可读关系。</div>';
 }
 
@@ -759,21 +941,57 @@ export function buildLineNodeBuckets(
   const component = lineComponentForNode(node);
   const overviewRows: PropertyRow[] = [
     { key: 'ENTITYNAME', value: node.entityName },
-    ...(node.classifyName ? [{ key: 'SYSCLASSIFYNAME', value: node.classifyName, definition: definitionWithDisplayLabel(component, 'SYSCLASSIFYNAME', '分类') }] : []),
-    ...(node.name && node.name !== node.entityName ? [{ key: 'PARTNAME', value: node.name, definition: definitionWithDisplayLabel(component, 'PARTNAME', '名称') }] : []),
-    { key: 'NUM', value: node.children.length, definition: definitionWithDisplayLabel(component, 'NUM', '子节点数') },
+    ...(node.classifyName
+      ? [
+          {
+            key: 'SYSCLASSIFYNAME',
+            value: node.classifyName,
+            definition: definitionWithDisplayLabel(component, 'SYSCLASSIFYNAME', '分类'),
+          },
+        ]
+      : []),
+    ...(node.name && node.name !== node.entityName
+      ? [
+          {
+            key: 'PARTNAME',
+            value: node.name,
+            definition: definitionWithDisplayLabel(component, 'PARTNAME', '名称'),
+          },
+        ]
+      : []),
+    {
+      key: 'NUM',
+      value: node.children.length,
+      definition: definitionWithDisplayLabel(component, 'NUM', '子节点数'),
+    },
   ];
-  const warning=node.sourceDiagnostics?.length?relationSection('来源字段歧义',node.sourceDiagnostics.map(row=>[
-    `${row.field} · 行 ${row.lines.join('、')}`,row.values.join(' / '),
-  ])):'';
-  const overview = warning+renderPropertySection('基本信息', component, overviewRows, { includeTechnical: false })
-    + renderPropertySection('关键业务字段', component, rawRows(component, node.rawProps, new Set(), { excludeReferences: true }).primary, { includeTechnical: false, allowReferences: false });
-  const params = renderLineRawProperties(node, component)
-    + renderLineAttributeRecords(node, attrs)
-    + (modEntries.length > 0 ? renderLineModSources(modEntries, { includeSourceLink: false }) : '<div class="props-note">正在读取可达的 MOD 参数…</div>');
+  const warning = node.sourceDiagnostics?.length
+    ? relationSection(
+        '来源字段歧义',
+        node.sourceDiagnostics.map((row) => [
+          `${row.field} · 行 ${row.lines.join('、')}`,
+          row.values.join(' / '),
+        ]),
+      )
+    : '';
+  const overview =
+    warning +
+    renderPropertySection('基本信息', component, overviewRows, { includeTechnical: false }) +
+    renderPropertySection(
+      '关键业务字段',
+      component,
+      rawRows(component, node.rawProps, new Set(), { excludeReferences: true }).primary,
+      { includeTechnical: false, allowReferences: false },
+    );
+  const params =
+    renderLineRawProperties(node, component) +
+    renderLineAttributeRecords(node, attrs) +
+    (modEntries.length > 0
+      ? renderLineModSources(modEntries, { includeSourceLink: false })
+      : '<div class="props-note">正在读取可达的 MOD 参数…</div>');
   const relations = renderLineRelationGroups(node);
-  const source = renderLineSourceRefs(node, modEntries)
-    + renderLineTowerShapeSource(node, modEntries, { includeSourceLink: false });
+  const source =
+    renderLineSourceRefs(node, modEntries) +
+    renderLineTowerShapeSource(node, modEntries, { includeSourceLink: false });
   return { overview, params, relations, source };
 }
-

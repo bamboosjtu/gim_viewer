@@ -22,6 +22,18 @@ const SAMPLE_STD = `<?xml version="1.0"?>
 </STD>`;
 
 describe('parseStd', () => {
+  it('preserves groups and devices nested in a bay', () => {
+    const doc = parseStd('<STD><Substation><VoltageLevel><Bay name="bay" gridId="b">' +
+      '<Group name="group" gridId="g"><ConductingEquipment name="device" gridId="d"/></Group>' +
+      '</Bay></VoltageLevel></Substation></STD>');
+    const bay = doc.substation?.voltageLevels[0].bays[0];
+    const group = bay?.children[0];
+    const device = group?.children[0];
+    expect(group).toMatchObject({ tag: 'Group', gridId: 'g' });
+    expect(device).toMatchObject({ tag: 'ConductingEquipment', gridId: 'd' });
+    expect(doc.gridIdIndex.get('g')).toBe(group);
+    expect(doc.gridIdIndex.get('d')).toBe(device);
+  });
   it('distinguishes malformed, empty and unsupported documents',()=>{
     expect(parseStd('<STD>','bad.std')).toMatchObject({status:'failed',diagnostics:[{code:'invalid-xml',path:'bad.std'}]});
     expect(parseStd('')).toMatchObject({status:'empty',diagnostics:[]});

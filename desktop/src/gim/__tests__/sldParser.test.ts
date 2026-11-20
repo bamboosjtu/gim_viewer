@@ -168,11 +168,14 @@ describe('parseSld 安全净化（P0 评审）', () => {
     const doc = parseSld(
       `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">` +
       `<defs><symbol id="s1"/></defs>` +
-      `<use xlink:href="#s1"/><use xlink:href="https://evil.example/x.svg"/><use xlink:href="javascript:alert(1)"/></svg>`,
+      `<g><use xlink:href="#s1"/><use href="#s1"/><use href="https://example.invalid/x.svg"/>` +
+      `<use xlink:href="https://example.invalid/y.svg"/><use xlink:href="javascript:alert(1)"/></g></svg>`,
     );
-    expect(doc.safeSvgOuterHTML).toContain('#s1');
-    expect(doc.safeSvgOuterHTML).not.toContain('evil.example');
+    expect(doc.safeSvgOuterHTML).toContain(' href="#s1"');
+    expect(doc.safeSvgOuterHTML).toContain('xlink:href="#s1"');
+    expect(doc.safeSvgOuterHTML).not.toContain('example.invalid');
     expect(doc.safeSvgOuterHTML).not.toContain('javascript');
+    expect(doc.groups[0].uses.map(use => use.symbolId)).toEqual(['s1', 's1', '', '', '']);
   });
 
   it('CSS 净化：url()/@import/expression 被剥离', () => {

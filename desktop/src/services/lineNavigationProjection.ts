@@ -13,12 +13,7 @@
  */
 
 import type { GimGraph, GimGraphNode } from '@gim/powerline-core/gimGraphTypes.js';
-import type {
-  CrossMarker,
-  LineMapData,
-  TowerMarker,
-  WireSegment,
-} from '../gim/lineMapData.js';
+import type { CrossMarker, LineMapData, TowerMarker, WireSegment } from '../gim/lineMapData.js';
 import type { LineAttributeIndex } from '@gim/powerline-core/lineAttributeTypes.js';
 import { getFileNameLower, normalizeGimPath } from '@gim/powerline-core/linePathNormalize.js';
 import type { SearchItem } from '../shared/searchTypes.js';
@@ -336,7 +331,11 @@ export function buildLineNavigationIndex(
     if (sectionStrains.length === 0 && (towerEntries.length > 0 || spanRecords.length > 0)) {
       const fallbackSpans = spanRecords.filter((span) => span.ownerF3Paths.size === 0);
       const paths = sortTowerPaths(
-        uniqueStrings(fallbackSpans.flatMap((span) => [span.startPath, span.endPath].filter(Boolean) as string[])),
+        uniqueStrings(
+          fallbackSpans.flatMap(
+            (span) => [span.startPath, span.endPath].filter(Boolean) as string[],
+          ),
+        ),
         towerByPath,
         towerOrder,
       );
@@ -432,9 +431,7 @@ export function buildLineNavigationIndex(
   for (const cross of crossProjections) {
     if (assignedCrossPaths.has(cross.marker.cbmPath)) continue;
     const ownerF3 = parentIndex.f4CrossF3ByPath.get(cross.marker.cbmPath);
-    const candidates = ownerF3
-      ? spanIndexes.nonSameByOwnerF3Path.get(ownerF3.path) || []
-      : [];
+    const candidates = ownerF3 ? spanIndexes.nonSameByOwnerF3Path.get(ownerF3.path) || [] : [];
     const selected = chooseCrossSpan(cross, candidates, towerByPath, stringToTowerPath);
     if (selected) {
       selected.crosses.push(cross);
@@ -444,15 +441,19 @@ export function buildLineNavigationIndex(
   }
 
   // 跨越物必须保留；没有可靠档距关系时使用唯一待关联组，不按 CROSS 叶节点展开。
-  const pendingCrosses = crossProjections.filter((cross) => !assignedCrossPaths.has(cross.marker.cbmPath));
+  const pendingCrosses = crossProjections.filter(
+    (cross) => !assignedCrossPaths.has(cross.marker.cbmPath),
+  );
   if (pendingCrosses.length > 0) {
-    const pendingChildren = pendingCrosses.map((cross) => buildCrossNode(
-      `line-navigation:pending-cross:${encodeURIComponent(cross.marker.cbmPath)}`,
-      cross,
-      parentByKey,
-      nodesByKey,
-      targetBySourcePath,
-    ));
+    const pendingChildren = pendingCrosses.map((cross) =>
+      buildCrossNode(
+        `line-navigation:pending-cross:${encodeURIComponent(cross.marker.cbmPath)}`,
+        cross,
+        parentByKey,
+        nodesByKey,
+        targetBySourcePath,
+      ),
+    );
     const pending = makeNode(
       'line-navigation:unassociated-crossings',
       'unassociated-crossings',
@@ -499,7 +500,9 @@ export function buildLineNavigationIndex(
     strainSectionCount: nodesByKind(rootNode, 'strain-section').length,
     towerCount: towerEntries.length,
     // “档距”只统计跨塔连接；同塔内部连接单独显示在塔位下，不混入档距计数。
-    spanCount: spanRecords.filter((span) => span.wires.length > 0 || (span.unresolved && span.samePointWires.length === 0)).length,
+    spanCount: spanRecords.filter(
+      (span) => span.wires.length > 0 || (span.unresolved && span.samePointWires.length === 0),
+    ).length,
     wireCount: mapData.stats.wireTotal,
     crossCount: crossProjections.length,
     unassociatedCrossCount: pendingCrosses.length,
@@ -543,7 +546,9 @@ export function resolveLineNavigationTarget(
   index: LineNavigationIndex,
   key: string,
 ): LineNavigationNode | null {
-  const rowKey = index.nodesByKey.has(key) ? key : findSourceTargetKey(index.targetBySourcePath, key);
+  const rowKey = index.nodesByKey.has(key)
+    ? key
+    : findSourceTargetKey(index.targetBySourcePath, key);
   return rowKey ? index.nodesByKey.get(rowKey) || null : null;
 }
 
@@ -575,8 +580,10 @@ function buildParentIndex(graph: GimGraph): ParentIndex {
 function findRouteNode(root: GimGraphNode | null): GimGraphNode | null {
   if (!root) return null;
   if (root.entityName === 'F1System') return root;
-  return root.children.find((child) => child.entityName === 'F1System')
-    || firstDescendant(root, (node) => node.entityName === 'F1System');
+  return (
+    root.children.find((child) => child.entityName === 'F1System') ||
+    firstDescendant(root, (node) => node.entityName === 'F1System')
+  );
 }
 
 function directOrDescendant(node: GimGraphNode, entityName: string): GimGraphNode[] {
@@ -587,9 +594,12 @@ function directOrDescendant(node: GimGraphNode, entityName: string): GimGraphNod
 
 function collectDescendantF4(node: GimGraphNode, parentIndex: ParentIndex): GimGraphNode[] {
   // 线路 F3 下的 F4 正常为直接子项；递归兜底兼容导出器增加的中间组。
-  return collectDescendants(node, (child) => child.entityName === 'F4System'
-    && ['TOWER', 'WIRE', 'CROSS'].includes(child.rawProps['GROUPTYPE'] || ''))
-    .filter((child) => parentIndex.f3ByPath.get(child.path)?.path === node.path);
+  return collectDescendants(
+    node,
+    (child) =>
+      child.entityName === 'F4System' &&
+      ['TOWER', 'WIRE', 'CROSS'].includes(child.rawProps['GROUPTYPE'] || ''),
+  ).filter((child) => parentIndex.f3ByPath.get(child.path)?.path === node.path);
 }
 
 function collectTowerEntries(graph: GimGraph, mapData: LineMapData): TowerEntry[] {
@@ -598,10 +608,19 @@ function collectTowerEntries(graph: GimGraph, mapData: LineMapData): TowerEntry[
   const seen = new Set<string>();
   let order = 0;
   const walk = (node: GimGraphNode): void => {
-    if (node.entityName === 'F4System' && node.rawProps['GROUPTYPE'] === 'TOWER' && !seen.has(node.path)) {
+    if (
+      node.entityName === 'F4System' &&
+      node.rawProps['GROUPTYPE'] === 'TOWER' &&
+      !seen.has(node.path)
+    ) {
       seen.add(node.path);
       const marker = markersByPath.get(node.path);
-      entries.push({ group: node, marker, sourceOrder: order++, orderValue: parseTowerNumber(marker?.towerNumber) });
+      entries.push({
+        group: node,
+        marker,
+        sourceOrder: order++,
+        orderValue: parseTowerNumber(marker?.towerNumber),
+      });
     }
     for (const child of node.children) walk(child);
   };
@@ -610,7 +629,12 @@ function collectTowerEntries(graph: GimGraph, mapData: LineMapData): TowerEntry[
   for (const marker of mapData.towers) {
     if (seen.has(marker.nodeRef.path)) continue;
     seen.add(marker.nodeRef.path);
-    entries.push({ group: marker.nodeRef, marker, sourceOrder: order++, orderValue: parseTowerNumber(marker.towerNumber) });
+    entries.push({
+      group: marker.nodeRef,
+      marker,
+      sourceOrder: order++,
+      orderValue: parseTowerNumber(marker.towerNumber),
+    });
   }
   return entries;
 }
@@ -674,9 +698,13 @@ function buildSpanRecords(
       startPath = startPath || resolveRef(group.rawProps['BACKSTRING']);
       endPath = endPath || resolveRef(group.rawProps['FRONTSTRING']);
     }
-    const samePoint = wire.groupKind === 'same-point'
-      || (startCoord && endCoord && coordKey(startCoord.lat, startCoord.lng) === coordKey(endCoord.lat, endCoord.lng));
-    const startIdentity = startPath || coordKeyFromCoord(startCoord) || `wire:${wire.nodeRef.path}:start`;
+    const samePoint =
+      wire.groupKind === 'same-point' ||
+      (startCoord &&
+        endCoord &&
+        coordKey(startCoord.lat, startCoord.lng) === coordKey(endCoord.lat, endCoord.lng));
+    const startIdentity =
+      startPath || coordKeyFromCoord(startCoord) || `wire:${wire.nodeRef.path}:start`;
     const endIdentity = endPath || coordKeyFromCoord(endCoord) || `wire:${wire.nodeRef.path}:end`;
     const key = samePoint
       ? `same:${startIdentity}`
@@ -713,7 +741,8 @@ function buildSpanRecords(
     record.endPath = record.endPath || endPath;
     record.startCoord = record.startCoord || startCoord;
     record.endCoord = record.endCoord || endCoord;
-    record.startTower = record.startTower || (startPath ? towerByPath.get(startPath)?.marker : undefined);
+    record.startTower =
+      record.startTower || (startPath ? towerByPath.get(startPath)?.marker : undefined);
     record.endTower = record.endTower || (endPath ? towerByPath.get(endPath)?.marker : undefined);
     record.unresolved = record.unresolved || !startPath || !endPath;
   };
@@ -725,8 +754,12 @@ function buildSpanRecords(
     if (node.entityName === 'F4System' && node.rawProps['GROUPTYPE'] === 'WIRE') {
       const hasMapped = node.children.some((child) => mappedWirePaths.has(child.path));
       if (!hasMapped) {
-        const startPath = stringToTowerPath.get(fileName(node.rawProps['BACKSTRING'] || '').toLowerCase());
-        const endPath = stringToTowerPath.get(fileName(node.rawProps['FRONTSTRING'] || '').toLowerCase());
+        const startPath = stringToTowerPath.get(
+          fileName(node.rawProps['BACKSTRING'] || '').toLowerCase(),
+        );
+        const endPath = stringToTowerPath.get(
+          fileName(node.rawProps['FRONTSTRING'] || '').toLowerCase(),
+        );
         const startIdentity = startPath || `f4:${node.path}:start`;
         const endIdentity = endPath || `f4:${node.path}:end`;
         const key = `span:${[startIdentity, endIdentity].sort().join('~')}:${encodeURIComponent(node.path)}`;
@@ -754,26 +787,50 @@ function buildSpanRecords(
 }
 
 function buildCrossFamResolver(attrs?: LineAttributeIndex) {
-  const byPath = new Map([...(attrs?.famBySourcePath ?? [])].map(([path, rows]) => [normalizeGimPath(path).toLowerCase(), rows]));
+  const byPath = new Map(
+    [...(attrs?.famBySourcePath ?? [])].map(([path, rows]) => [
+      normalizeGimPath(path).toLowerCase(),
+      rows,
+    ]),
+  );
   const byName = new Map<string, string[]>();
-  for (const path of byPath.keys()) { const name = getFileNameLower(path); const paths = byName.get(name) ?? []; paths.push(path); byName.set(name, paths); }
-  return (node: GimGraphNode) => node.refs.famFiles.flatMap(ref => {
-    const path = normalizeGimPath(ref).toLowerCase();
-    const folder = normalizeGimPath(node.path).split('/').slice(0, -1).join('/').toLowerCase();
-    const sibling = !path.includes('/') ? byPath.get(`${folder}/${path}`) : undefined;
-    const candidates = byName.get(getFileNameLower(path));
-    const rows = sibling ?? byPath.get(path) ?? (candidates?.length === 1 ? byPath.get(candidates[0]) : undefined);
-    return [...(rows ?? [])].flatMap(([key, records]) => records.map(row => ({ key, label: row.display_key, value: row.prop_value, source: row.source_path })));
-  });
+  for (const path of byPath.keys()) {
+    const name = getFileNameLower(path);
+    const paths = byName.get(name) ?? [];
+    paths.push(path);
+    byName.set(name, paths);
+  }
+  return (node: GimGraphNode) =>
+    node.refs.famFiles.flatMap((ref) => {
+      const path = normalizeGimPath(ref).toLowerCase();
+      const folder = normalizeGimPath(node.path).split('/').slice(0, -1).join('/').toLowerCase();
+      const sibling = !path.includes('/') ? byPath.get(`${folder}/${path}`) : undefined;
+      const candidates = byName.get(getFileNameLower(path));
+      const rows =
+        sibling ??
+        byPath.get(path) ??
+        (!path.includes('/') && candidates?.length === 1 ? byPath.get(candidates[0]) : undefined);
+      return [...(rows ?? [])].flatMap(([key, records]) =>
+        records.map((row) => ({
+          key,
+          label: row.display_key,
+          value: row.prop_value,
+          source: row.source_path,
+        })),
+      );
+    });
 }
 
-function buildCrossProjection(marker: CrossMarker, resolveFam: ReturnType<typeof buildCrossFamResolver>): LineCrossProjection {
+function buildCrossProjection(
+  marker: CrossMarker,
+  resolveFam: ReturnType<typeof buildCrossFamResolver>,
+): LineCrossProjection {
   const node = marker.nodeRef;
   const sourceNodes = collectDescendants(node, (child) => child.entityName === 'CROSS');
   const codes = uniqueStrings(sourceNodes.map((child) => child.rawProps['CODE']).filter(Boolean));
-  const classifications = sourceNodes.map(child => classifyCrossing(resolveFam(child)));
-  const names = uniqueStrings(classifications.flatMap(c => c.name ? [c.name] : []));
-  const typeLabel = uniqueStrings(classifications.map(c => c.label)).join('/') || '未分类跨越物';
+  const classifications = sourceNodes.map((child) => classifyCrossing(resolveFam(child)));
+  const names = uniqueStrings(classifications.flatMap((c) => (c.name ? [c.name] : [])));
+  const typeLabel = uniqueStrings(classifications.map((c) => c.label)).join('/') || '未分类跨越物';
   const position = marker.lat != null && marker.lng != null ? '可定位' : '无法定位';
   const title = `跨越物 · ${typeLabel}${names.length ? ' · ' + names.join('/') : ''}`;
   const subtitle = `${position}${sourceNodes.length > 1 ? ` · ${sourceNodes.length} 个来源对象` : ''}`;
@@ -806,7 +863,8 @@ function buildSpanRecordIndexes(spans: SpanRecord[]): SpanRecordIndexes {
   const byTowerPair = new Map<string, SpanRecord[]>();
 
   for (const span of spans) {
-    for (const sourcePath of span.sourcePaths) appendSpanKeyIndex(bySourcePath, sourcePath, span.key);
+    for (const sourcePath of span.sourcePaths)
+      appendSpanKeyIndex(bySourcePath, sourcePath, span.key);
     for (const ownerPath of span.ownerF3Paths) {
       appendSpanIndex(byOwnerF3Path, ownerPath, span);
       if (span.samePointWires.length === 0) appendSpanIndex(nonSameByOwnerF3Path, ownerPath, span);
@@ -871,8 +929,9 @@ function buildStrainChildren(
 
     const nextPath = orderedTowerPaths[index + 1];
     if (!nextPath) continue;
-    const between = (spanIndexes.byTowerPair.get(spanTowerPairKey(path, nextPath)) || [])
-      .filter((span) => inCurrentStrain(span) && !consumed.has(span.key));
+    const between = (spanIndexes.byTowerPair.get(spanTowerPairKey(path, nextPath)) || []).filter(
+      (span) => inCurrentStrain(span) && !consumed.has(span.key),
+    );
     for (const span of between) {
       const spanNode = buildSpanNode(span, parentByKey, nodesByKey, targetBySourcePath);
       children.push(spanNode);
@@ -910,13 +969,23 @@ function buildTowerNode(
   const marker = entry.marker;
   // 文件名（例如 f8.cbm）是来源证据，不是用户可读的塔位编号。
   // 没有 FAM/DEV 编号时使用稳定的来源顺序，避免把路径泄漏到主树。
-  const number = normalizeTowerNumber(marker?.towerNumber)
-    || normalizeTowerNumber(towerNumberFromNode(entry.group))
-    || `杆塔 ${pad(entry.sourceOrder + 1)}`;
+  const number =
+    normalizeTowerNumber(marker?.towerNumber) ||
+    normalizeTowerNumber(towerNumberFromNode(entry.group)) ||
+    `杆塔 ${pad(entry.sourceOrder + 1)}`;
   const quality = marker ? qualityLabel(marker.dataQuality) : '无法定位';
   const details = [marker?.towerType, quality].filter(Boolean).join(' · ');
   const label = number.startsWith('杆塔 ') ? number : `${number} 杆塔`;
-  const node = makeNode(key, 'tower', label, details || '塔型未提供', '●', entry.group, [], [entry.group.path]);
+  const node = makeNode(
+    key,
+    'tower',
+    label,
+    details || '塔型未提供',
+    '●',
+    entry.group,
+    [],
+    [entry.group.path],
+  );
   node.tower = marker;
   registerNode(node, nodesByKey, parentByKey, targetBySourcePath);
   return node;
@@ -931,7 +1000,16 @@ function buildSpanNode(
   const key = `line-navigation:span:${encodeURIComponent(span.key)}`;
   const label = spanLabel(span);
   const subtitle = spanSubtitle(span);
-  const node = makeNode(key, 'span', label, subtitle, '—', span.representativeNode, [], Array.from(span.sourcePaths));
+  const node = makeNode(
+    key,
+    'span',
+    label,
+    subtitle,
+    '—',
+    span.representativeNode,
+    [],
+    Array.from(span.sourcePaths),
+  );
   node.span = toSpanProjection(span);
   registerNode(node, nodesByKey, parentByKey, targetBySourcePath);
   refreshSpanNode(node, node.span, parentByKey, nodesByKey, targetBySourcePath);
@@ -983,7 +1061,9 @@ function buildSamePointNode(
   nodesByKey: Map<string, LineNavigationNode>,
   targetBySourcePath: Map<string, string>,
 ): LineNavigationNode {
-  const types = uniqueStrings(span.samePointWires.map((wire) => (wire.wireType || 'UNKNOWN').toUpperCase()));
+  const types = uniqueStrings(
+    span.samePointWires.map((wire) => (wire.wireType || 'UNKNOWN').toUpperCase()),
+  );
   const node = makeNode(
     key,
     'same-point',
@@ -1000,7 +1080,7 @@ function buildSamePointNode(
     const wireNode = makeNode(
       `${node.key}:wire:${encodeURIComponent(wire.nodeRef.path)}`,
       'wire',
-        WIRE_LABELS[(wire.wireType || 'UNKNOWN').toUpperCase()] || '未知导线',
+      WIRE_LABELS[(wire.wireType || 'UNKNOWN').toUpperCase()] || '未知导线',
       wire.split ? `分裂 ${wire.split}` : '同塔内部连接',
       '╱',
       wire.nodeRef,
@@ -1022,10 +1102,16 @@ function buildCrossNode(
   targetBySourcePath: Map<string, string>,
   parentKey?: string,
 ): LineNavigationNode {
-  const node = makeNode(key, 'crossing', cross.title, cross.subtitle, '✕', cross.node, [], [
-    cross.marker.cbmPath,
-    ...cross.sourceNodes.map((source) => source.path),
-  ]);
+  const node = makeNode(
+    key,
+    'crossing',
+    cross.title,
+    cross.subtitle,
+    '✕',
+    cross.node,
+    [],
+    [cross.marker.cbmPath, ...cross.sourceNodes.map((source) => source.path)],
+  );
   node.cross = cross;
   registerNode(node, nodesByKey, parentByKey, targetBySourcePath, parentKey);
   return node;
@@ -1146,8 +1232,8 @@ function findSourceTargetKey(
   if (direct) return direct;
   const normalized = normalizeGimPath(sourcePath);
   if (!normalized) return undefined;
-  const directNormalized = targetBySourcePath.get(normalized)
-    || targetBySourcePath.get(normalized.toLowerCase());
+  const directNormalized =
+    targetBySourcePath.get(normalized) || targetBySourcePath.get(normalized.toLowerCase());
   if (directNormalized) return directNormalized;
 
   // 部分来源记录只保留裸文件名（例如 `abc.cbm`），而解压后的图节点带有
@@ -1181,8 +1267,16 @@ function chooseCrossSpan(
   if (candidates.length === 0) return null;
   const raw = cross.node.rawProps;
   const refs = [
-    raw['BACKSTRING'], raw['FRONTSTRING'], raw['SPAN'], raw['SPANREF'], raw['WIRE'],
-    raw['WIREGROUP'], raw['TOWER0'], raw['TOWER1'], raw['STARTTOWER'], raw['ENDTOWER'],
+    raw['BACKSTRING'],
+    raw['FRONTSTRING'],
+    raw['SPAN'],
+    raw['SPANREF'],
+    raw['WIRE'],
+    raw['WIREGROUP'],
+    raw['TOWER0'],
+    raw['TOWER1'],
+    raw['STARTTOWER'],
+    raw['ENDTOWER'],
   ].filter(Boolean);
   if (refs.length > 0) {
     const towerPaths = refs
@@ -1198,11 +1292,15 @@ function chooseCrossSpan(
   }
   if (cross.marker.lat != null && cross.marker.lng != null) {
     const scored = candidates
-      .map((span) => ({ span, distance: pointToSpanMeters(cross.marker.lat as number, cross.marker.lng as number, span) }))
+      .map((span) => ({
+        span,
+        distance: pointToSpanMeters(cross.marker.lat as number, cross.marker.lng as number, span),
+      }))
       .filter((item) => Number.isFinite(item.distance))
       .sort((a, b) => a.distance - b.distance);
     if (scored.length > 0 && scored[0].distance <= 250) {
-      if (scored.length === 1 || scored[1].distance - scored[0].distance >= 25) return scored[0].span;
+      if (scored.length === 1 || scored[1].distance - scored[0].distance >= 25)
+        return scored[0].span;
     }
   }
   // 没有坐标或显式端点引用时不做“唯一档距”猜测。
@@ -1212,11 +1310,14 @@ function chooseCrossSpan(
 }
 
 function pointToSpanMeters(lat: number, lng: number, span: SpanRecord): number {
-  const start = span.startTower || (span.startCoord ? { lat: span.startCoord.lat, lng: span.startCoord.lng } : null);
-  const end = span.endTower || (span.endCoord ? { lat: span.endCoord.lat, lng: span.endCoord.lng } : null);
+  const start =
+    span.startTower ||
+    (span.startCoord ? { lat: span.startCoord.lat, lng: span.startCoord.lng } : null);
+  const end =
+    span.endTower || (span.endCoord ? { lat: span.endCoord.lat, lng: span.endCoord.lng } : null);
   if (!start || !end) return Infinity;
   const latScale = 111_320;
-  const lngScale = Math.cos(((start.lat + end.lat) / 2) * Math.PI / 180) * latScale;
+  const lngScale = Math.cos((((start.lat + end.lat) / 2) * Math.PI) / 180) * latScale;
   const px = (lng - start.lng) * lngScale;
   const py = (lat - start.lat) * latScale;
   const ex = (end.lng - start.lng) * lngScale;
@@ -1258,22 +1359,37 @@ function sortTowerPaths(
   });
 }
 
-function compareSpansByOrder(towerOrder: Map<string, number>): (a: SpanRecord, b: SpanRecord) => number {
-  const first = (span: SpanRecord): number => Math.min(
-    towerOrder.get(span.startPath || '') ?? Number.MAX_SAFE_INTEGER,
-    towerOrder.get(span.endPath || '') ?? Number.MAX_SAFE_INTEGER,
-  );
+function compareSpansByOrder(
+  towerOrder: Map<string, number>,
+): (a: SpanRecord, b: SpanRecord) => number {
+  const first = (span: SpanRecord): number =>
+    Math.min(
+      towerOrder.get(span.startPath || '') ?? Number.MAX_SAFE_INTEGER,
+      towerOrder.get(span.endPath || '') ?? Number.MAX_SAFE_INTEGER,
+    );
   return (a, b) => first(a) - first(b) || a.key.localeCompare(b.key);
 }
 
-function firstTowerMarker(paths: string[], entries: Map<string, TowerEntry>, order: Map<string, number>): TowerMarker | undefined {
+function firstTowerMarker(
+  paths: string[],
+  entries: Map<string, TowerEntry>,
+  order: Map<string, number>,
+): TowerMarker | undefined {
   const sorted = sortTowerPaths(paths, entries, order);
-  return sorted.map((path) => entries.get(path)?.marker).find((marker): marker is TowerMarker => Boolean(marker));
+  return sorted
+    .map((path) => entries.get(path)?.marker)
+    .find((marker): marker is TowerMarker => Boolean(marker));
 }
 
-function lastTowerMarker(paths: string[], entries: Map<string, TowerEntry>, order: Map<string, number>): TowerMarker | undefined {
+function lastTowerMarker(
+  paths: string[],
+  entries: Map<string, TowerEntry>,
+  order: Map<string, number>,
+): TowerMarker | undefined {
   const sorted = sortTowerPaths(paths, entries, order).reverse();
-  return sorted.map((path) => entries.get(path)?.marker).find((marker): marker is TowerMarker => Boolean(marker));
+  return sorted
+    .map((path) => entries.get(path)?.marker)
+    .find((marker): marker is TowerMarker => Boolean(marker));
 }
 
 function spanLabel(span: SpanRecord): string {
@@ -1291,35 +1407,66 @@ function spanSubtitle(span: SpanRecord): string {
   const types = uniqueStrings(span.wires.map((wire) => (wire.wireType || 'UNKNOWN').toUpperCase()));
   const cross = span.crosses.length > 0 ? `跨越物 ${span.crosses.length}` : undefined;
   const unresolved = span.unresolved && !meters ? '端点/定位待确认' : undefined;
-  return [meters != null ? `${meters.toFixed(1)} m` : '长度未计算', `导线 ${span.wires.length}`, types.join('/') || undefined, cross, unresolved]
-    .filter(Boolean).join(' · ');
+  return [
+    meters != null ? `${meters.toFixed(1)} m` : '长度未计算',
+    `导线 ${span.wires.length}`,
+    types.join('/') || undefined,
+    cross,
+    unresolved,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 function strainSubtitle(towerCount: number, spans: SpanRecord[]): string {
   const wireCount = spans.reduce((sum, span) => sum + span.wires.length, 0);
-  const quality = spans.some((span) => span.unresolved) ? '含未解析档距' : '拓扑顺序来自塔位/导线端点';
-  const spanCount = spans.filter((span) => span.wires.length > 0 || (span.unresolved && span.samePointWires.length === 0)).length;
-  return [`塔位 ${towerCount}`, `档距 ${spanCount}`, `导线 ${wireCount}`, quality]
-    .join(' · ');
+  const quality = spans.some((span) => span.unresolved)
+    ? '含未解析档距'
+    : '拓扑顺序来自塔位/导线端点';
+  const spanCount = spans.filter(
+    (span) => span.wires.length > 0 || (span.unresolved && span.samePointWires.length === 0),
+  ).length;
+  return [`塔位 ${towerCount}`, `档距 ${spanCount}`, `导线 ${wireCount}`, quality].join(' · ');
 }
 
-function sectionSubtitle(strainCount: number, towerCount: number, node: GimGraphNode | null | undefined): string {
-  return [`耐张段 ${strainCount}`, `塔位 ${towerCount}`, node ? '按模型层级归属' : '顺序推断'].join(' · ');
+function sectionSubtitle(
+  strainCount: number,
+  towerCount: number,
+  node: GimGraphNode | null | undefined,
+): string {
+  return [`耐张段 ${strainCount}`, `塔位 ${towerCount}`, node ? '按模型层级归属' : '顺序推断'].join(
+    ' · ',
+  );
 }
 
 function projectSubtitle(mapData: LineMapData, spans: SpanRecord[]): string {
-  const spanCount = spans.filter((span) => span.wires.length > 0 || (span.unresolved && span.samePointWires.length === 0)).length;
-  return [`塔位 ${mapData.stats.towerTotal}`, `档距 ${spanCount}`, `跨越物 ${mapData.crosses.length}`].join(' · ');
+  const spanCount = spans.filter(
+    (span) => span.wires.length > 0 || (span.unresolved && span.samePointWires.length === 0),
+  ).length;
+  return [
+    `塔位 ${mapData.stats.towerTotal}`,
+    `档距 ${spanCount}`,
+    `跨越物 ${mapData.crosses.length}`,
+  ].join(' · ');
 }
 
 function routeSubtitle(f1: GimGraphNode | null, mapData: LineMapData, towerCount: number): string {
   const lineLength = f1 ? cleanText(f1.rawProps['LINELENGTH']) : '';
-  return [lineLength ? `线路长度 ${lineLength} km` : undefined, `塔位 ${towerCount}`, `导线 ${mapData.wires.length}`]
-    .filter(Boolean).join(' · ');
+  return [
+    lineLength ? `线路长度 ${lineLength} km` : undefined,
+    `塔位 ${towerCount}`,
+    `导线 ${mapData.wires.length}`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 function resolveLineName(f1: GimGraphNode | null, options: LineNavigationOptions): string {
-  const fromFam = firstPropForNode(f1, options.attrs, ['LINENAME', 'RUNPROJECTNAME', 'DESIGNPROJECTNAME']);
+  const fromFam = firstPropForNode(f1, options.attrs, [
+    'LINENAME',
+    'RUNPROJECTNAME',
+    'DESIGNPROJECTNAME',
+  ]);
   return fromFam || cleanText(options.projectName) || '未命名线路';
 }
 
@@ -1329,27 +1476,43 @@ function rangeLabel(prefix: string, start?: string, end?: string): string {
 
 function qualityLabel(quality: TowerMarker['dataQuality']): string {
   switch (quality) {
-    case 'full': return '属性完整';
-    case 'partial': return '部分属性';
-    case 'coords-only': return '仅坐标';
-    default: return '无法定位';
+    case 'full':
+      return '属性完整';
+    case 'partial':
+      return '部分属性';
+    case 'coords-only':
+      return '仅坐标';
+    default:
+      return '无法定位';
   }
 }
 
 function kindLabel(kind: LineNavigationKind): string {
   switch (kind) {
-    case 'project': return '工程';
-    case 'route': return '线路';
-    case 'section': return '区段';
-    case 'strain-section': return '耐张段';
-    case 'tower': return '杆塔';
-    case 'span': return '档距';
-    case 'wire': return '导线';
-    case 'crossing': return '跨越物';
-    case 'same-point': return '同塔连接';
-    case 'unsegmented': return '未分段对象';
-    case 'unassociated-crossings': return '待关联跨越物';
-    default: return '对象';
+    case 'project':
+      return '工程';
+    case 'route':
+      return '线路';
+    case 'section':
+      return '区段';
+    case 'strain-section':
+      return '耐张段';
+    case 'tower':
+      return '杆塔';
+    case 'span':
+      return '档距';
+    case 'wire':
+      return '导线';
+    case 'crossing':
+      return '跨越物';
+    case 'same-point':
+      return '同塔连接';
+    case 'unsegmented':
+      return '未分段对象';
+    case 'unassociated-crossings':
+      return '待关联跨越物';
+    default:
+      return '对象';
   }
 }
 
@@ -1379,13 +1542,17 @@ function normalizeTowerNumber(value: string | undefined): string | undefined {
 function lookupFamMap(
   refs: string[],
   attrs?: LineAttributeIndex,
-): Map<string, { prop_value?: string | null; display_key?: string | null; source_path?: string }[]> | undefined {
+):
+  | Map<string, { prop_value?: string | null; display_key?: string | null; source_path?: string }[]>
+  | undefined {
   if (!attrs) return undefined;
   for (const ref of refs) {
     const normalized = normalizeGimPath(ref);
     const direct = attrs.famBySourcePath.get(normalized);
     if (direct) return direct;
-    const byName = attrs.famByFileNameLower.get(getFileNameLower(ref));
+    const byName = normalized.includes('/')
+      ? undefined
+      : attrs.famByFileNameLower.get(getFileNameLower(ref));
     if (byName) return byName;
   }
   return undefined;
@@ -1400,7 +1567,8 @@ function firstProp(
     const exact = propMap.get(key);
     if (exact?.[0]?.prop_value) return cleanText(exact[0].prop_value);
     for (const [candidate, values] of propMap) {
-      if (candidate.toUpperCase() === key.toUpperCase() && values[0]?.prop_value) return cleanText(values[0].prop_value);
+      if (candidate.toUpperCase() === key.toUpperCase() && values[0]?.prop_value)
+        return cleanText(values[0].prop_value);
     }
   }
   return undefined;
@@ -1455,7 +1623,10 @@ function uniqueByPath<T extends { path: string }>(nodes: T[]): T[] {
   });
 }
 
-function collectDescendants(node: GimGraphNode, predicate: (child: GimGraphNode) => boolean): GimGraphNode[] {
+function collectDescendants(
+  node: GimGraphNode,
+  predicate: (child: GimGraphNode) => boolean,
+): GimGraphNode[] {
   const result: GimGraphNode[] = [];
   const seen = new Set<string>();
   const walk = (current: GimGraphNode): void => {
@@ -1470,7 +1641,10 @@ function collectDescendants(node: GimGraphNode, predicate: (child: GimGraphNode)
   return result;
 }
 
-function firstDescendant(node: GimGraphNode, predicate: (child: GimGraphNode) => boolean): GimGraphNode | null {
+function firstDescendant(
+  node: GimGraphNode,
+  predicate: (child: GimGraphNode) => boolean,
+): GimGraphNode | null {
   for (const child of node.children) {
     if (predicate(child)) return child;
     const result = firstDescendant(child, predicate);
@@ -1479,7 +1653,11 @@ function firstDescendant(node: GimGraphNode, predicate: (child: GimGraphNode) =>
   return null;
 }
 
-function isDescendantOf(node: GimGraphNode, ancestor: GimGraphNode, parentByPath: Map<string, GimGraphNode>): boolean {
+function isDescendantOf(
+  node: GimGraphNode,
+  ancestor: GimGraphNode,
+  parentByPath: Map<string, GimGraphNode>,
+): boolean {
   let current: GimGraphNode | undefined = node;
   const seen = new Set<string>();
   while (current && !seen.has(current.path)) {
@@ -1491,7 +1669,9 @@ function isDescendantOf(node: GimGraphNode, ancestor: GimGraphNode, parentByPath
 }
 
 function sectionKeyFor(path: string | undefined, index: number): string {
-  return path ? `line-navigation:section:${encodeURIComponent(path)}` : `line-navigation:section:inferred:${index}`;
+  return path
+    ? `line-navigation:section:${encodeURIComponent(path)}`
+    : `line-navigation:section:inferred:${index}`;
 }
 
 function routeKey(path: string): string {

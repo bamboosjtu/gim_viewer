@@ -16,7 +16,6 @@ const mocks = vi.hoisted(() => ({
   buildAndRenderCbmTree: vi.fn(),
   renderFileDevPanel: vi.fn(),
   parseStdSldOnGimExtracted: vi.fn(),
-  findMissingStdSldCacheParts: vi.fn(() => []),
   restoreStdSldFromCache: vi.fn(),
   commitStdSldResult: vi.fn((state: AppState, result: StdSldParseResult | null) => {
     state.currentStdDoc = result?.stdDoc ?? null;
@@ -51,7 +50,6 @@ vi.mock('../../ui/cbmTreeView.js', () => ({ buildAndRenderCbmTree: mocks.buildAn
 vi.mock('../../ui/fileDevView.js', () => ({ renderFileDevPanel: mocks.renderFileDevPanel }));
 vi.mock('../stdSldService.js', () => ({
   parseStdSldOnGimExtracted: mocks.parseStdSldOnGimExtracted,
-  findMissingStdSldCacheParts: mocks.findMissingStdSldCacheParts,
   restoreStdSldFromCache: mocks.restoreStdSldFromCache,
   commitStdSldResult: mocks.commitStdSldResult,
 }));

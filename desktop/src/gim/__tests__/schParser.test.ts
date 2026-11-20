@@ -78,6 +78,16 @@ SCH1=zjx.sld`;
 });
 
 describe('discoverStdSldFromSCH', () => {
+  it('resolves the root CBM declaration and uses the actual SCH directory for its entries', async () => {
+    const files = new Map<string, File>([
+      ['Cbm/project.cbm', textFile('sch=Logic\\LAYOUT.sch', 'project.cbm')],
+      ['Cbm/project.sch', textFile('SCH.NUM=1\nSCH0=wrong.sld', 'project.sch')],
+      ['Logic/layout.sch', textFile('SCH.NUM=1\nSCH0=main.sld', 'layout.sch')],
+      ['Logic/main.sld', textFile('<svg/>', 'main.sld')],
+      ['Cbm/main.sld', textFile('<svg/>', 'main.sld')],
+    ]);
+    expect(await discoverStdSldFromSCH(files)).toMatchObject([{ path: 'Logic/main.sld', matchedPath: 'Logic/main.sld' }]);
+  });
   it('从 GIM 文件集合发现 SCH 条目', async () => {
     const files = new Map<string, File>([
       ['CBM/project.sch', textFile('SCH.NUM=2\nSCH0=zjx.std\nSCH1=zjx.sld', 'project.sch')],

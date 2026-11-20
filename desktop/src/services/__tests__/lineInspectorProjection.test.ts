@@ -106,7 +106,7 @@ function famRecord(source: string, key: string, value: string, display_key: stri
   return {
     source_path: source,
     normalized_path: source,
-    file_name_lower: source.toLowerCase(),
+    file_name_lower: source.split('/').pop()!.toLowerCase(),
     display_key,
     prop_key: key,
     prop_value: value,
@@ -148,6 +148,23 @@ function attrIndex(records: { fam: LineFamPropertyRecord[]; dev?: LineDevPropert
 }
 
 describe('线路属性面板分组', () => {
+  it('does not mix properties from another FAM with the same basename', () => {
+    const tower = node({
+      path: 'Cbm/tower.cbm',
+      entityName: 'Tower_Device',
+      refs: {
+        cbmFiles: [], devFiles: [], famFiles: ['Other/type.fam'], phmFiles: [], modFiles: [],
+        stlFiles: [], wireFiles: [], ifcFiles: [], rawRefs: {},
+      },
+    });
+    const attrs = attrIndex({ fam: [
+      famRecord('Other/type.fam', 'TYPE', 'referenced-type', '塔型'),
+      famRecord('Cbm/type.fam', 'TYPE', 'unreferenced-type', '塔型'),
+    ] });
+    const { params } = buildLineNodeBuckets(tower, attrs);
+    expect(params).toContain('referenced-type');
+    expect(params).not.toContain('unreferenced-type');
+  });
   it('塔位实例参数包含呼高/转角，关系按四类业务对象分组，引用集中在来源页', () => {
     const tower = node({
       path: 'Cbm/tower.cbm',

@@ -213,7 +213,6 @@ export async function onGimExtracted(
         stdSldPromise = buildAndCommitSubstationStdSld(
           state,
           files,
-          [],
           session,
           perfSession,
           showMessage,
@@ -540,15 +539,10 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
           ).catch(reportBackgroundError);
         });
 
-        const cachedStdSldEntryPaths = index.entries.map((entry) => entry.entry_path);
-        // STD/SLD restore is a feature-local background task.  A missing or
-        // stale STD/SLD cache must not discard an otherwise valid IFC cache hit;
-        // the helper records the degradation and clears only that projection.
         const startStdSld = (): Promise<boolean> =>
           buildAndCommitSubstationStdSld(
             state,
-            null,
-            cachedStdSldEntryPaths,
+            engineeringFiles,
             session,
             perfSession,
             showMessage,

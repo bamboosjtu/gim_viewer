@@ -1,6 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { AppState } from '../../app/state.js';
-import { commitStdSldResult, findMissingStdSldCacheParts, type StdSldParseResult } from '../stdSldService.js';
+import { commitStdSldResult, type StdSldParseResult } from '../stdSldService.js';
+import { buildAndCommitSubstationStdSld } from '../substationDocumentRuntime.js';
+import { bindDiagramPresentation } from '../diagramPresentationPort.js';
+import { buildCbmTree } from '../../gim/cbmParser.js';
+import { perfCurrentSession } from '../../utils/perfTimings.js';
+
+const { batchRead } = vi.hoisted(() => ({ batchRead: vi.fn() }));
+vi.mock('@desktop/database.js', () => ({ batchReadCachedFiles: batchRead }));
 
 function result(overrides: Partial<StdSldParseResult> = {}): StdSldParseResult {
   return {
@@ -18,34 +25,43 @@ function result(overrides: Partial<StdSldParseResult> = {}): StdSldParseResult {
   };
 }
 
-describe('findMissingStdSldCacheParts', () => {
-  const entries = ['CBM/project.sch', 'CBM/zjx.std', 'CBM/zjx.sld'];
+describe('STD/SLD cold and warm publication', () => {
+  it.each([
+    ['empty', '<STD/>'],
+    ['unsupported', '<svg xmlns="http://www.w3.org/2000/svg"/>'],
+    ['failed', '<STD>'],
+    [null, null],
+  ])('publishes the valid SLD when the accompanying STD is %s', async (status, stdText) => {
+    const sldText = '<svg xmlns="http://www.w3.org/2000/svg"><g gridId="bay"><circle r="1"/></g></svg>';
+    const files = new Map([
+      ['Cbm/project.cbm', new File(['SCH=Diagrams/entry.sch'], 'project.cbm')],
+      ['Diagrams/entry.sch', new File(['SCH.NUM=2\nSCH0=topology.std\nSCH1=main.sld'], 'entry.sch')],
+      ['Diagrams/main.sld', new File([sldText], 'main.sld')],
+    ]);
+    const documents = new Map([['Diagrams/main.sld', new TextEncoder().encode(sldText)]]);
+    if (stdText !== null) {
+      files.set('Diagrams/topology.std', new File([stdText], 'topology.std'));
+      documents.set('Diagrams/topology.std', new TextEncoder().encode(stdText));
+    }
+    batchRead.mockReset().mockResolvedValue(documents);
+    bindDiagramPresentation({ render: vi.fn().mockResolvedValue(undefined), onSelect: vi.fn().mockResolvedValue(() => {}) });
+    const state = new AppState();
+    state.currentProjectId = 42;
+    state.currentCbmTree = await buildCbmTree(files);
+    const session = state.captureProjectSession();
+    const open = (mode: 'cold' | 'warm') =>
+      buildAndCommitSubstationStdSld(state, files, session, perfCurrentSession(), vi.fn(), mode);
 
-  it('完整恢复 SCH/STD/SLD 时不报缺失', () => {
-    expect(findMissingStdSldCacheParts(entries, result())).toEqual([]);
-  });
-
-  it('旧缓存完全没有电气图文件时要求回退完整解压', () => {
-    expect(findMissingStdSldCacheParts(entries, null)).toEqual(['SCH', 'STD', 'SLD']);
-  });
-
-  it('只恢复 STD 但缺少 SLD 时识别 SLD 缺失', () => {
-    expect(findMissingStdSldCacheParts(entries, result({ sldDoc: null }))).toEqual(['SLD']);
-  });
-
-  it('NBT1 SVG 形式的 std（无独立拓扑）与冷路径保持兼容', () => {
-    expect(findMissingStdSldCacheParts(entries, result({
-      stdDoc: { version: 'NBT1', substation: null } as StdSldParseResult['stdDoc'],
-    }))).toEqual([]);
-  });
-
-  it('工程索引不声明电气图文件时保持兼容', () => {
-    expect(findMissingStdSldCacheParts(['CBM/project.cbm', 'DEV/model.ifc'], null)).toEqual([]);
-  });
-
-  it('路径匹配不区分大小写并兼容反斜杠', () => {
-    expect(findMissingStdSldCacheParts(['Cbm\\project.sch', 'cbm\\zjx.std', 'cbm\\zjx.sld'], null))
-      .toEqual(['SCH', 'STD', 'SLD']);
+    expect(await open('cold')).toBe(true);
+    const coldSld = state.currentSldDoc;
+    expect(coldSld?.gridIdIndex.has('bay')).toBe(true);
+    expect(await open('warm')).toBe(true);
+    expect(state.currentStdDoc?.status ?? null).toBe(status);
+    expect(state.currentSldDoc).toEqual(coldSld);
+    expect(batchRead).toHaveBeenCalledWith(42, [
+      ...(stdText !== null ? ['Diagrams/topology.std'] : []),
+      'Diagrams/main.sld',
+    ]);
   });
 });
 

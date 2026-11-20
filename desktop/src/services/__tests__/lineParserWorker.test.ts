@@ -44,4 +44,24 @@ describe('Line Parser Worker v1', () => {
     expect(attrs.unmatchedRefs).toEqual([]);
     expect(cache.resolveOriginalPath('fam/tower.FAM')).toBe('FAM/Tower.fam');
   });
+
+  it('publishes actual CBM and FAM paths when the archive has duplicate basenames', async () => {
+    const result = await parseLineInWorker([
+      textFile('CBM/project.cbm', 'SUBSYSTEM=A/line.cbm\nSUBSYSTEM=B/line.cbm'),
+      textFile('A/line.cbm', 'GROUPS.NUM=1\nGROUP0=tower.cbm'),
+      textFile('B/line.cbm', 'GROUPS.NUM=1\nGROUP0=tower.cbm'),
+      textFile('A/tower.cbm', 'BASEFAMILY=B\\tower.fam'),
+      textFile('B/tower.cbm', 'BASEFAMILY=A\\tower.fam'),
+      textFile('A/tower.fam', 'TYPE=A'),
+      textFile('B/tower.fam', 'TYPE=B'),
+    ], SESSION);
+    expect(result.graph.root?.children.map(line => line.children[0]?.path)).toEqual(['A/tower.cbm', 'B/tower.cbm']);
+    expect(result.graph.nodesByPath.get('A/tower.cbm')?.refs.famFiles).toEqual(['B/tower.fam']);
+    expect(result.graph.nodesByPath.get('B/tower.cbm')?.refs.famFiles).toEqual(['A/tower.fam']);
+    expect(result.attributes.unmatchedRefs).toEqual([]);
+    expect(result.attributes.famPayloads.map(property => [property.source_path, property.prop_value])).toEqual([
+      ['B/tower.fam', 'B'],
+      ['A/tower.fam', 'A'],
+    ]);
+  });
 });

@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.js';
 /**
  * 线路 MOD 运行时服务。
  *
@@ -42,8 +43,7 @@ function sourceKey(state: AppState, path: string): string {
 function withPrefix(path: string, prefix: 'Dev' | 'Phm' | 'Mod'): string {
   const normalized = normalizeGimPath(path);
   if (!normalized) return `${prefix}/`;
-  const lower = normalized.toLowerCase();
-  if (lower.startsWith(`${prefix.toLowerCase()}/`)) return normalized;
+  if (normalized.includes('/')) return normalized;
   // 引用值通常是 GUID.ext 裸名；目录大小写由实际文件查找工具兜底。
   return `${prefix}/${normalized}`;
 }
@@ -78,7 +78,11 @@ async function loadSource(state: AppState, path: string): Promise<LineModRuntime
 
   const text = await readText(state, normalized);
   if (text == null) {
-    const result: LineModRuntimeEntry = { path: normalized, source: null, error: '源 MOD 文件不在当前工程缓存中' };
+    const result: LineModRuntimeEntry = {
+      path: normalized,
+      source: null,
+      error: '源 MOD 文件不在当前工程缓存中',
+    };
     cache.set(key, result);
     return result;
   }
@@ -165,7 +169,10 @@ export async function resolveLineModPaths(state: AppState, node: GimGraphNode): 
       let doc;
       try {
         doc = parsePhm(text, phmPath);
-        if(doc.sourceDiagnostics?.length){console.warn('[Line PHM] 来源字段或矩阵存在歧义:',doc.sourceDiagnostics);continue;}
+        if (doc.sourceDiagnostics?.length) {
+          logger.warn('[Line PHM] 来源字段或矩阵存在歧义:', doc.sourceDiagnostics);
+          continue;
+        }
       } catch {
         continue;
       }
@@ -181,14 +188,24 @@ export async function resolveLineModPaths(state: AppState, node: GimGraphNode): 
 }
 
 /** 加载并解析节点可达的所有线路 MOD，结果按引用顺序去重。 */
-export async function loadLineModSourcesForNode(state: AppState, node: GimGraphNode): Promise<LineModRuntimeEntry[]> {
+export async function loadLineModSourcesForNode(
+  state: AppState,
+  node: GimGraphNode,
+): Promise<LineModRuntimeEntry[]> {
   // 同一塔型的多个塔位共享相同的 MOD/DEV/PHM 引用；用引用签名而不是节点路径
   // 作为缓存键，避免每个塔位都重新遍历 DEV→PHM 链。
   const refs = collectLineGeometryRefs(node);
-  const signature = [refs.modPaths.slice().sort().join('|'), refs.devPaths.slice().sort().join('|'), refs.phmPaths.slice().sort().join('|')].join('#');
+  const signature = [
+    refs.modPaths.slice().sort().join('|'),
+    refs.devPaths.slice().sort().join('|'),
+    refs.phmPaths.slice().sort().join('|'),
+  ].join('#');
   const key = `${state.currentSourceSha256 || (state.currentProjectId != null ? `project:${state.currentProjectId}` : IDENTITY_SOURCE)}:${signature}`;
   let resolveCache = resolvedPathCache.get(state);
-  if (!resolveCache) { resolveCache = new Map(); resolvedPathCache.set(state, resolveCache); }
+  if (!resolveCache) {
+    resolveCache = new Map();
+    resolvedPathCache.set(state, resolveCache);
+  }
   let paths = resolveCache.get(key);
   if (!paths) {
     paths = await resolveLineModPaths(state, node);
