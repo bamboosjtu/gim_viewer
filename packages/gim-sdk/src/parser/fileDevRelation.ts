@@ -20,6 +20,7 @@ export interface FileDevRelationRecord {
   index: number;
   format: FileDevRelationFormat;
   name: string;
+  directIfc: string;
   ifcFile: string;
   ifcName: string;
   deviceCount: number;
@@ -96,6 +97,7 @@ function append(
       index,
       format,
       name,
+      directIfc,
       ifcFile,
       ifcName,
       deviceCount,

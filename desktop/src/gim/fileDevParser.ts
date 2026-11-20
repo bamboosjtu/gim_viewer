@@ -24,7 +24,9 @@ export async function parseFileDevRelation(files: Map<string, File>): Promise<Fi
       ? resolveIfcPath(files, record.ifcFile)
       : { kind: 'not-found' as const };
     const referenceConflict = record.diagnostics.some(
-      (row) => row.field === `FILE${record.index}.IFC` || row.field === `FILE${record.index}.NAME`,
+      (row) =>
+        row.field === `FILE${record.index}.IFC` ||
+        (!record.directIfc && row.field === `FILE${record.index}.NAME`),
     );
     const modelId =
       !referenceConflict && resolvedIfc.kind === 'resolved'
