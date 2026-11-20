@@ -44,14 +44,22 @@ FAM 的既有详细返回形状保留给当前 source/UI 消费者；新调用�
 已迁移：
 
 - `parser/fam.ts`：FAM 物理分节、原始属性行和 malformed 诊断。
+- `parser/cbm.ts`：CBM 无损文档、原始属性、ENTITYNAME/OBJECTMODELPOINTER 记录；显示名和 Tree Builder 仍归 Source/Desktop。
+- `parser/dev.ts`：DEV 的 SOLIDMODEL/SUBDEVICE 槽位、块内矩阵与来源诊断。
+- `parser/phm.ts`：PHM 的 SOLIDS/SOLIDMODELS 槽位、矩阵和颜色。
+- `parser/substationMod.ts`：变电 XML MOD 的 Device/Entities/Entity 语法；桌面 DOM 适配和 Worker XML 读取在宿主。
+- `parser/mod.ts`：MOD 格式族入口，明确区分变电 XML 与线路文本模式；线路实现仍由 `powerline-core` 共享格式源提供。
+- `parser/ifcStep.ts`：IFC STEP 实体边界、引号/括号扫描、参数拆分；空间归属、坐标解释和空间索引仍在桌面 Geometry。
+- `parser/sch.ts`：SCH 索引语法和 STD/SLD 条目分类；文件发现仍归桌面。
+- `parser/affineMatrix.ts`：来源矩阵可用性判断，供 DEV/PHM 和 Geometry 共用。
 - `parser/values.ts`：GIM 空值 sentinel 的纯格式判断。
 - `source/famBusinessIdentity.ts`：`resolveSubstationBusinessIdentity()` 留在 Source 层，Parser 不导出。
 
 保留在各自所有者，后续按“纯函数先迁移”的顺序处理：
 
-- `desktop/src/gim/cbmParser.ts` 的 `buildCbmTree()` 是来源树构建器，仍归 `desktop/src/gim/`；其纯词法/引用字段解析可再下沉。
-- `desktop/src/gim/ifcSpatialParser.ts` 的 STEP 扫描可下沉；空间归属、坐标解释和空间索引仍归 Geometry/Source 运行时。
-- DEV/PHM/MOD 解析与 IFC 几何转换保留在桌面端，待去掉 DOM/Worker/第三方解码器依赖后再适配。
+- `desktop/src/gim/cbmParser.ts` 的 `buildCbmTree()` 仍是来源树构建器；CBM 词法/原始字段已由 `parser/cbm.ts` 提供。
+- `desktop/src/gim/ifcSpatialParser.ts` 的 STEP 字符扫描已由 `parser/ifcStep.ts` 提供；`parseIfcModel` 的空间语义和索引不迁入 Parser。
+- STD/SLD 目前依赖 DOM；应先在宿主提供 XML 节点适配器，再把纯语法部分下沉。MOD/IFC 几何转换同理，不能在未适配前直接变成跨平台纯解析器。
 
 ## 门禁
 

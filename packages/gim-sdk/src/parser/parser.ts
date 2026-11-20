@@ -6,4 +6,11 @@
  */
 export * from "./types.js";
 export * from "./values.js";
+export * from "./affineMatrix.js";
 export * from "./fam.js";
+export * from "./dev.js";
+export * from "./phm.js";
+export * from "./mod.js";
+export * from "./ifcStep.js";
+export * from "./cbm.js";
+export * from "./sch.js";

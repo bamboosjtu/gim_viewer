@@ -30,7 +30,7 @@ const allowed = {
   // Geometry has always consumed the shared source-document readers; the tree
   // migration renames their role from 'format' to 'source', so the allowance
   // follows the files instead of inventing a new violation.
-  geometry: ['geometry','source','format','shared'],
+  geometry: ['geometry','parser','source','format','shared'],
   engineering: ['engineering','geometry','shared'],
   projection: ['projection','directory','shared'],
   'source-adapter': ['source-adapter','parser','source','format','shared','semantic','directory'],

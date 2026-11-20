@@ -20,4 +20,6 @@ test('new intermediary modules inherit their directory role and unknown paths fa
   assert.doesNotThrow(()=>assertCapabilityInputs('source',['src/source/newParser.ts']));
   assert.doesNotThrow(()=>assertCapabilityInputs('parser',['src/parser/newGrammar.ts']));
   assert.throws(()=>assertCapabilityInputs('parser',['src/semantic/classify.ts']),/classify/);
+  assert.throws(()=>assertCapabilityInputs('parser',['src/geometry/affineMatrix.ts']),/affineMatrix/);
+  assert.doesNotThrow(()=>assertCapabilityInputs('geometry',['src/parser/affineMatrix.ts']));
 });

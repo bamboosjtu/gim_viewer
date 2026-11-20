@@ -6,6 +6,7 @@ import { logger } from '../utils/logger.js';
 import { resolveIfcModelId } from './modelIdentity.js';
 import { stripIfcExtension } from './modelIdentity.js';
 import { parseDev } from './geometry/devParser.js';
+import { parseCbmDocument } from '@gim/gim-sdk/parser';
 import { normalizeEntityName } from '@gim/powerline-core/entityName.js';
 import { PARSER_LIMITS, parseBoundedCount } from '@gim/powerline-core/parserLimits.js';
 import { getFileByPath } from './fileLookup.js';
@@ -17,7 +18,6 @@ import {
 import { parseFamSections } from './famParser.js';
 import { readCbmSourceDocument } from './cbmDocument.js';
 import {
-  sourceScalarProperties,
   sourceScalar,
   sourceReferenceFields,
   sourceDiagnostic,
@@ -236,7 +236,8 @@ export async function buildCbmTree(
       document = parseSourceDocument(p, '');
       sourceDiagnostics.push({ kind: 'read-failed', path: p, field: '', lines: [], values: [] });
     }
-    const kv = sourceScalarProperties(document);
+    const record = parseCbmDocument(document);
+    const kv = record.properties;
     const devEntry = p === equipmentEntry && /\.dev$/i.test(p);
     // Report every conflicting scalar once, preserving the rows for inspection.
     for (const key of new Set(document.fields.map((field) => field.keys[0].toUpperCase()))) {
@@ -246,11 +247,11 @@ export async function buildCbmTree(
       if (scalar.status === 'ambiguous')
         sourceDiagnostics.push(sourceDiagnostic(document, key, scalar.fields));
     }
-    const en = devEntry ? 'Device' : normalizeEntityName(getFirstNonEmptyKv(kv, ['ENTITYNAME']));
+    const en = devEntry ? 'Device' : record.entityName;
     const { name: initialName, systemNames } = extractDisplayName(kv, p);
     let name = initialName;
     const cn = getFirstNonEmptyKv(kv, ['SYSCLASSIFYNAME', 'PARTNAME']);
-    const devPath = devEntry ? normalizedPath : getFirstNonEmptyKv(kv, ['OBJECTMODELPOINTER']);
+    const devPath = devEntry ? normalizedPath : record.objectModelPointer;
 
     // 读取 DEV SYMBOLNAME/TYPE（回填到节点，供 getNodeDisplayName 使用）
     let devSymbolName = '';
