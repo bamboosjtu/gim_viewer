@@ -89,6 +89,30 @@ SDK 的实现及模块测试归 `packages/gim-sdk/src/`，IFC 运行时解析器
 
 `core-boundaries.mjs` 补充职责检查：投影和绑定不得导入分类器/归一化运行值，几何入口和目录不得消费语义主归属。中立类型允许共享；SDK 的裸包出口和能力别名同样参与依赖检查，UI/Viewer 的 SDK 运行值调用经服务端口接线，展示格式器保持精确登记入口。负向用例纳入 `test:presentation-boundaries`。入口不意味着五个独立进程或串行执行，几何仍可先于实体完成。
 
+## 宿主业务域收敛
+
+`desktop/src/services/` 当前仍按技术层集中打开、Worker、缓存、选择和展示端口。后续按业务能力逐步收敛，不在一次性搬迁中改变运行结果：
+
+```text
+desktop/src/
+├── app/                 # 启动与会话
+├── features/
+│   ├── substation/      # application / runtime / presentation
+│   ├── powerline/       # application / runtime / presentation
+│   └── equipment/       # application / runtime
+├── viewer/              # scene / geometry / selection / rendering
+├── infrastructure/      # cache / workers / native
+├── ui/
+└── measurement/
+```
+
+约束：
+
+- 每次只迁一个纵向工作流，先固定其输入、输出、会话守卫和资源释放器，再移动文件。
+- `packages/powerline-core/` 是独立可复用线路能力包，不并入 `features/powerline`；桌面 feature 只保留应用编排、宿主状态和展示接线。
+- `services/` 中的跨域入口先保留转发，迁移完成后删除；测试跟随被测模块移动，不复制到新目录。
+- 共享缓存、Worker 协议和原生 DTO 归 `infrastructure/` 或现有 `packages/`，不因目录调整复制第二份实现。
+
 ## 边界检查
 
 改动后至少确认：
