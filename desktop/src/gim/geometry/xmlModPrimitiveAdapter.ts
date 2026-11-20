@@ -1,11 +1,6 @@
 /** Desktop geometry adapter for substation XML MOD primitives. */
 import type { XmlModPrimitive } from '@gim/powerline-core/geometry/ir.js';
 
-export type XmlPrimitiveMapper = (
-  tagName: string,
-  attrs: Record<string, string>,
-) => XmlModPrimitive | null;
-
 function firstNumericAttr(attrs: Record<string, string>, keys: string[], fallback = 1): number {
   for (const key of keys) {
     const value = Number(attrs[key]);
