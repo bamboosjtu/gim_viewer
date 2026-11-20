@@ -21,10 +21,10 @@ test('changed desktop, bridge and SDK production sources must join the shared li
     'desktop/src/services/newPresentationPort.ts','packages/gim-sdk/src/new.ts']);
 });
 
-function gitFixture() {
+function gitFixture(autocrlf = 'true') {
   const folder = mkdtempSync(join(workspaceTemp(), 'windows-format-'));
   const git = (...args) => {
-    const result = spawnSync('git', ['-c', 'core.autocrlf=true', ...args], {
+    const result = spawnSync('git', ['-c', `core.autocrlf=${autocrlf}`, ...args], {
       cwd: folder, encoding: 'utf8', windowsHide: true, env: process.env,
     });
     if (result.error) throw result.error;
@@ -37,7 +37,7 @@ function gitFixture() {
 }
 
 test('incremental scope finds committed, renamed and untracked files against the selected Git base', () => {
-  const {folder,git}=gitFixture();
+  const {folder,git}=gitFixture('false');
   for (const dir of ['desktop/src','desktop/bridge','packages/gim-sdk/src']) mkdirSync(join(folder,dir),{recursive:true});
   writeFileSync(join(folder,'desktop/src/old.ts'),'export const value = 1;\r\n');
   writeFileSync(join(folder,'packages/gim-sdk/src/retired.ts'),'export {};\r\n');

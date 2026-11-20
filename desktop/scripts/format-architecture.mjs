@@ -33,7 +33,6 @@ export const architectureModules = [
   'src/gim/ifcSpatialParser.ts',
   'src/gim/cbmParser.ts',
   'src/gim/sourceDocument.ts',
-  'src/gim/documentParseInfo.ts',
   'src/gim/stdParser.ts',
   'src/gim/sldParser.ts',
   'src/services/substationSpatialWorkerClient.ts',
