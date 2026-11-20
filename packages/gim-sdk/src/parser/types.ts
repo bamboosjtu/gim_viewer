@@ -30,7 +30,3 @@ export interface ParseResult<T> {
   /** Optional for compatibility; new parsers should set it. */
   status?: ParseStatus;
 }
-
-export interface Parser<TInput, TOutput> {
-  parse(input: TInput): ParseResult<TOutput>;
-}
