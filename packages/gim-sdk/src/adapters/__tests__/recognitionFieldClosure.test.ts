@@ -53,8 +53,14 @@ function inlineRecognitionLabels(): string[] {
     }
     ts.forEachChild(node, visit);
   };
-  for (const name of ['recognizeSource.ts', 'sourceTypeCandidates.ts', 'evidenceReader.ts']) {
-    const source = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', name), 'utf8');
+  const adapterDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+  const semanticDir = resolve(adapterDir, '../semantic/recognition');
+  for (const [name, directory] of [
+    ['objectEvidenceDecision.ts', semanticDir],
+    ['sourceTypeCandidates.ts', adapterDir],
+    ['evidenceReader.ts', adapterDir],
+  ] as const) {
+    const source = readFileSync(resolve(directory, name), 'utf8');
     visit(ts.createSourceFile(name, source, ts.ScriptTarget.Latest, true));
   }
   return [...labels];

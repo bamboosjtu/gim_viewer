@@ -1,11 +1,5 @@
 import aliases from "../semantic/catalog/sourceCompatibilityPolicy.json";
-import { standardTerms } from "../semantic/standardCatalog.js";
-import {
-  cabinetModelType,
-  canonicalSourceType,
-  ifcModelType,
-} from "./sourceTypePolicy.js";
-import { directoryRecognitionCode } from "../semantic/catalogClassification.js";
+import { canonicalSourceType } from "./sourceTypePolicy.js";
 import type { SourceRecord } from "../shared/sourceRecord.js";
 import type { EvidenceValue } from "../semantic/types.js";
 
@@ -48,14 +42,10 @@ export interface SourceTypeCandidates {
   type: string;
   devTypes: Readonly<Record<string, string>>;
   ifcTypes: Readonly<Record<string, string>>;
-  standardTypes: ReturnType<typeof standardTerms>;
-  devCategory: string | undefined;
   typeFields: readonly string[];
   typeProperties: EvidenceValue[];
   typeModels: EvidenceValue[];
-  fineCabinetModel: boolean;
   predefinedCategories: EvidenceValue[];
-  categoryValue: (value: string) => string;
 }
 
 /** Read only source type/model declarations; business identity stays downstream. */
@@ -74,44 +64,12 @@ export function sourceTypeCandidates(
     : canonicalSourceType(rawType);
   const devTypes: Readonly<Record<string, string>> = aliases.dev;
   const ifcTypes: Readonly<Record<string, string>> = aliases.ifc;
-  const standardTypes = standardTerms(type);
-  const standardCategories = [
-    ...new Set(standardTypes.map((item) => item.recognitionCode)),
-  ];
-  const devCategory =
-    standardCategories.length === 1
-      ? standardCategories[0]
-      : (directoryRecognitionCode(type) ?? devTypes[type.toLowerCase()]);
-  const categoryValue = (value: string): string => {
-    const standard = standardTerms(value);
-    if (standard.length)
-      return standard.length === 1 ? standard[0].recognitionCode : "U-OBJECT";
-    const direct = directoryRecognitionCode(value);
-    const alias =
-      (aliases.structured as Record<string, string>)[value.trim()] ??
-      devTypes[value.toLowerCase()] ??
-      ifcTypes[value.toUpperCase()];
-    if (direct) return direct;
-    if (alias) return alias === "E01" ? "E-T" : alias;
-    return "U-OBJECT";
-  };
   const typeFields = TYPE_FIELDS;
   const typeProperties = values(typeFields);
   const modelKeys: string[] = [...MODEL_KEYS];
   if (record.track === "ifc")
     modelKeys.push("类型名称", "族与类型", "族名称", "结构材料", "结构材质");
-  const typeModels = values(modelKeys).flatMap((p) => {
-    const value = standardTerms(p.value).length
-      ? p.value
-      : (cabinetModelType(p.value) ??
-        (record.track === "ifc" ? ifcModelType(type, p.value) : undefined));
-    return value ? [{ ...p, value }] : [];
-  });
-  const fineCabinetModel = typeModels.some(
-    (model) =>
-      model.value === "MeasurementAndControlCabinet" ||
-      model.value === "ProtectionCabinet",
-  );
+  const typeModels = values(modelKeys);
   const predefinedCategories = values(["IFC.PredefinedType"]).flatMap((p) => {
     const value = (aliases.ifcPredefined as Record<string, string>)[
       `${type}.${p.value.trim().toUpperCase()}`
@@ -124,13 +82,9 @@ export function sourceTypeCandidates(
     type,
     devTypes,
     ifcTypes,
-    standardTypes,
-    devCategory,
     typeFields,
     typeProperties,
     typeModels,
-    fineCabinetModel,
     predefinedCategories,
-    categoryValue,
   };
 }

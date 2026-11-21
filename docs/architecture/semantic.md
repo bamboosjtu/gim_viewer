@@ -16,7 +16,10 @@ semantic/
 │   ├── standardClassResolver.ts # 标准目录类别候选
 │   ├── componentResolver.ts # 组件/标准优先级
 │   ├── materialResolver.ts  # 材料宿主与成员判定
-│   └── recognitionPolicy.ts # 上下文规则与模型优先词
+│   ├── recognitionPolicy.ts # 上下文规则与模型优先词
+│   ├── neutralAssemblyResolver.ts # 中性点成套类型证据
+│   ├── sourceEvidenceFacts.ts # Adapter→Semantic 的 transient facts
+│   └── objectEvidenceDecision.ts # 分类/宿主/归属与证据组装
 ├── catalog/
 ├── classify.ts              # 角色/类别/用途解释
 ├── recoverMembership.ts     # 宿主声明补充
@@ -25,7 +28,7 @@ semantic/
 
 adapters/
 ├── evidenceReader.ts        # 格式字段读取，不改变原属性
-├── recognizeSource.ts       # SourceRecord -> ObjectEvidence；下一轮继续拆裁决
+├── recognizeSource.ts       # facts reader/facade；不决定分类
 ├── sourceTypeCandidates.ts  # type/model 候选读取
 └── sourceTypePolicy.ts      # 格式别名与 canonical 值
 ```
@@ -65,7 +68,8 @@ adapters/
 - 独立边界与分类冲突分开：显式独立对象保留 `U-OBJECT` 实体，角色本身冲突仍进入待归。
 - 物理父级与语义组成冲突时保留两侧证据，主归属进入 `composition_host_conflict`；有/无 Adapter 宿主提示结果一致。
 - 中性点成套只接受两个直接且可确认的类型证据，显示名不能升级置信状态；暖开识别决策版本变化会自动重算实体与导航。
-- `adapters/recognizeSource.ts` 仍是最大的 Adapter；`adaptSourceEvidence` 的候选裁决/证据组装尚未拆完，不能把文件迁移当成职责拆分完成。
+- `adapters/recognizeSource.ts` 现在约 67 行，只读取 facts 并调用 Semantic；`objectEvidenceDecision.ts` 仍约 815 行，内部 `adapt()` 的候选裁决/证据组装尚未拆完。
+- `adapters/objectEvidence.ts` 不再补写语义宿主或中性命成套；分类、宿主和归属裁决由 Semantic 负责。
 
 ## 约束
 
@@ -76,7 +80,7 @@ adapters/
 
 ## 下一步
 
-1. 把 `adapters/recognizeSource.ts` 的格式事实读取与候选裁决分开：Adapter 只提交字段/证据/候选，分类和宿主裁决回到 Semantic；优先拆内部 `adapt()`。
+1. 把 `semantic/recognition/objectEvidenceDecision.ts` 内部的 `adapt()` 拆成候选裁决、对象解释和证据记录组装；Adapter 边界已经完成，不再把决策移回 Adapter。
 2. 把 `ownershipResolver` 的设备/机柜/neutral-set 分支拆成保留优先级的策略函数，入口与顺序不变。
 3. 评估 `classify.ts` 的角色/类别/候选汇合点和 `normalize.ts` 的快照发布；没有独立可验证改进时不扩张拆分范围。
 4. `extractEngineeringSourceGraph()` 的 FAM 归属/读取已抽到 `sourceFamilyIndex`，文档读取集中到 `SourceDocumentReader` 的 promise 缓存；继续评估引用解析与 CBM/DEV 遍历拆分，读取次数以测试锁定。

@@ -2,6 +2,7 @@ import type { ObjectEvidence, EvidenceValue } from "../semantic/types.js";
 import type { EngineeringSourceGraph } from "../source/sourceGraph.js";
 import { adaptSourceEvidence, type SourceRecord } from "./recognizeSource.js";
 import { collectSourceComposition } from "../source/sourceComposition.js";
+import { completeNeutralAssemblies } from "../semantic/recognition/neutralAssemblyResolver.js";
 
 /** Organizational labels are retained for audit, separately from object-owned
  * designations. The domain must never use them to establish identity or hosts. */
@@ -51,60 +52,19 @@ export function engineeringObjectEvidence(
       )
       .map((ref) => ref.owner),
   );
-  const possibleNeutral = new Set(
-    records
-      .filter((r) =>
-        /^(?:CompleteSetOfArcSuppressionCoilAndGroundingTransformer|GroundTransformer\/ArcExtinguishingCoil)$/i.test(
-          r.source_type,
-        ),
-      )
-      .map((r) => r.id),
-  );
-  const neutralParts = new Map<string, number>();
-  if (possibleNeutral.size)
-    for (const r of records) {
-      if (r.track !== "dev" || !possibleNeutral.has(r.parent)) continue;
-      // A display label can describe an accessory, not a typed device witness.
-      const type = r.source_type.trim();
-      const part = /^(?:GroundTransformer|接地变|接地变压器)$/i.test(type)
-        ? 1
-        : /^(?:ArcExtinguishingCoil|消弧线圈)$/i.test(type)
-          ? 2
-          : 0;
-      neutralParts.set(r.parent, (neutralParts.get(r.parent) ?? 0) | part);
-    }
+  const neutralAssemblies = completeNeutralAssemblies(records);
   return records.map((record) => {
     const complete =
       !familyPending.has(record.id) &&
       !record.sources.some((path) => familyRefMissing.has(path));
     const evidence = adaptSourceEvidence(record, {
         sourceTypesComplete: complete,
-        completeNeutralAssembly: neutralParts.get(record.id) === 3,
+        completeNeutralAssembly: neutralAssemblies.has(record.id),
       }),
       edges = composition.get(record.id);
-    // When semantic and physical parents coexist, retain both as constraints.
-    // Recovery reports disagreement; it must not silently replace either edge.
-    const semanticHosts = record.parent
-      ? (edges
-          ?.filter(
-            (edge) =>
-              edge.kind === "semantic_composition" &&
-              edge.status === "confirmed",
-          )
-          .flatMap((edge) =>
-            edge.parentSourceIds.map((value) => ({
-              value,
-              evidenceId: edge.evidence.join("|"),
-            })),
-          ) ?? [])
-      : [];
     return {
       ...evidence,
       composition: edges,
-      declaredHostSourceIds: [
-        ...(evidence.declaredHostSourceIds ?? []),
-        ...semanticHosts,
-      ],
       inheritedContextDesignations: record.context.flatMap(units),
     };
   });
