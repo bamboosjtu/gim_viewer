@@ -15,7 +15,8 @@ from library import Library, resources, read_json, write_json, now, remove_owned
 SIG7Z = bytes.fromhex('377abcaf271c')
 
 def progress(index, text):
-    print('@progress ' + json.dumps({'step': index, 'total': 8, 'text': text}, ensure_ascii=False), flush=True)
+    # JSON escapes preserve localized text even on legacy Windows stdout encodings.
+    print('@progress ' + json.dumps({'step': index, 'total': 8, 'text': text}), flush=True)
 
 def find_blender(home: Path):
     configured = os.environ.get('GIM_BLENDER_EXE')

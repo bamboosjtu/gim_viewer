@@ -1333,7 +1333,11 @@ export class DevLodRuntime {
       this.diagnostics.anchorReady && this.diagnostics.catalogReady && baseReady && allReady;
     if (nextBaseSettled && !this.diagnostics.baseRepresentationsSettled) {
       if (total > 0 && this.measureGeometryTracks)
-        perfMarkProductMoment('devBaseSettled', { total, shown, empty, unsupported, failed }, this.perf);
+        perfMarkProductMoment(
+          'devBaseSettled',
+          { total, shown, empty, unsupported, failed },
+          this.perf,
+        );
       perfMarkProductMoment(
         'devBaseRepresentationsSettled',
         {

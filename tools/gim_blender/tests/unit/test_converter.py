@@ -1,15 +1,28 @@
 from pathlib import Path
+import io,json
 import sys,tempfile,unittest
+from contextlib import redirect_stdout
 from unittest.mock import patch
 
 TOOL=Path(__file__).resolve().parents[2]
 REPO=TOOL.parent.parent
 sys.path[:0]=[str(TOOL),str(TOOL/'assets/scripts')]
-from converter import nav_bounds,convert
+from converter import nav_bounds,convert,progress
 from library import demo_runtime,node_runtime
 from project_identity import describe_project
 
 class ImportTests(unittest.TestCase):
+    def test_progress_preserves_chinese_text_on_windows_legacy_stdout(self):
+        message = '正在缓存 GIM'
+        with io.TextIOWrapper(io.BytesIO(), encoding='cp1252') as stdout:
+            with redirect_stdout(stdout):
+                progress(0, message)
+            line = stdout.buffer.getvalue().decode('ascii')
+        self.assertTrue(line.startswith('@progress '))
+        self.assertEqual(json.loads(line.removeprefix('@progress ')), {
+            'step': 0, 'total': 8, 'text': message,
+        })
+
     def test_large_station_is_not_rejected_or_cropped(self):
         self.assertEqual(nav_bounds({'files':[{'file':'layout.ifc','bounds':[-340,-307,-21,366,154,44]}]},[]),[-360,-327,386,174])
 
