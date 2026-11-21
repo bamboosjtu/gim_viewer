@@ -1,13 +1,13 @@
-import aliases from "../catalog/sourceCompatibilityPolicy.json";
-import { standardTerms } from "../standardCatalog.js";
+import aliases from "../semantic/catalog/sourceCompatibilityPolicy.json";
+import { standardTerms } from "../semantic/standardCatalog.js";
 import {
   cabinetModelType,
   canonicalSourceType,
   ifcModelType,
-} from "../sourceTypePolicy.js";
-import { directoryRecognitionCode } from "../catalogClassification.js";
-import type { SourceRecord } from "../../shared/sourceRecord.js";
-import type { EvidenceValue } from "../types.js";
+} from "./sourceTypePolicy.js";
+import { directoryRecognitionCode } from "../semantic/catalogClassification.js";
+import type { SourceRecord } from "../shared/sourceRecord.js";
+import type { EvidenceValue } from "../semantic/types.js";
 
 export const TYPE_FIELDS = [
   "TYPE",

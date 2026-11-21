@@ -3,7 +3,7 @@ import {
   extractEngineeringSourceGraph,
   materializeEngineeringFamilies,
 } from "../sourceGraph.js";
-import { toObjectEvidence } from "../../semantic/recognizeSource.js";
+import { toObjectEvidence } from "../../adapters/recognizeSource.js";
 import { normalizeEngineeringModel } from "../../semantic/normalize.js";
 
 function files(entries: Record<string, string>) {

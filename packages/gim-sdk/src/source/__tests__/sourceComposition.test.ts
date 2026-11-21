@@ -115,11 +115,12 @@ it('keeps a direct occurrence when an alias also contributes a competing host',a
   );
 });
 
-it.each([
+const neutralChildFixtures: Record<string, string>[] = [
  {'ground.dev':'TYPE=OTHERS\nSYMBOLNAME=接地变外壳','coil.dev':'TYPE=OTHERS\nSYMBOLNAME=消弧线圈支架'},
  {'ground.dev':'TYPE=GroundTransformer','coil.dev':'TYPE=GroundTransformer'},
  {'ground.dev':'TYPE=GroundTransformer\nSUBDEVICE0=subcoil.dev','coil.dev':'TYPE=OTHERS','subcoil.dev':'TYPE=ArcExtinguishingCoil'},
-])('does not confirm a nominal complete neutral set without both direct typed children: %j',async children=>{
+];
+it.each(neutralChildFixtures)('does not confirm a nominal complete neutral set without both direct typed children: %j',async children=>{
  const {graph,readText}=await read({
    'project.cbm':'OBJECTMODELPOINTER=neutral.dev',
    'neutral.dev':'TYPE=GroundTransformer/ArcExtinguishingCoil\nOBJECTROLE=independent\nSUBDEVICE0=ground.dev\nSUBDEVICE1=coil.dev',

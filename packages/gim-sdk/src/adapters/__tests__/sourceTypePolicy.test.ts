@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import type { EvidenceValue } from '../types.js';
+import type { EvidenceValue } from '../../semantic/types.js';
 import {
   applyTypeDefaults,
   cabinetModelType,

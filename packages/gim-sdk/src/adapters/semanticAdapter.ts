@@ -1,6 +1,6 @@
 import type { EngineeringSources } from "../source/buildSources.js";
 import { engineeringSourceRecords } from "../source/sourceGraph.js";
-import { ENGINEERING_RECOGNITION_VERSION } from "../semantic/recognizeSource.js";
+import { ENGINEERING_RECOGNITION_VERSION } from "./recognizeSource.js";
 import { engineeringObjectEvidence } from "./objectEvidence.js";
 import {
   normalizeEngineeringModel,
@@ -30,5 +30,5 @@ export {
   toObjectEvidence,
   ENGINEERING_RECOGNITION_VERSION,
   ENGINEERING_EVIDENCE_FIELDS,
-} from "../semantic/recognizeSource.js";
+} from "./recognizeSource.js";
 export type { SourceRecord, SourceProperty } from "../shared/sourceRecord.js";

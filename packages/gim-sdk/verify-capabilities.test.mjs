@@ -8,7 +8,7 @@ test('real capability bundles satisfy closure boundaries', async () => {
   assert.ok(capabilities.source.inputs>0);
 });
 test('transitive imports of policy fail even through a format or projection adapter', () => {
-  assert.throws(()=>assertCapabilityInputs('source',['src/source/ifcSourceRecords.ts','src/semantic/recognizeSource.ts']),/recognizeSource/);
+  assert.throws(()=>assertCapabilityInputs('source',['src/source/ifcSourceRecords.ts','src/adapters/recognizeSource.ts']),/recognizeSource/);
   assert.throws(()=>assertCapabilityInputs('projection',['src/projection/compositionTemplate.ts','src/semantic/classify.ts']),/classify/);
   assert.throws(()=>assertCapabilityInputs('geometry',['src/semantic/catalog/recognitionPolicy.json']),/recognitionPolicy/);
 });

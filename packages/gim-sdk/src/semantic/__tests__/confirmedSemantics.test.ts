@@ -2,7 +2,7 @@ import {expect,it} from 'vitest';
 import {interpretObject} from '../classify.js';
 import {normalizeEngineeringModel} from '../normalize.js';
 import {STANDARD_CATALOG} from '../standardCatalog.js';
-import {toObjectEvidence,type SourceRecord} from '../recognizeSource.js';
+import {toObjectEvidence,type SourceRecord} from '../../adapters/recognizeSource.js';
 const record=(id:string,type:string,props:Record<string,string>={},parent='',name='unknown'):SourceRecord=>({id,source:id+'.dev',source_type:type,track:'dev',name,parent,sources:[],context:[],guid:'',properties:Object.entries(props).map(([key,value],i)=>({keys:[key],value,path:'a.fam',line:i+1}))});
 const build=(rows:SourceRecord[])=>normalizeEngineeringModel('scope',rows.map(toObjectEvidence));
 it.each(STANDARD_CATALOG.filter(item=>item.kind==='equipment'))('allows equipment $term to contain a declared component',item=>{

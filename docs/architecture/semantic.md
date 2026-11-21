@@ -12,8 +12,6 @@ semantic/
 │   ├── contextualRecognition.ts # 设备/屏柜上下文中的成员解释
 │   └── ownershipResolver.ts # 递归归属和成员判断
 ├── recognition/
-│   ├── evidenceReader.ts    # 分类字段的 transient 读取器
-│   ├── sourceTypeCandidates.ts # 原始 type/model 候选与字段读取
 │   ├── standardClassResolver.ts # 标准目录类别候选
 │   ├── componentResolver.ts # 组件/标准优先级
 │   ├── materialResolver.ts  # 材料宿主与成员判定
@@ -45,11 +43,15 @@ semantic/
 
 集中处理递归父级、部件/机柜成员、neutral set、未分类装配候选和独立对象；设备/屏柜上下文解释已移到 `contextualRecognition`。当前仍是最大的单一阶段，后续可按分支继续拆成策略函数，但必须保持现有 parity 结果。
 
-### recognition/evidenceReader
+### membershipRecoveryState
+
+归属恢复只构造一次宿主和子件索引；同次归属转移集中更新 owner、状态、依据与后代。它不生成宿主匹配规则，也不改来源父级。
+
+### adapters/evidenceReader
 
 把分类字段读取、空值过滤、DEV 字段跳过和证据 ID 构造从 `adaptSourceEvidence()` 提取出来；它只返回 transient 证据，不改变原始属性。
 
-### recognition/sourceTypeCandidates
+### adapters/sourceTypeCandidates
 
 把原始 `source_type`、TYPE/型号字段、IFC/DEV 别名、标准类别候选、`IFC.PredefinedType` 和 `categoryValue()` 的读取从 `adaptSourceEvidence()` 提取出来。它只产出候选，不决定实体或归属。
 

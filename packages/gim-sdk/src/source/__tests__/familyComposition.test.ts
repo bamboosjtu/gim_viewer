@@ -1,6 +1,6 @@
 import {expect,it} from 'vitest';
 import {extractEngineeringSourceGraph} from '../sourceGraph.js';
-import {toObjectEvidence} from '../../semantic/recognizeSource.js';
+import {toObjectEvidence} from '../../adapters/recognizeSource.js';
 import {normalizeEngineeringModel} from '../../semantic/normalize.js';
 import {projectInventoryTemplate} from '../../projection/inventoryTemplate.js';
 

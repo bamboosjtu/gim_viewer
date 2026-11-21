@@ -1,6 +1,9 @@
-import policy from "./catalog/sourceCompatibilityPolicy.json";
-import { standardCatalogItem, standardTerms } from "./standardCatalog.js";
-import type { EvidenceValue } from "./types.js";
+import policy from "../semantic/catalog/sourceCompatibilityPolicy.json";
+import {
+  standardCatalogItem,
+  standardTerms,
+} from "../semantic/standardCatalog.js";
+import type { EvidenceValue } from "../semantic/types.js";
 
 const orderedTypes = new Map<string, string>(
   Object.entries(policy.orderedTypeValues),

@@ -1,9 +1,6 @@
 import type { ObjectEvidence, EvidenceValue } from "../semantic/types.js";
 import type { EngineeringSourceGraph } from "../source/sourceGraph.js";
-import {
-  adaptSourceEvidence,
-  type SourceRecord,
-} from "../semantic/recognizeSource.js";
+import { adaptSourceEvidence, type SourceRecord } from "./recognizeSource.js";
 import { collectSourceComposition } from "../source/sourceComposition.js";
 
 /** Organizational labels are retained for audit, separately from object-owned

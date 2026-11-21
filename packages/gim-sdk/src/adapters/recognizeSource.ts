@@ -1,5 +1,5 @@
-import { VOCABULARY_CONTENT } from "./policyFingerprints.js";
-import recognitionPolicy from "./catalog/recognitionPolicy.json";
+import { VOCABULARY_CONTENT } from "../semantic/policyFingerprints.js";
+import recognitionPolicy from "../semantic/catalog/recognitionPolicy.json";
 import {
   ENGINEERING_EVIDENCE_FIELDS,
   RECOGNITION_FIELDS_FINGERPRINT,
@@ -8,23 +8,23 @@ import {
   isIfcFeatureSourceType,
   type SourceRecord,
 } from "../shared/sourceRecord.js";
-import aliases from "./catalog/sourceCompatibilityPolicy.json";
-import type { ObjectEvidence } from "./types.js";
-import { ENGINEERING_RULES_VERSION } from "./classify.js";
-import { createValueReader } from "./recognition/evidenceReader.js";
-import { sourceTypeCandidates } from "./recognition/sourceTypeCandidates.js";
-import { resolveMaterial } from "./recognition/materialResolver.js";
-import { resolveComponents } from "./recognition/componentResolver.js";
-import { resolveStandardClasses } from "./recognition/standardClassResolver.js";
-import { contextualRule as contextRule } from "./recognition/recognitionPolicy.js";
-import { RECOGNITION_LABELS as ENGINEERING_CATEGORY_LABELS } from "./catalogClassification.js";
-import proxyCategories from "./catalog/proxyCategories.json";
-import sourceVocabulary from "./catalog/sourceVocabulary.json";
+import aliases from "../semantic/catalog/sourceCompatibilityPolicy.json";
+import type { ObjectEvidence } from "../semantic/types.js";
+import { ENGINEERING_RULES_VERSION } from "../semantic/classify.js";
+import { createValueReader } from "./evidenceReader.js";
+import { sourceTypeCandidates } from "./sourceTypeCandidates.js";
+import { resolveMaterial } from "../semantic/recognition/materialResolver.js";
+import { resolveComponents } from "../semantic/recognition/componentResolver.js";
+import { resolveStandardClasses } from "../semantic/recognition/standardClassResolver.js";
+import { contextualRule as contextRule } from "../semantic/recognition/recognitionPolicy.js";
+import { RECOGNITION_LABELS as ENGINEERING_CATEGORY_LABELS } from "../semantic/catalogClassification.js";
+import proxyCategories from "../semantic/catalog/proxyCategories.json";
+import sourceVocabulary from "../semantic/catalog/sourceVocabulary.json";
 import {
   standardTerms,
   standardEquipmentId,
   STANDARD_CATALOG_VERSION,
-} from "./standardCatalog.js";
+} from "../semantic/standardCatalog.js";
 import {
   applyTypeDefaults,
   cabinetModelType,
@@ -101,25 +101,26 @@ export function adaptSourceEvidence(
   }: { sourceTypesComplete: boolean; completeNeutralAssembly: boolean },
 ): ObjectEvidence {
   const values = createValueReader(record);
+  // All contextual variants consume the same indexed format facts.
+  const {
+    rawType,
+    sourceTypeEvidenceId,
+    type,
+    devTypes,
+    ifcTypes,
+    standardTypes,
+    devCategory,
+    typeFields,
+    typeProperties,
+    typeModels,
+    fineCabinetModel,
+    predefinedCategories,
+    categoryValue,
+  } = sourceTypeCandidates(record, values, completeNeutralAssembly);
   const adapt = (
     equipmentMember = false,
     cabinetMember = false,
   ): ObjectEvidence => {
-    const {
-      rawType,
-      sourceTypeEvidenceId,
-      type,
-      devTypes,
-      ifcTypes,
-      standardTypes,
-      devCategory,
-      typeFields,
-      typeProperties,
-      typeModels,
-      fineCabinetModel,
-      predefinedCategories,
-      categoryValue,
-    } = sourceTypeCandidates(record, values, completeNeutralAssembly);
     const dictionary = sourceVocabulary.keywordDictionary;
     const keywordEntries = dictionary.entries as Record<
       string,

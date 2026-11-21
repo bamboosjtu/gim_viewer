@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {coreBoundaryErrors} from './core-boundaries.mjs';
 
 test('projections and fusion reject reclassification through imports, exports and dynamic imports',()=>{
-  for(const source of ["import {classify} from '../semantic/classify.js'", "export * from '../semantic/semantic.js'", "const module=import('../semantic/recognizeSource.js')"])
+  for(const source of ["import {classify} from '../semantic/classify.js'", "export * from '../semantic/semantic.js'", "const module=import('../adapters/recognizeSource.js')"])
     assert.equal(coreBoundaryErrors(source,'projection/projection.ts').length,1);
   assert.equal(coreBoundaryErrors("import('../semantic/normalize.js')",'engineering/representations.ts').length,1);
 });

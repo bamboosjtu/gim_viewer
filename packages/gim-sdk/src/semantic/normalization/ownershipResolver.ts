@@ -44,6 +44,36 @@ interface OwnershipContext {
   bundle: (seed: string, reason: string, sourceIds: string[]) => unknown;
 }
 
+/** Remaining objects may share a physical assembly but never inherit a whole by default. */
+function planSeparateObjectBoundary(
+  m: Pick<ObjectInterpretation, "category" | "independent">,
+  aboveCategory: string | undefined,
+  abovePending: boolean,
+): { proof: string; association?: string } {
+  if (m.independent)
+    return {
+      proof: "independent_function_identity",
+      association: "source_assembly_only",
+    };
+  if (aboveCategory === "U-OBJECT" && m.category !== "U-OBJECT")
+    return {
+      proof: "object_identity_parent_boundary_unknown",
+      association: "unknown_parent_does_not_define_whole_boundary",
+    };
+  if (aboveCategory)
+    return {
+      proof: separateInstallation(m.category, aboveCategory)
+        ? "independent_installation_object"
+        : "object_identity_in_assembly",
+      association: "source_assembly_only",
+    };
+  return {
+    proof:
+      !abovePending && m.category === "U-OBJECT"
+        ? "outward_object_boundary_unconfirmed"
+        : "object_identity",
+  };
+}
 export function resolveOwnership({
   ordered,
   raw,
@@ -270,38 +300,21 @@ export function resolveOwnership({
           evidence: m.membershipEvidence,
         };
       owners.set(sourceId, above);
-    } else if (m.independent) {
-      associate("independent_function_identity", "source_assembly_only");
-    } else if (aboveCategory === "U-OBJECT" && m.category !== "U-OBJECT") {
-      associate(
-        "object_identity_parent_boundary_unknown",
-        "unknown_parent_does_not_define_whole_boundary",
-      );
-    } else if (aboveCategory) {
-      associate(
-        separateInstallation(m.category, aboveCategory)
-          ? "independent_installation_object"
-          : "object_identity_in_assembly",
-        "source_assembly_only",
-      );
-    } else if (above && pending.has(above)) {
-      addEntity(
-        sourceId,
-        m.category,
-        wholeName(row, m.category),
-        "object_identity",
-        [sourceId],
-      );
     } else {
-      addEntity(
-        sourceId,
-        m.category,
-        wholeName(row, m.category),
-        m.category === "U-OBJECT"
-          ? "outward_object_boundary_unconfirmed"
-          : "object_identity",
-        [sourceId],
+      const boundary = planSeparateObjectBoundary(
+        m,
+        aboveCategory,
+        above !== null && pending.has(above),
       );
+      if (boundary.association) associate(boundary.proof, boundary.association);
+      else
+        addEntity(
+          sourceId,
+          m.category,
+          wholeName(row, m.category),
+          boundary.proof,
+          [sourceId],
+        );
     }
     equipmentContexts.set(
       sourceId,

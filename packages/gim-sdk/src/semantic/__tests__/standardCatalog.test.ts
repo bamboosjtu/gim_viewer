@@ -3,7 +3,7 @@ import {STANDARD_CATALOG,standardTerms} from '../standardCatalog.js';
 import {interpretObject} from '../classify.js';
 import {normalizeEngineeringModel} from '../normalize.js';
 import {projectInventoryTemplate} from '../../projection/inventoryTemplate.js';
-import {toObjectEvidence,type SourceRecord} from '../recognizeSource.js';
+import {toObjectEvidence,type SourceRecord} from '../../adapters/recognizeSource.js';
 const field=(key:string,value:string)=>({keys:[key],value,path:'attributes.fam'});
 const source=(id:string,type:string,patch:Partial<SourceRecord>={}):SourceRecord=>({id,track:'dev',source:`${id}.dev`,name:id,source_type:type,parent:'',properties:[],sources:[`${id}.dev`],context:[],guid:'',...patch});
 const host=(id='host',name='1号主变',code='unit-1')=>source(id,'OilImmersedTransformer',{name,properties:[field('PROJECTNAME',name),field('GRIDIDENTIFICATIONSYSTEMCODE',code)]});

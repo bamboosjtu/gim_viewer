@@ -1,6 +1,6 @@
-import { ENGINEERING_EVIDENCE_FIELDS } from "../../shared/recognitionFieldPolicy.js";
-import type { SourceRecord } from "../../shared/sourceRecord.js";
-import type { EvidenceValue } from "../types.js";
+import { ENGINEERING_EVIDENCE_FIELDS } from "../shared/recognitionFieldPolicy.js";
+import type { SourceRecord } from "../shared/sourceRecord.js";
+import type { EvidenceValue } from "../semantic/types.js";
 
 const recognitionKeys = new Set(ENGINEERING_EVIDENCE_FIELDS);
 const empty = new Set(["", "-", "/", "-100", "软件自动生成"]);

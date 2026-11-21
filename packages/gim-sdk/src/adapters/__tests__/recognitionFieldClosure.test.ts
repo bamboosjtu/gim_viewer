@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, it } from 'vitest';
 import * as ts from 'typescript';
-import sourceVocabulary from '../catalog/sourceVocabulary.json';
+import sourceVocabulary from '../../semantic/catalog/sourceVocabulary.json';
 import { ENGINEERING_EVIDENCE_FIELDS } from '../../shared/recognitionFieldPolicy.js';
 
 /** Every inline label list that feeds the shared evidence reader: the string
@@ -24,9 +24,7 @@ function inlineRecognitionLabels(): string[] {
     }
     return texts;
   };
-  const namedFieldList = (name: string): boolean => /(?:Fields|Keys)$/.test(name);
-  const source = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../recognizeSource.ts'), 'utf8');
-  const ast = ts.createSourceFile('recognizeSource.ts', source, ts.ScriptTarget.Latest, true);
+  const namedFieldList = (name: string): boolean => /(?:Fields|Keys)$/i.test(name);
   const visit = (node: ts.Node): void => {
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && namedFieldList(node.name.text)) {
       const list = node.initializer ? stringList(node.initializer) : null;
@@ -55,7 +53,10 @@ function inlineRecognitionLabels(): string[] {
     }
     ts.forEachChild(node, visit);
   };
-  visit(ast);
+  for (const name of ['recognizeSource.ts', 'sourceTypeCandidates.ts', 'evidenceReader.ts']) {
+    const source = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', name), 'utf8');
+    visit(ts.createSourceFile(name, source, ts.ScriptTarget.Latest, true));
+  }
   return [...labels];
 }
 

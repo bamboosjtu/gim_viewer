@@ -1,7 +1,7 @@
 import vocabulary from '../catalog/sourceVocabulary.json';
 import fields from '../../shared/recognitionFields.json';
 import {expect,it,vi} from 'vitest';
-import {toObjectEvidence,type SourceRecord} from '../recognizeSource.js';
+import {toObjectEvidence,type SourceRecord} from '../../adapters/recognizeSource.js';
 import {interpretRecognitionObject as interpretObject} from '../classify.js';
 import {normalizeEngineeringModel} from '../normalize.js';
 import {attributeFromProperty,annotateAttributeConflicts} from '../../source/attributeEvidence.js';
@@ -105,23 +105,23 @@ it.each(['组合电器 GIS','组合电器 HGIS'])('matches the reviewed mixed-ca
 });
 
 it('changes the recognition contract when the source vocabulary version changes',async()=>{
-  const previous=(await import('../recognizeSource.js')).ENGINEERING_RECOGNITION_VERSION;
+  const previous=(await import('../../adapters/recognizeSource.js')).ENGINEERING_RECOGNITION_VERSION;
   vi.resetModules();
   vi.doMock('../catalog/sourceVocabulary.json',()=>({default:{...vocabulary,version:'test-vocabulary-next'}}));
   try{
-    const next=(await import('../recognizeSource.js')).ENGINEERING_RECOGNITION_VERSION;
+    const next=(await import('../../adapters/recognizeSource.js')).ENGINEERING_RECOGNITION_VERSION;
     expect(next).not.toBe(previous);
     expect(next.split('|')).toContain('test-vocabulary-next');
   }finally{vi.doUnmock('../catalog/sourceVocabulary.json');vi.resetModules();}
 });
 it('changes both the recognition and the source cache contracts when the recognition field list changes',async()=>{
-  const previousRecognition=(await import('../recognizeSource.js')).ENGINEERING_RECOGNITION_VERSION;
+  const previousRecognition=(await import('../../adapters/recognizeSource.js')).ENGINEERING_RECOGNITION_VERSION;
   const previousSource=(await import('../../source/buildSources.js')).ENGINEERING_SOURCE_VERSION;
   vi.resetModules();
   vi.doMock('../../shared/recognitionFields.json',()=>({default:[...fields,'FUTURE_RECOGNITION_FIELD']}));
   try{
     const fingerprint=(await import('../../shared/recognitionFieldPolicy.js')).RECOGNITION_FIELDS_FINGERPRINT;
-    const nextRecognition=(await import('../recognizeSource.js')).ENGINEERING_RECOGNITION_VERSION;
+    const nextRecognition=(await import('../../adapters/recognizeSource.js')).ENGINEERING_RECOGNITION_VERSION;
     const nextSource=(await import('../../source/buildSources.js')).ENGINEERING_SOURCE_VERSION;
     expect(nextRecognition).not.toBe(previousRecognition);
     expect(nextRecognition.split('|')).toContain(`recognition-fields:${fingerprint}`);
