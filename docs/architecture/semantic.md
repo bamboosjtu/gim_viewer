@@ -19,7 +19,9 @@ semantic/
 │   ├── recognitionPolicy.ts # 上下文规则与模型优先词
 │   ├── neutralAssemblyResolver.ts # 中性点成套类型证据
 │   ├── sourceEvidenceFacts.ts # Adapter→Semantic 的 transient facts
-│   └── objectEvidenceDecision.ts # 分类/宿主/归属与证据组装
+│   ├── objectEvidenceCandidates.ts # 来源声明、上下文与目录候选
+│   ├── objectVocabularyEvidence.ts # 词典匹配与歧义证据
+│   └── objectEvidenceDecision.ts # 解释候选并组装对象证据
 ├── catalog/
 ├── classify.ts              # 角色/类别/用途解释
 ├── recoverMembership.ts     # 宿主声明补充
@@ -53,7 +55,7 @@ adapters/
 
 ### ownershipResolver
 
-集中处理递归父级、部件/机柜成员、neutral set、未分类装配候选和独立对象；设备/屏柜上下文解释已移到 `contextualRecognition`。当前仍是最大的单一阶段，后续可按分支继续拆成策略函数，但必须保持现有 parity 结果。
+先递归确定已知父级，应用 `contextualRecognition` 中的设备或屏柜解释，再按优先级尝试策略。类别冲突和组成缺口优先保留诊断，灯具端子、已确认装配、中性点、部件兼容性、来源细节、未分类候选及独立整体依序决定归属。选定的结果在后续子件读取父级之前提交。
 
 ### membershipRecoveryState
 
@@ -68,8 +70,8 @@ adapters/
 - 独立边界与分类冲突分开：显式独立对象保留 `U-OBJECT` 实体，角色本身冲突仍进入待归。
 - 物理父级与语义组成冲突时保留两侧证据，主归属进入 `composition_host_conflict`；有/无 Adapter 宿主提示结果一致。
 - 中性点成套只接受两个直接且可确认的类型证据，显示名不能升级置信状态；暖开识别决策版本变化会自动重算实体与导航。
-- `adapters/recognizeSource.ts` 现在约 67 行，只读取 facts 并调用 Semantic；`objectEvidenceDecision.ts` 仍约 815 行，内部 `adapt()` 的候选裁决/证据组装尚未拆完。
-- `adapters/objectEvidence.ts` 不再补写语义宿主或中性命成套；分类、宿主和归属裁决由 Semantic 负责。
+- `adapters/recognizeSource.ts` 建立一次字段索引。Semantic 将声明和候选裁决、词典证据、候选解释及对象证据组装分成独立阶段。普通对象、设备内成员和屏柜内成员共用已提取的来源事实。
+- `adapters/objectEvidence.ts` 传递来源边和读取完整性。Semantic 负责分类、成套证据、宿主和归属裁决。
 
 ## 约束
 
@@ -77,10 +79,3 @@ adapters/
 - 拆分不重复读取 CBM/DEV/FAM；来源文档缓存仍由 Source 层持有。
 - Engineering 只消费 Semantic 快照做融合，Projection 不修正底层语义。
 - 解析语法归 Parser；Semantic 不直接读文件、不调用 DOM/Worker。
-
-## 下一步
-
-1. 把 `semantic/recognition/objectEvidenceDecision.ts` 内部的 `adapt()` 拆成候选裁决、对象解释和证据记录组装；Adapter 边界已经完成，不再把决策移回 Adapter。
-2. 把 `ownershipResolver` 的设备/机柜/neutral-set 分支拆成保留优先级的策略函数，入口与顺序不变。
-3. 评估 `classify.ts` 的角色/类别/候选汇合点和 `normalize.ts` 的快照发布；没有独立可验证改进时不扩张拆分范围。
-4. `extractEngineeringSourceGraph()` 的 FAM 归属/读取已抽到 `sourceFamilyIndex`，文档读取集中到 `SourceDocumentReader` 的 promise 缓存；继续评估引用解析与 CBM/DEV 遍历拆分，读取次数以测试锁定。

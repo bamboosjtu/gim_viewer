@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { resolveMaterial } from "../materialResolver.js";
 import { resolveComponents } from "../componentResolver.js";
 import { contextualRule } from "../recognitionPolicy.js";
+import type { EvidenceValue } from "../../types.js";
+import {
+  applyTypeDefaults,
+  roadPositionType,
+} from "../standardClassResolver.js";
 
 const evidence = (value: string) => ({ value, evidenceId: `e:${value}` });
 
@@ -54,4 +59,37 @@ describe("semantic recognition decisions", () => {
       "part-b",
     ]);
   });
+});
+
+const value = (text: string, evidenceId = text): EvidenceValue => ({
+  value: text,
+  evidenceId,
+});
+
+it("applies catalog defaults unless an explicit family already decides the type", () => {
+  expect(applyTypeDefaults([value("SwitchCabinet")])).toEqual([
+    { ...value("SwitchCabinet"), value: "HVSwitchCabinet" },
+  ]);
+  const declarations = [
+    value("SwitchCabinet", "default"),
+    value("RelayProtectionCabinet", "explicit"),
+  ];
+  expect(applyTypeDefaults(declarations)).toEqual([declarations[1]]);
+  expect(applyTypeDefaults([value("GIS")])).toEqual([value("GIS")]);
+});
+
+it("resolves road position only when every position agrees", () => {
+  expect(roadPositionType("Road", [value("站内")])).toEqual({
+    ...value("站内"),
+    value: "StationInRoadWays",
+  });
+  expect(roadPositionType("road", [value("站外")])).toEqual({
+    ...value("站外"),
+    value: "StationOutRoadWays",
+  });
+  expect(
+    roadPositionType("道路", [value("站内"), value("站外")]),
+  ).toBeUndefined();
+  expect(roadPositionType("道路", [])).toBeUndefined();
+  expect(roadPositionType("Building", [value("站内")])).toBeUndefined();
 });

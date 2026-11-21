@@ -57,6 +57,8 @@ function inlineRecognitionLabels(): string[] {
   const semanticDir = resolve(adapterDir, '../semantic/recognition');
   for (const [name, directory] of [
     ['objectEvidenceDecision.ts', semanticDir],
+    ['objectEvidenceCandidates.ts', semanticDir],
+    ['objectVocabularyEvidence.ts', semanticDir],
     ['sourceTypeCandidates.ts', adapterDir],
     ['evidenceReader.ts', adapterDir],
   ] as const) {

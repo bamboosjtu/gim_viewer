@@ -18,17 +18,10 @@ export interface SourceEvidenceFacts {
   typeModels: EvidenceValue[];
   predefinedCategories: EvidenceValue[];
   normalize: {
-    applyTypeDefaults(
-      declarations: readonly EvidenceValue[],
-    ): readonly EvidenceValue[];
     canonicalSourceType(value: string): string;
     cabinetModelType(value: string): string | undefined;
     ifcModelType(type: string, value: string): string | undefined;
     isTypeDeclaration(value: string): boolean;
-    roadPositionType(
-      type: string,
-      positions: readonly EvidenceValue[],
-    ): EvidenceValue | undefined;
   };
 }
 

@@ -2,6 +2,13 @@ import type { EvidenceValue } from "../types.js";
 import { directoryDefinition } from "../catalog/catalogLabels.js";
 import { directoryRecognitionCode } from "../catalogClassification.js";
 
+import policy from "../catalog/sourceCompatibilityPolicy.json";
+import { standardCatalogItem, standardTerms } from "../standardCatalog.js";
+
+const defaults = new Map<string, string>(Object.entries(policy.typeDefaults));
+const coarseRoadNames = new Set(["road", "道路", "ifcroad"]);
+const key = (value: string) => value.trim().normalize("NFKC").toLowerCase();
+
 export interface StandardTermLike {
   id: string;
   kind: string;
@@ -60,4 +67,45 @@ export function resolveStandardClasses(
       catalogGroup: item.catalogGroup,
     }));
   });
+}
+
+export function applyTypeDefaults(
+  declarations: readonly EvidenceValue[],
+): readonly EvidenceValue[] {
+  if (!declarations.some((p) => defaults.has(key(p.value))))
+    return declarations;
+  const explicitFamilies = new Set(
+    declarations
+      .filter((p) => !defaults.has(key(p.value)))
+      .flatMap((p) => standardTerms(p.value).map((item) => item.category)),
+  );
+  return declarations.flatMap((p) => {
+    const id = defaults.get(key(p.value));
+    const fallback = id && standardCatalogItem(id);
+    if (!fallback) return [p];
+    const genericSwitchCabinet =
+      fallback.catalogCategory === "开关柜" && explicitFamilies.has("E17");
+    return explicitFamilies.has(fallback.category) || genericSwitchCabinet
+      ? []
+      : [{ ...p, value: fallback.term }];
+  });
+}
+
+/** Positions are declared by the source adapter. Missing/crossing/contradictory
+ * boundary evidence keeps a generic road at the family level. */
+export function roadPositionType(
+  type: string,
+  positions: readonly EvidenceValue[],
+): EvidenceValue | undefined {
+  if (!coarseRoadNames.has(key(type)) || !positions.length) return undefined;
+  const id = (value: string) =>
+    /^(?:站内|围墙内|inside)$/i.test(value.trim())
+      ? "StationInRoadWays"
+      : /^(?:站外|围墙外|outside)$/i.test(value.trim())
+        ? "StationOutRoadWays"
+        : undefined;
+  const value = id(positions[0].value);
+  if (value && positions.every((p) => id(p.value) === value))
+    return { ...positions[0], value };
+  return undefined;
 }

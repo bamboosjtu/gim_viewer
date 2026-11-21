@@ -1,18 +1,10 @@
 import { expect, it } from 'vitest';
-import type { EvidenceValue } from '../../semantic/types.js';
 import {
-  applyTypeDefaults,
   cabinetModelType,
   canonicalSourceType,
   ifcModelType,
   isTypeDeclaration,
-  roadPositionType,
 } from '../sourceTypePolicy.js';
-
-const value = (text: string, evidenceId = text): EvidenceValue => ({
-  value: text,
-  evidenceId,
-});
 
 it('recognizes declarations while rejecting placeholder type text', () => {
   expect(isTypeDeclaration('GIS')).toBe(true);
@@ -26,18 +18,6 @@ it('keeps catalog aliases, neutral sets and opaque slash declarations whole', ()
     'NeutralPointEquipment',
   );
   expect(canonicalSourceType('A/B')).toBe('A/B');
-});
-
-it('applies catalog defaults unless an explicit family already decides the type', () => {
-  expect(applyTypeDefaults([value('SwitchCabinet')])).toEqual([
-    { ...value('SwitchCabinet'), value: 'HVSwitchCabinet' },
-  ]);
-  const declarations = [
-    value('SwitchCabinet', 'default'),
-    value('RelayProtectionCabinet', 'explicit'),
-  ];
-  expect(applyTypeDefaults(declarations)).toEqual([declarations[1]]);
-  expect(applyTypeDefaults([value('GIS')])).toEqual([value('GIS')]);
 });
 
 it('classifies cabinet models only from an unambiguous type value', () => {
@@ -57,20 +37,4 @@ it('recognizes IFC model declarations and ignores display names', () => {
   );
   expect(ifcModelType('IFCBUILDINGELEMENTPROXY', '事故油池')).toBe('OilPool');
   expect(ifcModelType('IFCWALL', '墙')).toBeUndefined();
-});
-
-it('resolves road position only when every position agrees', () => {
-  expect(roadPositionType('Road', [value('站内')])).toEqual({
-    ...value('站内'),
-    value: 'StationInRoadWays',
-  });
-  expect(roadPositionType('road', [value('站外')])).toEqual({
-    ...value('站外'),
-    value: 'StationOutRoadWays',
-  });
-  expect(
-    roadPositionType('道路', [value('站内'), value('站外')]),
-  ).toBeUndefined();
-  expect(roadPositionType('道路', [])).toBeUndefined();
-  expect(roadPositionType('Building', [value('站内')])).toBeUndefined();
 });

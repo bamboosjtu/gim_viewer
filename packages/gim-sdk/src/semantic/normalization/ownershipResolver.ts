@@ -19,6 +19,18 @@ import {
   wholeName,
 } from "./prepareEvidence.js";
 
+type MembershipContext = {
+  row: ObjectEvidence;
+  m: ObjectInterpretation;
+  sourceId: string;
+  above: string | null;
+  aboveCategory: string | undefined;
+  parentMeaning: ObjectInterpretation | undefined;
+  parentEquipment: boolean;
+  disputed: ObjectEvidence["composition"];
+  associate: (proof: string, evidence: string) => void;
+};
+
 interface OwnershipContext {
   ordered: readonly ObjectEvidence[];
   raw: ReadonlyMap<string, ObjectEvidence>;
@@ -46,15 +58,10 @@ interface OwnershipContext {
 
 /** Remaining objects may share a physical assembly but never inherit a whole by default. */
 function planSeparateObjectBoundary(
-  m: Pick<ObjectInterpretation, "category" | "independent">,
+  m: Pick<ObjectInterpretation, "category">,
   aboveCategory: string | undefined,
   abovePending: boolean,
 ): { proof: string; association?: string } {
-  if (m.independent)
-    return {
-      proof: "independent_function_identity",
-      association: "source_assembly_only",
-    };
   if (aboveCategory === "U-OBJECT" && m.category !== "U-OBJECT")
     return {
       proof: "object_identity_parent_boundary_unknown",
@@ -98,6 +105,254 @@ export function resolveOwnership({
       "family_identity_candidate",
       "unknown",
     ].includes(value.basis);
+  function resolveConflictingClassification({
+    m,
+    sourceId,
+    associate,
+  }: MembershipContext): boolean {
+    if (m.basis !== "attribute_conflict") return false;
+    if (m.independent && m.objectRole?.status === "confirmed")
+      associate("declared_independent_boundary", "source_assembly_only");
+    else bundle(sourceId, "object_attributes_conflict", [sourceId]);
+    return true;
+  }
+
+  function resolveMissingComposition({
+    row,
+    m,
+    sourceId,
+  }: MembershipContext): boolean {
+    if (!(
+      row.assemblyParentId &&
+      !raw.has(row.assemblyParentId) &&
+      row.composition?.length &&
+      !explicitIndependent(row)
+    ))
+      return false;
+    bundle(sourceId, "composition_parent_missing", [sourceId]);
+    m.membershipStatus = "unresolved";
+    diagnostics.push({
+      kind: "composition_parent_missing",
+      identity: sourceId,
+      name: row.name,
+    });
+    return true;
+  }
+
+  function resolveDisputedComposition({
+    row,
+    m,
+    sourceId,
+    disputed,
+  }: MembershipContext): boolean {
+    if (row.assemblyParentId || !disputed || explicitIndependent(row))
+      return false;
+    bundle(sourceId, "composition_parent_unresolved", [sourceId]);
+    m.membershipStatus = "unresolved";
+    m.membershipEvidence = disputed.flatMap((edge) => edge.evidence);
+    diagnostics.push({
+      kind: "composition_parent_unresolved",
+      identity: sourceId,
+      name: row.name,
+    });
+    return true;
+  }
+
+  function resolveLuminaireMembership({
+    row,
+    m,
+    sourceId,
+    above,
+    parentMeaning,
+  }: MembershipContext): boolean {
+    if (!(
+      above &&
+      row.traits.luminaireTerminal &&
+      !explicitIndependent(row) &&
+      !m.conflict &&
+      m.meaning === "object" &&
+      m.category === "U-OBJECT" &&
+      parentMeaning?.standardClass?.id === "material:lamps" &&
+      row.composition?.some(
+        (edge) =>
+          edge.kind === "physical_assembly" && edge.status === "confirmed",
+      )
+    ))
+      return false;
+    m.meaning = "part";
+    m.basis = "luminaire_terminal_assembly";
+    m.membershipStatus = "candidate";
+    m.membershipEvidence = [
+      row.traits.luminaireTerminal.evidenceId,
+      `assembly:${row.assemblyParentId}->${sourceId}`,
+    ];
+    owners.set(sourceId, above);
+    return true;
+  }
+
+  function resolveEquipmentAssemblyMembership({
+    row,
+    m,
+    sourceId,
+    above,
+    parentEquipment,
+  }: MembershipContext): boolean {
+    if (!(
+      above &&
+      entities.has(above) &&
+      parentEquipment &&
+      !explicitIndependent(row) &&
+      !m.conflict &&
+      m.componentType?.status !== "confirmed" &&
+      !unclassifiedAssemblyCandidate(row, m) &&
+      row.composition?.some(
+        (edge) =>
+          edge.kind !== "object_decomposition" && edge.status === "confirmed",
+      ) &&
+      !["source_only", "container", "detail", "neutral_set"].includes(m.meaning)
+    ))
+      return false;
+    // An equipment type/code/designation describes the member, not a new whole.
+    m.meaning = "part";
+    m.independent = false;
+    m.membershipStatus = "confirmed";
+    m.basis = "source_composition_member";
+    m.membershipEvidence = [
+      ...new Set(
+        row.composition
+          .flatMap((edge) => edge.evidence)
+          .concat(`policy:${COMPOSITION_POLICY.version}:whole-boundary`),
+      ),
+    ];
+    owners.set(sourceId, above);
+    return true;
+  }
+
+  function resolveNeutralSetMembership({
+    row,
+    m,
+    sourceId,
+    above,
+    aboveCategory,
+  }: MembershipContext): boolean {
+    if (!(m.meaning === "neutral_set")) return false;
+    if (transformer(aboveCategory) && !explicitIndependent(row)) {
+      owners.set(sourceId, above);
+      m.membershipStatus = "confirmed";
+      m.membershipEvidence = [`assembly:${row.assemblyParentId}->${sourceId}`];
+    } else bundle(sourceId, "neutral_set_main_unresolved", [sourceId]);
+    return true;
+  }
+
+  function resolveComponentMembership({
+    row,
+    m,
+    sourceId,
+    above,
+  }: MembershipContext): boolean {
+    if (!(
+      above &&
+      entities.has(above) &&
+      m.componentType?.status === "confirmed" &&
+      !explicitIndependent(row)
+    ))
+      return false;
+    const compatibility = componentHostCompatibility(m, entities.get(above)!);
+    m.membershipEvidence = [
+      ...(m.componentType.evidence ?? []),
+      `assembly:${row.assemblyParentId}->${sourceId}`,
+      `policy:${COMPOSITION_POLICY.version}:${m.componentType.id}`,
+    ];
+    if (compatibility === "compatible") {
+      m.meaning = "part";
+      m.independent = false;
+      m.basis = "configured_component_assembly";
+      m.membershipStatus = "confirmed";
+      owners.set(sourceId, above);
+    } else {
+      const reason =
+        compatibility === "unconfigured"
+          ? "component_host_unconfigured"
+          : "component_host_incompatible";
+      bundle(sourceId, reason, [sourceId]);
+      m.membershipStatus = "unresolved";
+      diagnostics.push({ kind: reason, identity: sourceId, name: row.name });
+    }
+    return true;
+  }
+
+  function resolveSourceOnlyMembership({
+    m,
+    sourceId,
+    above,
+  }: MembershipContext): boolean {
+    if (!["source_only", "container", "detail"].includes(m.meaning))
+      return false;
+    owners.set(sourceId, above);
+    return true;
+  }
+
+  function resolveDeclaredPartMembership({
+    row,
+    m,
+    sourceId,
+    above,
+  }: MembershipContext): boolean {
+    if (!(m.meaning === "part")) return false;
+    if (
+      m.componentType &&
+      m.componentType.status !== "confirmed" &&
+      !row.objectRoles?.some((p) => p.value === "part")
+    ) {
+      bundle(sourceId, "component_type_unresolved", [sourceId]);
+      m.membershipStatus = "unresolved";
+    } else if (above) {
+      owners.set(sourceId, above);
+      m.membershipStatus = "confirmed";
+      m.membershipEvidence = [
+        ...(row.objectRoles?.map((p) => p.evidenceId) ?? []),
+        `assembly:${row.assemblyParentId}->${sourceId}`,
+      ];
+    } else bundle(sourceId, "component_whole_unresolved", [sourceId]);
+    return true;
+  }
+
+  function resolveUnknownAssemblyMembership({
+    row,
+    m,
+    sourceId,
+    above,
+    parentEquipment,
+  }: MembershipContext): boolean {
+    if (!(above && parentEquipment && unclassifiedAssemblyCandidate(row, m)))
+      return false;
+    m.meaning = "part";
+    m.independent = false;
+    m.basis = "unclassified_equipment_assembly_member";
+    m.membershipStatus = "candidate";
+    m.membershipEvidence = [
+      `assembly:${row.assemblyParentId}->${sourceId}`,
+      `policy:${COMPOSITION_POLICY.version}:unclassified-assembly-member`,
+    ];
+    if (m.objectRole)
+      m.objectRole = {
+        id: "part",
+        status: "candidate",
+        evidence: m.membershipEvidence,
+      };
+    owners.set(sourceId, above);
+    return true;
+  }
+
+  function resolveExplicitIndependent({
+    m,
+    associate,
+  }: MembershipContext): boolean {
+    if (!m.independent) return false;
+    associate("independent_function_identity", "source_assembly_only");
+    return true;
+  }
+
   function assign(sourceId: string): string | null {
     if (owners.has(sourceId)) return owners.get(sourceId)!;
     if (visiting.has(sourceId))
@@ -153,154 +408,32 @@ export function resolveOwnership({
         identity: sourceId,
         name: row.name,
       });
-    if (m.basis === "attribute_conflict") {
-      if (m.independent && m.objectRole?.status === "confirmed")
-        associate("declared_independent_boundary", "source_assembly_only");
-      else bundle(sourceId, "object_attributes_conflict", [sourceId]);
-    } else if (
-      row.assemblyParentId &&
-      !raw.has(row.assemblyParentId) &&
-      row.composition?.length &&
-      !explicitIndependent(row)
-    ) {
-      bundle(sourceId, "composition_parent_missing", [sourceId]);
-      m.membershipStatus = "unresolved";
-      diagnostics.push({
-        kind: "composition_parent_missing",
-        identity: sourceId,
-        name: row.name,
-      });
-    } else if (!row.assemblyParentId && disputed && !explicitIndependent(row)) {
-      bundle(sourceId, "composition_parent_unresolved", [sourceId]);
-      m.membershipStatus = "unresolved";
-      m.membershipEvidence = disputed.flatMap((edge) => edge.evidence);
-      diagnostics.push({
-        kind: "composition_parent_unresolved",
-        identity: sourceId,
-        name: row.name,
-      });
-    } else if (
-      above &&
-      row.traits.luminaireTerminal &&
-      !explicitIndependent(row) &&
-      !m.conflict &&
-      m.meaning === "object" &&
-      m.category === "U-OBJECT" &&
-      parentMeaning?.standardClass?.id === "material:lamps" &&
-      row.composition?.some(
-        (edge) =>
-          edge.kind === "physical_assembly" && edge.status === "confirmed",
-      )
-    ) {
-      m.meaning = "part";
-      m.basis = "luminaire_terminal_assembly";
-      m.membershipStatus = "candidate";
-      m.membershipEvidence = [
-        row.traits.luminaireTerminal.evidenceId,
-        `assembly:${row.assemblyParentId}->${sourceId}`,
-      ];
-      owners.set(sourceId, above);
-    } else if (
-      above &&
-      entities.has(above) &&
-      parentEquipment &&
-      !explicitIndependent(row) &&
-      !m.conflict &&
-      m.componentType?.status !== "confirmed" &&
-      !unclassifiedAssemblyCandidate(row, m) &&
-      row.composition?.some(
-        (edge) =>
-          edge.kind !== "object_decomposition" && edge.status === "confirmed",
-      ) &&
-      !["source_only", "container", "detail", "neutral_set"].includes(m.meaning)
-    ) {
-      // An equipment type/code/designation describes the member, not a new whole.
-      m.meaning = "part";
-      m.independent = false;
-      m.membershipStatus = "confirmed";
-      m.basis = "source_composition_member";
-      m.membershipEvidence = [
-        ...new Set(
-          row.composition
-            .flatMap((edge) => edge.evidence)
-            .concat(`policy:${COMPOSITION_POLICY.version}:whole-boundary`),
-        ),
-      ];
-      owners.set(sourceId, above);
-    } else if (m.meaning === "neutral_set") {
-      if (transformer(aboveCategory) && !explicitIndependent(row)) {
-        owners.set(sourceId, above);
-        m.membershipStatus = "confirmed";
-        m.membershipEvidence = [
-          `assembly:${row.assemblyParentId}->${sourceId}`,
-        ];
-      } else bundle(sourceId, "neutral_set_main_unresolved", [sourceId]);
-    } else if (
-      above &&
-      entities.has(above) &&
-      m.componentType?.status === "confirmed" &&
-      !explicitIndependent(row)
-    ) {
-      const compatibility = componentHostCompatibility(m, entities.get(above)!);
-      m.membershipEvidence = [
-        ...(m.componentType.evidence ?? []),
-        `assembly:${row.assemblyParentId}->${sourceId}`,
-        `policy:${COMPOSITION_POLICY.version}:${m.componentType.id}`,
-      ];
-      if (compatibility === "compatible") {
-        m.meaning = "part";
-        m.independent = false;
-        m.basis = "configured_component_assembly";
-        m.membershipStatus = "confirmed";
-        owners.set(sourceId, above);
-      } else {
-        const reason =
-          compatibility === "unconfigured"
-            ? "component_host_unconfigured"
-            : "component_host_incompatible";
-        bundle(sourceId, reason, [sourceId]);
-        m.membershipStatus = "unresolved";
-        diagnostics.push({ kind: reason, identity: sourceId, name: row.name });
-      }
-    } else if (["source_only", "container", "detail"].includes(m.meaning)) {
-      owners.set(sourceId, above);
-    } else if (m.meaning === "part") {
-      if (
-        m.componentType &&
-        m.componentType.status !== "confirmed" &&
-        !row.objectRoles?.some((p) => p.value === "part")
-      ) {
-        bundle(sourceId, "component_type_unresolved", [sourceId]);
-        m.membershipStatus = "unresolved";
-      } else if (above) {
-        owners.set(sourceId, above);
-        m.membershipStatus = "confirmed";
-        m.membershipEvidence = [
-          ...(row.objectRoles?.map((p) => p.evidenceId) ?? []),
-          `assembly:${row.assemblyParentId}->${sourceId}`,
-        ];
-      } else bundle(sourceId, "component_whole_unresolved", [sourceId]);
-    } else if (
-      above &&
-      parentEquipment &&
-      unclassifiedAssemblyCandidate(row, m)
-    ) {
-      m.meaning = "part";
-      m.independent = false;
-      m.basis = "unclassified_equipment_assembly_member";
-      m.membershipStatus = "candidate";
-      m.membershipEvidence = [
-        `assembly:${row.assemblyParentId}->${sourceId}`,
-        `policy:${COMPOSITION_POLICY.version}:unclassified-assembly-member`,
-      ];
-      if (m.objectRole)
-        m.objectRole = {
-          id: "part",
-          status: "candidate",
-          evidence: m.membershipEvidence,
-        };
-      owners.set(sourceId, above);
-    } else {
+    const context: MembershipContext = {
+      row,
+      m,
+      sourceId,
+      above,
+      aboveCategory,
+      parentMeaning,
+      parentEquipment,
+      disputed,
+      associate,
+    };
+    // Earlier strategies own stronger evidence and their diagnostics. Commit
+    // only the first match before a later child observes this assignment.
+    const resolved =
+      resolveConflictingClassification(context) ||
+      resolveMissingComposition(context) ||
+      resolveDisputedComposition(context) ||
+      resolveLuminaireMembership(context) ||
+      resolveEquipmentAssemblyMembership(context) ||
+      resolveNeutralSetMembership(context) ||
+      resolveComponentMembership(context) ||
+      resolveSourceOnlyMembership(context) ||
+      resolveDeclaredPartMembership(context) ||
+      resolveUnknownAssemblyMembership(context) ||
+      resolveExplicitIndependent(context);
+    if (!resolved) {
       const boundary = planSeparateObjectBoundary(
         m,
         aboveCategory,

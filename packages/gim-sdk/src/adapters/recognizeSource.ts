@@ -3,12 +3,10 @@ import { ENGINEERING_EVIDENCE_FIELDS } from "../shared/recognitionFieldPolicy.js
 import { createValueReader } from "./evidenceReader.js";
 import { sourceTypeCandidates } from "./sourceTypeCandidates.js";
 import {
-  applyTypeDefaults,
   cabinetModelType,
   canonicalSourceType,
   ifcModelType,
   isTypeDeclaration,
-  roadPositionType,
 } from "./sourceTypePolicy.js";
 import {
   ENGINEERING_RECOGNITION_VERSION,
@@ -38,13 +36,10 @@ export function readSourceEvidenceFacts(
     record,
     values,
     normalize: {
-      applyTypeDefaults: (declarations) => applyTypeDefaults([...declarations]),
       canonicalSourceType,
       cabinetModelType,
       ifcModelType,
       isTypeDeclaration,
-      roadPositionType: (type, positions) =>
-        roadPositionType(type, [...positions]),
     },
   };
 }

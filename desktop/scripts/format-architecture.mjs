@@ -138,6 +138,8 @@ export const architectureModules = [
   '../packages/gim-sdk/src/semantic/recognition/neutralAssemblyResolver.ts',
   '../packages/gim-sdk/src/semantic/recognition/sourceEvidenceFacts.ts',
   '../packages/gim-sdk/src/semantic/recognition/objectEvidenceDecision.ts',
+  '../packages/gim-sdk/src/semantic/recognition/objectEvidenceCandidates.ts',
+  '../packages/gim-sdk/src/semantic/recognition/objectVocabularyEvidence.ts',
   '../packages/gim-sdk/src/adapters/sourceTypeCandidates.ts',
   '../packages/gim-sdk/src/semantic/policyFingerprints.ts',
   '../packages/gim-sdk/src/adapters/recognizeSource.ts',
