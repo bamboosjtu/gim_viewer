@@ -3,6 +3,20 @@ import { parseFileDevRelation } from '../fileDevParser.js';
 import { createIfcModelId } from '../modelIdentity.js';
 
 describe('FileDevRelation 路径兼容', () => {
+  it('skips GIM empty sentinels before selecting the IFC and device source', async () => {
+    const relation = 'file.num=1\nFILE0.NAME=a.ifc\nFILE0.IFC=NULL\nFILE0.DEV.NUM=1\nFILE0.DEV0=-\nFILE0.DEVS0=CBM/a.cbm';
+    const files = new Map([
+      ['CBM/FileDevRelation.cbm', new File([relation], 'FileDevRelation.cbm')],
+      ['DEV/a.ifc', new File([], 'a.ifc')],
+    ]);
+    await expect(parseFileDevRelation(files)).resolves.toEqual([
+      expect.objectContaining({
+        ifcFile: 'a.ifc',
+        modelId: createIfcModelId('DEV/a.ifc'),
+        deviceCbms: ['CBM/a.cbm'],
+      }),
+    ]);
+  });
   it('识别 Cbm/ 目录大小写变体', async () => {
     const relation = [
       'FILE.NUM=2',

@@ -24,7 +24,7 @@ CBM 根的 SCH 指向入口，SCHn 按实际条目引用 STD/SLD。
 | 其他 root | 不支持的结构 | unsupported，保留根类型与诊断 |
 
 扩展名 `.std` 不证明 root 为 STD；分型依据实际内容，不按厂商分支。
-STD/SLD 文档携带 `ok / empty / unsupported / failed` 状态与诊断。空输入、合法但无内容的文档和 XML 解析失败分别表达；服务保留解析失败文档，UI 显示具体终态，不将其替换为“此工程无文档”。
+STD/SLD 文档携带 `ok / empty / unsupported / failed` 状态与诊断。服务按 SCH 条目保留各自结果，冷开和暖开均优先发布可用的 STD 和 SLD。同一类型有多份可用文档时采用最后一份。当前类型只有失败文档时，面板显示解析失败状态。
 台账保存各包实际能力。SVG STD 与 SLD 是否同内容是文件事实，不能据此假定全标准都合并两者。
 
 ### STD 电气层级

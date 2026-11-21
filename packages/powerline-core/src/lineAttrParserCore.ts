@@ -70,7 +70,14 @@ export function parseLineAttributesFromCache(
   const { famRefs, devRefs } = collectAttrRefs(graph);
   const famPayloads: LineFamPropertyPayload[] = [];
   const devPayloads: LineDevPropertyPayload[] = [];
-  const unmatchedRefs: string[] = [];
+  const unmatched = new Set<string>();
+  for (const node of graph.nodesByPath.values()) {
+    for (const ref of node.refs.unresolvedFiles ?? []) {
+      if (/\.fam$/i.test(ref)) unmatched.add(`FAM: ${ref}`);
+      else if (/\.dev$/i.test(ref)) unmatched.add(`DEV: ${ref}`);
+    }
+  }
+  const unmatchedRefs = [...unmatched];
 
   for (const refValue of famRefs) {
     const matchedPath = cache.resolveOriginalPath(refValue);

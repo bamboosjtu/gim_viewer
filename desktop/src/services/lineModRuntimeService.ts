@@ -1,223 +1,207 @@
-import { logger } from '../utils/logger.js';
-/**
- * 线路 MOD 运行时服务。
- *
- * lineModParser 只负责把四类文本格式解析为 Geometry IR；本服务负责把
- * CBM → DEV → PHM → MOD 引用链解析到可读的 MOD 来源，并在当前工程会话内
- * 缓存结果。UI 只消费 LineModRuntimeEntry，不直接读取文件或数据库。
- */
-
+/** Resolve and load the line MOD sources of an inspector object. */
 import type { AppState } from '../app/state.js';
 import type { GimGraphNode } from '@gim/powerline-core/gimGraphTypes.js';
-import type { LineTextModGeometrySource } from '../gim/geometry/ir.js';
 import { parseLineMod } from '@gim/powerline-core/geometry/lineModParser.js';
+import { createEntryIndex, getFileEntryIndex, type EntryIndex } from '../gim/entryResolver.js';
 import { parseDev } from '../gim/geometry/devParser.js';
 import { parsePhm } from '../gim/geometry/phmParser.js';
-import { getFileByPath } from '../gim/fileLookup.js';
-import { normalizeGimPath } from '@gim/powerline-core/linePathNormalize.js';
+import type { LineTextModGeometrySource } from '../gim/geometry/ir.js';
+import { StaleSessionError, type SessionScope } from '../shared/sessionScope.js';
+import { logger } from '../utils/logger.js';
 
 export interface LineModRuntimeEntry {
-  /** 归一化后的 MOD 路径；完整路径只用于 data 属性/事件，不作为正文显示。 */
+  /** Actual archive path for the source inspector. */
   path: string;
   source: LineTextModGeometrySource | null;
   error?: string;
 }
 
-const IDENTITY_SOURCE = 'memory';
-const sourceCache = new WeakMap<AppState, Map<string, LineModRuntimeEntry>>();
-const resolvedPathCache = new WeakMap<AppState, Map<string, string[]>>();
-
-function cacheFor(state: AppState): Map<string, LineModRuntimeEntry> {
-  let cache = sourceCache.get(state);
-  if (!cache) {
-    cache = new Map<string, LineModRuntimeEntry>();
-    sourceCache.set(state, cache);
-  }
-  return cache;
+interface LineModSession {
+  scope: SessionScope;
+  files: Map<string, File> | null;
+  entryIndex?: Promise<EntryIndex>;
+  paths: Map<string, Promise<string[]>>;
+  sources: Map<string, Promise<LineModRuntimeEntry>>;
 }
 
-function sourceKey(state: AppState, path: string): string {
-  return `${state.currentSourceSha256 || (state.currentProjectId != null ? `project:${state.currentProjectId}` : IDENTITY_SOURCE)}:${path.toLowerCase()}`;
+const MAX_SOURCES_PER_TYPE = 20_000;
+const sessions = new WeakMap<AppState, LineModSession>();
+
+function getSession(state: AppState): LineModSession {
+  const scope = state.sessionScope(state.captureProjectSession());
+  const files = state.currentFiles;
+  const cached = sessions.get(state);
+  if (cached?.scope === scope && cached.files === files) return cached;
+  const runtime: LineModSession = { scope, files, paths: new Map(), sources: new Map() };
+  sessions.set(state, runtime);
+  scope.own(() => {
+    if (sessions.get(state) === runtime) sessions.delete(state);
+  });
+  return runtime;
 }
 
-function withPrefix(path: string, prefix: 'Dev' | 'Phm' | 'Mod'): string {
-  const normalized = normalizeGimPath(path);
-  if (!normalized) return `${prefix}/`;
-  if (normalized.includes('/')) return normalized;
-  // 引用值通常是 GUID.ext 裸名；目录大小写由实际文件查找工具兜底。
-  return `${prefix}/${normalized}`;
+function getEntryIndex(runtime: LineModSession): Promise<EntryIndex> {
+  if (runtime.entryIndex) return runtime.entryIndex;
+  const { scope, files } = runtime;
+  const index = scope
+    .read(async () => {
+      if (files) return getFileEntryIndex(files);
+      const { projectId, sourceSha256 } = scope.session;
+      if (projectId == null) return createEntryIndex([]);
+      const { readExtractionManifest } = await import('@desktop/gimExtract.js');
+      const manifest = await scope.read(() => readExtractionManifest(projectId));
+      if (!manifest || (sourceSha256 && manifest.source_sha256 !== sourceSha256)) {
+        throw new Error('线路来源清单不可用，请重新打开工程');
+      }
+      return createEntryIndex(manifest.entries.map((entry) => entry.path));
+    })
+    .catch((error: unknown) => {
+      runtime.entryIndex = undefined;
+      throw error;
+    });
+  runtime.entryIndex = index;
+  return index;
 }
 
-function fileName(path: string): string {
-  const normalized = normalizeGimPath(path);
-  return normalized.split('/').pop() || normalized;
+async function readText(runtime: LineModSession, path: string): Promise<string | null> {
+  const { scope, files } = runtime;
+  return scope.read(async () => {
+    try {
+      if (files) {
+        const file = files.get(path);
+        return file ? new TextDecoder().decode(await file.arrayBuffer()) : null;
+      }
+      const { projectId } = scope.session;
+      if (projectId == null) return null;
+      const { readCachedIfc } = await import('@desktop/database.js');
+      const bytes = await scope.read(() => readCachedIfc(projectId, path));
+      return bytes.byteLength > 0 ? new TextDecoder().decode(bytes) : null;
+    } catch (error) {
+      if (error instanceof StaleSessionError) throw error;
+      return null;
+    }
+  });
 }
 
-async function readText(state: AppState, path: string): Promise<string | null> {
-  if (state.currentFiles) {
-    const file = getFileByPath(state.currentFiles, path);
-    if (!file) return null;
-    return new TextDecoder().decode(await file.arrayBuffer());
-  }
-  if (state.currentProjectId == null) return null;
-  try {
-    const { readCachedIfc } = await import('@desktop/database.js');
-    const bytes = await readCachedIfc(state.currentProjectId, path);
-    return bytes.byteLength > 0 ? new TextDecoder().decode(bytes) : null;
-  } catch {
-    return null;
-  }
-}
-
-async function loadSource(state: AppState, path: string): Promise<LineModRuntimeEntry> {
-  const normalized = withPrefix(path, 'Mod');
-  const key = sourceKey(state, normalized);
-  const cache = cacheFor(state);
-  const cached = cache.get(key);
+function loadSource(runtime: LineModSession, path: string): Promise<LineModRuntimeEntry> {
+  const cached = runtime.sources.get(path);
   if (cached) return cached;
-
-  const text = await readText(state, normalized);
-  if (text == null) {
-    const result: LineModRuntimeEntry = {
-      path: normalized,
-      source: null,
-      error: '源 MOD 文件不在当前工程缓存中',
-    };
-    cache.set(key, result);
-    return result;
-  }
-  try {
-    const source = parseLineMod(text, normalized);
-    const result: LineModRuntimeEntry = { path: normalized, source };
-    cache.set(key, result);
-    return result;
-  } catch (error) {
-    const result: LineModRuntimeEntry = {
-      path: normalized,
-      source: null,
-      error: error instanceof Error ? error.message : String(error),
-    };
-    cache.set(key, result);
-    return result;
-  }
+  const entry = runtime.scope.read(async () => {
+    const text = await readText(runtime, path);
+    if (text == null) {
+      return { path, source: null, error: '源 MOD 文件不在当前工程缓存中' };
+    }
+    try {
+      return { path, source: parseLineMod(text, path) };
+    } catch (error) {
+      return { path, source: null, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+  runtime.sources.set(path, entry);
+  return entry;
 }
 
-/** 从节点及其业务子树收集所有可达的 MOD/DEV/PHM 引用。 */
-export function collectLineGeometryRefs(node: GimGraphNode): {
-  modPaths: string[];
-  devPaths: string[];
-  phmPaths: string[];
-} {
-  const mods = new Set<string>();
-  const devs = new Set<string>();
-  const phms = new Set<string>();
+/** Collect the actual paths already resolved by the line graph builder. */
+function collectLineGeometryRefs(node: GimGraphNode): string[] {
+  const paths = new Set<string>();
+  const visited = new Set<string>();
   const walk = (current: GimGraphNode): void => {
-    for (const path of current.refs.modFiles) mods.add(withPrefix(path, 'Mod'));
-    for (const path of current.refs.devFiles) devs.add(withPrefix(path, 'Dev'));
-    for (const path of current.refs.phmFiles) phms.add(withPrefix(path, 'Phm'));
+    if (visited.has(current.path)) return;
+    visited.add(current.path);
+    for (const path of current.refs.modFiles) paths.add(path);
+    for (const path of current.refs.devFiles) paths.add(path);
+    for (const path of current.refs.phmFiles) paths.add(path);
     for (const child of current.children) walk(child);
   };
   walk(node);
-  return { modPaths: Array.from(mods), devPaths: Array.from(devs), phmPaths: Array.from(phms) };
+  return [...paths];
 }
 
-/**
- * 解析 DEV/PHM 引用，返回节点真正可达的 MOD 路径。
- *
- * 线路 DEV 中常见的是 DEV→DEV→PHM→MOD 多级链；采用有界 BFS 并去重，
- * 保留弱 schema 文件的可见性，不因单个坏引用阻断属性面板。
- */
-export async function resolveLineModPaths(state: AppState, node: GimGraphNode): Promise<string[]> {
-  const refs = collectLineGeometryRefs(node);
-  const modPaths = new Set(refs.modPaths);
-  const pendingDev = [...refs.devPaths];
-  const pendingPhm = [...refs.phmPaths];
-  const seenDev = new Set<string>();
-  const seenPhm = new Set<string>();
-  const budget = 20000;
+async function resolveLineModPaths(
+  runtime: LineModSession,
+  roots: readonly string[],
+): Promise<string[]> {
+  const index = await getEntryIndex(runtime);
+  const pending: string[] = [];
+  const visited = new Set<string>();
+  const mods: string[] = [];
+  const counts = { DEV: 0, PHM: 0, MOD: 0 };
 
-  while ((pendingDev.length > 0 || pendingPhm.length > 0) && modPaths.size < budget) {
-    while (pendingDev.length > 0 && seenDev.size < budget) {
-      const devPath = pendingDev.shift()!;
-      const devKey = devPath.toLowerCase();
-      if (seenDev.has(devKey)) continue;
-      seenDev.add(devKey);
-      const text = await readText(state, devPath);
-      if (text == null) continue;
-      let doc;
-      try {
-        doc = parseDev(text, devPath);
-      } catch {
-        continue;
-      }
-      for (const solid of doc.solidModels) {
-        const lower = fileName(solid.solidModelPath).toLowerCase();
-        if (lower.endsWith('.mod')) modPaths.add(withPrefix(solid.solidModelPath, 'Mod'));
-        else if (lower.endsWith('.phm')) pendingPhm.push(withPrefix(solid.solidModelPath, 'Phm'));
-        else if (lower.endsWith('.dev')) pendingDev.push(withPrefix(solid.solidModelPath, 'Dev'));
-      }
-      for (const sub of doc.subDevices) pendingDev.push(withPrefix(sub.devPath, 'Dev'));
+  const enqueue = (path: string | null): void => {
+    if (!path || visited.has(path)) return;
+    const type = path.slice(path.lastIndexOf('.') + 1).toUpperCase();
+    if (type !== 'DEV' && type !== 'PHM' && type !== 'MOD') return;
+    if (counts[type] >= MAX_SOURCES_PER_TYPE) {
+      throw new RangeError(
+        `线路 ${type} 来源超过遍历上限 ${MAX_SOURCES_PER_TYPE}，请选取更具体的对象查看`,
+      );
     }
-
-    while (pendingPhm.length > 0 && seenPhm.size < budget) {
-      const phmPath = pendingPhm.shift()!;
-      const phmKey = phmPath.toLowerCase();
-      if (seenPhm.has(phmKey)) continue;
-      seenPhm.add(phmKey);
-      const text = await readText(state, phmPath);
-      if (text == null) continue;
-      let doc;
-      try {
-        doc = parsePhm(text, phmPath);
-        if (doc.sourceDiagnostics?.length) {
-          logger.warn('[Line PHM] 来源字段或矩阵存在歧义:', doc.sourceDiagnostics);
-          continue;
-        }
-      } catch {
-        continue;
-      }
-      for (const solid of doc.solidModels) {
-        const lower = fileName(solid.solidModelPath).toLowerCase();
-        if (lower.endsWith('.mod')) modPaths.add(withPrefix(solid.solidModelPath, 'Mod'));
-        else if (lower.endsWith('.phm')) pendingPhm.push(withPrefix(solid.solidModelPath, 'Phm'));
-      }
-    }
+    counts[type]++;
+    visited.add(path);
+    if (type === 'MOD') mods.push(path);
+    else pending.push(path);
+  };
+  for (const root of roots) {
+    const matches = index.exactCandidates(root);
+    if (matches.length === 1) enqueue(matches[0]);
   }
 
-  return Array.from(modPaths);
+  for (let cursor = 0; cursor < pending.length; cursor++) {
+    const path = pending[cursor];
+    const text = await readText(runtime, path);
+    if (text == null) continue;
+    let references: string[];
+    try {
+      if (/\.dev$/i.test(path)) {
+        const doc = parseDev(text, path);
+        references = [
+          ...doc.solidModels.map((row) => row.solidModelPath),
+          ...doc.subDevices.map((row) => row.devPath),
+        ];
+      } else {
+        const doc = parsePhm(text, path);
+        if (doc.sourceDiagnostics?.length) {
+          logger.warn('[Line PHM] 来源字段或矩阵存在歧义:', doc.sourceDiagnostics);
+        }
+        references = doc.solidModels.map((row) => row.solidModelPath);
+      }
+    } catch {
+      continue;
+    }
+    for (const reference of references) enqueue(index.resolve(reference, path));
+  }
+  return mods;
 }
 
-/** 加载并解析节点可达的所有线路 MOD，结果按引用顺序去重。 */
+/** Reuse a traversal for objects that reference the same set of sources. */
 export async function loadLineModSourcesForNode(
   state: AppState,
   node: GimGraphNode,
 ): Promise<LineModRuntimeEntry[]> {
-  // 同一塔型的多个塔位共享相同的 MOD/DEV/PHM 引用；用引用签名而不是节点路径
-  // 作为缓存键，避免每个塔位都重新遍历 DEV→PHM 链。
-  const refs = collectLineGeometryRefs(node);
-  const signature = [
-    refs.modPaths.slice().sort().join('|'),
-    refs.devPaths.slice().sort().join('|'),
-    refs.phmPaths.slice().sort().join('|'),
-  ].join('#');
-  const key = `${state.currentSourceSha256 || (state.currentProjectId != null ? `project:${state.currentProjectId}` : IDENTITY_SOURCE)}:${signature}`;
-  let resolveCache = resolvedPathCache.get(state);
-  if (!resolveCache) {
-    resolveCache = new Map();
-    resolvedPathCache.set(state, resolveCache);
-  }
-  let paths = resolveCache.get(key);
-  if (!paths) {
-    paths = await resolveLineModPaths(state, node);
-    resolveCache.set(key, paths);
-  }
-  const entries: LineModRuntimeEntry[] = [];
-  for (const path of paths) entries.push(await loadSource(state, path));
-  return entries;
+  const runtime = getSession(state);
+  return runtime.scope.read(async () => {
+    const roots = collectLineGeometryRefs(node);
+    if (!roots.length) return [];
+    const key = JSON.stringify(roots.slice().sort());
+    let pending = runtime.paths.get(key);
+    if (!pending) {
+      pending = runtime.scope
+        .read(() => resolveLineModPaths(runtime, roots))
+        .catch((error: unknown) => {
+          runtime.paths.delete(key);
+          throw error;
+        });
+      runtime.paths.set(key, pending);
+    }
+    const paths = await pending;
+    const entries: LineModRuntimeEntry[] = [];
+    for (const path of paths) {
+      entries.push(await runtime.scope.read(() => loadSource(runtime, path)));
+    }
+    return entries;
+  });
 }
 
-/** 工程切换时由 UI/清理流程调用；WeakMap 会自动释放 state，但显式清空便于测试。 */
 export function clearLineModRuntimeCache(state: AppState): void {
-  sourceCache.get(state)?.clear();
-  resolvedPathCache.get(state)?.clear();
+  sessions.delete(state);
 }

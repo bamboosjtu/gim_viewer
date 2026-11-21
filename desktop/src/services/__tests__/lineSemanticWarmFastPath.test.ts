@@ -4,7 +4,10 @@ import { buildLineGimGraphFromTexts } from '../../gim/lineCbmParserCore.js';
 import { createLineParserCache, parseLineAttributesFromCache } from '@gim/powerline-core/lineAttrParserCore.js';
 import { buildLineGraphPayload } from '../lineGraphPersistenceService.js';
 import { restoreLineGraphToState } from '../lineGraphRestoreService.js';
-import { restoreLineAttributesToState } from '../lineAttrRestoreService.js';
+import { buildLineAttributeIndex, restoreLineAttributesToState } from '../lineAttrRestoreService.js';
+import { extractLineMapData } from '../../gim/lineMapData.js';
+import { buildLineNavigationIndex } from '../lineNavigationProjection.js';
+import { renderLineSourceRefs } from '../lineInspectorProjection.js';
 import { buildLineSemanticWarmFiles, commitLineParserResult } from '../powerlineRuntime.js';
 import { parseLineInWorker } from '../lineParserWorkerClient.js';
 import type { LineParserWorkerFile } from '../lineParserWorker.js';
@@ -161,6 +164,70 @@ describe('Line Warm Fast Path v1', () => {
       .toBe(attributes.famPayloads.length);
     expect(Array.from(state.properties.cachedLineDevProperties.values()).flatMap((byProp) => Array.from(byProp.values()).flat()).length)
       .toBe(attributes.devPayloads.length);
+  });
+
+  it('preserves one boundary tower and both strain edges through SQLite graph restore', () => {
+    const files = textMap([
+      textFile('CBM/project.cbm', 'ENTITYNAME=F1System\nSECTIONS.NUM=1\nSECTION0=line.cbm'),
+      textFile('CBM/line.cbm', 'ENTITYNAME=F2System\nSTRAINSECTIONS.NUM=2\nSTRAINSECTION0=s1.cbm\nSTRAINSECTION1=s2.cbm'),
+      textFile('CBM/s1.cbm', 'ENTITYNAME=F3System\nGROUPS.NUM=2\nGROUP0=tower.cbm\nGROUP1=tower.cbm'),
+      textFile('CBM/s2.cbm', 'ENTITYNAME=F3System\nGROUPS.NUM=1\nGROUP0=tower.cbm'),
+      textFile('CBM/tower.cbm', 'ENTITYNAME=F4System\nGROUPTYPE=TOWER\nBLHA=30,110,0\nSUBDEVICE0=s1.cbm\nSUBDEVICES.NUM=1'),
+    ]);
+    const cold = buildLineGimGraphFromTexts(files);
+    const state = new AppState();
+    const payload = buildLineGraphPayload(7, cold, 'fixture');
+    expect(payload.nodes.filter(node => node.path === 'CBM/tower.cbm')).toHaveLength(1);
+    expect(payload.children.filter(edge => edge.child_path === 'CBM/tower.cbm').map(edge => edge.parent_path))
+      .toEqual(['CBM/s1.cbm', 'CBM/s2.cbm']);
+    expect(payload.children.some(edge => edge.parent_path === 'CBM/tower.cbm')).toBe(false);
+
+    for (const graph of [cold, restoreLineGraphToState(state, payload)]) {
+      const tower = graph.nodesByPath.get('CBM/tower.cbm');
+      expect(graph.nodesByPath.get('CBM/s1.cbm')?.children[0]).toBe(tower);
+      expect(graph.nodesByPath.get('CBM/s2.cbm')?.children[0]).toBe(tower);
+      const map = extractLineMapData(graph, buildLineAttributeIndex(state));
+      expect(map.towers).toHaveLength(1);
+      const navigation = buildLineNavigationIndex(graph, map);
+      const strains = [...navigation.nodesByKey.values()].filter(node => node.kind === 'strain-section');
+      expect(strains.map(strain => strain.children.map(child => child.tower?.cbmPath)))
+        .toEqual([['CBM/tower.cbm'], ['CBM/tower.cbm']]);
+    }
+  });
+
+  it('keeps exact wire endpoints and unresolved FAM references through desktop projections and restore', () => {
+    const files = textMap([
+      textFile('CBM/project.cbm', 'GROUPS.NUM=5\nGROUP0=A/tower.cbm\nGROUP1=B/tower.cbm\nGROUP2=C/tower.cbm\nGROUP3=wire.cbm\nGROUP4=ambiguous-wire.cbm'),
+      textFile('A/tower.cbm', 'ENTITYNAME=F4System\nGROUPTYPE=TOWER\nBLHA=30,110,0\nSTRINGS.NUM=1\nSTRING0.STRING=hang.cbm\nBASEFAMILY=B/type.fam'),
+      textFile('B/tower.cbm', 'ENTITYNAME=F4System\nGROUPTYPE=TOWER\nBLHA=32,112,0\nSTRINGS.NUM=1\nSTRING0.STRING=hang.cbm'),
+      textFile('C/tower.cbm', 'ENTITYNAME=F4System\nGROUPTYPE=TOWER\nBLHA=31,111,0\nSTRINGS.NUM=1\nSTRING0.STRING=end.cbm\nBASEFAMILY=type.fam'),
+      textFile('A/hang.cbm', 'ENTITYNAME=STRING'),
+      textFile('B/hang.cbm', 'ENTITYNAME=STRING'),
+      textFile('C/end.cbm', 'ENTITYNAME=STRING'),
+      textFile('CBM/wire.cbm', 'ENTITYNAME=WIRE\nBACKSTRING=a\\HANG.cbm\nFRONTSTRING=C/end.cbm'),
+      textFile('CBM/ambiguous-wire.cbm', 'ENTITYNAME=WIRE\nBACKSTRING=hang.cbm\nFRONTSTRING=C/end.cbm'),
+      textFile('A/type.fam', 'TYPE=A-model'),
+      textFile('B/type.fam', 'TYPE=B-model'),
+    ]);
+    const cache = createLineParserCache(files);
+    const cold = buildLineGimGraphFromTexts(files, cache);
+    const attrs = parseLineAttributesFromCache(cold, cache);
+    expect(attrs.unmatchedRefs).toContain('FAM: type.fam');
+    expect(attrs.famPayloads.map(row => row.source_path)).toEqual(['B/type.fam']);
+    const state = new AppState();
+    const warm = restoreLineGraphToState(state, buildLineGraphPayload(7, cold, 'fixture'));
+    restoreLineAttributesToState({ fam_properties: attrs.famPayloads, dev_properties: attrs.devPayloads }, state);
+    const attrIndex = buildLineAttributeIndex(state);
+    for (const graph of [cold, warm]) {
+      const map = extractLineMapData(graph, attrIndex);
+      expect(map.wires).toHaveLength(1);
+      expect(map.wires[0]).toMatchObject({ startLat: 30, startLng: 110, endLat: 31, endLng: 111 });
+      expect(map.unresolved.wires).toEqual(['CBM/ambiguous-wire.cbm']);
+      expect(map.towers.find(tower => tower.cbmPath === 'A/tower.cbm')?.towerType).toBe('B-model');
+      expect(map.towers.find(tower => tower.cbmPath === 'C/tower.cbm')?.towerType).toBeUndefined();
+      expect(map.unresolved.famSources).toEqual(['type.fam']);
+      expect(renderLineSourceRefs(graph.nodesByPath.get('C/tower.cbm')!)).toContain('未解析引用');
+    }
   });
 
   it('A→B 工程切换后迟到的 semantic Worker/pack 结果不能提交或清空 B', async () => {

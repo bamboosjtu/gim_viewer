@@ -13,7 +13,13 @@
  */
 
 import type { GimGraph, GimGraphNode } from '@gim/powerline-core/gimGraphTypes.js';
-import type { CrossMarker, LineMapData, TowerMarker, WireSegment } from '../gim/lineMapData.js';
+import {
+  createLineWireTowerResolver,
+  type CrossMarker,
+  type LineMapData,
+  type TowerMarker,
+  type WireSegment,
+} from '../gim/lineMapData.js';
 import type { LineAttributeIndex } from '@gim/powerline-core/lineAttributeTypes.js';
 import { getFileNameLower, normalizeGimPath } from '@gim/powerline-core/linePathNormalize.js';
 import type { SearchItem } from '../shared/searchTypes.js';
@@ -108,7 +114,6 @@ export interface LineNavigationOptions {
 
 interface ParentIndex {
   parentByPath: Map<string, GimGraphNode>;
-  f3ByPath: Map<string, GimGraphNode>;
   f4WireByWirePath: Map<string, GimGraphNode>;
   f4WireF3ByPath: Map<string, GimGraphNode>;
   f4CrossF3ByPath: Map<string, GimGraphNode>;
@@ -201,7 +206,7 @@ export function buildLineNavigationIndex(
   for (const entry of towerEntries) {
     if (entry.marker) towerByCoord.set(coordKey(entry.marker.lat, entry.marker.lng), entry);
   }
-  const stringToTowerPath = buildStringTowerIndex(towerEntries);
+  const wireTower = createLineWireTowerResolver(graph.nodesByPath.values());
 
   const spanRecords = buildSpanRecords(
     graph,
@@ -209,7 +214,7 @@ export function buildLineNavigationIndex(
     parentIndex,
     towerByPath,
     towerByCoord,
-    stringToTowerPath,
+    wireTower,
   );
   const spanByKey = new Map<string, SpanRecord>();
   for (const span of spanRecords) spanByKey.set(span.key, span);
@@ -227,7 +232,7 @@ export function buildLineNavigationIndex(
       towerPaths: new Set<string>(),
       spanKeys: new Set<string>(),
     };
-    for (const group of collectDescendantF4(node, parentIndex)) {
+    for (const group of collectDescendantF4(node)) {
       if (group.rawProps['GROUPTYPE'] === 'TOWER') record.towerPaths.add(group.path);
       if (group.rawProps['GROUPTYPE'] === 'WIRE') {
         for (const key of spanIndexes.bySourcePath.get(group.path) || []) record.spanKeys.add(key);
@@ -395,7 +400,13 @@ export function buildLineNavigationIndex(
   const unsegmentedChildren: LineNavigationNode[] = [];
   for (const span of spanRecords) {
     if (assignedSpanKeys.has(span.key)) continue;
-    const spanNode = buildSpanNode(span, parentByKey, nodesByKey, targetBySourcePath);
+    const spanNode = buildSpanNode(
+      span,
+      'line-navigation:unsegmented',
+      parentByKey,
+      nodesByKey,
+      targetBySourcePath,
+    );
     unsegmentedChildren.push(spanNode);
     assignedSpanKeys.add(span.key);
   }
@@ -432,7 +443,7 @@ export function buildLineNavigationIndex(
     if (assignedCrossPaths.has(cross.marker.cbmPath)) continue;
     const ownerF3 = parentIndex.f4CrossF3ByPath.get(cross.marker.cbmPath);
     const candidates = ownerF3 ? spanIndexes.nonSameByOwnerF3Path.get(ownerF3.path) || [] : [];
-    const selected = chooseCrossSpan(cross, candidates, towerByPath, stringToTowerPath);
+    const selected = chooseCrossSpan(cross, candidates, towerByPath, wireTower);
     if (selected) {
       selected.crosses.push(cross);
       assignedCrossPaths.add(cross.marker.cbmPath);
@@ -554,14 +565,16 @@ export function resolveLineNavigationTarget(
 
 function buildParentIndex(graph: GimGraph): ParentIndex {
   const parentByPath = new Map<string, GimGraphNode>();
-  const f3ByPath = new Map<string, GimGraphNode>();
   const f4WireByWirePath = new Map<string, GimGraphNode>();
   const f4WireF3ByPath = new Map<string, GimGraphNode>();
   const f4CrossF3ByPath = new Map<string, GimGraphNode>();
+  const visited = new Set<string>();
   const walk = (node: GimGraphNode, f3: GimGraphNode | null): void => {
+    if (visited.has(node.path)) return;
+    visited.add(node.path);
     const ownF3 = node.entityName === 'F3System' ? node : f3;
-    if (ownF3) f3ByPath.set(node.path, ownF3);
     for (const child of node.children) {
+      if (visited.has(child.path)) continue;
       parentByPath.set(child.path, node);
       if (node.entityName === 'F4System' && node.rawProps['GROUPTYPE'] === 'WIRE') {
         f4WireByWirePath.set(child.path, node);
@@ -574,7 +587,7 @@ function buildParentIndex(graph: GimGraph): ParentIndex {
     }
   };
   if (graph.root) walk(graph.root, null);
-  return { parentByPath, f3ByPath, f4WireByWirePath, f4WireF3ByPath, f4CrossF3ByPath };
+  return { parentByPath, f4WireByWirePath, f4WireF3ByPath, f4CrossF3ByPath };
 }
 
 function findRouteNode(root: GimGraphNode | null): GimGraphNode | null {
@@ -592,14 +605,24 @@ function directOrDescendant(node: GimGraphNode, entityName: string): GimGraphNod
   return collectDescendants(node, (child) => child.entityName === entityName);
 }
 
-function collectDescendantF4(node: GimGraphNode, parentIndex: ParentIndex): GimGraphNode[] {
-  // 线路 F3 下的 F4 正常为直接子项；递归兜底兼容导出器增加的中间组。
-  return collectDescendants(
-    node,
-    (child) =>
-      child.entityName === 'F4System' &&
-      ['TOWER', 'WIRE', 'CROSS'].includes(child.rawProps['GROUPTYPE'] || ''),
-  ).filter((child) => parentIndex.f3ByPath.get(child.path)?.path === node.path);
+function collectDescendantF4(node: GimGraphNode): GimGraphNode[] {
+  const groups: GimGraphNode[] = [];
+  const seen = new Set<string>();
+  const walk = (parent: GimGraphNode): void => {
+    for (const child of parent.children) {
+      if (seen.has(child.path) || child.entityName === 'F3System') continue;
+      seen.add(child.path);
+      if (
+        child.entityName === 'F4System' &&
+        ['TOWER', 'WIRE', 'CROSS'].includes(child.rawProps.GROUPTYPE)
+      ) {
+        groups.push(child);
+      }
+      walk(child);
+    }
+  };
+  walk(node);
+  return groups;
 }
 
 function collectTowerEntries(graph: GimGraph, mapData: LineMapData): TowerEntry[] {
@@ -607,12 +630,11 @@ function collectTowerEntries(graph: GimGraph, mapData: LineMapData): TowerEntry[
   const entries: TowerEntry[] = [];
   const seen = new Set<string>();
   let order = 0;
+  const visited = new Set<string>();
   const walk = (node: GimGraphNode): void => {
-    if (
-      node.entityName === 'F4System' &&
-      node.rawProps['GROUPTYPE'] === 'TOWER' &&
-      !seen.has(node.path)
-    ) {
+    if (visited.has(node.path)) return;
+    visited.add(node.path);
+    if (node.entityName === 'F4System' && node.rawProps.GROUPTYPE === 'TOWER') {
       seen.add(node.path);
       const marker = markersByPath.get(node.path);
       entries.push({
@@ -650,31 +672,13 @@ function buildTowerOrder(entries: TowerEntry[]): Map<string, number> {
   return new Map(ordered.map((entry, index) => [entry.group.path, index]));
 }
 
-function buildStringTowerIndex(entries: TowerEntry[]): Map<string, string> {
-  const result = new Map<string, string>();
-  for (const entry of entries) {
-    result.set(entry.group.path.toLowerCase(), entry.group.path);
-    result.set(getFileNameLower(entry.group.path), entry.group.path);
-    for (const child of entry.group.children) {
-      result.set(child.path.toLowerCase(), entry.group.path);
-      result.set(getFileNameLower(child.path), entry.group.path);
-    }
-    for (const value of Object.entries(entry.group.rawProps)) {
-      if (!value[0].startsWith('STRING') || !value[0].endsWith('.STRING')) continue;
-      const filename = fileName(value[1]);
-      if (filename) result.set(filename.toLowerCase(), entry.group.path);
-    }
-  }
-  return result;
-}
-
 function buildSpanRecords(
   graph: GimGraph,
   mapData: LineMapData,
   parentIndex: ParentIndex,
   towerByPath: Map<string, TowerEntry>,
   towerByCoord: Map<string, TowerEntry>,
-  stringToTowerPath: Map<string, string>,
+  wireTower: ReturnType<typeof createLineWireTowerResolver>,
 ): SpanRecord[] {
   const records = new Map<string, SpanRecord>();
   const mappedWirePaths = new Set<string>();
@@ -682,22 +686,15 @@ function buildSpanRecords(
     if (!coord) return undefined;
     return towerByCoord.get(coordKey(coord.lat, coord.lng))?.group.path;
   };
-  const resolveRef = (value: string | undefined): string | undefined => {
-    if (!value) return undefined;
-    const fn = fileName(value).toLowerCase();
-    return stringToTowerPath.get(fn) || stringToTowerPath.get(value.toLowerCase());
-  };
   const addWire = (wire: WireSegment): void => {
     mappedWirePaths.add(wire.nodeRef.path);
     const group = parentIndex.f4WireByWirePath.get(wire.nodeRef.path);
     const startCoord = coordFromWire(wire, true);
     const endCoord = coordFromWire(wire, false);
-    let startPath = towerPathForCoord(startCoord);
-    let endPath = towerPathForCoord(endCoord);
-    if (group) {
-      startPath = startPath || resolveRef(group.rawProps['BACKSTRING']);
-      endPath = endPath || resolveRef(group.rawProps['FRONTSTRING']);
-    }
+    const startPath =
+      wireTower(wire.nodeRef, 'BACKSTRING', group)?.path ?? towerPathForCoord(startCoord);
+    const endPath =
+      wireTower(wire.nodeRef, 'FRONTSTRING', group)?.path ?? towerPathForCoord(endCoord);
     const samePoint =
       wire.groupKind === 'same-point' ||
       (startCoord &&
@@ -750,16 +747,12 @@ function buildSpanRecords(
 
   // mapData.unresolved.wires 没有 WIRE 节点，不能凭空创建档距；但仍将只有 F4 WIRE
   // 组且没有可提取 WIRE 的情况显示为“未解析档距”。
-  const walk = (node: GimGraphNode): void => {
+  for (const node of graph.nodesByPath.values()) {
     if (node.entityName === 'F4System' && node.rawProps['GROUPTYPE'] === 'WIRE') {
       const hasMapped = node.children.some((child) => mappedWirePaths.has(child.path));
       if (!hasMapped) {
-        const startPath = stringToTowerPath.get(
-          fileName(node.rawProps['BACKSTRING'] || '').toLowerCase(),
-        );
-        const endPath = stringToTowerPath.get(
-          fileName(node.rawProps['FRONTSTRING'] || '').toLowerCase(),
-        );
+        const startPath = wireTower(node, 'BACKSTRING')?.path;
+        const endPath = wireTower(node, 'FRONTSTRING')?.path;
         const startIdentity = startPath || `f4:${node.path}:start`;
         const endIdentity = endPath || `f4:${node.path}:end`;
         const key = `span:${[startIdentity, endIdentity].sort().join('~')}:${encodeURIComponent(node.path)}`;
@@ -780,9 +773,7 @@ function buildSpanRecords(
         });
       }
     }
-    for (const child of node.children) walk(child);
-  };
-  if (graph.root) walk(graph.root);
+  }
   return Array.from(records.values());
 }
 
@@ -933,13 +924,11 @@ function buildStrainChildren(
       (span) => inCurrentStrain(span) && !consumed.has(span.key),
     );
     for (const span of between) {
-      const spanNode = buildSpanNode(span, parentByKey, nodesByKey, targetBySourcePath);
+      const spanNode = buildSpanNode(span, strainKey, parentByKey, nodesByKey, targetBySourcePath);
       children.push(spanNode);
-      parentByKey.set(spanNode.key, strainKey);
       consumed.add(span.key);
       assignedSpanKeys.add(span.key);
       for (const cross of span.crosses) assignedCrossPaths.add(cross.marker.cbmPath);
-      for (const source of span.sourcePaths) targetBySourcePath.set(source, spanNode.key);
     }
   }
 
@@ -949,9 +938,8 @@ function buildStrainChildren(
     .sort(compareSpansByOrder(towerOrder));
   for (const span of remaining) {
     if (span.samePointWires.length > 0) continue;
-    const spanNode = buildSpanNode(span, parentByKey, nodesByKey, targetBySourcePath);
+    const spanNode = buildSpanNode(span, strainKey, parentByKey, nodesByKey, targetBySourcePath);
     children.push(spanNode);
-    parentByKey.set(spanNode.key, strainKey);
     consumed.add(span.key);
     assignedSpanKeys.add(span.key);
     for (const cross of span.crosses) assignedCrossPaths.add(cross.marker.cbmPath);
@@ -993,11 +981,12 @@ function buildTowerNode(
 
 function buildSpanNode(
   span: SpanRecord,
+  parentKey: string,
   parentByKey: Map<string, string>,
   nodesByKey: Map<string, LineNavigationNode>,
   targetBySourcePath: Map<string, string>,
 ): LineNavigationNode {
-  const key = `line-navigation:span:${encodeURIComponent(span.key)}`;
+  const key = `line-navigation:span:${encodeURIComponent(parentKey)}:${encodeURIComponent(span.key)}`;
   const label = spanLabel(span);
   const subtitle = spanSubtitle(span);
   const node = makeNode(
@@ -1011,7 +1000,7 @@ function buildSpanNode(
     Array.from(span.sourcePaths),
   );
   node.span = toSpanProjection(span);
-  registerNode(node, nodesByKey, parentByKey, targetBySourcePath);
+  registerNode(node, nodesByKey, parentByKey, targetBySourcePath, parentKey);
   refreshSpanNode(node, node.span, parentByKey, nodesByKey, targetBySourcePath);
   return node;
 }
@@ -1262,7 +1251,7 @@ function chooseCrossSpan(
   cross: LineCrossProjection,
   candidates: SpanRecord[],
   towerByPath: Map<string, TowerEntry>,
-  stringToTowerPath: Map<string, string>,
+  wireTower: ReturnType<typeof createLineWireTowerResolver>,
 ): SpanRecord | null {
   if (candidates.length === 0) return null;
   const raw = cross.node.rawProps;
@@ -1279,15 +1268,18 @@ function chooseCrossSpan(
     raw['ENDTOWER'],
   ].filter(Boolean);
   if (refs.length > 0) {
-    const towerPaths = refs
-      .map((value) => fileName(value).toLowerCase())
-      .map((value) => stringToTowerPath.get(value) || value)
-      .filter((value) => towerByPath.has(value));
+    const towerPaths = [
+      ...cross.node.refs.cbmFiles.filter((path) => towerByPath.has(path)),
+      wireTower(cross.node, 'BACKSTRING')?.path,
+      wireTower(cross.node, 'FRONTSTRING')?.path,
+    ].filter((path): path is string => path !== undefined);
     const byTowers = candidates.filter((span) =>
       towerPaths.some((path) => path === span.startPath || path === span.endPath),
     );
     if (byTowers.length === 1) return byTowers[0];
-    const bySource = candidates.filter((span) => refs.some((ref) => span.sourcePaths.has(ref)));
+    const bySource = candidates.filter((span) =>
+      cross.node.refs.cbmFiles.some((ref) => span.sourcePaths.has(ref)),
+    );
     if (bySource.length === 1) return bySource[0];
   }
   if (cross.marker.lat != null && cross.marker.lng != null) {
@@ -1588,12 +1580,6 @@ function cleanText(value: string | undefined): string {
   return text && !PLACEHOLDER_RE.test(text) ? text : '';
 }
 
-function fileName(value: string): string {
-  const normalized = value.trim().replace(/\\/g, '/');
-  const slash = normalized.lastIndexOf('/');
-  return slash >= 0 ? normalized.slice(slash + 1) : normalized;
-}
-
 function pad(value: number): string {
   return String(value).padStart(2, '0');
 }
@@ -1645,12 +1631,18 @@ function firstDescendant(
   node: GimGraphNode,
   predicate: (child: GimGraphNode) => boolean,
 ): GimGraphNode | null {
-  for (const child of node.children) {
-    if (predicate(child)) return child;
-    const result = firstDescendant(child, predicate);
-    if (result) return result;
-  }
-  return null;
+  const visited = new Set<string>();
+  const walk = (current: GimGraphNode): GimGraphNode | null => {
+    for (const child of current.children) {
+      if (visited.has(child.path)) continue;
+      visited.add(child.path);
+      if (predicate(child)) return child;
+      const result = walk(child);
+      if (result) return result;
+    }
+    return null;
+  };
+  return walk(node);
 }
 
 function isDescendantOf(

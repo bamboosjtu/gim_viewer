@@ -65,17 +65,16 @@ export function buildPowerlineProject(files: LineParserTextFile[], identity: Pro
     if (!path && !missing.has(ref)) { missing.add(ref); findings.push({ severity: 'WARNING', code: 'missing-reference', message: '引用文件缺失或存在歧义', source: ref }); }
     return path ?? undefined;
   };
-  for (const node of nodes) for (const ref of node.refs.cbmFiles) if (!cache.resolveOriginalPath(ref)) findings.push({ severity: 'WARNING', code: 'missing-cbm-reference', message: '结构引用目标缺失或存在歧义', source: node.path });
-  // Reconstruct explicit containment, including a tower referenced by multiple strain sections.
-  const children = (n: GimGraphNode): GimGraphNode[] => {
-    const refs = [...(n.refs.rawRefs.SUBSYSTEM ?? []), ...Object.entries(n.rawProps)
-      .filter(([key]) => /^(SECTION\d+|STRAINSECTION\d+|GROUP\d+|TOWER\d+|BASE\d+|SUBDEVICE\d+|STRING\d+\.STRING)$/.test(key))
-      .map(([, value]) => value)]
-      .filter(ref => /\.cbm$/i.test(ref))
-      .map(ref => resolveNode(ref, n.path))
-      .filter((node): node is GimGraphNode => !!node);
-    return unique([...n.children, ...refs]);
-  };
+  for (const node of nodes) {
+    for (const ref of node.refs.unresolvedFiles ?? []) {
+      if (/\.cbm$/i.test(ref)) {
+        findings.push({ severity: 'WARNING', code: 'missing-cbm-reference', message: '结构引用目标缺失或存在歧义', source: node.path });
+      } else if (/\.(fam|dev|phm|mod)$/i.test(ref) && !missing.has(ref)) {
+        missing.add(ref);
+        findings.push({ severity: 'WARNING', code: 'missing-reference', message: '引用文件缺失或存在歧义', source: ref });
+      }
+    }
+  }
   const attrMemo = new Map<string, { attrs: Attribute[]; refs: string[]; mods: string[] }>();
   function evidence(n: GimGraphNode) {
     const old = attrMemo.get(n.path); if (old) return old;
@@ -128,7 +127,7 @@ export function buildPowerlineProject(files: LineParserTextFile[], identity: Pro
   const stringTowers = new Map<string, Set<string>>();
   for (const n of towerNodes) {
     const obj = make(n, 'tower');
-    const devices = children(n).filter(c => entity(c) === 'TOWER_DEVICE');
+    const devices = n.children.filter(c => entity(c) === 'TOWER_DEVICE');
     const towerRefs = new Set(Object.entries(n.rawProps).filter(([key]) => /^TOWER\d+$/.test(key)).map(([,ref]) => resolveNode(ref, n.path)?.path).filter(Boolean));
     for (const c of devices) {
       const ev = evidence(c); obj.sourceRefs.push(...ev.refs);
@@ -140,7 +139,7 @@ export function buildPowerlineProject(files: LineParserTextFile[], identity: Pro
     obj.type = pick(obj.attributes, ['TYPE', '杆塔型号', '塔型', 'TOWERTYPE']);
     obj.height = pick(obj.attributes, ['NOMINALHEIGHT', '呼称高', 'TOWERHEIGHT', '杆塔高度', 'HEIGHT']);
     obj.coordinate = coordinateFromBlha(n.rawProps.BLHA); const azimuth = Number(n.rawProps.BLHA?.split(',')[3]); if (Number.isFinite(azimuth)) obj.azimuth = azimuth;
-    const mods = unique([evidence(n).mods, ...children(n).filter(c => entity(c) === 'TOWER_DEVICE').map(c => evidence(c).mods)].flat());
+    const mods = unique([evidence(n).mods, ...devices.map(c => evidence(c).mods)].flat());
     obj.previewRef = mods.find(p => /^\uFEFF?\s*HNum\s*,/im.test(cache.getText(p) ?? ''));
     for (const [k, ref] of Object.entries(n.rawProps)) if (/^STRING\d+\.STRING$/.test(k)) {
       const path = cache.resolveOriginalPath(ref, n.path);
@@ -160,7 +159,7 @@ export function buildPowerlineProject(files: LineParserTextFile[], identity: Pro
     if (membershipSeen.has(key)) return; membershipSeen.add(key);
     if (obj) { if (line) obj.lineIds = unique([...obj.lineIds, line]); if (strain) obj.strainIds = unique([...obj.strainIds, strain]); }
     nodeMembership.set(pathKey(n.path), { lines: unique([...(nodeMembership.get(pathKey(n.path))?.lines ?? []), ...(line ? [line] : [])]), strains: unique([...(nodeMembership.get(pathKey(n.path))?.strains ?? []), ...(strain ? [strain] : [])]) });
-    const next = new Set(trail).add(n.path); for (const c of children(n)) memberships(c, line, strain, next);
+    const next = new Set(trail).add(n.path); for (const c of n.children) memberships(c, line, strain, next);
   }
   const nodeMembership = new Map<string, { lines: string[]; strains: string[] }>();
   memberships(graph.root);
@@ -180,7 +179,7 @@ export function buildPowerlineProject(files: LineParserTextFile[], identity: Pro
   };
   // Explicit grouping parent lets a WIRE inherit BACKSTRING/FRONTSTRING and ISJUMPER.
   const wireParent = new Map<string, GimGraphNode>();
-  for (const n of nodes.filter(n => n.rawProps.GROUPTYPE?.toUpperCase() === 'WIRE')) for (const c of children(n)) wireParent.set(pathKey(c.path), n);
+  for (const n of nodes.filter(n => n.rawProps.GROUPTYPE?.toUpperCase() === 'WIRE')) for (const c of n.children) wireParent.set(pathKey(c.path), n);
   progress?.('合并物理档', 0, nodes.length);
   for (const n of nodes.filter(n => entity(n) === 'WIRE')) {
     const ev = evidence(n), parent = wireParent.get(pathKey(n.path));
@@ -232,14 +231,14 @@ export function buildPowerlineProject(files: LineParserTextFile[], identity: Pro
     }
     if (!obj.coordinate) findings.push({ severity: 'WARNING', code: 'cross-coordinate', message: '跨越物无可用位置', objectId: obj.id });
   }
-  for (const n of nodes.filter(n => n.rawProps.GROUPTYPE?.toUpperCase() === 'CROSS' && !children(n).length)) findings.push({ severity: 'INFO', code: 'empty-cross-group', message: '空跨越组保留为源结构，不生成跨越物', source: n.path });
+  for (const n of nodes.filter(n => n.rawProps.GROUPTYPE?.toUpperCase() === 'CROSS' && !n.children.length)) findings.push({ severity: 'INFO', code: 'empty-cross-group', message: '空跨越组保留为源结构，不生成跨越物', source: n.path });
   const tree: TreeNode = { id: 'root', objectId: projectObj.id, label: projectObj.name, children: [] };
   const lines = objects.filter(o => o.kind === 'line');
   lines.forEach((line, i) => { if (line.name.toUpperCase() === 'F2SYSTEM') line.name = `线路 ${i + 1}`; });
   objects.filter(o => o.kind === 'strain').forEach((strain, i) => { if (strain.name.toUpperCase() === 'F3SYSTEM') { const towers = objects.filter(o => o.kind === 'tower' && o.strainIds.includes(strain.id)); strain.name = `耐张段 ${i + 1}${towers.length ? ` · ${towers[0].name}—${towers[towers.length - 1].name}` : ''}`; } });
   const occurrenceOrder = (rootNode: GimGraphNode): Map<string, number> => {
     const order = new Map<string, number>(), seen = new Set<string>();
-    const visit = (node: GimGraphNode) => { if (seen.has(node.path)) return; seen.add(node.path); const id = nodeObjects.get(pathKey(node.path)) ?? wireSpan.get(pathKey(node.path)); if (id && !order.has(id)) order.set(id, order.size); for (const child of children(node)) visit(child); }; visit(rootNode); return order;
+    const visit = (node: GimGraphNode) => { if (seen.has(node.path)) return; seen.add(node.path); const id = nodeObjects.get(pathKey(node.path)) ?? wireSpan.get(pathKey(node.path)); if (id && !order.has(id)) order.set(id, order.size); for (const child of node.children) visit(child); }; visit(rootNode); return order;
   };
   for (const line of lines) {
     const ln: TreeNode = { id: line.id, objectId: line.id, label: line.name, children: [] }; tree.children.push(ln);

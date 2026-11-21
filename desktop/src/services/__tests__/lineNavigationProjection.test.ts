@@ -8,6 +8,17 @@ import {node,parseFamFixture,makeLineFixture} from './lineNavigationFixture.js';
 import {buildLineNavigationIndex,resolveLineNavigationTarget} from '../lineNavigationProjection.js';
 
 describe('line navigation projection without DOM',()=>{
+  it.each([false, true])('associates a crossing with an unresolved span only through a resolved reference (resolved=%s)', resolved => {
+    const fixture = makeLineFixture();
+    fixture.nodes.cross.rawProps.SPANREF = resolved ? 'Cbm/wire-group-b.cbm' : 'missing.cbm';
+    fixture.nodes.cross.refs.cbmFiles = resolved ? ['Cbm/wire-group-b.cbm'] : [];
+    fixture.nodes.cross.children.push(node({ path: 'Cbm/cross.cbm', entityName: 'CROSS' }));
+    const index = buildLineNavigationIndex(fixture.graph, { ...fixture.mapData, wires: [] });
+    const crossing = [...index.nodesByKey.values()].find(row => row.kind === 'crossing')!;
+    const parent = index.nodesByKey.get(index.parentByKey.get(crossing.key)!);
+    expect(parent?.kind).toBe(resolved ? 'span' : 'unassociated-crossings');
+    expect(index.stats.unassociatedCrossCount).toBe(resolved ? 0 : 1);
+  });
 function crossingFixture(families: [string, string][], refs = ['cross.fam']) {
     const fixture = makeLineFixture();
     fixture.nodes.cross.children.push(node({ path: 'Cbm/actual-cross.cbm', entityName: 'CROSS', rawProps: { CODE: '201' }, refs: { ...node().refs, famFiles: refs } }));

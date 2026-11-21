@@ -24,10 +24,10 @@
 
 | 元素/字段 | 当前解析行为 |
 |---|---|
-| `Entity.ID` | 整数 ID；不可解析则该 Entity 不进入实体集合 |
+| `Entity.ID` | 非负安全整数。ID 无效时保留诊断并跳过该 Entity。同 ID 的多条声明均排除，Boolean 引用保留未解析状态 |
 | `Entity.Type` | 不作为 primitive 名称；非 simple 值诊断并按当前 simple IR 处理 |
 | `Entity.Visible` | 缺失默认为 true；false 不进入可见几何 |
-| `TransformMatrix.Value` | 16 项列主序；缺失、长度不符或含 NaN 时回退单位阵 |
+| `TransformMatrix.Value` | 16 项列主序仿射矩阵。缺失时使用单位阵，项数不符、数值无效或不可用于放置时回退单位阵并保留诊断 |
 | `Color` | 可选；RGB 0–255，A 的刻度由文件级 `max(A)` 判定，见[几何模型](geometry-model.md#颜色) |
 | primitive | 跳过 TransformMatrix/Color 后取首个子元素；未知标签保留 `Unsupported/sourceType/raw` |
 

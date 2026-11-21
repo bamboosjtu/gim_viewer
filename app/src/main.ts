@@ -2,6 +2,7 @@ import './style.css';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { horizontalDistance, PREVIEW_VERSION, type PowerlineProject, type BusinessObject, type TowerPreview } from '@gim/powerline-core';
 import * as bridge from './native/bridge';
+import { NativeImportSession } from './native/importSession';
 import { parseProjectHeader, type ProjectHeader } from './core/header';
 import { ParserWorker } from './core/parser';
 import { MapWorkspace, type Camera } from './map/workspace';
@@ -43,7 +44,7 @@ class MobileApp {
   private pluginHost = new PluginHost();
   private session = 0;
   private previewSession = 0;
-  private pendingImport?: { id: string; newlyCreated: boolean };
+  private nativeImport?: NativeImportSession;
   private importing = false;
   private cancellingImport = false;
   private gpsBusy = false;
@@ -169,7 +170,10 @@ class MobileApp {
   }
   private closeModal() { if (this.importing) { void this.abortImport(); return; } this.el('modal-root').innerHTML = ''; }
   private async showProjects() {
+    if (this.importing) return;
+    const session = this.session;
     const projects = await bridge.listProjects();
+    if (session !== this.session || this.importing) return;
     this.modal('我的工程', `<div class="project-list">${projects.length ? projects.map((p, i) => `<div class="project-entry"><button data-open="${i}" class="project-open"><span class="project-symbol">${icon('tower', 24)}</span><span><strong>${esc(p.name)}</strong><small>${p.counts.tower ?? '—'} 基杆塔 · ${p.counts.span ?? '—'} 档 · ${(p.size / 1048576).toFixed(1)} MiB</small><small>${p.importedAt ? `导入 ${new Date(p.importedAt * 1000).toLocaleDateString('zh-CN')}` : '本地预览缓存'}${p.parserVersion ? '' : ' · 待完成解析'}</small></span></button><button class="icon-button" data-delete="${i}" aria-label="删除 ${esc(p.name)}">${icon('trash', 18)}</button></div>`).join('') : '<div class="empty-state">尚未导入工程。<br>使用系统文件选择器打开线路 .gim。</div>'}</div>`, `<button class="primary" id="import-project">${icon('plus', 18)}导入工程</button>`);
     this.bind('import-project', () => void this.showImport());
     document.querySelectorAll<HTMLButtonElement>('[data-open]').forEach(b => b.onclick = () => { this.closeModal(); void this.openProject(projects[Number(b.dataset.open)]); });
@@ -202,31 +206,36 @@ class MobileApp {
     this.bind('import-cancel', () => void this.abortImport()); return token;
   }
   private async abortImport() {
-    if (this.cancellingImport) return;
+    if (!this.importing || this.cancellingImport) return;
     this.cancellingImport = true;
     const cancelledSession = ++this.session;
-    const pending = this.pendingImport;
-    this.pendingImport = undefined;
+    const attempt = this.nativeImport;
     this.parser.cancel();
+    this.progress({ stage: '正在取消导入' });
     try {
       await bridge.cancelImport();
-      if (pending?.newlyCreated) await bridge.deleteProject(pending.id).catch(() => {});
+      // Prepare may have published the source before the cancellation IPC
+      // returns. Keep the import slot occupied until any owned writes and
+      // rollback have finished, so a same-SHA retry cannot adopt that source.
+      await attempt?.rollback();
     } finally {
       this.cancellingImport = false;
     }
     if (cancelledSession !== this.session) return;
+    this.nativeImport = undefined;
     this.importing = false; this.closeModal(); this.notify('导入已取消');
   }
   private async importNative() {
+    if (this.importing) return;
     const token = this.beginImport(); let remove = () => {}; let started = performance.now();
+    const attempt = this.nativeImport = new NativeImportSession();
     try {
       remove = await bridge.importProgress(p => { if (token === this.session) this.progress(p); });
       if (token !== this.session) return;
       const input = await bridge.chooseNativeFile(p => { if (token === this.session) this.progress(p); }); if (token !== this.session) { await bridge.discardImport(input.path); return; }
       started = performance.now() - input.copyMs;
-      const prepared = await bridge.prepareNative(input);
-      if (token !== this.session) { if (!prepared.duplicate) await bridge.deleteProject(prepared.meta.id); return; }
-      this.pendingImport = { id: prepared.meta.id, newlyCreated: !prepared.duplicate };
+      const prepared = await attempt.prepare(input);
+      if (token !== this.session) return;
       let p = prepared.cache ?? undefined;
       if (!p) {
         const files = await bridge.readEntries(prepared.meta.id);
@@ -237,20 +246,20 @@ class MobileApp {
         });
         if (token !== this.session) return;
         this.progress({ stage: '保存本地缓存' });
-        await bridge.commit(p);
+        await attempt.commit(p);
       }
-      if (token !== this.session) return; this.activate(p); this.timings.push({ kind: prepared.cache ? 'duplicate-warm-open' : 'cold-import', durationMs: performance.now() - started, phases: [...this.phases, ...(this.phase ? [{ stage: this.phase.stage, durationMs: performance.now() - this.phase.started }] : [])].map(p => p.stage === "复制文件与 SHA 校验" ? { ...p, durationMs: input.copyMs } : p) }); this.pendingImport = undefined; this.importing = false; this.closeModal(); if (prepared.duplicate) this.notify('已存在相同源包，打开本地工程');
+      if (token !== this.session) return; this.activate(p); this.timings.push({ kind: prepared.cache ? 'duplicate-warm-open' : 'cold-import', durationMs: performance.now() - started, phases: [...this.phases, ...(this.phase ? [{ stage: this.phase.stage, durationMs: performance.now() - this.phase.started }] : [])].map(p => p.stage === "复制文件与 SHA 校验" ? { ...p, durationMs: input.copyMs } : p) }); this.nativeImport = undefined; this.importing = false; this.closeModal(); if (prepared.duplicate) this.notify('已存在相同源包，打开本地工程');
     } catch (error) {
       if (token !== this.session) return;
-      const pending = this.pendingImport;
-      this.pendingImport = undefined;
-      if (pending?.newlyCreated) await bridge.deleteProject(pending.id).catch(() => {});
+      await attempt.rollback();
       if (token !== this.session) return;
+      this.nativeImport = undefined;
       this.importing = false; this.closeModal(); this.notify(String(error));
     }
     finally { remove(); }
   }
   private async importSample(name: string) {
+    if (this.importing) return;
     const token = this.beginImport(), started = performance.now();
     try {
       this.progress({ stage: '读取本地预览输入' }); const data = await bridge.prepareSample(name); if (token !== this.session) return;
@@ -265,6 +274,7 @@ class MobileApp {
     } catch (error) { if (token === this.session) { this.importing = false; this.closeModal(); this.notify(String(error)); } }
   }
   private async openProject(meta: bridge.ProjectMeta) {
+    if (this.importing) return;
     this.persist(); const token = this.beginImport(), start = performance.now();
     try {
       this.progress({ stage: '恢复本地缓存' }); let project = await bridge.loadCache(meta.id);

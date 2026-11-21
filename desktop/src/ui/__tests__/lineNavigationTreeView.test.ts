@@ -37,6 +37,37 @@ describe('line navigation rendering and lifecycle', () => {
     expect(row).not.toBeUndefined();
     expect(row?.textContent).toContain('N3 杆塔');
   });
+
+  it('reveals the same physical span under the requested strain and preserves each wire row', () => {
+    const fixture = makeLineFixture();
+    const index = buildLineNavigationIndex(fixture.graph, fixture.mapData);
+    const strains = [...index.nodesByKey.values()].filter(row => row.kind === 'strain-section');
+    const spans = strains.map(strain => strain.children.find(child => child.kind === 'span')!);
+    expect(spans).toHaveLength(2);
+    expect(spans[0].span?.key).toBe(spans[1].span?.key);
+    expect(index.stats.spanCount).toBe(1);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const select = vi.fn();
+    const tree = renderLineNavigationTree(index, host, select);
+    try {
+      for (const [rowIndex, span] of spans.entries()) {
+        const wire = span.children.find(child => child.kind === 'wire')!;
+        expect(index.nodesByKey.get(span.key)).toBe(span);
+        expect(index.parentByKey.get(span.key)).toBe(strains[rowIndex].key);
+        expect(index.nodesByKey.get(wire.key)).toBe(wire);
+        expect(revealLineNavigationTarget(index, wire.key)).toBe(wire.key);
+        const row = [...host.querySelectorAll<HTMLElement>('.line-navigation-row')]
+          .find(candidate => candidate.dataset.nodePath === wire.key)!;
+        row.click();
+        expect(select).toHaveBeenLastCalledWith(wire);
+      }
+      const keys = [...host.querySelectorAll<HTMLElement>('.line-navigation-row')].map(row => row.dataset.nodePath);
+      expect(new Set(keys).size).toBe(keys.length);
+    } finally {
+      tree.destroy();
+    }
+  });
 it('destroys navigation listeners and cannot clear a replacement tree',()=>{
  const {graph,mapData}=makeLineFixture(),index=buildLineNavigationIndex(graph,mapData);
  const host=document.createElement('div');document.body.append(host);const selected=vi.fn();

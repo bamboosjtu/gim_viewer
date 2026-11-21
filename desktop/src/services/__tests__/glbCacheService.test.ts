@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
-import { serializeDevToGlb, serializeDevToGlbDetailed, parseDevGlbAsset, analyzeDevCompilation, buildDevCompilePlan, mergeDevGlbParts, InvalidDevGeometryError } from '../glbCacheService.js';
+import { serializeDevToGlb, serializeDevToGlbDetailed, parseDevGlbAsset, analyzeDevCompilation, buildDevCompilePlan, mergeDevGlbParts, aggregateDevGlbDiagnostics, InvalidDevGeometryError } from '../glbCacheService.js';
 import type { DiscoveredGeometries, DiscoveredModGeometry } from '../modGeometryDiscovery.js';
 import { collectDeviceGroups } from '../nodeInteractionService.js';
 import { AppState } from '../../app/state.js';
@@ -38,6 +38,61 @@ it('carries invalid DEV placement evidence through cold compilation and warm dia
   expect(restored.sourceDiagnostics).toEqual(result.diagnostics.sourceDiagnostics);
   files.set('device.dev',file('SOLIDMODELS.NUM=1\nSOLIDMODEL0=body.phm\nSOLIDMODEL0=other.phm','device.dev'));
   await expect(serializeDevToGlbDetailed('device.dev',files)).rejects.toBeInstanceOf(InvalidDevGeometryError);
+});
+
+it('keeps a renderable MOD with an invalid matrix partial through serialization, merge and warm restore', async () => {
+  const { diagnosticFromSerialization } = await import('../../gim/geometry/geometryDiagnostics.js');
+  const { packDevArtifact, unpackDevArtifact } = await import('@desktop/devLodCache.js');
+  const files = new Map([
+    ['DEV/device.dev', file('SOLIDMODELS.NUM=1\nSOLIDMODEL0=body.phm', 'device.dev')],
+    ['PHM/body.phm', file('SOLIDMODELS.NUM=1\nSOLIDMODEL0=piece.mod', 'body.phm')],
+    ['MOD/piece.mod', file(
+      '<Device><Entities><Entity ID="1"><TransformMatrix Value="1,0,0"/>' +
+      '<Cuboid L="1000" W="1000" H="1000"/></Entity></Entities></Device>', 'piece.mod',
+    )],
+  ]);
+  const cold = await serializeDevToGlbDetailed('DEV/device.dev', files);
+  expect(cold.bytes?.byteLength).toBeGreaterThan(0);
+  expect(cold.status).toBe('partial');
+  expect(cold.diagnostics.partialSourceCount).toBe(1);
+  expect(cold.diagnostics.sourceDiagnostics).toEqual([
+    { kind: 'invalid-source-matrix', path: 'MOD/piece.mod', field: 'TransformMatrix', lines: [], values: ['1,0,0'] },
+  ]);
+  const merged = aggregateDevGlbDiagnostics([cold]);
+  expect(merged.status).toBe('partial');
+  expect(merged.sourceDiagnostics).toEqual(cold.diagnostics.sourceDiagnostics);
+  const warm = unpackDevArtifact<{ diagnostics: typeof merged }>('template', packDevArtifact('template', { diagnostics: merged }));
+  expect(warm).not.toBeNull();
+  expect(diagnosticFromSerialization('DEV/device.dev', warm!.diagnostics, 'warm')).toMatchObject({
+    status: 'partial', source: 'warm', sourceDiagnostics: cold.diagnostics.sourceDiagnostics,
+  });
+});
+
+it('publishes partial GLB geometry only from entities with usable unique MOD IDs', async () => {
+  const entity = (id: string, x: number) => (
+    `<Entity ID="${id}"><TransformMatrix Value="1,0,0,0,0,1,0,0,0,0,1,0,${x},0,0,1"/>` +
+    '<Cuboid L="1000" W="1000" H="1000"/></Entity>'
+  );
+  const text = '<Device><Entities>' +
+    entity('9007199254740991', 0) +
+    entity('9007199254740992', 2000) +
+    entity('9007199254740993', 5000) +
+    entity('1', 7000) +
+    entity('01', 9000) +
+    '</Entities></Device>';
+  const files = new Map([
+    ['DEV/device.dev', file('SOLIDMODELS.NUM=1\nSOLIDMODEL0=body.phm', 'device.dev')],
+    ['PHM/body.phm', file('SOLIDMODELS.NUM=1\nSOLIDMODEL0=piece.mod', 'body.phm')],
+    ['MOD/piece.mod', file(text, 'piece.mod')],
+  ]);
+  const result = await serializeDevToGlbDetailed('DEV/device.dev', files);
+  expect(result.status).toBe('partial');
+  expect(result.diagnostics.partialSourceCount).toBe(1);
+  const asset = await parseDevGlbAsset('DEV/device.dev', result.bytes!);
+  const bounds = new THREE.Box3().setFromObject(asset!.scene);
+  expect(bounds.min.x).toBeCloseTo(-0.5);
+  expect(bounds.max.x).toBeCloseTo(0.5);
+  new DevGlbTemplate('DEV/device.dev', asset!.scene).dispose();
 });
 
 it('shares repeated STL buffers while retaining occurrence identity, colors and exact affine node matrices', async () => {

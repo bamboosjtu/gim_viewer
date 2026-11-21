@@ -21,10 +21,20 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { parseXmlMod } from '../gim/geometry/xmlModParser.js';
-import { applyPhmColorOverride, collectBakedGeometriesByMaterial, collectBakedGeometriesByMaterialAsync, disposeOwnedXmlModMaterials, gimMatrixToMatrix4, MOD_MM_TO_SCENE_UNIT, resolveOpacity } from './xmlModGeometry.js';
+import {
+  applyPhmColorOverride,
+  collectBakedGeometriesByMaterial,
+  collectBakedGeometriesByMaterialAsync,
+  disposeOwnedXmlModMaterials,
+  gimMatrixToMatrix4,
+  MOD_MM_TO_SCENE_UNIT,
+  resolveOpacity,
+} from './xmlModGeometry.js';
 import type { XmlModDocument } from '../gim/geometry/xmlModParser.js';
 import type { XmlModColor } from '../gim/geometry/ir.js';
+import type { SourceDiagnostic } from '../gim/sourceDocument.js';
 import { getFileByPath } from '../gim/fileLookup.js';
+import { logger } from '../utils/logger.js';
 
 export type XmlModGeometryStatus = 'empty' | 'renderable' | 'partial' | 'unsupported';
 
@@ -35,6 +45,7 @@ export interface XmlModGeometryDiagnostics {
   malformedEntityCount: number;
   unsupportedEntityCount: number;
   unsupportedPrimitiveTypeCounts: Record<string, number>;
+  sourceDiagnostics?: SourceDiagnostic[];
   failedVisibleRoots?: import('./xmlModGeometry.js').BakedGeometryFailure[];
   simplifiedBooleans?: number;
   representationPolicy?: 'outline' | 'detailed';
@@ -53,7 +64,8 @@ export {
   applyPhmColorOverride,
 } from './xmlModGeometry.js';
 
-const RENDERABLE_MOD_PRIMITIVE_RE = /<(Cylinder|Cuboid|Sphere|TruncatedCone|Ring|CircularGasket|StretchedBody|PorcelainBushing|TerminalBlock|Wire|Cable|RotationalEllipsoid|BeamChannel|H|Boolean|OffsetRectangularTable|RectangularFixedPlate|RectangularRing|Insulator|VTypeInsulator|ConePorcelainBushing|EccentricTruncatedCone|EllipticRing|BendingCylindrical|CircularFixedPlate|SquareGasket|TableGasket)\b/i;
+const RENDERABLE_MOD_PRIMITIVE_RE =
+  /<(Cylinder|Cuboid|Sphere|TruncatedCone|Ring|CircularGasket|StretchedBody|PorcelainBushing|TerminalBlock|Wire|Cable|RotationalEllipsoid|BeamChannel|H|Boolean|OffsetRectangularTable|RectangularFixedPlate|RectangularRing|Insulator|VTypeInsulator|ConePorcelainBushing|EccentricTruncatedCone|EllipticRing|BendingCylindrical|CircularFixedPlate|SquareGasket|TableGasket)\b/i;
 const GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT = 0.001;
 
 /**
@@ -69,8 +81,12 @@ function addElectricalConnectionLines(group: THREE.Group, doc: XmlModDocument): 
   for (const entity of doc.entities) {
     if (!entity.visible) continue;
     const primitive = entity.primitive;
-    const flat = primitive.type === 'Wire' ? primitive.fitPoints
-      : primitive.type === 'Cable' ? primitive.inflectionPoints : null;
+    const flat =
+      primitive.type === 'Wire'
+        ? primitive.fitPoints
+        : primitive.type === 'Cable'
+          ? primitive.inflectionPoints
+          : null;
     if (!flat || flat.length < 6) continue;
     const matrix = new THREE.Matrix4()
       .makeScale(MOD_MM_TO_SCENE_UNIT, MOD_MM_TO_SCENE_UNIT, MOD_MM_TO_SCENE_UNIT)
@@ -120,8 +136,11 @@ function mergeElectricalConnectionLines(group: THREE.Group, lines: THREE.Line[])
       bucket = {
         positions: [],
         material: new THREE.LineBasicMaterial({
-          color: material.color.clone(), opacity: material.opacity,
-          transparent: material.transparent, depthTest: true, depthWrite: false,
+          color: material.color.clone(),
+          opacity: material.opacity,
+          transparent: material.transparent,
+          depthTest: true,
+          depthWrite: false,
         }),
       };
       bucket.material.userData.__gimOwnedInstanceMaterial = true;
@@ -130,8 +149,12 @@ function mergeElectricalConnectionLines(group: THREE.Group, lines: THREE.Line[])
     const positions = line.geometry.getAttribute('position');
     for (let i = 0; i + 1 < positions.count; i++) {
       bucket.positions.push(
-        positions.getX(i), positions.getY(i), positions.getZ(i),
-        positions.getX(i + 1), positions.getY(i + 1), positions.getZ(i + 1),
+        positions.getX(i),
+        positions.getY(i),
+        positions.getZ(i),
+        positions.getX(i + 1),
+        positions.getY(i + 1),
+        positions.getZ(i + 1),
       );
     }
     line.geometry.dispose();
@@ -188,18 +211,32 @@ function flattenDocumentToGroup(
   // explicitly to cache/pipeline callers. A non-rendered primitive is not an
   // empty source.
   const renderableTypes = new Set([
-    'Cuboid', 'Cylinder', 'Sphere', 'TruncatedCone', 'Ring',
-    'CircularGasket', 'StretchedBody', 'PorcelainBushing', 'TerminalBlock', 'Wire', 'Cable',
-    'RotationalEllipsoid', 'BeamChannelLike', 'Boolean', 'OffsetRectangularTable',
-    'RectangularFixedPlate', 'RectangularRing', 'ChannelSteel', 'Table',
+    'Cuboid',
+    'Cylinder',
+    'Sphere',
+    'TruncatedCone',
+    'Ring',
+    'CircularGasket',
+    'StretchedBody',
+    'PorcelainBushing',
+    'TerminalBlock',
+    'Wire',
+    'Cable',
+    'RotationalEllipsoid',
+    'BeamChannelLike',
+    'Boolean',
+    'OffsetRectangularTable',
+    'RectangularFixedPlate',
+    'RectangularRing',
+    'ChannelSteel',
+    'Table',
   ]);
   let unsupportedEntityCount = doc.malformedEntityCount;
   for (const entity of doc.entities) {
     if (renderableTypes.has(entity.primitive.type)) continue;
     unsupportedEntityCount++;
-    const type = entity.primitive.type === 'Unsupported'
-      ? entity.primitive.sourceType
-      : entity.primitive.type;
+    const type =
+      entity.primitive.type === 'Unsupported' ? entity.primitive.sourceType : entity.primitive.type;
     unsupportedPrimitiveTypeCounts[type] = (unsupportedPrimitiveTypeCounts[type] ?? 0) + 1;
   }
 
@@ -211,9 +248,9 @@ function flattenDocumentToGroup(
       for (const g of geos) g.dispose();
     } else {
       // mergeGeometries 失败（attributes 不一致等）：回退到独立 Mesh，避免 entity 丢失
-      console.warn(`[xmlModLoader] mergeGeometries 失败，回退到独立 Mesh: ${doc.modPath}`, {
+      logger.warn(`[xmlModLoader] mergeGeometries 失败，回退到独立 Mesh: ${doc.modPath}`, {
         geoCount: geos.length,
-        attributes: geos.map(g => Object.keys(g.attributes)),
+        attributes: geos.map((g) => Object.keys(g.attributes)),
       });
       for (const g of geos) {
         merged.add(new THREE.Mesh(g, mat));
@@ -232,11 +269,30 @@ function flattenDocumentToGroup(
     }
   });
   const hasRenderable = renderableEntityCount > 0;
-  const status: XmlModGeometryStatus = doc.declaredEntityCount === 0 || (!hasRenderable && unsupportedEntityCount === 0 && byMaterial.failures.length === 0)
-    ? 'empty'
-    : hasRenderable
-      ? (unsupportedEntityCount > 0 || byMaterial.failures.length > 0 ? 'partial' : 'renderable')
-      : 'unsupported';
+  const status: XmlModGeometryStatus =
+    doc.declaredEntityCount === 0 ||
+    (!hasRenderable &&
+      doc.status !== 'partial' &&
+      unsupportedEntityCount === 0 &&
+      byMaterial.failures.length === 0)
+      ? 'empty'
+      : hasRenderable
+        ? doc.status === 'partial' || unsupportedEntityCount > 0 || byMaterial.failures.length > 0
+          ? 'partial'
+          : 'renderable'
+        : 'unsupported';
+  const sourceDiagnostics: SourceDiagnostic[] = [];
+  for (const diagnostic of doc.diagnostics) {
+    if (diagnostic.code !== 'invalid-source-matrix') continue;
+    sourceDiagnostics.push({
+      kind: 'invalid-source-matrix',
+      path: diagnostic.path ?? doc.modPath,
+      field: 'TransformMatrix',
+      lines: diagnostic.line === undefined ? [] : [diagnostic.line],
+      values: diagnostic.rawValue === undefined ? [] : [diagnostic.rawValue],
+    });
+    if (sourceDiagnostics.length >= 64) break;
+  }
   merged.userData[XML_MOD_GEOMETRY_DIAGNOSTICS_KEY] = {
     status,
     entityCount: doc.declaredEntityCount,
@@ -244,6 +300,7 @@ function flattenDocumentToGroup(
     malformedEntityCount: doc.malformedEntityCount,
     unsupportedEntityCount,
     unsupportedPrimitiveTypeCounts,
+    ...(sourceDiagnostics.length ? { sourceDiagnostics } : {}),
     failedVisibleRoots: byMaterial.failures,
     simplifiedBooleans: byMaterial.simplifiedBooleans,
     representationPolicy: byMaterial.representationPolicy,
@@ -281,7 +338,14 @@ export async function loadXmlModFromFiles(
   files: Map<string, File>,
   phmColor?: XmlModColor,
   phmColorMaxA?: number,
-  options?: { strict?: boolean; parseXml?: typeof parseXmlMod; lod?: import('./xmlModGeometry.js').DeviceLod; timings?: Record<string, number>; outline?: import('./xmlModGeometry.js').OutlineGeometryOptions; onStage?:import('../measurement/core.js').StageObserver },
+  options?: {
+    strict?: boolean;
+    parseXml?: typeof parseXmlMod;
+    lod?: import('./xmlModGeometry.js').DeviceLod;
+    timings?: Record<string, number>;
+    outline?: import('./xmlModGeometry.js').OutlineGeometryOptions;
+    onStage?: import('../measurement/core.js').StageObserver;
+  },
 ): Promise<THREE.Group | null> {
   const strict = options?.strict === true;
   const file = getFileByPath(files, modPath);
@@ -289,7 +353,7 @@ export async function loadXmlModFromFiles(
     const kind = /\.gl$/i.test(modPath) ? 'GL' : 'MOD';
     const message = `[xmlModLoader] ${kind} 文件不存在: ${modPath}`;
     if (strict) throw new Error(message);
-    console.warn(message);
+    logger.warn(message);
     return null;
   }
   // 使用 arrayBuffer + TextDecoder 而非 file.text()，确保跨运行时（浏览器/jsdom）兼容
@@ -297,7 +361,10 @@ export async function loadXmlModFromFiles(
   try {
     // 空 MOD 是已知的合法占位文件；其他不含当前可渲染 primitive 的内容
     // 仍交给 XML parser 校验，不能把损坏文件静默伪装成空模型。
-    if (!RENDERABLE_MOD_PRIMITIVE_RE.test(text) && /<Device\b[^>]*>\s*<Entities\s*\/\s*>\s*<\/Device>\s*$/i.test(text)) {
+    if (
+      !RENDERABLE_MOD_PRIMITIVE_RE.test(text) &&
+      /<Device\b[^>]*>\s*<Entities\s*\/\s*>\s*<\/Device>\s*$/i.test(text)
+    ) {
       const group = new THREE.Group();
       group.name = `xml-mod:${modPath}`;
       group.userData[XML_MOD_GEOMETRY_DIAGNOSTICS_KEY] = {
@@ -312,10 +379,17 @@ export async function loadXmlModFromFiles(
       return group;
     }
     const doc = (options?.parseXml ?? parseXmlMod)(text, modPath);
-    const baked = await collectBakedGeometriesByMaterialAsync(doc, options?.lod, options?.timings, options?.outline,options?.onStage);
+    const baked = await collectBakedGeometriesByMaterialAsync(
+      doc,
+      options?.lod,
+      options?.timings,
+      options?.outline,
+      options?.onStage,
+    );
     const mergeStarted = performance.now();
     const group = flattenDocumentToGroup(doc, baked);
-    if (options?.timings) options.timings.mergeMs = (options.timings.mergeMs ?? 0) + performance.now() - mergeStarted;
+    if (options?.timings)
+      options.timings.mergeMs = (options.timings.mergeMs ?? 0) + performance.now() - mergeStarted;
     applyPhmColorOverride(group, phmColor, phmColorMaxA);
     return group;
   } catch (err) {
@@ -330,7 +404,7 @@ export async function loadXmlModFromFiles(
       (strictError as Error & { cause?: unknown }).cause = err;
       throw strictError;
     }
-    console.error(`[xmlModLoader] ${message}`, err);
+    logger.error(`[xmlModLoader] ${message}`, err);
     return null;
   }
 }
@@ -390,7 +464,8 @@ export function applyPlacementTransformToSceneUnits(
         const index = geometry.index;
         for (let i = 0; i < index.count; i += 3) {
           const b = index.getX(i + 1);
-          index.setX(i + 1, index.getX(i + 2)); index.setX(i + 2, b);
+          index.setX(i + 1, index.getX(i + 2));
+          index.setX(i + 2, b);
         }
         index.needsUpdate = true;
       } else {

@@ -13,6 +13,7 @@ import {
 import { parseBoundedCount } from "@gim/powerline-core/parserLimits.js";
 import type { SourceDiagnostic } from "@gim/powerline-core/sourceDocument.js";
 import type { ParseDiagnostic, ParseResult, ParseStatus } from "./types.js";
+import { isGimEmptyValue } from "./values.js";
 
 export type FileDevRelationFormat = "jin-qu" | "bentley" | "bimbase";
 
@@ -35,31 +36,23 @@ export interface FileDevRelationDocument {
   entries: FileDevRelationRecord[];
 }
 
-const empty = (value: string | undefined): boolean =>
-  value === undefined ||
-  ["", "-", "/", "-100", "软件自动生成"].includes(value.trim().toLowerCase());
-
 function value(kv: Record<string, string>, key: string): string {
-  const direct = kv[key];
-  if (direct !== undefined) return direct;
-  const lower = key.toLowerCase();
-  const found = Object.keys(kv).find((name) => name.toLowerCase() === lower);
-  return found === undefined ? "" : kv[found];
+  const raw = kv[key];
+  return isGimEmptyValue(raw) ? "" : raw;
 }
 
 function countKeyFor(kv: Record<string, string>): "FILES.NUM" | "FILE.NUM" {
-  return empty(value(kv, "FILES.NUM")) ? "FILE.NUM" : "FILES.NUM";
+  return value(kv, "FILES.NUM") ? "FILES.NUM" : "FILE.NUM";
 }
 
 function hasCount(kv: Record<string, string>, index: number): boolean {
   return (
-    !empty(value(kv, `FILE${index}.DEVS.NUM`)) ||
-    !empty(value(kv, `FILE${index}.DEV.NUM`))
+    !!value(kv, `FILE${index}.DEVS.NUM`) || !!value(kv, `FILE${index}.DEV.NUM`)
   );
 }
 
 function hasIfc(kv: Record<string, string>, index: number): boolean {
-  return !empty(value(kv, `FILE${index}.IFC`));
+  return !!value(kv, `FILE${index}.IFC`);
 }
 
 function append(
@@ -73,7 +66,7 @@ function append(
   const name = value(kv, `FILE${index}.NAME`);
   const directIfc = value(kv, `FILE${index}.IFC`);
   const devKey = hasCount(kv, index)
-    ? !empty(value(kv, `FILE${index}.DEVS.NUM`))
+    ? value(kv, `FILE${index}.DEVS.NUM`)
       ? `FILE${index}.DEVS.NUM`
       : `FILE${index}.DEV.NUM`
     : null;
@@ -85,8 +78,7 @@ function append(
     if (dev) deviceCbms.push(dev);
   }
   const nameAsIfc = /\.ifc$/i.test(name) ? name : "";
-  const ifcFile =
-    directIfc || (empty(pairedIfc) ? "" : pairedIfc.trim()) || nameAsIfc;
+  const ifcFile = directIfc || pairedIfc || nameAsIfc;
   const ifcName =
     name.replace(/\.(?:ifc|dgn)$/i, "") || ifcFile.replace(/\.ifc$/i, "");
   const sourceDiagnostics = diagnostics.filter((row) =>
@@ -110,8 +102,11 @@ export function parseFileDevRelationText(
   text: string,
   sourcePath = "FileDevRelation.cbm",
 ): ParseResult<FileDevRelationDocument> {
-  const kv = parseKeyValue(text, sourcePath);
-  const diagnostics = keyValueDiagnostics(kv);
+  const source = parseKeyValue(text, sourcePath);
+  const diagnostics = keyValueDiagnostics(source);
+  const kv = Object.fromEntries(
+    Object.entries(source).map(([key, raw]) => [key.toUpperCase(), raw]),
+  );
   const countKey = countKeyFor(kv);
   const num = parseBoundedCount(value(kv, countKey), countKey);
   const isLegacyPair =
@@ -125,7 +120,7 @@ export function parseFileDevRelationText(
       hasIfc(kv, i),
     ) &&
     Array.from({ length: num / 2 }, (_, pair) => pair * 2 + 1).every(
-      (i) => !hasCount(kv, i) && empty(value(kv, `FILE${i}.NAME`)),
+      (i) => !hasCount(kv, i) && !value(kv, `FILE${i}.NAME`),
     );
   const format: FileDevRelationFormat = isLegacyPair
     ? "jin-qu"

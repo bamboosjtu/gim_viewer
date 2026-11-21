@@ -83,11 +83,50 @@ export function parseXmlModRoot(
     };
   }
 
-  const entities: XmlModEntity[] = [];
+  let entities: XmlModEntity[] = [];
   const diagnostics: ParseDiagnostic[] = [];
+  const seenIds = new Set<number>();
+  let duplicateIds: Set<number> | undefined;
   for (const entityNode of entityNodes) {
-    const entity = parseEntity(entityNode, mapPrimitive, diagnostics, modPath);
+    const idText = (entityNode.attrs["ID"] ?? "").trim();
+    const id = Number(idText);
+    if (!/^\d+$/.test(idText) || !Number.isSafeInteger(id)) {
+      diagnostics.push({
+        severity: "warning",
+        code: "invalid-entity-id",
+        message: "Entity ID must be a non-negative safe integer",
+        path: modPath,
+        ...(idText ? { rawValue: idText } : {}),
+      });
+      continue;
+    }
+    if (seenIds.has(id)) {
+      duplicateIds ??= new Set<number>();
+      if (!duplicateIds.has(id)) {
+        diagnostics.push({
+          severity: "warning",
+          code: "duplicate-entity-id",
+          message: `Entity ID ${id} is ambiguous`,
+          path: modPath,
+          rawValue: idText,
+        });
+        duplicateIds.add(id);
+      }
+      continue;
+    }
+    seenIds.add(id);
+    const entity = parseEntity(
+      entityNode,
+      id,
+      mapPrimitive,
+      diagnostics,
+      modPath,
+    );
     if (entity) entities.push(entity);
+  }
+  // Boolean operands must never bind to one arbitrarily chosen declaration.
+  if (duplicateIds) {
+    entities = entities.filter((entity) => !duplicateIds.has(entity.id));
   }
 
   // 文件级 A 刻度判定依据：Bentley 产物含 A=255（字节制），JinQu/SDDP/BIMBase ≤100（百分制）
@@ -117,23 +156,11 @@ export function parseXmlModRoot(
 /** 解析单个 <Entity> 节点 */
 function parseEntity(
   node: XmlModNode,
+  id: number,
   mapPrimitive: XmlPrimitiveMapper,
   diagnostics: ParseDiagnostic[],
   modPath: string,
 ): XmlModEntity | null {
-  const idText = (node.attrs["ID"] ?? "").trim();
-  if (!/^\d+$/.test(idText)) {
-    diagnostics.push({
-      severity: "warning",
-      code: "invalid-entity-id",
-      message: "Entity ID must be a non-negative integer",
-      path: modPath,
-      ...(idText ? { rawValue: idText } : {}),
-    });
-    return null;
-  }
-  const id = Number(idText);
-
   // 当前样本 Entity.Type 全部为 "simple"，XmlModEntity.type 字段类型亦锁为 "simple" 字面量。
   // Unknown Entity.Type remains a non-fatal source fact; the parser keeps the
   // established simple behavior and does not log or mutate global state.

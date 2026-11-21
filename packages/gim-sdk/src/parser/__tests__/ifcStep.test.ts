@@ -52,15 +52,61 @@ describe("independent IFC STEP lexical parser", () => {
     ]);
   });
 
+  it.each([
+    "ISO-10303-21;HEADER;FILE_DESCRIPTION(('See; #91=IFCWALL(example)'),'2;1');ENDSEC;DATA;ENDSEC;END-ISO-10303-21;",
+    "/* Example; #92=IFCWALL(comment) */",
+  ])("keeps records inside literals out of fallback results: %s", (text) => {
+    const ids: number[] = [];
+    expect(scanIfcEntityBoundaries(text, (id) => ids.push(id))).toBe(0);
+    expect(ids).toEqual([]);
+  });
+
+  it("still recovers an unanchored record outside a quoted literal", () => {
+    const text =
+      "prefix 'Example; #91=IFCWALL(example)' #2=IFCCARTESIANPOINT((1.,2.,3.));";
+    const records: Array<ReturnType<typeof materializeIfcEntity>> = [];
+    expect(
+      scanIfcEntityBoundaries(
+        text,
+        (expressId, ifcType, bodyStart, bodyEnd) => {
+          records.push(
+            materializeIfcEntity(text, {
+              expressId,
+              ifcType,
+              bodyStart,
+              bodyEnd,
+            }),
+          );
+        },
+      ),
+    ).toBe(1);
+    expect(records).toEqual([
+      { expressId: 2, ifcType: "IFCCARTESIANPOINT", args: ["(1.,2.,3.)"] },
+    ]);
+  });
+
   it("skips quoted and commented headers and finds the record after a comment", () => {
-    const text = "#1=IFCTEXT('it''s a label; #91=IFCWALL(example)');" +
+    const text =
+      "#1=IFCTEXT('it''s a label; #91=IFCWALL(example)');" +
       "/* #92=IFCWALL(comment); */ #2=IFCLOCALPLACEMENT($,/* ) , */#3);" +
       '#3=IFCBINARY("remark; #93=IFCWALL(example)");';
     const entities: Array<ReturnType<typeof materializeIfcEntity>> = [];
-    expect(scanIfcEntityBoundaries(text, (expressId, ifcType, bodyStart, bodyEnd) => {
-      entities.push(materializeIfcEntity(text, { expressId, ifcType, bodyStart, bodyEnd }));
-    })).toBe(3);
-    expect(entities.map(entity => entity.expressId)).toEqual([1, 2, 3]);
+    expect(
+      scanIfcEntityBoundaries(
+        text,
+        (expressId, ifcType, bodyStart, bodyEnd) => {
+          entities.push(
+            materializeIfcEntity(text, {
+              expressId,
+              ifcType,
+              bodyStart,
+              bodyEnd,
+            }),
+          );
+        },
+      ),
+    ).toBe(3);
+    expect(entities.map((entity) => entity.expressId)).toEqual([1, 2, 3]);
     expect(entities[0].args).toEqual(["'it''s a label; #91=IFCWALL(example)'"]);
     expect(entities[1].args).toEqual(["$", "#3"]);
   });

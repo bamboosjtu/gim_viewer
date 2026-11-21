@@ -59,6 +59,48 @@ describe("independent substation XML MOD parser", () => {
 });
 
 describe("substation XML MOD parser diagnostics", () => {
+  it("excludes unrepresentable IDs and all declarations of a repeated ID", () => {
+    const cuboid: XmlModNode = {
+      tagName: "Cuboid",
+      attrs: {},
+      children: [],
+    };
+    const doc = parseXmlModRoot(
+      {
+        tagName: "Device",
+        attrs: {},
+        children: [
+          {
+            tagName: "Entities",
+            attrs: {},
+            children: [
+              "9007199254740991",
+              "9007199254740992",
+              "9007199254740993",
+              "1",
+              "01",
+            ].map((id) => entityNode(id, [cuboid])),
+          },
+        ],
+      },
+      "MOD/ids.mod",
+      () => ({ type: "Cuboid", l: 1, w: 1, h: 1 }),
+    );
+    expect(doc.status).toBe("partial");
+    expect(doc.declaredEntityCount).toBe(5);
+    expect(doc.malformedEntityCount).toBe(4);
+    expect(doc.entities.map((entity) => entity.id)).toEqual([
+      Number.MAX_SAFE_INTEGER,
+    ]);
+    expect(
+      doc.diagnostics.map((row) => [row.code, row.path, row.rawValue]),
+    ).toEqual([
+      ["invalid-entity-id", "MOD/ids.mod", "9007199254740992"],
+      ["invalid-entity-id", "MOD/ids.mod", "9007199254740993"],
+      ["duplicate-entity-id", "MOD/ids.mod", "01"],
+    ]);
+  });
+
   it("distinguishes a missing matrix from an invalid matrix", () => {
     const mapper = () => ({ type: "Cuboid" as const, l: 1, w: 1, h: 1 });
     const node = (matrix?: string): XmlModNode => ({

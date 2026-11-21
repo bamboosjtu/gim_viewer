@@ -22,9 +22,9 @@ export interface GimGraphNode {
   classifyName: string;
   /** 原始键值对（parseKeyValue 解析结果，保留 POINT<i>.BLHA / KVALUE / SPLIT 等） */
   rawProps: Record<string, string>;
-  /** 子节点（递归构建） */
+  /** 已解析的结构边。多个父节点可共享同一个子节点。 */
   children: GimGraphNode[];
-  /** 引用清单（按类型归类，命中时为实际包内路径，未命中时保留引用值） */
+  /** 引用清单（按类型归类，值为实际包内路径） */
   refs: {
     cbmFiles: string[];
     devFiles: string[];
@@ -34,6 +34,10 @@ export interface GimGraphNode {
     stlFiles: string[];
     wireFiles: string[];
     ifcFiles: string[];
+    /** 未绑定到唯一归档条目的原文引用。 */
+    unresolvedFiles?: string[];
+    /** 挂点相关字段名 → 已解析的 CBM 路径。 */
+    stringTargets?: Record<string, string>;
     /** 原始引用键 → 引用值列表（保留 STRING<i>.GPOINT 等非文件挂点信息） */
     rawRefs: Record<string, string[]>;
   };

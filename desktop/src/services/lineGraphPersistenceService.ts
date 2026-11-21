@@ -24,10 +24,18 @@ import type {
 } from '@desktop/database.js';
 import { LineRefKind } from '../gim/lineRefKind.js';
 import { normalizeGimPath, getFileNameLower } from '@gim/powerline-core/linePathNormalize.js';
-import {SourceConflictError} from '../gim/sourceDocument.js';
+import { SourceConflictError } from '../gim/sourceDocument.js';
 
 /** refs 中数组型字段名（对应 GimGraphNode.refs 的 8 个 string[] 字段，排除 rawRefs） */
-type ArrayRefField = 'cbmFiles' | 'devFiles' | 'famFiles' | 'phmFiles' | 'modFiles' | 'stlFiles' | 'wireFiles' | 'ifcFiles';
+type ArrayRefField =
+  | 'cbmFiles'
+  | 'devFiles'
+  | 'famFiles'
+  | 'phmFiles'
+  | 'modFiles'
+  | 'stlFiles'
+  | 'wireFiles'
+  | 'ifcFiles';
 
 const ARRAY_REF_FIELDS_LIST: readonly ArrayRefField[] = [
   LineRefKind.CBM_FILES,
@@ -54,7 +62,7 @@ const FILE_TYPE_KEYS: ReadonlyArray<keyof GimGraph['filesByType']> = [
 
 /** 单个节点 → LineCbmNodePayload */
 function toNodePayload(node: GimGraphNode, sortOrder: number | null): LineCbmNodePayload {
-  if(node.sourceDiagnostics?.length)throw new SourceConflictError(node.sourceDiagnostics);
+  if (node.sourceDiagnostics?.length) throw new SourceConflictError(node.sourceDiagnostics);
   return {
     path: node.path,
     name: node.name || null,
@@ -71,7 +79,10 @@ function flattenLineNode(
   sortOrder: number,
   nodes: LineCbmNodePayload[],
   children: LineCbmChildPayload[],
+  visited: Set<string>,
 ): void {
+  if (visited.has(node.path)) return;
+  visited.add(node.path);
   nodes.push(toNodePayload(node, sortOrder));
   for (let i = 0; i < node.children.length; i++) {
     const child = node.children[i];
@@ -82,7 +93,7 @@ function flattenLineNode(
       ref_type: 'CHILD',
       extra: null,
     });
-    flattenLineNode(child, i, nodes, children);
+    flattenLineNode(child, i, nodes, children, visited);
   }
 }
 
@@ -124,6 +135,28 @@ function collectRefs(node: GimGraphNode, refs: LineCbmRefPayload[]): void {
       });
     }
   }
+  for (const [sortOrder, refValue] of (node.refs.unresolvedFiles ?? []).entries()) {
+    refs.push({
+      node_path: nodePath,
+      ref_kind: LineRefKind.UNRESOLVED_FILES,
+      ref_key: null,
+      ref_value: refValue,
+      sort_order: sortOrder,
+      normalized_ref_value: normalizeGimPath(refValue),
+      file_name_lower: getFileNameLower(refValue),
+    });
+  }
+  for (const [rawKey, target] of Object.entries(node.refs.stringTargets ?? {})) {
+    refs.push({
+      node_path: nodePath,
+      ref_kind: LineRefKind.STRING_TARGETS,
+      ref_key: rawKey,
+      ref_value: target,
+      sort_order: null,
+      normalized_ref_value: normalizeGimPath(target),
+      file_name_lower: getFileNameLower(target),
+    });
+  }
 }
 
 /**
@@ -142,11 +175,11 @@ export function buildLineGraphPayload(
   const refs: LineCbmRefPayload[] = [];
 
   // 1. DFS 遍历 root 收集 nodes + children
+  const visited = new Set<string>();
   if (graph.root) {
-    flattenLineNode(graph.root, 0, nodes, children);
+    flattenLineNode(graph.root, 0, nodes, children, visited);
   }
   // 兜底：nodesByPath 中存在未被 root 遍历到的节点（理论上不会发生，防御性写入）
-  const visited = new Set(nodes.map((n) => n.path));
   for (const node of graph.nodesByPath.values()) {
     if (!visited.has(node.path)) {
       nodes.push(toNodePayload(node, null));

@@ -113,14 +113,7 @@ export interface LineMapData {
 interface LineGraphTopoIndex {
   /** 路径 → 节点 */
   nodeByPath: Map<string, GimGraphNode>;
-  /** 子路径 → 父节点 */
-  parentByPath: Map<string, GimGraphNode>;
-  /** 文件名小写 → 节点（用于按裸文件名反查节点） */
-  nodeByFileNameLower: Map<string, GimGraphNode>;
-  /** Tower_Device 路径 → 所属 F4System(GROUPTYPE=TOWER) */
-  towerGroupByDevicePath: Map<string, GimGraphNode>;
-  /** STRING 文件路径/文件名 → 所属 TOWER F4（导线端点兜底用） */
-  towerGroupByStringPath: Map<string, GimGraphNode>;
+  wireTower: ReturnType<typeof createLineWireTowerResolver>;
   /** WIRE 路径 → 所属 F4System(GROUPTYPE=WIRE) */
   wireGroupByWirePath: Map<string, GimGraphNode>;
 }
@@ -179,59 +172,38 @@ function parseBlha(blha: string | undefined): BlhaCoord | null {
  * 所属 TOWER F4 → BLHA 稳定反查，必须先建立拓扑索引。
  */
 function buildLineGraphTopoIndex(graph: GimGraph): LineGraphTopoIndex {
-  const nodeByPath = new Map<string, GimGraphNode>(graph.nodesByPath);
-  const parentByPath = new Map<string, GimGraphNode>();
-  const nodeByFileNameLower = new Map<string, GimGraphNode>();
-
-  // 递归建立 parentByPath + nodeByFileNameLower
-  function walk(node: GimGraphNode): void {
-    nodeByFileNameLower.set(getFileNameLower(node.path), node);
-    for (const child of node.children) {
-      parentByPath.set(child.path, node);
-      walk(child);
-    }
+  const nodeByPath = graph.nodesByPath;
+  const wireGroupByWirePath = new Map<string, GimGraphNode>();
+  const visited = new Set<string>();
+  function walk(node: GimGraphNode, wireGroup?: GimGraphNode): void {
+    if (visited.has(node.path)) return;
+    visited.add(node.path);
+    const group = node.entityName === 'F4System' && node.rawProps.GROUPTYPE === 'WIRE'
+      ? node : wireGroup;
+    if (node.entityName === 'WIRE' && group) wireGroupByWirePath.set(node.path, group);
+    for (const child of node.children) walk(child, group);
   }
   if (graph.root) walk(graph.root);
+  return { nodeByPath, wireGroupByWirePath, wireTower: createLineWireTowerResolver(nodeByPath.values()) };
+}
 
-  const towerGroupByDevicePath = new Map<string, GimGraphNode>();
-  const towerGroupByStringPath = new Map<string, GimGraphNode>();
-  const wireGroupByWirePath = new Map<string, GimGraphNode>();
-
-  /** 向上回溯找到满足条件的祖先 F4System */
-  function findAncestorF4(start: GimGraphNode, groupType: string): GimGraphNode | null {
-    let cur: GimGraphNode | null = parentByPath.get(start.path) || null;
-    while (cur) {
-      if (cur.entityName === 'F4System' && cur.rawProps['GROUPTYPE'] === groupType) {
-        return cur;
-      }
-      cur = parentByPath.get(cur.path) || null;
-    }
-    return null;
-  }
-
-  for (const node of nodeByPath.values()) {
-    if (node.entityName === 'WIRE') {
-      const wireF4 = findAncestorF4(node, 'WIRE');
-      if (wireF4) wireGroupByWirePath.set(node.path, wireF4);
-    } else if (node.entityName === 'Tower_Device') {
-      const towerF4 = findAncestorF4(node, 'TOWER');
-      if (towerF4) towerGroupByDevicePath.set(node.path, towerF4);
-    } else if (node.entityName === 'F4System' && node.rawProps['GROUPTYPE'] === 'TOWER') {
-      // STRING 子节点（.cbm）→ 所属 TOWER F4，供导线端点兜底
-      for (const child of node.children) {
-        towerGroupByStringPath.set(child.path, node);
-        towerGroupByStringPath.set(getFileNameLower(child.path), node);
-      }
+/** Use the archive-resolved CBM target, including when coordinates are absent. */
+export function createLineWireTowerResolver(nodes: Iterable<GimGraphNode>) {
+  const towersByTarget = new Map<string, GimGraphNode | null>();
+  for (const tower of nodes) {
+    if (tower.entityName !== 'F4System' || tower.rawProps.GROUPTYPE !== 'TOWER') continue;
+    const strings = Object.entries(tower.refs.stringTargets ?? {})
+      .filter(([key]) => /^STRING\d+\.STRING$/.test(key))
+      .map(([, target]) => target);
+    for (const target of [tower.path, ...strings]) {
+      const existing = towersByTarget.get(target);
+      towersByTarget.set(target, existing === undefined || existing === tower ? tower : null);
     }
   }
-
-  return {
-    nodeByPath,
-    parentByPath,
-    nodeByFileNameLower,
-    towerGroupByDevicePath,
-    towerGroupByStringPath,
-    wireGroupByWirePath,
+  return (node: GimGraphNode, field: 'BACKSTRING' | 'FRONTSTRING', group?: GimGraphNode): GimGraphNode | undefined => {
+    const owner = node.rawProps[field] ? node : group ?? node;
+    const target = owner.refs.stringTargets?.[field];
+    return target ? towersByTarget.get(target) ?? undefined : undefined;
   };
 }
 
@@ -390,39 +362,18 @@ function resolveWireType(
   return 'UNKNOWN';
 }
 
-/** 从节点 rawProp 值中提取裸文件名（refs 已是文件名，此函数用于 rawProp 兜底） */
-function extractFileName(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) return '';
-  const p = trimmed.replace(/\\/g, '/');
-  const idx = p.lastIndexOf('/');
-  return idx >= 0 ? p.slice(idx + 1) : trimmed;
-}
-
 /**
- * 导线端点兜底：WIRE 缺少 POINT0/1.BLHA 时，
- * 用 BACKSTRING/FRONTSTRING 反查两端所属 TOWER F4 的 BLHA。
+ * 导线端点兜底：WIRE 缺少 POINT0/1.BLHA 时，使用挂点所属杆塔的 BLHA。
  */
 function resolveWireEndpointsFromTowers(
   node: GimGraphNode,
   topo: LineGraphTopoIndex,
 ): { startLat: number; startLng: number; endLat: number; endLng: number } | null {
-  const backStr = node.rawProps['BACKSTRING'];
-  const frontStr = node.rawProps['FRONTSTRING'];
-  if (!backStr && !frontStr) return null;
-
-  /** 通过 STRING 文件引用找到 TOWER F4 并取 BLHA */
-  function blhaFromStringRef(ref: string): BlhaCoord | null {
-    if (!ref) return null;
-    const fn = extractFileName(ref);
-    if (!fn) return null;
-    const towerF4 = topo.towerGroupByStringPath.get(fn) || topo.towerGroupByStringPath.get(getFileNameLower(fn));
-    if (!towerF4) return null;
-    return parseBlha(towerF4.rawProps['BLHA']);
-  }
-
-  const start = backStr ? blhaFromStringRef(backStr) : null;
-  const end = frontStr ? blhaFromStringRef(frontStr) : null;
+  const group = topo.wireGroupByWirePath.get(node.path);
+  const startTower = topo.wireTower(node, 'BACKSTRING', group);
+  const endTower = topo.wireTower(node, 'FRONTSTRING', group);
+  const start = parseBlha(startTower?.rawProps.BLHA);
+  const end = parseBlha(endTower?.rawProps.BLHA);
   if (!start || !end) return null;
   return { startLat: start.lat, startLng: start.lng, endLat: end.lat, endLng: end.lng };
 }
@@ -550,6 +501,13 @@ export function extractLineMapData(graph: GimGraph, attrs: LineAttributeIndex): 
         continue;
       }
       towerWithBlha++;
+
+      for (const source of [node, ...node.children.filter(child => child.entityName === 'Tower_Device')]) {
+        for (const ref of source.refs.unresolvedFiles ?? []) {
+          if (/\.fam$/i.test(ref)) unresolved.famSources.push(ref);
+          else if (/\.dev$/i.test(ref)) unresolved.devSources.push(ref);
+        }
+      }
 
       // FAM 属性查找
       const famRefs = gatherFamRefs(node);

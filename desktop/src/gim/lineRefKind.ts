@@ -20,6 +20,8 @@ export const LineRefKind = {
   IFC_FILES: 'ifcFiles',
   IFC_GUIDS: 'ifcGuids',
   RAW_REFS: 'rawRefs',
+  UNRESOLVED_FILES: 'unresolvedFiles',
+  STRING_TARGETS: 'stringTargets',
 } as const;
 
 /** 数组型引用字段名集合（ref_kind 命中这些时归类到对应 refs 数组） */

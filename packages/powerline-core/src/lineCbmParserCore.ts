@@ -92,14 +92,13 @@ export function buildLineGimGraphFromTexts(
     }
   }
 
-  const visited = new Set<string>();
+  const active = new Set<string>();
   const nodesByPath = new Map<string, GimGraphNode>();
   const stats: Record<string, number> = {
     total: 0,
     F1System: 0, F2System: 0, F3System: 0, F4System: 0,
     Tower_Device: 0, Wire_Device: 0, WIRE: 0, CROSS: 0,
   };
-  const nodeBudget = { count: 0 };
 
   function parseKv(path: string): Record<string, string> | null {
     return cache.parse('kv',path,text=>parseKeyValue(text,path));
@@ -135,11 +134,10 @@ export function buildLineGimGraphFromTexts(
     if (depth > PARSER_LIMITS.maxRecursionDepth) {
       throw new Error(`线路 CBM 引用递归深度超过 ${PARSER_LIMITS.maxRecursionDepth}`);
     }
-    const visitKey = normalizeGimPath(actualPath).toLowerCase();
-    if (visited.has(visitKey)) return null;
-    visited.add(visitKey);
-    nodeBudget.count++;
-    if (nodeBudget.count > PARSER_LIMITS.maxLineNodes) {
+    if (active.has(actualPath)) return null;
+    const existing = nodesByPath.get(actualPath);
+    if (existing) return existing;
+    if (active.size + nodesByPath.size >= PARSER_LIMITS.maxLineNodes) {
       throw new Error(`线路 CBM 节点数超过安全上限 ${PARSER_LIMITS.maxLineNodes}`);
     }
     const kv = parseKv(actualPath);
@@ -147,6 +145,7 @@ export function buildLineGimGraphFromTexts(
       console.warn('[GIM] 读取 CBM 文件失败:', actualPath);
       return null;
     }
+    active.add(actualPath);
 
     const entityName = normalizeEntityName(kv['ENTITYNAME'] || '');
     const classifyName = kv['GROUPTYPE'] || kv['WIRETYPE'] || kv['DEVICETYPE'] || kv['SYSCLASSIFYNAME'] || kv['PARTNAME'] || '';
@@ -157,6 +156,8 @@ export function buildLineGimGraphFromTexts(
       modFiles: [], stlFiles: [], wireFiles: [], ifcFiles: [], rawRefs: {},
     };
     const children: GimGraphNode[] = [];
+    const childPaths = new Set<string>();
+    const unresolved = new Set<string>();
 
     function recordRef(value: string, rawKey: string, recursive = false): void {
       const ref = value.trim();
@@ -165,11 +166,18 @@ export function buildLineGimGraphFromTexts(
       if (suffix) {
         const field = REF_SUFFIX_MAP[suffix];
         const resolved = cache.resolveOriginalPath(ref, actualPath);
-        const target = resolved ?? ref;
-        if (!refs[field].includes(target)) refs[field].push(target);
-        if (recursive && resolved && field === 'cbmFiles') {
-          const child = build(resolved, depth + 1);
-          if (child) children.push(child);
+        if (resolved) {
+          if (!refs[field].includes(resolved)) refs[field].push(resolved);
+          if (field === 'cbmFiles' && /^(?:BACKSTRING|FRONTSTRING|STRING\d+\.STRING)$/.test(rawKey)) {
+            (refs.stringTargets ??= {})[rawKey] = resolved;
+          }
+          if (recursive && field === 'cbmFiles' && !childPaths.has(resolved)) {
+            childPaths.add(resolved);
+            const child = build(resolved, depth + 1);
+            if (child) children.push(child);
+          }
+        } else {
+          unresolved.add(ref);
         }
       }
       const raw = refs.rawRefs[rawKey] ??= [];
@@ -214,6 +222,7 @@ export function buildLineGimGraphFromTexts(
       const code = resolveCrossCode(kv['OBJECTMODELPOINTER'] || '', actualPath);
       if (code) kv['CODE'] = code;
     }
+    if (unresolved.size) refs.unresolvedFiles = [...unresolved];
 
     const node: GimGraphNode = {
       path: actualPath,
@@ -225,6 +234,7 @@ export function buildLineGimGraphFromTexts(
       refs,
       ...(keyValueDiagnostics(kv).length?{sourceDiagnostics:[...keyValueDiagnostics(kv)]}:{}),
     };
+    active.delete(actualPath);
     nodesByPath.set(actualPath, node);
     stats.total++;
     if (entityName && entityName in stats) stats[entityName]++;

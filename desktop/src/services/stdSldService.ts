@@ -8,12 +8,25 @@ import { buildStdSldIndex, type StdSldIndex } from '../gim/stdSldIndex.js';
 import { DEBUG_RUNTIME_LOGS } from '../config/debug.js';
 import { debugLog, logger } from '../utils/logger.js';
 
+interface SchematicEntryResult {
+  path: string;
+  status: StdDocument['status'] | 'unread';
+  diagnostics: readonly { code: string; message: string }[];
+}
+
 /** 解析结果摘要 */
 export interface StdSldParseResult {
   schEntries: SchEntry[];
+  entryResults: SchematicEntryResult[];
   stdDoc: StdDocument | null;
   sldDoc: SldDocument | null;
   index: StdSldIndex;
+}
+
+function schematicRank(doc: StdDocument | SldDocument): number {
+  if (doc.status === 'ok') return 3;
+  if ('safeSvgOuterHTML' in doc && doc.safeSvgOuterHTML) return 2;
+  return doc.status === 'failed' ? 0 : 1;
 }
 
 /**
@@ -72,26 +85,40 @@ async function parseAndIndexStdSld(
   // 解析 STD/SLD 文档
   let stdDoc: StdDocument | null = null;
   let sldDoc: SldDocument | null = null;
+  const entryResults: SchematicEntryResult[] = [];
   for (const entry of entries) {
     if (entry.type === 'unknown') continue;
     const text = entry.matchedPath == null ? undefined : fileTextMap.get(entry.matchedPath);
     if (text === undefined) {
-      logger.warn(`[STD/SLD] SCH 引用缺失、存在歧义或读取失败: ${entry.filename}`);
+      const message = `SCH 引用缺失、存在歧义或读取失败: ${entry.filename}`;
+      entryResults.push({
+        path: entry.path,
+        status: 'unread',
+        diagnostics: [{ code: 'document-unread', message }],
+      });
+      logger.warn(`[STD/SLD] ${message}`);
       continue;
     }
     try {
       if (entry.type === 'std') {
-        stdDoc = parseStd(text, entry.path);
-        if (stdDoc.status === 'failed')
-          logger.warn(`[STD/SLD] STD 解析失败: ${entry.path}`, stdDoc.diagnostics);
-      } else if (entry.type === 'sld') {
-        sldDoc = parseSld(text, entry.path);
-        if (sldDoc.status === 'failed')
-          logger.warn(`[SLD] SLD 解析失败: ${entry.path}`, sldDoc.diagnostics);
+        const doc = parseStd(text, entry.path);
+        if (!stdDoc || schematicRank(doc) >= schematicRank(stdDoc)) stdDoc = doc;
+        entryResults.push({ path: entry.path, status: doc.status, diagnostics: doc.diagnostics });
+      } else {
+        const doc = parseSld(text, entry.path);
+        if (!sldDoc || schematicRank(doc) >= schematicRank(sldDoc)) sldDoc = doc;
+        entryResults.push({ path: entry.path, status: doc.status, diagnostics: doc.diagnostics });
       }
     } catch (err) {
-      logger.error(`[STD/SLD] 解析 ${entry.path} 失败:`, err);
+      entryResults.push({
+        path: entry.path,
+        status: 'failed',
+        diagnostics: [{ code: 'document-parse-failed', message: String(err) }],
+      });
     }
+    const parsed = entryResults[entryResults.length - 1];
+    if (parsed?.status === 'failed')
+      logger.warn(`[STD/SLD] 解析 ${entry.path} 失败:`, parsed.diagnostics);
   }
 
   // 构建三向索引
@@ -107,7 +134,7 @@ async function parseAndIndexStdSld(
     sldOnly: index.sldOnlyGridIds.length,
   });
 
-  return { schEntries: entries, stdDoc, sldDoc, index };
+  return { schEntries: entries, entryResults, stdDoc, sldDoc, index };
 }
 
 /**

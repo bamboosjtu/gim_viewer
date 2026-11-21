@@ -687,7 +687,8 @@ export function renderLineTowerShapeSource(
 
 // GL is a substation-only source kind. Keep the line source contract narrow so
 // adding the shared property-dictionary kind does not alter line behavior.
-type LineSourceKind = Exclude<Parameters<typeof fileReferenceValue>[0], 'gl'>;
+type LineReferenceKind = Exclude<Parameters<typeof fileReferenceValue>[0], 'gl'>;
+type LineSourceKind = LineReferenceKind | 'unresolved';
 
 interface LineSourceEntry {
   kind: LineSourceKind;
@@ -696,6 +697,7 @@ interface LineSourceEntry {
 }
 
 const LINE_SOURCE_KINDS: Array<{ kind: LineSourceKind; label: string }> = [
+  { kind: 'unresolved', label: '未解析引用' },
   { kind: 'cbm', label: 'CBM' },
   { kind: 'dev', label: 'DEV' },
   { kind: 'fam', label: 'FAM' },
@@ -751,7 +753,10 @@ function collectLineSourceEntries(
     seen.add(key);
     entries.push({ kind, path: normalized || path, context });
   };
+  const visited = new Set<string>();
   const walk = (current: GimGraphNode, inheritedContext: string): void => {
+    if (visited.has(current.path)) return;
+    visited.add(current.path);
     const context = lineSourceContext(current, inheritedContext);
     add('cbm', current.path, context);
     for (const path of current.refs.cbmFiles) {
@@ -767,6 +772,7 @@ function collectLineSourceEntries(
     for (const path of current.refs.stlFiles) add('stl', path, context);
     for (const path of current.refs.wireFiles) add('file', path, context);
     for (const path of current.refs.ifcFiles) add('ifc', path, context);
+    for (const path of current.refs.unresolvedFiles ?? []) add('unresolved', path, context);
     for (const child of current.children) walk(child, childSourceContext(current, child, context));
   };
   walk(node, '当前对象');
@@ -785,7 +791,7 @@ export function renderLineSourceRefs(
 ): string {
   const entries = collectLineSourceEntries(node, modEntries);
   if (entries.length === 0) return '';
-  const labels: Record<LineSourceKind, string> = {
+  const labels: Record<LineReferenceKind, string> = {
     cbm: '定位 CBM',
     dev: '查看 DEV',
     fam: '查看属性族',
@@ -809,7 +815,10 @@ export function renderLineSourceRefs(
     if (!group || group.length === 0) continue;
     const visible = group.slice(0, SOURCE_PREVIEW_LIMIT_PER_KIND);
     const rows: PropertyRow[] = visible.map((entry, index) => {
-      const reference = fileReferenceValue(kind, entry.path, labels[kind]);
+      const reference =
+        kind === 'unresolved'
+          ? { text: entry.path, html: undefined }
+          : fileReferenceValue(kind, entry.path, labels[kind]);
       const context = entry.context || '当前对象';
       return {
         key: `source-${kind}-${index}`,

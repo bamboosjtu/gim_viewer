@@ -859,6 +859,9 @@ async function loadModStlForNodeImpl(
     (diagnostic) => diagnostic.status === 'partial' || diagnostic.status === 'unsupported',
   );
   const types: Record<string, number> = {};
+  const sourceDiagnostics = xml
+    .flatMap((diagnostic) => diagnostic.sourceDiagnostics ?? [])
+    .slice(0, 64);
   for (const diagnostic of xml)
     for (const [type, count] of Object.entries(diagnostic.unsupportedPrimitiveTypeCounts))
       types[type] = (types[type] ?? 0) + count;
@@ -877,17 +880,23 @@ async function loadModStlForNodeImpl(
       status,
       source: 'raw',
       unsupportedPrimitiveTypeCounts: types,
+      ...(sourceDiagnostics.length ? { sourceDiagnostics } : {}),
       ...(missing || reachabilityError
         ? {
             reason: 'missing-dependency' as const,
             detail: `${missing} 个几何源加载失败；${visible} 个来源可显示。${reachabilityError ?? ''}`,
           }
-        : degraded
+        : sourceDiagnostics.length
           ? {
-              reason: 'parser-unsupported' as const,
-              detail: '部分来源或 primitive 暂不支持；只定位当前实例中可显示的几何。',
+              reason: 'source-invalid' as const,
+              detail: '源矩阵无效，位置待确认。已使用可浏览的回退表示。',
             }
-          : {}),
+          : degraded
+            ? {
+                reason: 'parser-unsupported' as const,
+                detail: '部分来源或 primitive 暂不支持；只定位当前实例中可显示的几何。',
+              }
+            : {}),
       discoveredModCount: mods.length,
       discoveredStlCount: stls.length,
     });

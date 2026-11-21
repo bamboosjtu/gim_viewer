@@ -125,6 +125,7 @@ function makeSpatial(label: string): any {
 function makeStdSldResult(label: string): StdSldParseResult {
   return {
     schEntries: [],
+    entryResults: [],
     stdDoc: { sourcePath: `${label}.std` } as any,
     sldDoc: { sourcePath: `${label}.sld` } as any,
     index: { source: label } as any,

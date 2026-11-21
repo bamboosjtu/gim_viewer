@@ -21,7 +21,7 @@ import type { GimGraph, GimGraphNode } from '@gim/powerline-core/gimGraphTypes.j
 import type { LineGraphResult } from '@desktop/database.js';
 import { LineRefKind, ARRAY_REF_FIELDS } from '../gim/lineRefKind.js';
 import { DEBUG_GIM_CACHE } from '../config/debug.js';
-import { debugLog } from '../utils/logger.js';
+import { debugLog, logger } from '../utils/logger.js';
 
 /** 创建空的 refs 结构 */
 function emptyRefs(): GimGraphNode['refs'] {
@@ -52,13 +52,13 @@ export function restoreLineGraphToState(state: AppState, result: LineGraphResult
     let rawProps: Record<string, string> = {};
     if (r.raw_props_json) {
       try {
-        const parsed = JSON.parse(r.raw_props_json);
+        const parsed: unknown = JSON.parse(r.raw_props_json);
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
           rawProps = parsed as Record<string, string>;
         }
       } catch {
         // raw_props_json 损坏时回退空对象，不阻断恢复
-        console.warn('[Restore] line_cbm_node.raw_props_json 解析失败:', r.path);
+        logger.warn('[Restore] line_cbm_node.raw_props_json 解析失败:', r.path);
       }
     }
     const node: GimGraphNode = {
@@ -119,8 +119,12 @@ export function restoreLineGraphToState(state: AppState, result: LineGraphResult
       const key = ref.ref_key || '';
       if (!node.refs.rawRefs[key]) node.refs.rawRefs[key] = [];
       node.refs.rawRefs[key].push(ref.ref_value);
+    } else if (ref.ref_kind === LineRefKind.UNRESOLVED_FILES) {
+      (node.refs.unresolvedFiles ??= []).push(ref.ref_value);
+    } else if (ref.ref_kind === LineRefKind.STRING_TARGETS && ref.ref_key) {
+      (node.refs.stringTargets ??= {})[ref.ref_key] = ref.ref_value;
     } else if (ARRAY_REF_FIELDS.has(ref.ref_kind)) {
-      const arr = node.refs[ref.ref_kind as keyof typeof node.refs] as string[] | undefined;
+      const arr = node.refs[ref.ref_kind as keyof typeof node.refs];
       if (Array.isArray(arr)) arr.push(ref.ref_value);
     }
     // 未知 ref_kind 忽略（向前兼容）

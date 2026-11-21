@@ -85,10 +85,10 @@ export function scanIfcEntityBoundaries(
     count++;
   }
   if (count > 0) return count;
-  return scanIfcEntityBoundariesCharacter(text, onEntity);
+  return scanIfcEntityBoundariesStateful(text, onEntity);
 }
 
-/** Stateful fallback for malformed/unclosed literals. */
+/** Fallback for unanchored records, high literal density, or unclosed literals. */
 function scanIfcEntityBoundariesStateful(
   text: string,
   onEntity: ScannedIfcEntityCallback,
@@ -103,61 +103,6 @@ function scanIfcEntityBoundariesStateful(
     }
     onEntity(Number(match[1]), match[2].toUpperCase(), tokens.lastIndex, -1);
     count++;
-  }
-  return count;
-}
-
-/** Fallback for malformed/minified text where the header regexp finds nothing. */
-function scanIfcEntityBoundariesCharacter(
-  text: string,
-  onEntity: ScannedIfcEntityCallback,
-): number {
-  let cursor = 0;
-  let count = 0;
-  while (cursor < text.length) {
-    const hash = text.indexOf("#", cursor);
-    if (hash < 0) break;
-    let i = hash + 1;
-    while (i < text.length && /\d/.test(text[i])) i++;
-    if (i === hash + 1) {
-      cursor = hash + 1;
-      continue;
-    }
-    const expressId = Number(text.slice(hash + 1, i));
-    while (/\s/.test(text[i] || "")) i++;
-    if (text[i] !== "=") {
-      cursor = i + 1;
-      continue;
-    }
-    i++;
-    while (/\s/.test(text[i] || "")) i++;
-    const typeStart = i;
-    while (i < text.length && /[A-Za-z0-9_]/.test(text[i])) i++;
-    const ifcType = text.slice(typeStart, i).toUpperCase();
-    while (/\s/.test(text[i] || "")) i++;
-    if (!ifcType || text[i] !== "(") {
-      cursor = i + 1;
-      continue;
-    }
-    const bodyStart = ++i;
-    let depth = 1;
-    for (; i < text.length; i++) {
-      const ch = text[i];
-      if (ch === "'" || ch === '"' || (ch === "/" && text[i + 1] === "*")) {
-        i = skipStepLiteral(text, i) - 1;
-        continue;
-      }
-      if (ch === "(") depth++;
-      else if (ch === ")") {
-        depth--;
-        if (depth === 0) break;
-      }
-    }
-    if (depth !== 0) break;
-    count++;
-    onEntity(expressId, ifcType, bodyStart, i);
-    const semi = text.indexOf(";", i);
-    cursor = semi >= 0 ? semi + 1 : i + 1;
   }
   return count;
 }
