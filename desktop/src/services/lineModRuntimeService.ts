@@ -2,6 +2,10 @@
 import type { AppState } from '../app/state.js';
 import type { GimGraphNode } from '@gim/powerline-core/gimGraphTypes.js';
 import { parseLineMod } from '@gim/powerline-core/geometry/lineModParser.js';
+import {
+  resolveLineReference,
+  type LineEntryLookup,
+} from '@gim/powerline-core/linePathNormalize.js';
 import { createEntryIndex, getFileEntryIndex, type EntryIndex } from '../gim/entryResolver.js';
 import { parseDev } from '../gim/geometry/devParser.js';
 import { parsePhm } from '../gim/geometry/phmParser.js';
@@ -14,13 +18,19 @@ export interface LineModRuntimeEntry {
   path: string;
   source: LineTextModGeometrySource | null;
   error?: string;
+  dependencyKind?: 'dev' | 'phm';
+}
+
+interface LineModTraversal {
+  paths: string[];
+  failures: LineModRuntimeEntry[];
 }
 
 interface LineModSession {
   scope: SessionScope;
   files: Map<string, File> | null;
   entryIndex?: Promise<EntryIndex>;
-  paths: Map<string, Promise<string[]>>;
+  paths: Map<string, Promise<LineModTraversal>>;
   sources: Map<string, Promise<LineModRuntimeEntry>>;
 }
 
@@ -66,37 +76,52 @@ function getEntryIndex(runtime: LineModSession): Promise<EntryIndex> {
 async function readText(runtime: LineModSession, path: string): Promise<string | null> {
   const { scope, files } = runtime;
   return scope.read(async () => {
-    try {
-      if (files) {
-        const file = files.get(path);
-        return file ? new TextDecoder().decode(await file.arrayBuffer()) : null;
-      }
-      const { projectId } = scope.session;
-      if (projectId == null) return null;
-      const { readCachedIfc } = await import('@desktop/database.js');
-      const bytes = await scope.read(() => readCachedIfc(projectId, path));
-      return bytes.byteLength > 0 ? new TextDecoder().decode(bytes) : null;
-    } catch (error) {
-      if (error instanceof StaleSessionError) throw error;
-      return null;
+    if (files) {
+      const file = files.get(path);
+      return file ? new TextDecoder().decode(await file.arrayBuffer()) : null;
     }
+    const { projectId } = scope.session;
+    if (projectId == null) return null;
+    const { readCachedEntry } = await import('@desktop/database.js');
+    const bytes = await scope.read(() => readCachedEntry(projectId, path));
+    return new TextDecoder().decode(bytes);
   });
+}
+
+function sourceReadFailure(
+  runtime: LineModSession,
+  path: string,
+  error: unknown,
+): LineModRuntimeEntry {
+  if (error instanceof StaleSessionError) throw error;
+  if (!runtime.scope.isCurrent()) throw new StaleSessionError();
+  const message = error instanceof Error ? error.message : String(error);
+  return { path, source: null, error: `读取线路来源 ${path} 失败：${message}` };
 }
 
 function loadSource(runtime: LineModSession, path: string): Promise<LineModRuntimeEntry> {
   const cached = runtime.sources.get(path);
   if (cached) return cached;
-  const entry = runtime.scope.read(async () => {
-    const text = await readText(runtime, path);
-    if (text == null) {
-      return { path, source: null, error: '源 MOD 文件不在当前工程缓存中' };
-    }
-    try {
-      return { path, source: parseLineMod(text, path) };
-    } catch (error) {
-      return { path, source: null, error: error instanceof Error ? error.message : String(error) };
-    }
-  });
+  const entry = runtime.scope
+    .read(async () => {
+      const text = await readText(runtime, path);
+      if (text == null) {
+        return { path, source: null, error: '源 MOD 文件不在当前工程缓存中' };
+      }
+      try {
+        return { path, source: parseLineMod(text, path) };
+      } catch (error) {
+        return {
+          path,
+          source: null,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    })
+    .catch((error: unknown) => {
+      runtime.sources.delete(path);
+      return sourceReadFailure(runtime, path, error);
+    });
   runtime.sources.set(path, entry);
   return entry;
 }
@@ -120,11 +145,22 @@ function collectLineGeometryRefs(node: GimGraphNode): string[] {
 async function resolveLineModPaths(
   runtime: LineModSession,
   roots: readonly string[],
-): Promise<string[]> {
+): Promise<LineModTraversal> {
   const index = await getEntryIndex(runtime);
+  const lookup: LineEntryLookup = {
+    exact: (path) => {
+      const matches = index.exactCandidates(path);
+      return matches.length > 1 ? null : matches[0];
+    },
+    uniqueBasename: (name) => {
+      const matches = index.basenameCandidates(name);
+      return matches.length === 1 ? matches[0] : null;
+    },
+  };
   const pending: string[] = [];
   const visited = new Set<string>();
   const mods: string[] = [];
+  const failures: LineModRuntimeEntry[] = [];
   const counts = { DEV: 0, PHM: 0, MOD: 0 };
 
   const enqueue = (path: string | null): void => {
@@ -148,11 +184,18 @@ async function resolveLineModPaths(
 
   for (let cursor = 0; cursor < pending.length; cursor++) {
     const path = pending[cursor];
-    const text = await readText(runtime, path);
+    const dependencyKind = /\.dev$/i.test(path) ? 'dev' : 'phm';
+    let text: string | null;
+    try {
+      text = await readText(runtime, path);
+    } catch (error) {
+      failures.push({ ...sourceReadFailure(runtime, path, error), dependencyKind });
+      continue;
+    }
     if (text == null) continue;
     let references: string[];
     try {
-      if (/\.dev$/i.test(path)) {
+      if (dependencyKind === 'dev') {
         const doc = parseDev(text, path);
         references = [
           ...doc.solidModels.map((row) => row.solidModelPath),
@@ -168,9 +211,9 @@ async function resolveLineModPaths(
     } catch {
       continue;
     }
-    for (const reference of references) enqueue(index.resolve(reference, path));
+    for (const reference of references) enqueue(resolveLineReference(reference, path, lookup));
   }
-  return mods;
+  return { paths: mods, failures };
 }
 
 /** Reuse a traversal for objects that reference the same set of sources. */
@@ -187,14 +230,20 @@ export async function loadLineModSourcesForNode(
     if (!pending) {
       pending = runtime.scope
         .read(() => resolveLineModPaths(runtime, roots))
-        .catch((error: unknown) => {
-          runtime.paths.delete(key);
-          throw error;
-        });
+        .then(
+          (result) => {
+            if (result.failures.length) runtime.paths.delete(key);
+            return result;
+          },
+          (error: unknown) => {
+            runtime.paths.delete(key);
+            throw error;
+          },
+        );
       runtime.paths.set(key, pending);
     }
-    const paths = await pending;
-    const entries: LineModRuntimeEntry[] = [];
+    const { paths, failures } = await pending;
+    const entries = [...failures];
     for (const path of paths) {
       entries.push(await runtime.scope.read(() => loadSource(runtime, path)));
     }

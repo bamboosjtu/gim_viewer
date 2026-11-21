@@ -26,6 +26,25 @@ it('merges phase hang points by explicit tower identity, excludes jumpers and re
   expect(p.findings.find(f => f.code === 'empty-cross-group')).toBeDefined();
 });
 it('does not invent geographic positions from malformed BLHA', () => { expect(coordinateFromBlha('x,110')).toBeUndefined(); expect(coordinateFromBlha('91,110')).toBeUndefined(); expect(coordinateFromBlha(',,0')).toBeUndefined(); expect(coordinateFromBlha('28,,0')).toBeUndefined(); });
+it('accumulates project bounds across multiple individually valid large point sources', () => {
+  const count = 64_000;
+  const crossMod = (code: string, latitude: number, longitude: number) => [
+    `CODE=${code}`,
+    `POINTNUM=${count}`,
+    'LINENUM=0',
+    ...Array.from({ length: count }, (_, i) => `POINT${i}=${i},${latitude},${longitude},1,P`),
+  ].join('\n');
+  const project = buildPowerlineProject([
+    { path: 'CBM/project.cbm', text: 'GROUPS.NUM=2\nGROUP0=cross1.cbm\nGROUP1=cross2.cbm' },
+    { path: 'CBM/cross1.cbm', text: 'ENTITYNAME=CROSS\nOBJECTMODELPOINTER=one.mod' },
+    { path: 'CBM/cross2.cbm', text: 'ENTITYNAME=CROSS\nOBJECTMODELPOINTER=two.mod' },
+    { path: 'MOD/one.mod', text: crossMod('one', 28, 120) },
+    { path: 'MOD/two.mod', text: crossMod('two', 32, 110) },
+  ], identity);
+  expect(project.objects.filter(object => object.kind === 'cross').map(object => object.geometry?.length))
+    .toEqual([count, count]);
+  expect(project.bounds).toEqual([110, 28, 120, 32]);
+});
 it('retains ambiguity instead of guessing a basename match', () => { const c = new LineParserTextCache([{path:'A/shared.fam',text:'a'},{path:'B/shared.fam',text:'b'}]); expect(c.getText('shared.fam')).toBeNull(); expect(c.getText('a\\SHARED.FAM')).toBe('a'); });
 it('rejects case collisions and indexes the archive only once for multiple references', () => {
   let enumerations = 0;

@@ -95,6 +95,30 @@ it('publishes partial GLB geometry only from entities with usable unique MOD IDs
   new DevGlbTemplate('DEV/device.dev', asset!.scene).dispose();
 });
 
+it('does not compile an XML MOD Boolean with a malformed operand ID into GLB', async () => {
+  const hiddenCuboid = (id: number, x: number) => (
+    `<Entity ID="${id}" Visible="False"><TransformMatrix Value="1,0,0,0,0,1,0,0,0,0,1,0,${x},0,0,1"/>` +
+    '<Cuboid L="1000" W="1000" H="1000"/></Entity>'
+  );
+  const text = '<Device><Entities>' + hiddenCuboid(1, 5000) + hiddenCuboid(2, 5500) +
+    '<Entity ID="3"><Boolean Type="Union" Entity1="1junk" Entity2="2"/></Entity>' +
+    '<Entity ID="4"><Cuboid L="1000" W="1000" H="1000"/></Entity></Entities></Device>';
+  const files = new Map([
+    ['DEV/device.dev', file('SOLIDMODELS.NUM=1\nSOLIDMODEL0=body.phm', 'device.dev')],
+    ['PHM/body.phm', file('SOLIDMODELS.NUM=1\nSOLIDMODEL0=piece.mod', 'body.phm')],
+    ['MOD/piece.mod', file(text, 'piece.mod')],
+  ]);
+
+  const result = await serializeDevToGlbDetailed('DEV/device.dev', files);
+  expect(result.status).toBe('partial');
+  expect(result.diagnostics.partialSourceCount).toBe(1);
+  const asset = await parseDevGlbAsset('DEV/device.dev', result.bytes!);
+  const bounds = new THREE.Box3().setFromObject(asset!.scene);
+  expect(bounds.min.x).toBeCloseTo(-0.5);
+  expect(bounds.max.x).toBeCloseTo(0.5);
+  new DevGlbTemplate('DEV/device.dev', asset!.scene).dispose();
+});
+
 it('shares repeated STL buffers while retaining occurrence identity, colors and exact affine node matrices', async () => {
   const matrices = [new THREE.Matrix4().set(1,.25,0,1200,0,1,.2,0,0,0,1,0,0,0,0,1),
     new THREE.Matrix4().makeScale(-1,2,1).setPosition(0,2000,0)];

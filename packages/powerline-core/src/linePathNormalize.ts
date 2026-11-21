@@ -50,3 +50,39 @@ export function getFileNameLower(path: string): string {
   const lastSeg = normalized.split('/').filter((seg) => seg.length > 0).pop();
   return lastSeg ? lastSeg.toLowerCase() : '';
 }
+
+export interface LineEntryLookup {
+  /** Canonical key lookup. Undefined means absent, null means ambiguous. */
+  exact(path: string): string | null | undefined;
+  uniqueBasename(name: string): string | null;
+}
+
+/** Resolve each line reference using the same precedence in both hosts. */
+export function resolveLineReference(
+  reference: string,
+  ownerPath: string | undefined,
+  lookup: LineEntryLookup,
+): string | null {
+  const path = normalizeGimPath(reference.trim()).replace(/^\.\//, '').toLowerCase();
+  if (!path) return null;
+  const parts = path.split('/');
+  const archiveMatch = parts.some(part => part === '.' || part === '..')
+    ? undefined
+    : lookup.exact(path);
+  if (parts.length > 1 && archiveMatch !== undefined) return archiveMatch;
+
+  if (ownerPath) {
+    const relative = normalizeGimPath(ownerPath).toLowerCase().split('/').slice(0, -1);
+    for (const part of parts) {
+      if (part === '..') {
+        if (!relative.length) return null;
+        relative.pop();
+      } else if (part !== '.') {
+        relative.push(part);
+      }
+    }
+    const sibling = lookup.exact(relative.join('/'));
+    if (sibling !== undefined) return sibling;
+  }
+  return archiveMatch === undefined ? lookup.uniqueBasename(parts[parts.length - 1]) : archiveMatch;
+}

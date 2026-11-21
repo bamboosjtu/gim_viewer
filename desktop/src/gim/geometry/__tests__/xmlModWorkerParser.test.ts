@@ -22,3 +22,24 @@ it('rejects malformed XML and external declarations', () => {
   expect(() => parseWorkerXmlMod('<Device><Entities></Device>', 'bad.mod')).toThrow();
   expect(() => parseWorkerXmlMod('<!DOCTYPE Device><Device/>', 'bad.mod')).toThrow();
 });
+
+it.each([
+  ['1junk', '2'],
+  ['1', '2.0'],
+  ['1', '9007199254740992'],
+])('preserves malformed Boolean references %s and %s in both XML parsers', (entity1, entity2) => {
+  const text = `<Device><Entities><Entity ID="3"><Boolean Type="Union" Entity1="${entity1}" Entity2="${entity2}"/></Entity></Entities></Device>`;
+  const worker = parseWorkerXmlMod(text, 'bad.mod');
+  expect(worker).toEqual(parseXmlMod(text, 'bad.mod'));
+  expect(worker.entities[0].primitive).toEqual({
+    type: 'Unsupported', sourceType: 'Boolean', raw: { Type: 'Union', Entity1: entity1, Entity2: entity2 },
+  });
+  expect(worker.diagnostics).toContainEqual(expect.objectContaining({ code: 'unsupported-primitive' }));
+});
+
+it('accepts Boolean references with the same integer syntax as Entity IDs in both XML parsers', () => {
+  const text = '<Device><Entities><Entity ID="3"><Boolean Type="Union" Entity1=" 00 " Entity2="9007199254740991"/></Entity></Entities></Device>';
+  const worker = parseWorkerXmlMod(text, 'valid.mod');
+  expect(worker).toEqual(parseXmlMod(text, 'valid.mod'));
+  expect(worker.entities[0].primitive).toEqual({ type: 'Boolean', op: 'Union', entity1: 0, entity2: Number.MAX_SAFE_INTEGER });
+});

@@ -454,9 +454,14 @@ function appendLineModSource(
   entry: LineModRuntimeEntry,
   options: LineModRenderOptions,
 ): string {
+  const kind = entry.dependencyKind ?? 'mod';
+  const label = kind.toUpperCase();
   return options.includeSourceLink === false
     ? html
-    : html + sectionHtml('来源', [['MOD 文件', fileReferenceValue('mod', entry.path, '查看 MOD')]]);
+    : html +
+        sectionHtml('来源', [
+          [`${label} 文件`, fileReferenceValue(kind, entry.path, `查看 ${label}`)],
+        ]);
 }
 
 export function renderLineModSource(
@@ -464,8 +469,9 @@ export function renderLineModSource(
   options: LineModRenderOptions = {},
 ): string {
   if (!entry.source) {
+    const label = (entry.dependencyKind ?? 'mod').toUpperCase();
     return appendLineModSource(
-      `<div class="props-section"><div class="props-section-title">线路 MOD</div><div class="props-note warning">${escHtml(entry.error || 'MOD 解析失败')}</div></div>`,
+      `<div class="props-section"><div class="props-section-title">线路 ${label}</div><div class="props-note warning">${escHtml(entry.error || 'MOD 解析失败')}</div></div>`,
       entry,
       options,
     );
@@ -776,7 +782,7 @@ function collectLineSourceEntries(
     for (const child of current.children) walk(child, childSourceContext(current, child, context));
   };
   walk(node, '当前对象');
-  for (const entry of modEntries) add('mod', entry.path, '几何来源');
+  for (const entry of modEntries) add(entry.dependencyKind ?? 'mod', entry.path, '几何来源');
   return entries.sort((a, b) => {
     const ai = LINE_SOURCE_KINDS.findIndex((item) => item.kind === a.kind);
     const bi = LINE_SOURCE_KINDS.findIndex((item) => item.kind === b.kind);

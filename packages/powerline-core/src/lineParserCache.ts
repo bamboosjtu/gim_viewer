@@ -8,7 +8,7 @@
 
 import type { LineFamProperty } from './lineFamParser.js';
 import type { LineDevProperty } from './lineDevParser.js';
-import { normalizeGimPath } from './linePathNormalize.js';
+import { normalizeGimPath, resolveLineReference, type LineEntryLookup } from './linePathNormalize.js';
 
 export interface LineParserTextFile {
   path: string;
@@ -23,6 +23,15 @@ export class LineParserTextCache {
   private readonly ambiguousPaths = new Set<string>();
   private readonly filesByName = new Map<string, string[]>();
   private readonly parsed = new Map<string, Map<ParserKind, unknown>>();
+  private readonly lookup: LineEntryLookup = {
+    exact: key => this.ambiguousPaths.has(key) ? null : this.filesByPath.get(key)?.path,
+    uniqueBasename: name => {
+      const matches = this.filesByName.get(name);
+      return matches?.length === 1 && !this.ambiguousPaths.has(matches[0])
+        ? this.filesByPath.get(matches[0])?.path ?? null
+        : null;
+    },
+  };
 
   constructor(files: Iterable<LineParserTextFile>) {
     for (const file of files) {
@@ -54,29 +63,7 @@ export class LineParserTextCache {
 
   /** 取得引用对应的实际原始路径（用于 payload/source_path）。 */
   resolveOriginalPath(path: string, sourcePath?: string): string | null {
-    const ref = normalizeGimPath(path.trim()).replace(/^\.\//, '');
-    if (!ref) return null;
-    // Prefer explicit archive paths, then resolve relative to the source.
-    // The shared basename index only accepts a unique archive entry.
-    if (ref.includes('/')) {
-      const exactKey = ref.toLowerCase();
-      const exact = this.filesByPath.get(exactKey);
-      if (exact) return this.ambiguousPaths.has(exactKey) ? null : exact.path;
-    }
-    if (sourcePath) {
-      const relative = normalizeGimPath(sourcePath).split('/').slice(0, -1);
-      for (const part of ref.split('/')) {
-        if (part === '..') {
-          if (!relative.length) return null;
-          relative.pop();
-        } else if (part !== '.') relative.push(part);
-      }
-      const relativeKey = relative.join('/').toLowerCase();
-      const match = this.filesByPath.get(relativeKey);
-      if (match) return this.ambiguousPaths.has(relativeKey) ? null : match.path;
-    }
-    const key = this.resolvePath(ref);
-    return key ? this.filesByPath.get(key)?.path ?? null : null;
+    return resolveLineReference(path, sourcePath, this.lookup);
   }
 
   getText(path: string): string | null {

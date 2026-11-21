@@ -1,4 +1,5 @@
 /** Desktop geometry adapter for substation XML MOD primitives. */
+import { parseXmlModEntityId } from '@gim/gim-sdk/parser';
 import type { XmlModPrimitive } from '@gim/powerline-core/geometry/ir.js';
 
 function firstNumericAttr(attrs: Record<string, string>, keys: string[], fallback = 1): number {
@@ -107,7 +108,13 @@ export function mapXmlModPrimitive(
       };
     case 'Boolean': {
       const rawOp = (attrs['Type'] ?? '').trim().toLowerCase();
-      if (!['union', 'intersection', 'difference'].includes(rawOp)) {
+      const entity1 = parseXmlModEntityId(attrs['Entity1']);
+      const entity2 = parseXmlModEntityId(attrs['Entity2']);
+      if (
+        !['union', 'intersection', 'difference'].includes(rawOp) ||
+        entity1 === undefined ||
+        entity2 === undefined
+      ) {
         return { type: 'Unsupported', sourceType: 'Boolean', raw: attrs };
       }
       const op =
@@ -115,8 +122,8 @@ export function mapXmlModPrimitive(
       return {
         type: 'Boolean',
         op,
-        entity1: num(attrs, 'Entity1'),
-        entity2: num(attrs, 'Entity2'),
+        entity1,
+        entity2,
       };
     }
     case 'Wire': {

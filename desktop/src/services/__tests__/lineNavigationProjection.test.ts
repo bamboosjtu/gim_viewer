@@ -88,4 +88,35 @@ it('隐藏的 Tower_Device CBM 来源回溯到可见杆塔行，并兼容裸文�
     expect(target?.label).toBe('N10 杆塔');
     expect(resolveLineNavigationTarget(index, 'tower-device-0.cbm')?.key).toBe(target?.key);
   });
+
+  it('follows the exact parent chain for a hidden source sharing a visible tower basename', () => {
+    const fixture = makeLineFixture();
+    const hidden = node({ path: 'Other/tower-0.cbm', entityName: 'Tower_Device' });
+    fixture.nodes.tower2.children.push(hidden);
+    fixture.graph.nodesByPath.set(hidden.path, hidden);
+    const index = buildLineNavigationIndex(fixture.graph, fixture.mapData);
+    expect(resolveLineNavigationTarget(index, 'other\\TOWER-0.CBM')?.node).toBe(fixture.nodes.tower2);
+    expect(resolveLineNavigationTarget(index, fixture.nodes.tower0.path)?.node).toBe(fixture.nodes.tower0);
+    expect(resolveLineNavigationTarget(index, 'tower-0.cbm')).toBeNull();
+    expect(resolveLineNavigationTarget(index, 'Missing/tower-2.cbm')).toBeNull();
+    expect(resolveLineNavigationTarget(index, 'tower-2.cbm')?.node).toBe(fixture.nodes.tower2);
+  });
+
+  it.each([false, true])('keeps coincident towers ambiguous unless the wire has a source binding (bound=%s)', bound => {
+    const fixture = makeLineFixture();
+    const wire = fixture.mapData.wires[0];
+    const coincident = fixture.mapData.towers.find(tower => tower.nodeRef === fixture.nodes.tower2)!;
+    coincident.lat = wire.startLat;
+    coincident.lng = wire.startLng;
+    if (bound) {
+      wire.nodeRef.rawProps.BACKSTRING = fixture.nodes.tower0.path;
+      wire.nodeRef.refs.stringTargets = { BACKSTRING: fixture.nodes.tower0.path };
+    }
+    const index = buildLineNavigationIndex(fixture.graph, { ...fixture.mapData, wires: [wire] });
+    const span = [...index.nodesByKey.values()].find(row => row.span?.wires.includes(wire))!.span!;
+    expect(span.startTower?.cbmPath).toBe(bound ? fixture.nodes.tower0.path : undefined);
+    expect(span.endTower?.cbmPath).toBe('Cbm/tower-1.cbm');
+    expect(span.unresolved).toBe(!bound);
+    expect(span.wires[0]).toMatchObject({ startLat: wire.startLat, startLng: wire.startLng });
+  });
 });

@@ -41,6 +41,16 @@ export type XmlPrimitiveMapper = (
   attrs: Record<string, string>,
 ) => XmlModPrimitive | null;
 
+/** The same lexical rule applies to an Entity ID and a Boolean operand reference. */
+export function parseXmlModEntityId(
+  value: string | undefined,
+): number | undefined {
+  const text = value?.trim() ?? "";
+  if (!/^\d+$/.test(text)) return undefined;
+  const id = Number(text);
+  return Number.isSafeInteger(id) ? id : undefined;
+}
+
 /** Same geometry grammar for native DOM and the worker's XML reader. */
 export function parseXmlModRoot(
   device: XmlModNode,
@@ -89,8 +99,8 @@ export function parseXmlModRoot(
   let duplicateIds: Set<number> | undefined;
   for (const entityNode of entityNodes) {
     const idText = (entityNode.attrs["ID"] ?? "").trim();
-    const id = Number(idText);
-    if (!/^\d+$/.test(idText) || !Number.isSafeInteger(id)) {
+    const id = parseXmlModEntityId(idText);
+    if (id === undefined) {
       diagnostics.push({
         severity: "warning",
         code: "invalid-entity-id",

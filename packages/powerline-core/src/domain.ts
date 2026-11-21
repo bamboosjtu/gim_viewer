@@ -251,8 +251,20 @@ export function buildPowerlineProject(files: LineParserTextFile[], identity: Pro
   }
   const inTree = new Set<string>(); const collect = (t: TreeNode) => { inTree.add(t.objectId); t.children.forEach(collect); }; collect(tree);
   for (const obj of objects.filter(o => o.kind !== 'project' && !inTree.has(o.id))) tree.children.push({ id: `unassigned/${obj.id}`, objectId: obj.id, label: obj.name, children: [] });
-  const coordinates = objects.flatMap(o => o.geometry?.length ? o.geometry : o.coordinate ? [o.coordinate] : []);
-  const bounds: PowerlineProject['bounds'] = coordinates.length ? [Math.min(...coordinates.map(c => c[0])), Math.min(...coordinates.map(c => c[1])), Math.max(...coordinates.map(c => c[0])), Math.max(...coordinates.map(c => c[1]))] : undefined;
+  let bounds: PowerlineProject['bounds'];
+  for (const object of objects) {
+    const points = object.geometry?.length ? object.geometry : object.coordinate ? [object.coordinate] : [];
+    for (const [longitude, latitude] of points) {
+      if (bounds) {
+        bounds[0] = Math.min(bounds[0], longitude);
+        bounds[1] = Math.min(bounds[1], latitude);
+        bounds[2] = Math.max(bounds[2], longitude);
+        bounds[3] = Math.max(bounds[3], latitude);
+      } else {
+        bounds = [longitude, latitude, longitude, latitude];
+      }
+    }
+  }
   const counts = { project: 0, line: 0, strain: 0, tower: 0, span: 0, cross: 0 }; objects.forEach(o => counts[o.kind]++);
   const geometryLengthMeters = [...spanMap.values()].reduce((s, o) => s + (o.horizontalMeters ?? 0), 0);
   for (const line of lines) {

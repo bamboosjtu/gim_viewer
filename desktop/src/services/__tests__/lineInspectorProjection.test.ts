@@ -232,6 +232,17 @@ describe('线路属性面板分组', () => {
   });
 });
 
+it('按实际文件类型展示读取失败的线路装配来源', () => {
+  const path = 'Phm/part.phm';
+  const { params, source } = buildLineNodeBuckets(node(), undefined, [
+    { path, source: null, dependencyKind: 'phm', error: '临时读取失败' },
+  ]);
+  expect(params).toContain('线路 PHM');
+  expect(params).toContain('临时读取失败');
+  expect(source).toContain(`data-reference-kind="phm" data-reference-path="${path}"`);
+  expect(source).not.toContain('查看 MOD');
+});
+
 describe('线路螺栓表格', () => {
   it('将多个螺栓渲染为单个表格而不是重复属性分节', () => {
     const bolt: BoltModFile = {

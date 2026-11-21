@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { beforeEach, expect, it, vi } from 'vitest';
+import { buildPowerlineProject } from '@gim/powerline-core';
 import { AppState } from '../../app/state.js';
 import { buildLineGimGraphFromTexts } from '../../gim/lineCbmParserCore.js';
 import { StaleSessionError } from '../../shared/sessionScope.js';
@@ -8,10 +9,10 @@ import { node } from './lineNavigationFixture.js';
 
 const native = vi.hoisted(() => ({
   readExtractionManifest: vi.fn(),
-  readCachedIfc: vi.fn(),
+  readCachedEntry: vi.fn(),
 }));
 vi.mock('@desktop/gimExtract.js', () => ({ readExtractionManifest: native.readExtractionManifest }));
-vi.mock('@desktop/database.js', () => ({ readCachedIfc: native.readCachedIfc }));
+vi.mock('@desktop/database.js', () => ({ readCachedEntry: native.readCachedEntry }));
 
 beforeEach(() => { vi.resetAllMocks(); });
 
@@ -42,7 +43,7 @@ it.each(['cold', 'warm'] as const)('resolves nested paths and reuses in-flight r
     source_sha256: 'source',
     entries: [...texts.keys()].map(path => ({ path })),
   });
-  native.readCachedIfc.mockImplementation(async (_id: number, path: string) => {
+  native.readCachedEntry.mockImplementation(async (_id: number, path: string) => {
     const text = texts.get(path);
     if (text === undefined) throw Error('unexpected source');
     return new TextEncoder().encode(text);
@@ -61,7 +62,7 @@ it.each(['cold', 'warm'] as const)('resolves nested paths and reuses in-flight r
   } else {
     expect(native.readExtractionManifest).toHaveBeenCalledOnce();
     expect(native.readExtractionManifest).toHaveBeenCalledWith(7);
-    expect(native.readCachedIfc.mock.calls).toEqual(expected.map(path => [7, path]));
+    expect(native.readCachedEntry.mock.calls).toEqual(expected.map(path => [7, path]));
   }
 });
 
@@ -76,6 +77,30 @@ it('leaves a nested basename unresolved when multiple candidates exist', async (
   const read = vi.spyOn(state.currentFiles.get('Phm/part.phm')!, 'arrayBuffer');
   await expect(loadLineModSourcesForNode(state, references('A/root.dev'))).resolves.toEqual([]);
   expect(read).not.toHaveBeenCalled();
+});
+
+it.each([
+  ['a\\body.mod', 'A/body.mod'],
+  ['../A/body.mod', 'A/body.mod'],
+  ['local/body.mod', 'B/local/body.mod'],
+])('resolves %s to the same source in the desktop inspector and the mobile project', async (reference, expectedPath) => {
+  const texts = new Map([
+    ['CBM/project.cbm', 'GROUPS.NUM=1\nGROUP0=cross.cbm'],
+    ['CBM/cross.cbm', 'ENTITYNAME=CROSS\nOBJECTMODELPOINTER=B/root.dev'],
+    ['B/root.dev', `SOLIDMODELS.NUM=1\nSOLIDMODEL0=${reference}`],
+    ['A/body.mod', mod('archive-root')],
+    ['B/A/body.mod', mod('shadow')],
+    ['B/local/body.mod', mod('owner-relative')],
+  ]);
+  const input = [...texts].map(([path, text]) => ({ path, text }));
+  const graph = buildLineGimGraphFromTexts(input);
+  const mobile = buildPowerlineProject(input, { id: 'test', name: 'test', sha256: 'test', size: 1 });
+  const state = new AppState();
+  state.currentFiles = filesFrom(texts);
+  const desktop = await loadLineModSourcesForNode(state, graph.root!);
+  expect(desktop.map(entry => entry.path)).toEqual([expectedPath]);
+  expect(mobile.objects.find(object => object.kind === 'cross')?.sourceRefs.filter(path => path.endsWith('.mod')))
+    .toEqual([expectedPath]);
 });
 
 it.each([false, true])('rejects a delayed A traversal and caches only the current result (A already reopened=%s)', async reopened => {
@@ -118,6 +143,98 @@ it.each([false, true])('rejects a delayed A traversal and caches only the curren
   await expect(loadLineModSourcesForNode(state, source)).resolves.toMatchObject([
     { path: 'Mod/a.mod', source: { records: { code: 'right' } } },
   ]);
+});
+
+it.each(['cold', 'warm'] as const)('retries temporary DEV and PHM read failures on %s open', async mode => {
+  const texts = new Map([
+    ['A/retry.dev', 'SOLIDMODELS.NUM=1\nSOLIDMODEL0=dev-body.mod'],
+    ['A/retry.phm', 'SOLIDMODELS.NUM=1\nSOLIDMODEL0=phm-body.mod'],
+    ['A/dev-body.mod', mod('dev')],
+    ['A/phm-body.mod', mod('phm')],
+    ['A/independent.mod', mod('independent')],
+  ]);
+  const files = filesFrom(texts);
+  const readDev = vi.spyOn(files.get('A/retry.dev')!, 'arrayBuffer');
+  const readPhm = vi.spyOn(files.get('A/retry.phm')!, 'arrayBuffer');
+  const readIndependent = vi.spyOn(files.get('A/independent.mod')!, 'arrayBuffer');
+  const devError = new Error('temporary DEV read failure');
+  const phmError = new Error('temporary PHM read failure');
+  const failures = new Map([['A/retry.dev', devError], ['A/retry.phm', phmError]]);
+  if (mode === 'cold') {
+    readDev.mockRejectedValueOnce(devError);
+    readPhm.mockRejectedValueOnce(phmError);
+  }
+  native.readExtractionManifest.mockResolvedValue({
+    source_sha256: 'source',
+    entries: [...texts.keys()].map(path => ({ path })),
+  });
+  native.readCachedEntry.mockImplementation(async (_id: number, path: string) => {
+    const error = failures.get(path);
+    if (error) {
+      failures.delete(path);
+      throw error;
+    }
+    return new TextEncoder().encode(texts.get(path));
+  });
+  const state = new AppState();
+  state.activateProject(7, 'source');
+  state.currentFiles = mode === 'cold' ? files : null;
+  const root = node({ refs: {
+    ...node().refs,
+    devFiles: ['A/retry.dev'],
+    phmFiles: ['A/retry.phm'],
+    modFiles: ['A/independent.mod'],
+  } });
+
+  const [first, concurrent] = await Promise.all([
+    loadLineModSourcesForNode(state, root),
+    loadLineModSourcesForNode(state, root),
+  ]);
+  expect(first).toEqual(concurrent);
+  expect(first).toMatchObject([
+    { path: 'A/retry.dev', source: null, dependencyKind: 'dev', error: expect.stringContaining(devError.message) },
+    { path: 'A/retry.phm', source: null, dependencyKind: 'phm', error: expect.stringContaining(phmError.message) },
+    { path: 'A/independent.mod', source: { records: { code: 'independent' } } },
+  ]);
+  const recovered = await loadLineModSourcesForNode(state, root);
+  expect(recovered).toMatchObject([
+    { path: 'A/independent.mod', source: { records: { code: 'independent' } } },
+    { path: 'A/dev-body.mod', source: { records: { code: 'dev' } } },
+    { path: 'A/phm-body.mod', source: { records: { code: 'phm' } } },
+  ]);
+  await expect(loadLineModSourcesForNode(state, root)).resolves.toEqual(recovered);
+  if (mode === 'cold') {
+    expect(readDev).toHaveBeenCalledTimes(2);
+    expect(readPhm).toHaveBeenCalledTimes(2);
+    expect(readIndependent).toHaveBeenCalledOnce();
+  } else {
+    expect(native.readExtractionManifest).toHaveBeenCalledOnce();
+    expect(native.readCachedEntry.mock.calls.map(([, path]) => path)).toEqual([
+      'A/retry.dev', 'A/retry.phm', 'A/independent.mod', 'A/retry.dev', 'A/retry.phm', 'A/dev-body.mod', 'A/phm-body.mod',
+    ]);
+  }
+});
+
+it('retries a temporary MOD read failure without repeating a successful traversal', async () => {
+  const state = new AppState();
+  const files = filesFrom(new Map([
+    ['A/root.dev', 'SOLIDMODELS.NUM=1\nSOLIDMODEL0=body.mod'],
+    ['A/body.mod', mod('recovered')],
+  ]));
+  state.currentFiles = files;
+  const devRead = vi.spyOn(files.get('A/root.dev')!, 'arrayBuffer');
+  const modRead = vi.spyOn(files.get('A/body.mod')!, 'arrayBuffer')
+    .mockRejectedValueOnce(new Error('temporary MOD read failure'));
+  const root = references('A/root.dev');
+
+  await expect(loadLineModSourcesForNode(state, root)).resolves.toMatchObject([
+    { path: 'A/body.mod', source: null, error: expect.stringContaining('temporary MOD read failure') },
+  ]);
+  await expect(loadLineModSourcesForNode(state, root)).resolves.toMatchObject([
+    { path: 'A/body.mod', source: { records: { code: 'recovered' } } },
+  ]);
+  expect(devRead).toHaveBeenCalledOnce();
+  expect(modRead).toHaveBeenCalledTimes(2);
 });
 
 it.each(['DEV', 'PHM'] as const)('ends an over-budget %s traversal without reading excess sources', async kind => {

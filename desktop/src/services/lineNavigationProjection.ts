@@ -103,6 +103,8 @@ export interface LineNavigationIndex {
   parentByKey: Map<string, string>;
   /** 来源路径 → 首个业务投影行；共享边界塔使用首次出现的行。 */
   targetBySourcePath: Map<string, string>;
+  /** 裸文件名 → 唯一 CBM 来源路径。多候选记为 null。 */
+  sourcePathByBasename: ReadonlyMap<string, string | null>;
   stats: LineNavigationStats;
 }
 
@@ -202,9 +204,11 @@ export function buildLineNavigationIndex(
   const towerEntries = collectTowerEntries(graph, mapData);
   const towerByPath = new Map(towerEntries.map((entry) => [entry.group.path, entry]));
   const towerOrder = buildTowerOrder(towerEntries);
-  const towerByCoord = new Map<string, TowerEntry>();
+  const towerByCoord = new Map<string, TowerEntry | null>();
   for (const entry of towerEntries) {
-    if (entry.marker) towerByCoord.set(coordKey(entry.marker.lat, entry.marker.lng), entry);
+    if (!entry.marker) continue;
+    const key = coordKey(entry.marker.lat, entry.marker.lng);
+    towerByCoord.set(key, towerByCoord.has(key) ? null : entry);
   }
   const wireTower = createLineWireTowerResolver(graph.nodesByPath.values());
 
@@ -504,7 +508,7 @@ export function buildLineNavigationIndex(
   // 而导航树只渲染杆塔、档距、导线和跨越物等业务投影行。将未直接登记的
   // 图节点沿 CBM 父链回溯到最近已登记行，保证 CBM/DEV/FAM/PHM/MOD/STL
   // 等引用都能定位到可见业务节点；缓存恢复或目录大小写变化也走同一索引。
-  registerGraphSourceAliases(graph, parentIndex, targetBySourcePath);
+  const sourcePathByBasename = registerGraphSourceAliases(graph, parentIndex, targetBySourcePath);
 
   const stats: LineNavigationStats = {
     sectionCount: sections.length,
@@ -521,7 +525,15 @@ export function buildLineNavigationIndex(
     unresolvedWireCount: mapData.unresolved.wires.length,
   };
 
-  return { root: rootNode, route: routeNode, nodesByKey, parentByKey, targetBySourcePath, stats };
+  return {
+    root: rootNode,
+    route: routeNode,
+    nodesByKey,
+    parentByKey,
+    targetBySourcePath,
+    sourcePathByBasename,
+    stats,
+  };
 }
 
 /** 构建路线树搜索索引；业务名称优先，来源路径作为可搜索别名。 */
@@ -557,10 +569,14 @@ export function resolveLineNavigationTarget(
   index: LineNavigationIndex,
   key: string,
 ): LineNavigationNode | null {
-  const rowKey = index.nodesByKey.has(key)
-    ? key
-    : findSourceTargetKey(index.targetBySourcePath, key);
-  return rowKey ? index.nodesByKey.get(rowKey) || null : null;
+  const row = index.nodesByKey.get(key);
+  if (row) return row;
+  const normalized = normalizeGimPath(key);
+  const sourcePath = normalized.includes('/')
+    ? normalized
+    : index.sourcePathByBasename.get(normalized.toLowerCase());
+  const rowKey = sourcePath && findExactSourceTargetKey(index.targetBySourcePath, sourcePath);
+  return rowKey ? (index.nodesByKey.get(rowKey) ?? null) : null;
 }
 
 function buildParentIndex(graph: GimGraph): ParentIndex {
@@ -677,7 +693,7 @@ function buildSpanRecords(
   mapData: LineMapData,
   parentIndex: ParentIndex,
   towerByPath: Map<string, TowerEntry>,
-  towerByCoord: Map<string, TowerEntry>,
+  towerByCoord: ReadonlyMap<string, TowerEntry | null>,
   wireTower: ReturnType<typeof createLineWireTowerResolver>,
 ): SpanRecord[] {
   const records = new Map<string, SpanRecord>();
@@ -1182,59 +1198,41 @@ function registerGraphSourceAliases(
   graph: GimGraph,
   parentIndex: ParentIndex,
   targetBySourcePath: Map<string, string>,
-): void {
-  // `findSourceTargetKey` 的裸文件名兜底原先会在每个隐藏 graph 节点上
-  // 扫描整个 targetBySourcePath。真实线路图有近万节点时，这个 O(n×m)
-  // 过程本身就足以制造秒级长任务；预先建立同样保持“首次登记优先”
-  // 语义的文件名倒排表。
-  const targetByFileName = new Map<string, string>();
-  for (const [source, target] of targetBySourcePath) {
-    const fileName = getFileNameLower(source);
-    if (fileName && !targetByFileName.has(fileName)) targetByFileName.set(fileName, target);
-  }
+): Map<string, string | null> {
+  const sourcePathByBasename = new Map<string, string | null>();
   for (const graphNode of graph.nodesByPath.values()) {
-    if (findSourceTargetKey(targetBySourcePath, graphNode.path, targetByFileName)) continue;
+    const basename = getFileNameLower(graphNode.path);
+    if (basename) {
+      sourcePathByBasename.set(
+        basename,
+        sourcePathByBasename.has(basename) ? null : graphNode.path,
+      );
+    }
+    if (findExactSourceTargetKey(targetBySourcePath, graphNode.path)) continue;
     const seen = new Set<string>();
     let current: GimGraphNode | undefined = parentIndex.parentByPath.get(graphNode.path);
     while (current && !seen.has(current.path)) {
       seen.add(current.path);
-      const targetKey = findSourceTargetKey(targetBySourcePath, current.path, targetByFileName);
+      const targetKey = findExactSourceTargetKey(targetBySourcePath, current.path);
       if (targetKey) {
         registerSourceAlias(targetBySourcePath, graphNode.path, targetKey);
-        const fileName = getFileNameLower(graphNode.path);
-        if (fileName && !targetByFileName.has(fileName)) targetByFileName.set(fileName, targetKey);
         break;
       }
       current = parentIndex.parentByPath.get(current.path);
     }
   }
+  return sourcePathByBasename;
 }
 
 /** 精确、斜杠归一化、大小写不敏感地查找来源路径对应的投影行。 */
-function findSourceTargetKey(
+function findExactSourceTargetKey(
   targetBySourcePath: Map<string, string>,
   sourcePath: string,
-  targetByFileName?: Map<string, string>,
 ): string | undefined {
-  if (!sourcePath) return undefined;
   const direct = targetBySourcePath.get(sourcePath);
   if (direct) return direct;
-  const normalized = normalizeGimPath(sourcePath);
-  if (!normalized) return undefined;
-  const directNormalized =
-    targetBySourcePath.get(normalized) || targetBySourcePath.get(normalized.toLowerCase());
-  if (directNormalized) return directNormalized;
-
-  // 部分来源记录只保留裸文件名（例如 `abc.cbm`），而解压后的图节点带有
-  // `Cbm/` 前缀。文件名是 GUID，按文件名兜底不会把不同业务对象混淆；若
-  // 未来出现同名文件，仍优先使用上面的完整路径匹配。
-  const fileName = getFileNameLower(normalized);
-  if (!fileName) return undefined;
-  if (targetByFileName) return targetByFileName.get(fileName);
-  for (const [source, target] of targetBySourcePath) {
-    if (getFileNameLower(source) === fileName) return target;
-  }
-  return undefined;
+  const normalized = normalizeGimPath(sourcePath).replace(/^\.\//, '');
+  return targetBySourcePath.get(normalized) ?? targetBySourcePath.get(normalized.toLowerCase());
 }
 
 /** 在所有投影行完成后补齐父链，覆盖懒加载明细（塔位、档距、导线、跨越物）。 */
