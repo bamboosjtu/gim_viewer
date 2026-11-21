@@ -1,3 +1,5 @@
+import { observeFirstGeometry } from './geometryPresentationService.js';
+import { perfGeometryTracksEnabled } from '../utils/perfTimings.js';
 import { projectPresentation } from './projectPresentationPort.js';
 import { RetryableResource } from '../shared/retryableResource.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
@@ -178,6 +180,20 @@ export async function getViewerRuntimeWithUI(
       const modelCallbacks: ModelEventCallbacks = {
         onModelAdded: (modelId, runtimeModelId) => {
           const model = ctx.fragments.list.get(runtimeModelId);
+          // Observe the authoritative Fragments root at registration, before
+          // any async UI work. Connection preview meshes never use this path.
+          if (model && state.currentProjectType === 'substation' && perfGeometryTracksEnabled()) {
+            void observeFirstGeometry(
+              state,
+              ctx,
+              model.object,
+              state.captureProjectSession(),
+              undefined,
+              undefined,
+              'ifc',
+              true,
+            ).catch((error) => logger.warn('[IFC draw diagnostics]', error));
+          }
           if (model) state.selection.selectionVisibility?.registerModel(modelId, model);
           presentation.addModel(ctx, state, modelId, runtimeModelId);
           if (state.selection.engineeringSelection?.ifc.some((ref) => ref.modelId === modelId))

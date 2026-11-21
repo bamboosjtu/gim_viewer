@@ -3,6 +3,14 @@ import { fileURLToPath } from 'node:url';
 
 // The same bounded adoption scope drives Prettier and type-checked ESLint.
 export const architectureModules = [
+  'src/measurement/benchmarkHost.ts',
+  'src/services/devLodRuntime.ts',
+  'src/services/devLodTemplateStore.ts',
+  'src/services/geometryPresentationService.ts',
+  'src/utils/perfTimings.ts',
+  'src/viewer/ifcConversionWorker.ts',
+  'src/viewer/modelPresentation.ts',
+
   'src/engineering/catalogLabels.ts',
   '../packages/gim-sdk/src/projection/projection.ts',
   'src/engineering/composition.ts',

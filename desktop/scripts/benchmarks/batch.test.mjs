@@ -53,6 +53,28 @@ test('public report explains failed index publication and skipped warm preparati
   assert.deepEqual(state.rows.map(row=>row.status),['FAIL','SKIPPED']);
 });
 
+test('batch CSV, JSON and HTML preserve optional dual-track evidence in public reports',async()=>{
+  const options=setup(),sample=inputs().samples[0];
+  await executeBatch({...options,inputs:{entries:[inputs().entries[0]],samples:[sample]},
+    execute:async({profileDigest})=>{
+      const result=run(sample,profileDigest);
+      Object.assign(result.report.metrics,{devFirstDrawSubmittedMs:31,ifcFirstDrawSubmittedMs:82,
+        ifcFirstLoadAdmittedMs:40,ifcFirstOrderedWaitMs:0,ifcFirstConversionStartMs:null,
+        ifcFirstConversionPath:null,ifcFirstUsableSource:'lod-cache'});
+      return result;
+    }});
+  const report=JSON.parse(readFileSync(join(options.out,'results.json'),'utf8'));
+  assert.equal(report.rows[0].ifcFirstUsableSource,'lod-cache');
+  assert.equal(report.rows[0].ifcFirstConversionStartMs,null);
+  assert.equal(report.rows[0].devFirstDrawSubmittedMs,31);
+  assert.equal(report.rows[0].ifcFirstDrawSubmittedMs,82);
+  const csv=readFileSync(join(options.out,'results.csv'),'utf8');
+  assert.match(csv,/ifcFirstConversionSlotWaitMs/);
+  assert.match(csv,/lod-cache/);
+  const html=readFileSync(join(options.out,'report.html'),'utf8');
+  assert.match(html,/首个可用 IFC 的来源/);
+  assert.match(html,/未观察/);
+});
 test('batch continues after execution exceptions and exports every result and failure',async()=>{
   const options=setup(),called=[];
   const result=await executeBatch({...options,inputs:inputs(),execute:async({sample,profileDigest})=>{

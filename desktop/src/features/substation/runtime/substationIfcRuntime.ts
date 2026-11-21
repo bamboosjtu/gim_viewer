@@ -21,6 +21,8 @@ import {
   perfBegin,
   perfMark,
   perfMarkProductMoment,
+  perfGeometryTracksEnabled,
+  perfRecordTaskPhase,
   perfRecordIfcLoadProfile,
 } from '../../../utils/perfTimings.js';
 import { startSubstationResourceMonitor } from '../../../services/substationResourceTelemetry.js';
@@ -86,6 +88,7 @@ export async function loadAllIfcFiles(
   const openingPolicy = 'bim-lod' as const;
   const session = options.session ?? state.captureProjectSession();
   const perfSession = perfCurrentSession();
+  const measureGeometryTracks = perfGeometryTracksEnabled();
   const isCurrent = () => state.isCurrentSession(session);
   const clearIfcPending = () => {
     if (isCurrent()) state.ifcLoading.pending = false;
@@ -410,9 +413,15 @@ export async function loadAllIfcFiles(
       afterPaintOpportunity(start);
     };
     if (object)
-      void observeFirstGeometry(state, ctx, object, session, onIfcPresented, perfSession).catch(
-        reportBackgroundError,
-      );
+      void observeFirstGeometry(
+        state,
+        ctx,
+        object,
+        session,
+        onIfcPresented,
+        perfSession,
+        'ifc',
+      ).catch(reportBackgroundError);
     signalInteractive();
     // Keep the IFC tail and DEV anchor live even if the first IFC is empty.
     // Optional work starts after a model draw, or after the full IFC tail if
@@ -511,9 +520,26 @@ export async function loadAllIfcFiles(
           perfSession,
         );
       }
+      // Queue policy is unchanged: later IFC files wait behind earlier ones.
+      const ifcQueueReadyAt = measureGeometryTracks ? performance.now() : 0;
       for (let queueIndex = 0; queueIndex < queue.length; queueIndex++) {
         if (!isCurrent()) return;
         const entry = queue[queueIndex];
+        if (measureGeometryTracks) {
+          const orderedWaitMs = performance.now() - ifcQueueReadyAt;
+          perfMarkProductMoment('ifcFirstLoadAdmitted', { orderedWaitMs }, perfSession);
+          perfRecordTaskPhase(
+            {
+              domain: 'ifc',
+              kind: 'entry',
+              taskId: 'ifc-entry:' + entry.path,
+              sourcePath: entry.path,
+            },
+            'orderedFileWait',
+            orderedWaitMs,
+            perfSession,
+          );
+        }
         activeIfcPath = entry.path;
         ifcStages.set(entry.path, ifcStageLabels['checking-cache']);
         setIfcStatus(ifcStatus(entry, queueIndex, queue.length));
@@ -729,6 +755,12 @@ export async function loadAllIfcFiles(
           const runtimeModelId = state.ifc.runtimeModelIds.get(entry.modelId) ?? entry.modelId;
           const usable =
             state.ifc.loadedModels.has(entry.modelId) && ctx.fragments.list.has(runtimeModelId);
+          if (usable && measureGeometryTracks)
+            perfMarkProductMoment(
+              'ifcFirstUsable',
+              { source: loadSource.value, scope: 'registered-authoritative-base' },
+              perfSession,
+            );
           if (usable && !interactiveInitialized) {
             await initializeInteractiveAfterFirstIfc(entry, loadSource.value);
             if (!isCurrent()) return;
@@ -744,6 +776,7 @@ export async function loadAllIfcFiles(
                 session,
                 onIfcPresented,
                 perfSession,
+                'ifc',
               ).catch(reportBackgroundError);
           }
         } catch (err) {
@@ -811,6 +844,17 @@ export async function loadAllIfcFiles(
       // All IFCs may be empty/hidden. Complete source work independently of
       // presentation; this does not emit an interactive/visible-frame moment.
       afterPaintOpportunity(() => startDeferredTasks());
+      if (entries.length > 0 && measureGeometryTracks)
+        perfMarkProductMoment(
+          'ifcBaseSettled',
+          {
+            total: entries.length,
+            loaded: state.ifc.loadedModels.size,
+            failed: failed.length,
+            skipped: skippedLargeIfc.length,
+          },
+          perfSession,
+        );
       perfMarkProductMoment(
         'allIfcReady',
         {

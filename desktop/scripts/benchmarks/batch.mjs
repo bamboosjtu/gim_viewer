@@ -1,3 +1,4 @@
+import {geometryTrackKeys} from './geometry-track-metrics.mjs';
 import {createPublicProjector} from './observability.mjs';
 import {existsSync,readFileSync,writeFileSync,readdirSync,unlinkSync} from 'node:fs';
 import {randomBytes} from 'node:crypto';
@@ -86,7 +87,7 @@ function recordReport(row,report,state){
     geometryStatuses:Object.entries(report.evidence?.geometryStatuses??{}).map(([status,count])=>`${status}:${count}`).join(';'),
     failedSourceSetDigest:report.evidence?.geometryDefects?.failedSourceSetDigest??null,
     failedSourceCount:report.evidence?.geometryDefects?.failedSourceCount??0});
-  for(const key of ['firstResponseMs','modelTreeReadyMs','geometryCommitMs','firstGeometryMs','allGeometryReadyMs','automaticLoadMs','cachePublishMs','settledMs','writeDrainMs','processPrivatePeakBytes'])row[key]=report.metrics?.[key]??null;
+  for(const key of ['firstResponseMs','modelTreeReadyMs','geometryCommitMs','firstGeometryMs','allGeometryReadyMs','automaticLoadMs','cachePublishMs','settledMs','writeDrainMs','processPrivatePeakBytes',...geometryTrackKeys])row[key]=report.metrics?.[key]??null;
   const writeStats=report.measurement?.phases?.['host:host.cacheWrite'];
   const writeBytes=writeStats?.workload?.bytes;
   row.cacheWriteBytes=Number.isFinite(writeBytes)?writeBytes:null;

@@ -164,6 +164,7 @@ it('a corrupt artifact retries source even when no failed model can be disposed'
   const read = vi.fn(async () => new Uint8Array([3]));
   await loadBimIfc(ctx, state, session, 'runtime', 'logical', 'CBM/a.ifc', read);
   expect(read).toHaveBeenCalledOnce();
+  expect(cache.raw.mock.calls[0][8]).toMatchObject({conversionPath:'cache-restore-failed'});
   expect(cache.remove).toHaveBeenCalledOnce();
   expect(cache.write).toHaveBeenCalledOnce();
   expect(model.object.userData.ifcLodCacheHit).toBe(false);

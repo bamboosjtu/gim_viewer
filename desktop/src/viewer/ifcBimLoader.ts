@@ -93,6 +93,7 @@ export async function loadBimIfc(
   let model: Awaited<ReturnType<ViewerContext['fragments']['core']['load']>> | null | undefined;
   let hit = false;
   let restoredBytes = 0;
+  let cacheRestoreFailed = artifact != null;
   cacheReadMs = performance.now() - cacheStarted;
   if (!current()) return;
   if (
@@ -116,6 +117,7 @@ export async function loadBimIfc(
       // The authoritative model is loaded. Connection previews are only useful
       // while conversion is in progress, so there is no mesh replay on a hit.
       hit = true;
+      cacheRestoreFailed = false;
       options.onStage?.('lod-cache-hit', {
         path,
         bytes: restoredBytes,
@@ -147,6 +149,7 @@ export async function loadBimIfc(
       {
         transferInput: true,
         openingPolicy: 'bim-lod',
+        conversionPath: cacheRestoreFailed ? 'cache-restore-failed' : 'cache-miss',
         sourceSha256,
         onConversionStage: (stage) =>
           options.onStage?.('cold-convert', {

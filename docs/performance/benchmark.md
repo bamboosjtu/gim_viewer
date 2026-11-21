@@ -449,3 +449,20 @@ system 配置仍校验 durationMs 与 bufferMiB，但当前录制入口关闭，
 包装脚本可用 `-Batch l0`、`-Batch substation` 或 `-Batch line` 只执行开发者选定范围；`-BuildManifest <acceptance-build.json>` 复用已有构建。相同输出目录已存在时自动加时间后缀，不覆盖旧报告。`--build` 指定被冻结的应用构建，运行期间不要求当前工作区源码保持同一指纹；每次原生运行仍核对 EXE、固定运行时和采样器 SHA，并将构建身份写入报告。源码变更后的修复效果需重新构建后测量，选择历史构建则测量该历史二进制。
 
 HTML 明细和汇总中的数值列，表头与单元格统一右对齐并使用等宽数字；宽度不足时横向滚动，保持完整单位。终端范围表分别对齐最短值、分隔符和最长值；未取得的观测继续显示缺失符号。格式更新可直接用已完成 results.json 重建 report.html，不执行工程或改动原始测量值。
+
+### DEV / IFC 双轨（诊断字段）
+
+原有 `firstGeometryMs`（首个有效模型视口绘制提交）与通过/回退门槛不变。双轨只在
+benchmark / diagnostic 模式启用，里程碑共享本次工程打开的时间零点。单跑 `metrics`
+和批量表都将未观察到的时刻保留为 `null`（CSV 空值），不伪造为零；阶段对应如下：
+
+| 轨道 | 里程碑 |
+| --- | --- |
+| DEV | `devFirstStartMs`（模板获准开始，包含缓存路径）、`devFirstUsableMs`（第一个几何表示提交到场景）、`devFirstDrawSubmittedMs`（第一个有效视口绘制提交）、`devBaseSettledMs`（基础表示结算，可包含空、失败或不支持） |
+| IFC | `ifcFirstLoadAdmittedMs`（首文件离开顺序队列）、`ifcFirstConversionStartMs`（实际工作线程收到源输入开始冷转换）、`ifcFirstUsableMs`（首个权威基础模型登记）、`ifcFirstDrawSubmittedMs`（首个权威 IFC 的有效视口绘制提交）、`ifcBaseSettledMs`（基础列表结算，可包含失败或略过） |
+
+`ifcFirstOrderedWaitMs` 和 `ifcFirstConversionSlotWaitMs` 是时长，分别对应首文件及首个真正开始的转换；可能来自不同文件，不应直接相减。逐文件等待看 `orderedFileWait` 和
+`conversionSlotWait` 诊断阶段，列表等待包含更早文件占用的墙钟时间。缓存命中可产生可用和绘制时刻，但不产生转换开始，
+`ifcFirstUsableSource` 区分 `lod-cache` 和源文件 `ifc`；`ifcFirstConversionPath` 区分无命中、
+缓存恢复失败后的回退和显式原始读取策略。绘制字段只计真正提交至有效视口的权威模型，
+不含预览、网格、空或隐藏几何，也不代表 GPU 完成、屏幕显示完成或输入延迟验证。

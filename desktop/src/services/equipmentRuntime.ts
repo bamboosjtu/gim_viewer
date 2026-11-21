@@ -110,11 +110,17 @@ export async function startGeometryOnlyView(
         if (!state.selection.selectionRequest?.target && !state.viewState.viewerUserInteracted)
           fitCameraToScene(ctx, state.viewState, { force: true });
         if (state.modRootGroup) {
-          void observeFirstGeometry(state, ctx, state.modRootGroup, session, hideLoading).catch(
-            (error) => {
-              if (current()) logger.warn('[Geometry presentation]', error);
-            },
-          );
+          void observeFirstGeometry(
+            state,
+            ctx,
+            state.modRootGroup,
+            session,
+            hideLoading,
+            undefined,
+            'dev',
+          ).catch((error) => {
+            if (current()) logger.warn('[Geometry presentation]', error);
+          });
         }
       }
       if (d?.baseRepresentationsSettled && !fitted) {

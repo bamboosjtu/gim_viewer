@@ -1,3 +1,4 @@
+import {geometryTrackTimingKeys,geometryTrackSources} from './geometry-track-metrics.mjs';
 import {publicView} from './observability.mjs';
 import {isPublicArtifact} from './batch-input.mjs';
 import {writeFileSync,renameSync} from 'node:fs';
@@ -45,7 +46,7 @@ export function writeBatchProgress(out,state,{ready=false,...options}={}){
     anonymize,environmentCalibration,baselineEligible,updatedAt,rows},options);
   put(out,'report.html',renderBatchHtml(view,summarize(view.rows??[]),counts,progress));
 }
-const metrics=['firstResponseMs','modelTreeReadyMs','geometryCommitMs','firstGeometryMs','allGeometryReadyMs','automaticLoadMs','cachePublishMs','settledMs','writeDrainMs','processPrivatePeakBytes'];
+const metrics=['firstResponseMs','modelTreeReadyMs','geometryCommitMs','firstGeometryMs','allGeometryReadyMs','automaticLoadMs','cachePublishMs','settledMs','writeDrainMs','processPrivatePeakBytes',...geometryTrackTimingKeys];
 export function summarize(rows){
   const groups=new Map();
   for(const row of rows){const key=`${row.inputId}:${row.cacheState}`;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(row);}
@@ -77,7 +78,7 @@ export function writeBatchReports(out,state,options={}){
   put(out,'results.json',JSON.stringify(publicState,null,2));
   const exportRows=state.rows.map(row=>({...row,buildCommit:state.buildInfo?.commit,buildFingerprint:state.buildFingerprint,partialFailedOccurrences:row.partialCounts?.failedOccurrences,
     partialFailedSources:row.partialCounts?.failedSourceCount,partialUnresolvedReferences:row.partialCounts?.unresolvedReferences}));
-  const columns=['inputId','buildCommit','buildFingerprint','sampleLabel','sourcePath','sampleId','sourceSha256','sampleTier','group','repetition','cacheState','status','error','runId','partialKind','partialFailedOccurrences','partialFailedSources','partialUnresolvedReferences',...metrics,'cacheWriteBytes','cacheWriteMsPerMiB',
+  const columns=['inputId','buildCommit','buildFingerprint','sampleLabel','sourcePath','sampleId','sourceSha256','sampleTier','group','repetition','cacheState','status','error','runId','partialKind','partialFailedOccurrences','partialFailedSources','partialUnresolvedReferences',...metrics,...Object.keys(geometryTrackSources),'cacheWriteBytes','cacheWriteMsPerMiB',
     'attempts','startupFailures','projectType','correctness','semanticDigestScope','pendingCount','pendingSourceCount','pendingDigest','geometryTimingPolicy','workerHeapPolicy','geometryStructuralFingerprint','devContentDigest','devContentCovered','devContentComplete','partialEvidenceStatus','partialEvidenceDigest','partialSignature','inputIntegrity','environmentSuspend','inputVariantCode','inputVariant','cacheFailureCode','cachePublished','coverageComplete','engineeringCacheStatus','devCatalogMisses','sourceFailureCatalogMisses','unexplainedCatalogMisses','catalogProofComplete','devPartialOccurrences','partialGeometryReasons','geometryDiagnosticScope','sourceReferenceStatuses','coverageIncompleteReasons','unresolvedReferenceCount','gpuTimingStatus','gpuTimingSamples','gpuMemoryStatus','gpuMemoryBytes','gpuMemoryScope','measurementDetailDropped','measurementDetailStatus','measurementAggregatedDetail','measurementLifecycleComplete','measurementLifecycleIssues','measurementIncompleteItems','memoryEvidenceComplete','memoryIncompleteItems','templateDiagnosticsStatus','cancelledBeforeStart','lateBackgroundTasks','finalEvidenceIssue','finalEvidenceAttempts','finalEvidenceDrifts','cacheVerified','measurementComplete','processSamples','processSamplesAvailable','missingWorkerHeaps','unavailableWorkerHeaps','shortLivedWorkerHeaps','notApplicableWorkerHeaps','failedGeometry','failedGeometryReasons','geometryStatuses','failedSourceCount','failedSourceSetDigest','pendingTasks','interruptedAtMs','interruptedWritePending','interruptedCacheSettled','backgroundSettled','cachePublication','linePackAssessment','duplicateOf'];
   put(out,'results.csv',csv(exportRows,columns));
   put(out,'summary.csv',csv(summaries,['inputId','sampleLabel','sampleId','sampleTier','group','cacheState','planned','validRepetitions','coverageGroups','partialSignatures','startupRetries','passed','partial','failed','inconclusive','skipped',...metrics.flatMap(key=>[`${key}Median`,`${key}P95`,`${key}Count`,`${key}Missing`])]));
@@ -127,6 +128,18 @@ export function renderBatchHtml(state,summaries=summarize(state.rows),counts,pro
       ['基础几何齐备','allGeometryReadyMs',1000,'s'],['DEV 写排水','writeDrainMs',1000,'s'],
       ['DEV 写入','cacheWriteBytes',2**20,'MiB'],['DEV 写入服务','cacheWriteMsPerMiB',1,'ms/MiB'],
     ])if(Number.isFinite(row[key]))facts.push([label,numeric(row[key],scale)+' '+unit]);
+    for (const [label, keys] of [
+      ['DEV：启动／首个可用／首次绘制提交／基础结算',
+        ['devFirstStartMs','devFirstUsableMs','devFirstDrawSubmittedMs','devBaseSettledMs']],
+      ['IFC：获准加载／实际转换开始／首个可用／首次绘制提交／基础结算',
+        ['ifcFirstLoadAdmittedMs','ifcFirstConversionStartMs','ifcFirstUsableMs','ifcFirstDrawSubmittedMs','ifcBaseSettledMs']],
+      ['IFC：首文件列表等待／首转换插槽等待',
+        ['ifcFirstOrderedWaitMs','ifcFirstConversionSlotWaitMs']],
+    ]) if (keys.some(key=>Number.isFinite(row[key]))) {
+      facts.push([label,keys.map(key=>Number.isFinite(row[key])?numeric(row[key],1000)+' s':'未观察').join(' / ')]);
+    }
+    if (row.ifcFirstUsableSource) facts.push(['首个可用 IFC 的来源',row.ifcFirstUsableSource]);
+    if (row.ifcFirstConversionPath) facts.push(['首次 IFC 转换原因',row.ifcFirstConversionPath]);
     if(row.projectType)facts.push(['模型类型',row.projectType]);
     if(row.group)facts.push(['样本分组',row.group]);
     if(row.inputVariant)facts.push(['输入变体',row.inputVariant]);

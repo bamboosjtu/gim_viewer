@@ -6,6 +6,7 @@ import { registerModelEvents } from '../ifcLoader.js';
 import { cancelIfcConversions, loadRawIfc } from '../ifcConversion.js';
 import {geometryWorkSnapshot} from '../geometryWorkGate.js';
 import type { IfcConversionInput, IfcConversionOutput } from '../ifcConversionWorker.js';
+import {perfProductMomentSnapshot,perfReset} from '../../utils/perfTimings.js';
 
 class ConversionWorker {
   static instances: ConversionWorker[]=[];
@@ -67,6 +68,40 @@ it('boots the one IFC worker before its deferred source is ready', async () => {
   expect(worker.terminate).toHaveBeenCalledOnce();
   expect(ctx.fragments.core.load).toHaveBeenCalledOnce();
   expect(geometryWorkSnapshot().ifcActive).toBe(0);
+});
+
+it('records actual IFC worker start only after input, with its slot wait and source path kind',async()=>{
+  vi.stubGlobal('__GIM_MEASUREMENT_CONFIG__',{mode:'benchmark'});
+  vi.stubGlobal('URL', class extends URL {
+    static createObjectURL=()=> 'blob:http://localhost/ifc-conversion-test';
+    static revokeObjectURL=()=>{};
+  });
+  perfReset();
+  try {
+    const state=new AppState(),session=state.activateProject(1,'sha'),{ctx}=context(state);
+    const runtimeId=state.ifc.getRuntimeModelId(entry.modelId,session);
+    state.ifc.registerIfcRuntimeModel(entry.modelId,runtimeId,session);
+    let supply!: (bytes:Uint8Array)=>void;
+    const read=vi.fn(()=>new Promise<Uint8Array>(resolve=>{supply=resolve;}));
+    const loading=loadRawIfc(ctx,state,session,read,runtimeId,entry.path,undefined,undefined,
+      {conversionPath:'cache-restore-failed'});
+    await vi.waitFor(()=>expect(read).toHaveBeenCalledOnce());
+    expect(perfProductMomentSnapshot().ifcFirstConversionStart).toBeNull();
+    supply(new Uint8Array([1,2,3]));
+    const worker=ConversionWorker.instances[0];
+    await vi.waitFor(()=>expect(worker.input?.reportConversionStart).toBe(true));
+    expect(perfProductMomentSnapshot().ifcFirstConversionStart).toBeNull();
+    worker.reply({type:'progress',progress:0.25,
+      conversionStart:{atMs:performance.now(),timeOriginMs:performance.timeOrigin}});
+    const milestone=perfProductMomentSnapshot().ifcFirstConversionStart;
+    expect(milestone?.atMs).toBeGreaterThan(0);
+    expect(milestone?.meta).toMatchObject({slotWaitMs:expect.any(Number),source:'cache-restore-failed'});
+    worker.reply({type:'complete',bytes:new Uint8Array([9]),conversionMs:1});
+    await loading;
+  } finally {
+    Reflect.deleteProperty(globalThis,'__GIM_MEASUREMENT_CONFIG__');
+    perfReset();
+  }
 });
 
 it('cancels the booted worker while native source reading is pending', async () => {

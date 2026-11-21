@@ -5,7 +5,14 @@ import type { ViewerContext } from './viewerEngine.js';
 import type { ViewerState as AppState } from '../shared/viewerState.js';
 import type { ProjectLoadSession } from '../shared/projectSession.js';
 import type { IfcConversionInput, IfcConversionOutput } from './ifcConversionWorker.js';
-import { perfBegin, perfRecordExternalSpan } from '../utils/perfTimings.js';
+import {
+  perfBegin,
+  perfCurrentSession,
+  perfGeometryTracksEnabled,
+  perfMarkProductMoment,
+  perfRecordTaskPhase,
+  perfRecordExternalSpan,
+} from '../utils/perfTimings.js';
 import type { IfcOpeningPolicy } from '../config/features.js';
 import type { RegionalIndex } from './ifcRegionalData.js';
 export {
@@ -16,6 +23,8 @@ export {
 /** A bounded, ordered batch of source-evidenced connection objects. */
 export type IfcRegionalConnectionBatch =
   import('./ifcConnectionBatches.js').ConnectionGeometryBatch;
+
+export type IfcConversionPath = 'cache-miss' | 'cache-restore-failed' | 'raw-policy';
 
 const activeConversions = new Set<() => void>();
 
@@ -38,6 +47,7 @@ export async function loadRawIfc(
   perfSessionId?: number,
   options: {
     transferInput?: boolean;
+    conversionPath?: IfcConversionPath;
     openingPolicy?: IfcOpeningPolicy;
     /** Digest of this exact IFC buffer when already computed for its cache key. */
     sourceSha256?: string;
@@ -49,9 +59,24 @@ export async function loadRawIfc(
 ) {
   const isCurrent = () => state.isCurrentSession(session);
   if (!isCurrent()) return;
+  const measureTracks = perfGeometryTracksEnabled();
+  const timingSession = measureTracks
+    ? perfSessionId === undefined
+      ? perfCurrentSession()
+      : { id: perfSessionId }
+    : null;
+  const reserveStarted = timingSession ? performance.now() : 0;
   const geometry = await reserveIfcGeometryWork();
   try {
     if (!isCurrent()) return;
+    const slotWaitMs = timingSession ? performance.now() - reserveStarted : null;
+    if (timingSession && slotWaitMs !== null)
+      perfRecordTaskPhase(
+        { domain: 'ifc', kind: 'entry', taskId: 'ifc-entry:' + entryPath, sourcePath: entryPath },
+        'conversionSlotWait',
+        slotWaitMs,
+        timingSession,
+      );
     const diagnosticSession = perfSessionId === undefined ? undefined : { id: perfSessionId };
     let endConversion: ReturnType<typeof perfBegin> | undefined;
     let failed = false;
@@ -108,6 +133,18 @@ export async function loadRawIfc(
           }
           try {
             const response = event.data;
+            const conversionStart = response.conversionStart;
+            if (timingSession && conversionStart)
+              perfMarkProductMoment(
+                'ifcFirstConversionStart',
+                {
+                  slotWaitMs,
+                  source: options.conversionPath ?? 'raw-policy',
+                  scope: 'worker-input-handler',
+                },
+                timingSession,
+                conversionStart.timeOriginMs - performance.timeOrigin + conversionStart.atMs,
+              );
             if (response.type === 'stage') {
               lastProgressAt = performance.now();
               options.onConversionStage?.(response.stage);
@@ -212,6 +249,7 @@ export async function loadRawIfc(
             webIfcSettings: { ...ctx.ifcLoader.settings.webIfc },
             openingPolicy: options.openingPolicy ?? 'full',
             sourceSha256: options.sourceSha256,
+            ...(timingSession ? { reportConversionStart: true } : {}),
           };
           input.earlyConnections =
             state.substationMemoryPressure !== 'high' &&

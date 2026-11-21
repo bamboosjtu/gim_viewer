@@ -1,3 +1,4 @@
+import {geometryTrackMetrics} from './geometry-track-metrics.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {compareRuns,compareSuites,approveBaseline,baselineApprovalIssue,runReadiness,digest,createPartialReview} from './compare.mjs';
@@ -350,4 +351,33 @@ test('portable runtime preparation includes image integrity and restricts recurs
     assert.throws(()=>prepareFixedRuntimeSecurity(workspace,runtime,()=>({status:1})),/preparation failed/);
   }
   assert.throws(()=>prepareFixedRuntimeSecurity(runtime,root,()=>({status:0})),/outside/);
+});
+
+test('dual-track measurements preserve nulls and distinguish cache restore, conversion and both waits',()=>{
+  const missing=geometryTrackMetrics();
+  assert.ok(Object.values(missing).every(value=>value===null));
+  const warm=geometryTrackMetrics({
+    moments:{devFirstUsable:18,devFirstDrawSubmitted:25,ifcFirstLoadAdmitted:30,
+      ifcFirstUsable:55,ifcFirstDrawSubmitted:62,ifcBaseSettled:74},
+    geometryTrackDetails:{ifcFirstOrderedWaitMs:0,ifcFirstUsableSource:'lod-cache',
+      ifcFirstConversionSlotWaitMs:999,ifcFirstConversionPath:'cache-miss'},
+  });
+  assert.equal(warm.ifcFirstOrderedWaitMs,0);
+  assert.equal(warm.ifcFirstUsableSource,'lod-cache');
+  assert.equal(warm.ifcFirstConversionStartMs,null);
+  assert.equal(warm.ifcFirstConversionSlotWaitMs,null);
+  assert.equal(warm.ifcFirstConversionPath,null);
+  assert.equal(warm.devFirstDrawSubmittedMs,25);
+  assert.equal(warm.ifcFirstDrawSubmittedMs,62);
+  const fallback=geometryTrackMetrics({
+    moments:{ifcFirstLoadAdmitted:12,ifcFirstConversionStart:37,ifcFirstUsable:66},
+    geometryTrackDetails:{ifcFirstOrderedWaitMs:3,ifcFirstConversionSlotWaitMs:11,
+      ifcFirstConversionPath:'cache-restore-failed',ifcFirstUsableSource:'ifc'},
+  });
+  assert.equal(fallback.ifcFirstConversionStartMs,37);
+  assert.equal(fallback.ifcFirstOrderedWaitMs,3);
+  assert.equal(fallback.ifcFirstConversionSlotWaitMs,11);
+  assert.equal(fallback.ifcFirstConversionPath,'cache-restore-failed');
+  assert.equal(fallback.ifcFirstDrawSubmittedMs,null);
+  assert.equal(fallback.devBaseSettledMs,null);
 });

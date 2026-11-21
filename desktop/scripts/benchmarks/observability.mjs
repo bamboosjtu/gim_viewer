@@ -1,3 +1,4 @@
+import {geometryTrackTimingKeys,geometryTrackSources} from './geometry-track-metrics.mjs';
 import {cpuHotspots} from './profile-summary.mjs';
 import {MEASUREMENT_VERSION} from '../../../packages/measurement-core/src/version.mjs';
 import {WORKER_HEAP_POLICY} from './cdp.mjs';
@@ -20,6 +21,14 @@ const publicKeys=new Set(['exportId','status','outcome','correctness','cacheStat
   'wallClockMs','requested','available','unavailable','unsupported','method','unit','startMs','endMs','durationMs','estimatedMs','value','samples','maxSampleGapMs','maxSampleDelayMs','observedPeakBytes','observedHeapPeakBytes','attempts','updatedAt','atMs','bytes','sampleDelayMs']);
 for(const key of ['workerHeapPolicy','geometryTimingPolicy','automaticTimingPolicy','failedGeometryReasons','coverageIncompleteReasons'])publicKeys.add(key);
 for(const key of ['gpuTimingStatus','gpuTimingSamples','gpuMemoryStatus','gpuMemoryBytes','gpuMemoryScope'])publicKeys.add(key);
+for (const key of geometryTrackTimingKeys) {
+  publicKeys.add(key);
+  for (const suffix of ['Median','P95','Count','Missing']) publicKeys.add(key+suffix);
+}
+for (const [key,values] of Object.entries(geometryTrackSources)) {
+  publicKeys.add(key);
+  for (const value of values) enums.add(value);
+}
 enums.add('DEV-representations-only');
 for(const value of ['aggregate-only','incomplete','in-viewport-model-draw-submitted-v1','semantic-base-without-cache-v1'])enums.add(value);
 for(const key of ['stage','heapAvailability','heapReason','heapSamples','failedHeapSamples','sampleLabel','sampleTier','group','error','reason','reasonCode','preset','version',
@@ -32,6 +41,7 @@ for(const key of ['timeoutMs','detailPolicy','lifecyclePolicy','contentPolicy','
 for(const value of ['task-phase-timeline-v1','worker-terminal-v1','dev-l0-glb-sha256-v1','source-failure-catalog-v1','paired-webview-profile-v1','pre-open-infrastructure-v1',MEASUREMENT_VERSION,'source-geometry','engineering-reference-coverage','coverage'])enums.add(value);
 const phaseNames=new Set(('assemblyParseMs blobReadMs bounds decode decodeMs discovery exportWallMs mergeMs parse-dev parse-mod parse-phm parseMs part-merge primitive primitiveMs readRpcMs source-blob-wait source-rpc-wait validateMs validateParseMs cache-encode composition-projection extract normalize projection source-read spatial-projection delivery-and-worker-queue output-retention result-roundtrip send execution queue anchorQueue cacheHash cacheInvokeWall cacheNativeResolve cacheNativeWrite cachePack cachePrepare cacheRead cacheWrite cacheWriteQueue catalogCacheRead deserialize inputBudgetQueue memoryTemplate placementCommit requestWall sceneCommitQueue sceneSubmitWall sourceRpc templateBuild templateQueue templateSlotOccupancy templateWall vertexValidation workerQueue workerWall connectionEvidenceMs connectionGeometryMs earlyPreparationMs importWithBoundsMs openModelMs output-backpressure preparationMs remainingIndexMs semanticsMs sourceHashMs wasm-init wasmInitMs mesh-extraction open-model relationships finalize scan-and-model submission scheduled-task').split(' '));
 phaseNames.add('physical-index');
+phaseNames.add('orderedFileWait');phaseNames.add('conversionSlotWait');
 const reasonWords=new Set(('input-corrupt INPUT_CORRUPT product-geometry-failed warm-preparation-incomplete WARM_UNSUPPORTED batch-execution-failed controller-interrupted batch-not-executed run-cancelled automatic-completion-not-observed correctness-unverified pending-evidence-missing measurement-incomplete measurement-lifecycle-incomplete cache-state-unverified missing-condition missing-metric measurement run lifecycle collector active-tasks worker-interrupted-tasks unexplained-task-abort interruptedTasks workloadDigest automaticLoadMs firstResponseMs firstGeometryMs allGeometryReadyMs settledMs previous-sample-pending worker-target-not-observed target-ended previous-sample-failed not-applicable target-not-observed unavailable sample-timeout').split(' '));
 for(const code of ['native-run-error','worker-target-ended','previous-sample-pending','private-tree-sampler-unavailable','heap-samples-missing','heap-samples-unavailable','worker-memory-unavailable','active-tasks','not-requested','unverified-reason-omitted'])reasonWords.add(code);
 for(const code of ['missing-dependency','source-reference-unresolved','capacity-exceeded','parse-failed','ifc-manifest-incomplete','geometry-failed','source-invalid','cache-io-failed'])reasonWords.add(code);

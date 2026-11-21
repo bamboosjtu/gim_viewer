@@ -1,5 +1,11 @@
-import { resetMeasurementRun, updateMeasurementIdentity, recordLegacyPhase, recordHostMemory } from '../measurement/runtime.js';
-import {measurementRun,measurementContext} from '../measurement/runtime.js';
+import { logger } from './logger.js';
+import {
+  resetMeasurementRun,
+  updateMeasurementIdentity,
+  recordLegacyPhase,
+  recordHostMemory,
+} from '../measurement/runtime.js';
+import { measurementRun, measurementContext } from '../measurement/runtime.js';
 /**
  * 性能埋点体系（acc-plan.md P0-1）。
  *
@@ -84,6 +90,15 @@ export interface PerfLongTaskStats {
  * 和 all-IFC barrier。
  */
 export type PerfProductMoment =
+  | 'devFirstStart'
+  | 'devFirstUsable'
+  | 'devFirstDrawSubmitted'
+  | 'devBaseSettled'
+  | 'ifcFirstLoadAdmitted'
+  | 'ifcFirstConversionStart'
+  | 'ifcFirstUsable'
+  | 'ifcFirstDrawSubmitted'
+  | 'ifcBaseSettled'
   | 'coreSemanticReady'
   | 'navigationUiReady'
   | 'engineeringTreeReady'
@@ -181,10 +196,7 @@ export interface PerfRuntimeResourceSnapshot {
   meta?: Record<string, unknown>;
 }
 
-export type PerfCleanupCheckpoint =
-  | 'beforeCleanup'
-  | 'afterCleanup'
-  | 'settledAfterCleanup';
+export type PerfCleanupCheckpoint = 'beforeCleanup' | 'afterCleanup' | 'settledAfterCleanup';
 
 export interface PerfBenchmarkMetadata {
   commit?: string;
@@ -339,9 +351,24 @@ export interface PerfTaskIdentity {
 }
 type TaskPhaseStatus = 'completed' | 'failed' | 'cancelled';
 interface TaskPhaseSample extends PerfTaskIdentity {
-  phase: string; durationMs: number; atMs: number; sessionId: number; status: TaskPhaseStatus; bytes?: number;
+  phase: string;
+  durationMs: number;
+  atMs: number;
+  sessionId: number;
+  status: TaskPhaseStatus;
+  bytes?: number;
 }
-const taskPhaseTotals = new Map<string, {count: number; totalMs: number; maxMs: number; failed: number; cancelled: number; bytes: number}>();
+const taskPhaseTotals = new Map<
+  string,
+  {
+    count: number;
+    totalMs: number;
+    maxMs: number;
+    failed: number;
+    cancelled: number;
+    bytes: number;
+  }
+>();
 let slowTaskPhases: TaskPhaseSample[] = [];
 let detailedTaskTrace = false;
 let taskPhaseOverflow = 0;
@@ -397,7 +424,10 @@ export function perfCurrentSession(): PerfSession {
  */
 export function perfUpdateSessionIdentity(identity: PerfSessionIdentity): PerfSession {
   currentSession = { ...currentSession, ...identity };
-  updateMeasurementIdentity({ generation: currentSession.generation ?? null, sourceSha256: currentSession.sourceSha256 ?? null });
+  updateMeasurementIdentity({
+    generation: currentSession.generation ?? null,
+    sourceSha256: currentSession.sourceSha256 ?? null,
+  });
   return cloneSession(currentSession);
 }
 
@@ -413,7 +443,10 @@ export function perfIsCurrentSession(session: PerfSession | number | undefined):
 export function perfReset(identity: PerfSessionIdentity = {}): void {
   sessionSequence += 1;
   currentSession = { id: sessionSequence, ...identity };
-  resetMeasurementRun({ generation: identity.generation ?? null, sourceSha256: identity.sourceSha256 ?? null });
+  resetMeasurementRun({
+    generation: identity.generation ?? null,
+    sourceSha256: identity.sourceSha256 ?? null,
+  });
   sessionStartMs = performance.now();
   spans = [];
   evictedPerfSpans = 0;
@@ -435,16 +468,22 @@ export function perfReset(identity: PerfSessionIdentity = {}): void {
   activeSpanLabels = [];
   productMoments.clear();
   if (import.meta.env?.DEV) {
-    (globalThis as { __GIM_DEV_SUBSTATION_PRODUCT_MOMENTS__?: Record<string, unknown> })
-      .__GIM_DEV_SUBSTATION_PRODUCT_MOMENTS__ = {};
+    (
+      globalThis as { __GIM_DEV_SUBSTATION_PRODUCT_MOMENTS__?: Record<string, unknown> }
+    ).__GIM_DEV_SUBSTATION_PRODUCT_MOMENTS__ = {};
   }
   memorySamples = [];
   processTreePrivatePeakBytes = null;
   runtimeResourceSnapshots = [];
   devGeometryProfiles = [];
-  taskPhaseTotals.clear(); slowTaskPhases = []; taskPhaseOverflow = 0;
-  try { detailedTaskTrace = globalThis.localStorage?.getItem('GIM_PERF_TASK_TRACE') === '1'; }
-  catch { detailedTaskTrace = false; }
+  taskPhaseTotals.clear();
+  slowTaskPhases = [];
+  taskPhaseOverflow = 0;
+  try {
+    detailedTaskTrace = globalThis.localStorage?.getItem('GIM_PERF_TASK_TRACE') === '1';
+  } catch {
+    detailedTaskTrace = false;
+  }
   substationIfcReads = [];
   substationIfcLoads = [];
   substationIfcParses = [];
@@ -460,51 +499,111 @@ export function perfReset(identity: PerfSessionIdentity = {}): void {
  */
 const MAX_PERF_SPANS = 8192;
 function appendSpan(span: PerfSpan): void {
-  if (spans.length >= MAX_PERF_SPANS) { spans.splice(0, 1024); evictedPerfSpans += 1024; }
+  if (spans.length >= MAX_PERF_SPANS) {
+    spans.splice(0, 1024);
+    evictedPerfSpans += 1024;
+  }
   spans.push(span);
 }
 
 /** Existing profiler's correlated task phases: bounded aggregates and slow/
  * failed samples by default. Detailed spans are opt-in and share the normal
  * bounded span buffer. Durations may nest/overlap and are never CPU time. */
-export function perfRecordTaskPhase(identity: PerfTaskIdentity, phase: string, durationMs: number,
-  session: PerfSession = currentSession, status: TaskPhaseStatus = 'completed', bytes?: number): void {
+export function perfRecordTaskPhase(
+  identity: PerfTaskIdentity,
+  phase: string,
+  durationMs: number,
+  session: PerfSession = currentSession,
+  status: TaskPhaseStatus = 'completed',
+  bytes?: number,
+): void {
   if (!perfIsCurrentSession(session) || !Number.isFinite(durationMs) || durationMs < 0) return;
   recordLegacyPhase(identity, phase, durationMs, status, bytes);
   const key = `${identity.domain}:${identity.kind}:${phase}`;
-  if (!taskPhaseTotals.has(key) && taskPhaseTotals.size >= 128) { taskPhaseOverflow++; return; }
-  const total = taskPhaseTotals.get(key) ?? {count: 0, totalMs: 0, maxMs: 0, failed: 0, cancelled: 0, bytes: 0};
-  total.count++; total.totalMs += durationMs; total.maxMs = Math.max(total.maxMs, durationMs);
-  if (status === 'failed') total.failed++; if (status === 'cancelled') total.cancelled++;
-  const safeBytes = typeof bytes === 'number' && Number.isFinite(bytes) && bytes >= 0 ? bytes : undefined;
-  total.bytes += safeBytes ?? 0; taskPhaseTotals.set(key, total);
-  const sample: TaskPhaseSample = {...identity, phase, durationMs, atMs: performance.now() - sessionStartMs,
-    sessionId: session.id, status, ...(safeBytes == null ? {} : {bytes: safeBytes})};
+  if (!taskPhaseTotals.has(key) && taskPhaseTotals.size >= 128) {
+    taskPhaseOverflow++;
+    return;
+  }
+  const total = taskPhaseTotals.get(key) ?? {
+    count: 0,
+    totalMs: 0,
+    maxMs: 0,
+    failed: 0,
+    cancelled: 0,
+    bytes: 0,
+  };
+  total.count++;
+  total.totalMs += durationMs;
+  total.maxMs = Math.max(total.maxMs, durationMs);
+  if (status === 'failed') total.failed++;
+  if (status === 'cancelled') total.cancelled++;
+  const safeBytes =
+    typeof bytes === 'number' && Number.isFinite(bytes) && bytes >= 0 ? bytes : undefined;
+  total.bytes += safeBytes ?? 0;
+  taskPhaseTotals.set(key, total);
+  const sample: TaskPhaseSample = {
+    ...identity,
+    phase,
+    durationMs,
+    atMs: performance.now() - sessionStartMs,
+    sessionId: session.id,
+    status,
+    ...(safeBytes == null ? {} : { bytes: safeBytes }),
+  };
   if (durationMs >= 50 || status === 'failed') {
     slowTaskPhases.push(sample);
-    slowTaskPhases.sort((a,b) => Number(b.status === 'failed') - Number(a.status === 'failed') || b.durationMs - a.durationMs);
+    slowTaskPhases.sort(
+      (a, b) =>
+        Number(b.status === 'failed') - Number(a.status === 'failed') ||
+        b.durationMs - a.durationMs,
+    );
     if (slowTaskPhases.length > 32) slowTaskPhases.length = 32;
   }
-  if (detailedTaskTrace) appendSpan({label: `${identity.domain.toUpperCase()} task · ${phase}`,
-    startMs: Math.max(0, sample.atMs - durationMs), durationMs, sessionId: session.id, meta: {...sample}});
+  if (detailedTaskTrace)
+    appendSpan({
+      label: `${identity.domain.toUpperCase()} task · ${phase}`,
+      startMs: Math.max(0, sample.atMs - durationMs),
+      durationMs,
+      sessionId: session.id,
+      meta: { ...sample },
+    });
 }
 
-export async function perfMeasureTaskPhase<T>(identity: PerfTaskIdentity, phase: string, operation: () => Promise<T>,
-  session: PerfSession = currentSession): Promise<T> {
-  const started = performance.now(); let status: TaskPhaseStatus = 'completed';
-  const run=measurementRun();
-  const span=run.collector.mode==='diagnostic'&&perfIsCurrentSession(session)
-    ?run.probe.phase(measurementContext(run.collector),'host.'+phase,null,{summary:false}):null;
-  try { return await operation(); }
-  catch (error) { status = (error as Error)?.name === 'AbortError' ? 'cancelled' : 'failed'; throw error; }
-  finally { span?.end(status);perfRecordTaskPhase(identity, phase, performance.now() - started, session, status); }
+export async function perfMeasureTaskPhase<T>(
+  identity: PerfTaskIdentity,
+  phase: string,
+  operation: () => Promise<T>,
+  session: PerfSession = currentSession,
+): Promise<T> {
+  const started = performance.now();
+  let status: TaskPhaseStatus = 'completed';
+  const run = measurementRun();
+  const span =
+    run.collector.mode === 'diagnostic' && perfIsCurrentSession(session)
+      ? run.probe.phase(measurementContext(run.collector), 'host.' + phase, null, {
+          summary: false,
+        })
+      : null;
+  try {
+    return await operation();
+  } catch (error) {
+    status = (error as Error)?.name === 'AbortError' ? 'cancelled' : 'failed';
+    throw error;
+  } finally {
+    span?.end(status);
+    perfRecordTaskPhase(identity, phase, performance.now() - started, session, status);
+  }
 }
 
 export function perfTaskPhaseSnapshot() {
-  return {detailedTraceEnabled: detailedTaskTrace, cpuTimeAvailable: false, overflow: taskPhaseOverflow,
-    spanWindow: {limit: MAX_PERF_SPANS, evicted: evictedPerfSpans},
-    totals: Object.fromEntries([...taskPhaseTotals].map(([key,value]) => [key,{...value}])),
-    slowSamples: slowTaskPhases.map(sample => ({...sample}))};
+  return {
+    detailedTraceEnabled: detailedTaskTrace,
+    cpuTimeAvailable: false,
+    overflow: taskPhaseOverflow,
+    spanWindow: { limit: MAX_PERF_SPANS, evicted: evictedPerfSpans },
+    totals: Object.fromEntries([...taskPhaseTotals].map(([key, value]) => [key, { ...value }])),
+    slowSamples: slowTaskPhases.map((sample) => ({ ...sample })),
+  };
 }
 
 export function perfBegin(
@@ -513,9 +612,12 @@ export function perfBegin(
   session: PerfSession = currentSession,
 ): (labelSuffix?: string, endMeta?: Record<string, unknown>) => void {
   const t0 = performance.now();
-  const measured=measurementRun();
+  const measured = measurementRun();
   // Raw labels can contain source names; Trace uses a controlled stage.
-  const phase=measured.collector.mode==='diagnostic'?measured.probe.phase(measurementContext(measured.collector),'host.product-stage'):null;
+  const phase =
+    measured.collector.mode === 'diagnostic'
+      ? measured.probe.phase(measurementContext(measured.collector), 'host.product-stage')
+      : null;
   activeSpanLabels.push(label);
   return (labelSuffix?: string, endMeta?: Record<string, unknown>) => {
     phase?.end();
@@ -583,24 +685,50 @@ export function perfMarkProductMoment(
   moment: PerfProductMoment,
   meta?: Record<string, unknown>,
   session: PerfSession = currentSession,
+  observedHostTimeMs?: number,
 ): void {
   if (!perfIsCurrentSession(session) || productMoments.has(moment)) return;
-  const atMs = performance.now() - sessionStartMs;
+  const capturedAt = observedHostTimeMs ?? performance.now();
+  if (!Number.isFinite(capturedAt) || capturedAt < sessionStartMs) return;
+  const atMs = capturedAt - sessionStartMs;
   productMoments.set(moment, { atMs, meta, sessionId: session.id });
-  const measured=measurementRun();
-  measured.probe.trace(measurementContext(measured.collector),{type:'milestone',action:'observed',name:moment});
+  const measured = measurementRun();
+  measured.probe.trace(
+    measurementContext(measured.collector),
+    { type: 'milestone', action: 'observed', name: moment },
+    capturedAt,
+  );
   perfMark(moment, meta, session);
   // 开发期采集器可轮询该只读快照，不影响生产构建行为。
   if (import.meta.env?.DEV) {
-    const target = globalThis as { __GIM_DEV_SUBSTATION_PRODUCT_MOMENTS__?: Record<string, unknown> };
+    const target = globalThis as {
+      __GIM_DEV_SUBSTATION_PRODUCT_MOMENTS__?: Record<string, unknown>;
+    };
     target.__GIM_DEV_SUBSTATION_PRODUCT_MOMENTS__ = Object.fromEntries(
       [...productMoments.entries()].map(([key, value]) => [key, { ...value }]),
     );
   }
 }
 
-export function perfProductMomentSnapshot(): Record<PerfProductMoment, PerfProductMomentInfo | null> {
+export function perfGeometryTracksEnabled(): boolean {
+  const mode = measurementRun().collector.mode;
+  return mode === 'benchmark' || mode === 'diagnostic';
+}
+
+export function perfProductMomentSnapshot(): Record<
+  PerfProductMoment,
+  PerfProductMomentInfo | null
+> {
   return {
+    devFirstStart: productMoments.get('devFirstStart') ?? null,
+    devFirstUsable: productMoments.get('devFirstUsable') ?? null,
+    devFirstDrawSubmitted: productMoments.get('devFirstDrawSubmitted') ?? null,
+    devBaseSettled: productMoments.get('devBaseSettled') ?? null,
+    ifcFirstLoadAdmitted: productMoments.get('ifcFirstLoadAdmitted') ?? null,
+    ifcFirstConversionStart: productMoments.get('ifcFirstConversionStart') ?? null,
+    ifcFirstUsable: productMoments.get('ifcFirstUsable') ?? null,
+    ifcFirstDrawSubmitted: productMoments.get('ifcFirstDrawSubmitted') ?? null,
+    ifcBaseSettled: productMoments.get('ifcBaseSettled') ?? null,
     coreSemanticReady: productMoments.get('coreSemanticReady') ?? null,
     navigationUiReady: productMoments.get('navigationUiReady') ?? null,
     engineeringTreeReady: productMoments.get('engineeringTreeReady') ?? null,
@@ -654,10 +782,19 @@ export function perfRecordMemorySample(
   const finiteOrNull = (value: number | null | undefined): number | null =>
     value != null && Number.isFinite(value) && value >= 0 ? value : null;
   const privateBytes = finiteOrNull(sample.processTreePrivateBytes);
-  recordHostMemory({ name: 'private-bytes', scope: 'process-tree', method: 'native-process-tree', quality: 'runtime-sampled',
-    availability: sample.processTreeAvailable && privateBytes !== null ? 'available' : 'unavailable',
-    bytes: sample.processTreeAvailable ? privateBytes : null, sampleDelayMs: 0,
-    ...(!sample.processTreeAvailable || privateBytes === null ? { reason: 'native-process-tree-unavailable' } : {}) });
+  recordHostMemory({
+    name: 'private-bytes',
+    scope: 'process-tree',
+    method: 'native-process-tree',
+    quality: 'runtime-sampled',
+    availability:
+      sample.processTreeAvailable && privateBytes !== null ? 'available' : 'unavailable',
+    bytes: sample.processTreeAvailable ? privateBytes : null,
+    sampleDelayMs: 0,
+    ...(!sample.processTreeAvailable || privateBytes === null
+      ? { reason: 'native-process-tree-unavailable' }
+      : {}),
+  });
   if (sample.processTreeAvailable && privateBytes != null) {
     processTreePrivatePeakBytes = Math.max(processTreePrivatePeakBytes ?? 0, privateBytes);
   }
@@ -685,7 +822,10 @@ export function perfRecordMemorySample(
 }
 
 export function perfMemorySnapshot(): PerfMemorySample[] {
-  return memorySamples.map((sample) => ({ ...sample, meta: sample.meta ? { ...sample.meta } : undefined }));
+  return memorySamples.map((sample) => ({
+    ...sample,
+    meta: sample.meta ? { ...sample.meta } : undefined,
+  }));
 }
 
 /** 记录一次低频的 Three/Fragments/语义资源所有权快照。 */
@@ -698,16 +838,37 @@ export function perfRecordRuntimeResourceSnapshot(
   const finiteOrNull = (value: number | null | undefined): number | null =>
     value != null && Number.isFinite(value) && value >= 0 ? value : null;
   const countFields = [
-    'sceneObjectCount', 'groupCount', 'meshCount',
-    'uniqueGeometryCount', 'uniqueMaterialCount', 'uniqueTextureCount',
-    'rendererInfoGeometries', 'rendererInfoTextures', 'rendererInfoPrograms', 'rendererInfoDrawCalls',
-    'templateCount', 'templateParseCount', 'sharedPlacementCount',
-    'exclusivePlacementCount', 'sharedGeometryCount', 'sharedMaterialCount',
-    'sharedTextureCount', 'loadedXmlModGroupCount', 'loadedStlGroupCount',
-    'fragmentModelCount', 'loadedIfcModelCount', 'currentIfcEntryCount',
-    'cbmNodeCount', 'spatialNodeCount', 'spatialObjectCount',
-    'spatialLinkCount', 'fileDevRelationCount',
-    'connectionPreviewBatchCount', 'connectionPreviewObjectCount', 'connectionPreviewCompleteModels', 'connectionPreviewReadyModels',
+    'sceneObjectCount',
+    'groupCount',
+    'meshCount',
+    'uniqueGeometryCount',
+    'uniqueMaterialCount',
+    'uniqueTextureCount',
+    'rendererInfoGeometries',
+    'rendererInfoTextures',
+    'rendererInfoPrograms',
+    'rendererInfoDrawCalls',
+    'templateCount',
+    'templateParseCount',
+    'sharedPlacementCount',
+    'exclusivePlacementCount',
+    'sharedGeometryCount',
+    'sharedMaterialCount',
+    'sharedTextureCount',
+    'loadedXmlModGroupCount',
+    'loadedStlGroupCount',
+    'fragmentModelCount',
+    'loadedIfcModelCount',
+    'currentIfcEntryCount',
+    'cbmNodeCount',
+    'spatialNodeCount',
+    'spatialObjectCount',
+    'spatialLinkCount',
+    'fileDevRelationCount',
+    'connectionPreviewBatchCount',
+    'connectionPreviewObjectCount',
+    'connectionPreviewCompleteModels',
+    'connectionPreviewReadyModels',
   ] as const;
   const normalized = {} as Omit<PerfRuntimeResourceSnapshot, 'label' | 'atMs' | 'sessionId'>;
   for (const field of countFields) {
@@ -734,9 +895,13 @@ export function perfRuntimeResourceSnapshot(): PerfRuntimeResourceSnapshot[] {
 /** cleanupProfile 是 runtime resource 快照的稳定子集，避免创建第二套采样器。 */
 export function perfCleanupSnapshot(): PerfRuntimeResourceSnapshot[] {
   const checkpoints = new Set<PerfCleanupCheckpoint>([
-    'beforeCleanup', 'afterCleanup', 'settledAfterCleanup',
+    'beforeCleanup',
+    'afterCleanup',
+    'settledAfterCleanup',
   ]);
-  return perfRuntimeResourceSnapshot().filter((snapshot) => checkpoints.has(snapshot.label as PerfCleanupCheckpoint));
+  return perfRuntimeResourceSnapshot().filter((snapshot) =>
+    checkpoints.has(snapshot.label as PerfCleanupCheckpoint),
+  );
 }
 
 /** 记录一次已经聚合的 DEV geometry profile；不记录每个 placement 的 trace。 */
@@ -759,7 +924,12 @@ export function perfRecordIfcLoadProfile(
 ): void {
   if (!perfIsCurrentSession(session)) return;
   substationIfcLoads.push({ ...profile });
-  perfRecordExternalSpan(`变电 IFC file profile · ${profile.path}`, profile.loadMs, { ...profile }, session);
+  perfRecordExternalSpan(
+    `变电 IFC file profile · ${profile.path}`,
+    profile.loadMs,
+    { ...profile },
+    session,
+  );
 }
 
 export function perfRecordSubstationIfcRead(
@@ -787,33 +957,69 @@ export function perfRecordSubstationIfcProfile(
   substationIfcParses.push(normalized);
   const prefix = `变电 IFC Spatial Semantic · ${profile.entryPath}`;
   perfRecordExternalSpan(`${prefix} · total`, profile.totalMs, normalized, session);
-  perfRecordExternalSpan(`${prefix} · STEP scan`, profile.stepScanMs, {
-    rawEntityCount: profile.rawEntityCount,
-    ...(profile.retainedEntityCount != null ? { retainedEntityCount: profile.retainedEntityCount } : {}),
-    ...(profile.placementCandidateCount != null ? { placementCandidateCount: profile.placementCandidateCount } : {}),
-  }, session);
-  perfRecordExternalSpan(`${prefix} · placement/detail`, profile.placementDetailMs, {
-    detailEntityCount: profile.detailEntityCount,
-    placementEntityCount: profile.placementEntityCount,
-    ...(profile.placementCandidateCount != null ? { placementCandidateCount: profile.placementCandidateCount } : {}),
-  }, session);
-  perfRecordExternalSpan(`${prefix} · spatial entity`, profile.spatialEntityMs, { spatialEntityCount: profile.spatialEntityCount }, session);
-  perfRecordExternalSpan(`${prefix} · property/quantity/material/classification`, profile.propertyMs, {
-    propertyEntityCount: profile.propertyEntityCount,
-    quantityEntityCount: profile.quantityEntityCount,
-    propertyValueCount: profile.propertyValueCount,
-    quantityValueCount: profile.quantityValueCount,
-    materialEntityCount: profile.materialEntityCount,
-    classificationEntityCount: profile.classificationEntityCount,
-  }, session);
-  perfRecordExternalSpan(`${prefix} · relationships`, profile.relationshipMs, {
-    relationshipRecordCount: profile.relationshipRecordCount,
-    relationshipReferenceCount: profile.relationshipReferenceCount,
-  }, session);
-  perfRecordExternalSpan(`${prefix} · finalize`, profile.finalizeMs, {
-    objectCount: profile.objectCount,
-    containedObjectCount: profile.containedObjectCount,
-  }, session);
+  perfRecordExternalSpan(
+    `${prefix} · STEP scan`,
+    profile.stepScanMs,
+    {
+      rawEntityCount: profile.rawEntityCount,
+      ...(profile.retainedEntityCount != null
+        ? { retainedEntityCount: profile.retainedEntityCount }
+        : {}),
+      ...(profile.placementCandidateCount != null
+        ? { placementCandidateCount: profile.placementCandidateCount }
+        : {}),
+    },
+    session,
+  );
+  perfRecordExternalSpan(
+    `${prefix} · placement/detail`,
+    profile.placementDetailMs,
+    {
+      detailEntityCount: profile.detailEntityCount,
+      placementEntityCount: profile.placementEntityCount,
+      ...(profile.placementCandidateCount != null
+        ? { placementCandidateCount: profile.placementCandidateCount }
+        : {}),
+    },
+    session,
+  );
+  perfRecordExternalSpan(
+    `${prefix} · spatial entity`,
+    profile.spatialEntityMs,
+    { spatialEntityCount: profile.spatialEntityCount },
+    session,
+  );
+  perfRecordExternalSpan(
+    `${prefix} · property/quantity/material/classification`,
+    profile.propertyMs,
+    {
+      propertyEntityCount: profile.propertyEntityCount,
+      quantityEntityCount: profile.quantityEntityCount,
+      propertyValueCount: profile.propertyValueCount,
+      quantityValueCount: profile.quantityValueCount,
+      materialEntityCount: profile.materialEntityCount,
+      classificationEntityCount: profile.classificationEntityCount,
+    },
+    session,
+  );
+  perfRecordExternalSpan(
+    `${prefix} · relationships`,
+    profile.relationshipMs,
+    {
+      relationshipRecordCount: profile.relationshipRecordCount,
+      relationshipReferenceCount: profile.relationshipReferenceCount,
+    },
+    session,
+  );
+  perfRecordExternalSpan(
+    `${prefix} · finalize`,
+    profile.finalizeMs,
+    {
+      objectCount: profile.objectCount,
+      containedObjectCount: profile.containedObjectCount,
+    },
+    session,
+  );
 }
 
 export function perfRecordSubstationFinalizeProfile(
@@ -823,7 +1029,12 @@ export function perfRecordSubstationFinalizeProfile(
   if (!perfIsCurrentSession(session)) return;
   const normalized = { ...profile };
   substationFinalizes.push(normalized);
-  perfRecordExternalSpan('变电 spatial finalize / CBM linkage', profile.durationMs, normalized, session);
+  perfRecordExternalSpan(
+    '变电 spatial finalize / CBM linkage',
+    profile.durationMs,
+    normalized,
+    session,
+  );
 }
 
 export function perfSubstationSnapshot(): PerfSubstationStats {
@@ -835,7 +1046,12 @@ export function perfSubstationSnapshot(): PerfSubstationStats {
   };
 }
 /** Publication summaries are independent from visible-model readiness. */
-export function perfIfcPublicationSnapshot(){return {settled:substationIfcLoads.length,failed:substationIfcLoads.filter(row=>row.cacheWriteOk===false).length};}
+export function perfIfcPublicationSnapshot() {
+  return {
+    settled: substationIfcLoads.length,
+    failed: substationIfcLoads.filter((row) => row.cacheWriteOk === false).length,
+  };
+}
 
 /**
  * 记录一次 Tauri invoke。由 bridge/invokeTimed.ts 调用，不能把旧 session
@@ -852,16 +1068,18 @@ export function perfRecordInvoke(
   if (sessionId !== currentSession.id) return;
   const safeDuration = Number.isFinite(durationMs) && durationMs >= 0 ? durationMs : 0;
   const safeBytes = Number.isFinite(bytes) && bytes >= 0 ? bytes : 0;
-  const current = invokeStats.get(command) ?? {
-    count: 0,
-    bytes: 0,
-    measuredCalls: 0,
-    unmeasuredCalls: 0,
-    totalMs: 0,
-    maxMs: 0,
-    failures: 0,
-    durations: [],
-  } satisfies InvokeAccumulator;
+  const current =
+    invokeStats.get(command) ??
+    ({
+      count: 0,
+      bytes: 0,
+      measuredCalls: 0,
+      unmeasuredCalls: 0,
+      totalMs: 0,
+      maxMs: 0,
+      failures: 0,
+      durations: [],
+    } satisfies InvokeAccumulator);
   current.count += 1;
   current.bytes += safeBytes;
   if (bytesMeasured) current.measuredCalls += 1;
@@ -913,7 +1131,7 @@ export function perfRecordBatchRead(
   sessionId: number = currentSession.id,
 ): void {
   if (sessionId !== currentSession.id) return;
-  const safe = (value: number): number => Number.isFinite(value) && value >= 0 ? value : 0;
+  const safe = (value: number): number => (Number.isFinite(value) && value >= 0 ? value : 0);
   const totalMs = safe(profile.totalMs);
   const entryCount = Math.max(0, Math.floor(safe(profile.entryCount)));
   const hitCount = Math.min(entryCount, Math.max(0, Math.floor(safe(profile.hitCount))));
@@ -972,7 +1190,14 @@ export function installLongTaskObserver(): () => void {
         longTaskStats.count += 1;
         longTaskStats.totalBlockingTimeMs += Math.max(0, duration - 50);
         longTaskStats.maxMs = Math.max(longTaskStats.maxMs, duration);
-        longTaskStats.samples.push({ atMs: performance.now() - sessionStartMs, durationMs: duration, blockingMs: Math.max(0, duration - 50), ...(activeSpanLabels.length ? { phase: activeSpanLabels[activeSpanLabels.length - 1] } : {}) });
+        longTaskStats.samples.push({
+          atMs: performance.now() - sessionStartMs,
+          durationMs: duration,
+          blockingMs: Math.max(0, duration - 50),
+          ...(activeSpanLabels.length
+            ? { phase: activeSpanLabels[activeSpanLabels.length - 1] }
+            : {}),
+        });
         if (longTaskStats.samples.length > 64) longTaskStats.samples.shift();
       }
     });
@@ -1005,7 +1230,7 @@ export function perfLongTaskSnapshot(): PerfLongTaskStats {
 
 function debugPerf(span: PerfSpan): void {
   // 控制台即时可见（不受 DEBUG 开关限制——打点本身极廉价，且是排障关键线索）
-  console.log(
+  logger.log(
     `[perf] ${span.label}: ${span.durationMs > 0 ? `${Math.round(span.durationMs)}ms` : '事件'} @ +${Math.round(span.startMs)}ms`,
     span.meta ?? '',
   );
@@ -1057,15 +1282,17 @@ function benchmarkPath(value: string): string {
 
 function isBenchmarkPathField(key: string): boolean {
   const normalized = key.toLowerCase();
-  return normalized === 'name'
-    || normalized === 'sample'
-    || normalized === 'path'
-    || normalized.endsWith('path')
-    || normalized.endsWith('_path')
-    || normalized.includes('devpath')
-    || normalized.includes('entrypath')
-    || normalized === 'fallbackdevpaths'
-    || normalized === 'worstdevpaths';
+  return (
+    normalized === 'name' ||
+    normalized === 'sample' ||
+    normalized === 'path' ||
+    normalized.endsWith('path') ||
+    normalized.endsWith('_path') ||
+    normalized.includes('devpath') ||
+    normalized.includes('entrypath') ||
+    normalized === 'fallbackdevpaths' ||
+    normalized === 'worstdevpaths'
+  );
 }
 
 /**
@@ -1079,15 +1306,15 @@ function sanitizeBenchmarkValue(value: unknown, key = ''): unknown {
   if (!value || typeof value !== 'object') return value;
   const result: Record<string, unknown> = {};
   for (const [rawKey, child] of Object.entries(value)) {
-    const safeKey = rawKey.includes('/') || rawKey.includes('\\')
-      ? benchmarkPath(rawKey)
-      : rawKey;
+    const safeKey = rawKey.includes('/') || rawKey.includes('\\') ? benchmarkPath(rawKey) : rawKey;
     result[safeKey] = sanitizeBenchmarkValue(child, rawKey);
   }
   return result;
 }
 
-function benchmarkDefaults(): Required<Pick<PerfBenchmarkMetadata, 'commit' | 'platform' | 'buildMode'>> & {
+function benchmarkDefaults(): Required<
+  Pick<PerfBenchmarkMetadata, 'commit' | 'platform' | 'buildMode'>
+> & {
   sample: string | null;
   coldWarm: 'cold' | 'warm' | null;
   sourceSha256: string | null;
@@ -1098,23 +1325,29 @@ function benchmarkDefaults(): Required<Pick<PerfBenchmarkMetadata, 'commit' | 'p
     __GIM_BENCHMARK_COLD_WARM__?: unknown;
   };
   const env = import.meta.env as Record<string, unknown>;
-  const platform = typeof navigator !== 'undefined'
-    ? ((navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform
-      || navigator.platform
-      || 'unknown')
-    : 'unknown';
-  const sample = typeof globals.__GIM_BENCHMARK_SAMPLE_ID__ === 'string'
-    && globals.__GIM_BENCHMARK_SAMPLE_ID__.trim()
-    ? benchmarkPath(globals.__GIM_BENCHMARK_SAMPLE_ID__.trim())
-    : null;
-  const coldWarm = globals.__GIM_BENCHMARK_COLD_WARM__ === 'cold'
-    || globals.__GIM_BENCHMARK_COLD_WARM__ === 'warm'
-    ? globals.__GIM_BENCHMARK_COLD_WARM__
-    : null;
+  const platform =
+    typeof navigator !== 'undefined'
+      ? (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData
+          ?.platform ||
+        navigator.platform ||
+        'unknown'
+      : 'unknown';
+  const sample =
+    typeof globals.__GIM_BENCHMARK_SAMPLE_ID__ === 'string' &&
+    globals.__GIM_BENCHMARK_SAMPLE_ID__.trim()
+      ? benchmarkPath(globals.__GIM_BENCHMARK_SAMPLE_ID__.trim())
+      : null;
+  const coldWarm =
+    globals.__GIM_BENCHMARK_COLD_WARM__ === 'cold' || globals.__GIM_BENCHMARK_COLD_WARM__ === 'warm'
+      ? globals.__GIM_BENCHMARK_COLD_WARM__
+      : null;
   return {
-    commit: typeof env.VITE_GIM_COMMIT === 'string'
-      ? env.VITE_GIM_COMMIT
-      : typeof globals.__GIM_COMMIT__ === 'string' ? globals.__GIM_COMMIT__ : 'unknown',
+    commit:
+      typeof env.VITE_GIM_COMMIT === 'string'
+        ? env.VITE_GIM_COMMIT
+        : typeof globals.__GIM_COMMIT__ === 'string'
+          ? globals.__GIM_COMMIT__
+          : 'unknown',
     platform,
     buildMode: import.meta.env?.DEV ? 'development' : 'production',
     sample,
@@ -1157,7 +1390,14 @@ export function perfSummary(): string {
   const invokes = perfInvokeSnapshot();
   const batchReads = perfBatchReadSnapshot();
   const longTasks = perfLongTaskSnapshot();
-  if (spans.length === 0 && invokes.length === 0 && batchReads.count === 0 && longTasks.count === 0 && memorySamples.length === 0) return '(无性能埋点数据)';
+  if (
+    spans.length === 0 &&
+    invokes.length === 0 &&
+    batchReads.count === 0 &&
+    longTasks.count === 0 &&
+    memorySamples.length === 0
+  )
+    return '(无性能埋点数据)';
   const lines = ['阶段耗时（相对会话起点）:', '─'.repeat(64)];
   for (const s of spans) {
     const dur = s.durationMs > 0 ? `${Math.round(s.durationMs)}ms`.padEnd(8) : '  事件 ';
@@ -1168,14 +1408,22 @@ export function perfSummary(): string {
   if (invokes.length > 0) {
     const measured = invokes.reduce((sum, item) => sum + item.bytes, 0);
     const unmeasured = invokes.reduce((sum, item) => sum + item.unmeasuredCalls, 0);
-    lines.push(`Tauri IPC: ${invokes.reduce((sum, item) => sum + item.count, 0)} 次, ${Math.round(measured)} B${unmeasured > 0 ? `（${unmeasured} 次字节未测量）` : ''}`);
+    lines.push(
+      `Tauri IPC: ${invokes.reduce((sum, item) => sum + item.count, 0)} 次, ${Math.round(measured)} B${unmeasured > 0 ? `（${unmeasured} 次字节未测量）` : ''}`,
+    );
   }
   if (batchReads.count > 0) {
-    lines.push(`Batch Rust: ${batchReads.count} 批, ${batchReads.requestedEntries} 条（命中 ${batchReads.hitEntries}）, ${Math.round(batchReads.bytes)} B, read ${Math.round(batchReads.totalReadMs)}ms, encode ${Math.round(batchReads.totalEncodeMs)}ms, total ${Math.round(batchReads.totalMs)}ms`);
+    lines.push(
+      `Batch Rust: ${batchReads.count} 批, ${batchReads.requestedEntries} 条（命中 ${batchReads.hitEntries}）, ${Math.round(batchReads.bytes)} B, read ${Math.round(batchReads.totalReadMs)}ms, encode ${Math.round(batchReads.totalEncodeMs)}ms, total ${Math.round(batchReads.totalMs)}ms`,
+    );
   }
-  lines.push(`Long Task: ${longTasks.count} 次, blocking ${Math.round(longTasks.totalBlockingTimeMs)}ms, max ${Math.round(longTasks.maxMs)}ms`);
+  lines.push(
+    `Long Task: ${longTasks.count} 次, blocking ${Math.round(longTasks.totalBlockingTimeMs)}ms, max ${Math.round(longTasks.maxMs)}ms`,
+  );
   const moments = perfProductMomentSnapshot();
-  const momentText = (Object.entries(moments) as Array<[PerfProductMoment, PerfProductMomentInfo | null]>)
+  const momentText = (
+    Object.entries(moments) as Array<[PerfProductMoment, PerfProductMomentInfo | null]>
+  )
     .filter(([, value]) => value)
     .map(([key, value]) => `${key}=+${Math.round(value!.atMs)}ms`)
     .join(', ');
@@ -1184,11 +1432,15 @@ export function perfSummary(): string {
   const heapSamples = memorySamples.filter((sample) => sample.jsHeapUsedBytes != null);
   if (rssSamples.length > 0) {
     const peak = Math.max(...rssSamples.map((sample) => sample.rssBytes!));
-    lines.push(`RSS 样本: ${rssSamples.length} 个, 峰值 ${(peak / 1024 / 1024).toFixed(1)}MB（来源以 sample.rssSource 标注）`);
+    lines.push(
+      `RSS 样本: ${rssSamples.length} 个, 峰值 ${(peak / 1024 / 1024).toFixed(1)}MB（来源以 sample.rssSource 标注）`,
+    );
   }
   if (heapSamples.length > 0) {
     const peak = Math.max(...heapSamples.map((sample) => sample.jsHeapUsedBytes!));
-    lines.push(`JS heap 样本: ${heapSamples.length} 个, used 峰值 ${(peak / 1024 / 1024).toFixed(1)}MB（不等同 RSS）`);
+    lines.push(
+      `JS heap 样本: ${heapSamples.length} 个, used 峰值 ${(peak / 1024 / 1024).toFixed(1)}MB（不等同 RSS）`,
+    );
   }
   return lines.join('\n');
 }

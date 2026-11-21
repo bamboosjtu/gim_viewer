@@ -1,3 +1,4 @@
+import {geometryTrackMetrics} from './geometry-track-metrics.mjs';
 import {CaptureController,diagnosticPlan} from './diagnostics.mjs';
 import {SystemCapture,systemCapabilities} from './system-diagnostics.mjs';
 import {analyzeRun,exportRunTrace} from './observability.mjs';
@@ -461,6 +462,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
       measurement?.lifecycleComplete===true&&!measurement.activeTasks.length,
     measurementIncompleteItems,memoryEvidenceComplete,memoryIncompleteItems,
     requiredMetrics:['firstResponseMs','automaticLoadMs','processPrivatePeakBytes',...((evidence?.contentEvidence?.expectedShownOccurrences??0)>0?['firstGeometryMs']:[])],metrics:{
+      ...geometryTrackMetrics(observation),
       firstResponseMs:observation?.moments.navigationUiReady??observation?.moments.coreSemanticReady??null,
       modelTreeReadyMs:observation?.projectType==='substation'?observation?.moments.engineeringTreeReady??null:
         observation?.moments.navigationUiReady??null,
