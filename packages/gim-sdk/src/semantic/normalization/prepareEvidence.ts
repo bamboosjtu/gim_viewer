@@ -50,6 +50,7 @@ export function wholeName(row: ObjectEvidence, category: string): string {
 
 export interface PreparedEvidence {
   disputedComposition: Map<string, NonNullable<ObjectEvidence["composition"]>>;
+  conflictingComposition: Map<string, readonly CompositionEvidence[]>;
   ordered: ObjectEvidence[];
   raw: Map<string, ObjectEvidence>;
   parents: Set<string | undefined>;
@@ -68,13 +69,38 @@ export function prepareEvidence(
     string,
     NonNullable<ObjectEvidence["composition"]>
   >();
+  const conflictingComposition = new Map<
+    string,
+    readonly CompositionEvidence[]
+  >();
   const ordered = input
     .map((row) => {
       if (!row.composition?.length) return row;
       let uncertain: CompositionEvidence[] | undefined;
       let parent: string | undefined;
       let multipleParents = false;
+      const physicalParent = row.assemblyParentId;
+      let physicalEdge: CompositionEvidence | undefined;
+      let decompositionParent = false;
+      let contrarySemanticParent = false;
       for (const edge of row.composition) {
+        if (physicalParent && edge.status === "confirmed") {
+          if (
+            edge.kind === "physical_assembly" &&
+            edge.parentSourceIds.includes(physicalParent)
+          )
+            physicalEdge = edge;
+          if (
+            edge.kind === "object_decomposition" &&
+            edge.parentSourceIds.includes(physicalParent)
+          )
+            decompositionParent = true;
+          if (
+            edge.kind === "semantic_composition" &&
+            edge.parentSourceIds.some((id) => id !== physicalParent)
+          )
+            contrarySemanticParent = true;
+        }
         if (edge.kind !== "semantic_composition") continue;
         if (edge.status !== "confirmed") {
           (uncertain ??= []).push(edge);
@@ -87,6 +113,25 @@ export function prepareEvidence(
             parent = id;
           }
         }
+      }
+      if (
+        physicalParent &&
+        contrarySemanticParent &&
+        (physicalEdge || !decompositionParent)
+      ) {
+        const edges = row.composition.filter(
+          (edge) => edge.kind !== "object_decomposition",
+        );
+        if (!physicalEdge)
+          edges.unshift({
+            kind: "physical_assembly",
+            status: "confirmed",
+            parentSourceIds: [physicalParent],
+            evidence: [`assembly:${physicalParent}->${row.sourceId}`],
+          });
+        conflictingComposition.set(row.sourceId, edges);
+        disputedComposition.set(row.sourceId, edges);
+        return row;
       }
       if (multipleParents)
         disputedComposition.set(
@@ -135,5 +180,12 @@ export function prepareEvidence(
       interpretObject(row, parents.has(row.sourceId)),
     ]),
   );
-  return { disputedComposition, ordered, raw, parents, meaning };
+  return {
+    disputedComposition,
+    conflictingComposition,
+    ordered,
+    raw,
+    parents,
+    meaning,
+  };
 }

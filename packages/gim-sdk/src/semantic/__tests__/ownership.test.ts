@@ -99,3 +99,23 @@ it('preserves an explicit independent boundary through category conflict but kee
  expect(snapshot.entities.find(row=>row.sourceIds.includes('whole'))?.category).toBe('E06');
  expect(normalizeEngineeringModel('scope',[...rows].reverse())).toEqual(snapshot);
 });
+
+it('keeps conflicting confirmed physical and semantic hosts unresolved without adapter host hints',()=>{
+ const physical={kind:'physical_assembly',status:'confirmed',parentSourceIds:['whole'],evidence:['physical:whole']} as const;
+ const semantic={kind:'semantic_composition',status:'confirmed',parentSourceIds:['other'],evidence:['semantic:other']} as const;
+ const leaf=declaredObject('leaf','散热器',{assemblyParentId:'whole',composition:[physical,semantic]});
+ const rows=[host(),declaredObject('other','断路器'),leaf];
+ const snapshot=normalizeEngineeringModel('scope',rows);
+ const member=snapshot.memberships.find(row=>row.sourceId==='leaf')!;
+ expect(member).toMatchObject({parentPartId:'whole',disposition:'pending_whole_member',compositionCandidates:[physical,semantic],
+   interpretation:{conflict:'composition_host_conflict',membershipStatus:'unresolved',membershipEvidence:['physical:whole','semantic:other']}});
+ expect(snapshot.pending.find(row=>row.id===member.ownerId)).toMatchObject({reason:'composition_host_conflict',sourceIds:['leaf']});
+ expect(snapshot.entities).toHaveLength(2);
+ expect(normalizeEngineeringModel('scope',[...rows].reverse())).toEqual(snapshot);
+ const adapted=normalizeEngineeringModel('scope',[...rows.slice(0,2),{...leaf,
+  declaredHostSourceIds:[{value:'other',evidenceId:'semantic:other'}]}]);
+ expect(adapted).toEqual(snapshot);
+ const matching=normalizeEngineeringModel('scope',[...rows.slice(0,2),{...leaf,
+  composition:[physical,{...semantic,parentSourceIds:['whole']}]}]);
+ expect(matching.memberships.find(row=>row.sourceId==='leaf')?.disposition).toBe('whole_member');
+});

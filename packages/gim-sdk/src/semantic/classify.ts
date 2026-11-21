@@ -16,7 +16,7 @@ import {
 } from "./catalogClassification.js";
 import { ENGINEERING_CATEGORIES } from "./catalog/catalogLabels.js";
 
-export const ENGINEERING_RULES_VERSION = `recognition-evidence-policy-v1|decision-revision:1|${STANDARD_CATALOG_VERSION}|${POLICY_CONTENT}`;
+export const ENGINEERING_RULES_VERSION = `recognition-evidence-policy-v1|decision-revision:2|${STANDARD_CATALOG_VERSION}|${POLICY_CONTENT}`;
 export function normalizedObjectName(name: string): string {
   return name.normalize("NFKC").replace(/\s+/g, "");
 }

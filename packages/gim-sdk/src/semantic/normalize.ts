@@ -37,8 +37,14 @@ export function normalizeEngineeringModel(
   aliases: readonly SourceAlias[] = [],
 ): EngineeringSnapshot {
   if (!scope) throw new Error("Engineering scope is required");
-  const { disputedComposition, ordered, raw, parents, meaning } =
-    prepareEvidence(input);
+  const {
+    disputedComposition,
+    conflictingComposition,
+    ordered,
+    raw,
+    parents,
+    meaning,
+  } = prepareEvidence(input);
   const entities = new Map<string, EngineeringEntity>();
   const pending = new Map<string, PendingWhole>();
   const owners = new Map<string, string | null>();
@@ -112,6 +118,30 @@ export function normalizeEngineeringModel(
     pending.set(id, { id, reason, sourceIds: [] });
     sourceIds.forEach((sourceId) => owners.set(sourceId, id));
     return id;
+  }
+
+  // A confirmed composition conflict blocks both initial grouping and host
+  // recovery. Keep the actual physical parent and both source proofs.
+  for (const [sourceId, edges] of [...conflictingComposition].sort(([a], [b]) =>
+    compare(a, b),
+  )) {
+    const interpretation = meaning.get(sourceId)!;
+    diagnostics.push({
+      kind: "composition_host_conflict",
+      identity: sourceId,
+      name: raw.get(sourceId)!.name,
+    });
+    if (
+      interpretation.independent &&
+      interpretation.objectRole?.status === "confirmed"
+    )
+      continue;
+    interpretation.conflict = "composition_host_conflict";
+    interpretation.membershipStatus = "unresolved";
+    interpretation.membershipEvidence = [
+      ...new Set(edges.flatMap((edge) => edge.evidence)),
+    ].sort(compare);
+    bundle(sourceId, "composition_host_conflict", [sourceId]);
   }
 
   resolveTransformerBanks({
