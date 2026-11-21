@@ -124,7 +124,9 @@ export function resolveOwnership({
         name: row.name,
       });
     if (m.basis === "attribute_conflict") {
-      bundle(sourceId, "object_attributes_conflict", [sourceId]);
+      if (m.independent && m.objectRole?.status === "confirmed")
+        associate("declared_independent_boundary", "source_assembly_only");
+      else bundle(sourceId, "object_attributes_conflict", [sourceId]);
     } else if (
       row.assemblyParentId &&
       !raw.has(row.assemblyParentId) &&

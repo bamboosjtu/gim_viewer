@@ -78,3 +78,24 @@ it('preserves uncertain semantic candidates alongside independent physical owner
  expect(snapshot.memberships.find(row=>row.sourceId==='part')).toMatchObject({disposition:'whole_member',parentPartId:'whole',compositionCandidates:[uncertain]});
  expect(snapshot.diagnostics).toContainEqual(expect.objectContaining({kind:'composition_parent_unresolved',identity:'part'}));
 });
+
+it('preserves an explicit independent boundary through category conflict but keeps conflicting roles pending',()=>{
+ const independent=declaredObject('independent','冲突对象',{
+  typeCategory:'E06',typeEvidenceId:'type:circuit-breaker',
+  propertyCategories:[{value:'E07',evidenceId:'fam:switch'}],
+  objectRoles:[{value:'independent',evidenceId:'role:independent'}],
+ });
+ const ambiguous=declaredObject('ambiguous','角色冲突',{...independent,sourceId:'ambiguous',
+  objectRoles:[{value:'independent',evidenceId:'role:independent'},{value:'part',evidenceId:'role:part'}],
+ });
+ const rows=[host(),independent,ambiguous];
+ const snapshot=normalizeEngineeringModel('scope',rows);
+ const entity=snapshot.entities.find(row=>row.sourceIds.includes('independent'))!;
+ expect(entity).toMatchObject({id:'entity:["scope","independent"]',category:'U-OBJECT',boundaryStatus:'confirmed',classificationStatus:'unresolved'});
+ const member=snapshot.memberships.find(row=>row.sourceId==='independent')!;
+ expect(member).toMatchObject({ownerId:entity.id,disposition:'whole_member',interpretation:{independent:true,objectRole:{status:'confirmed',evidence:['role:independent']}}});
+ expect(member.interpretation.classificationEvidence).toEqual(expect.arrayContaining(['type:circuit-breaker','fam:switch']));
+ expect(snapshot.pending).toContainEqual(expect.objectContaining({reason:'object_attributes_conflict',sourceIds:['ambiguous']}));
+ expect(snapshot.entities.find(row=>row.sourceIds.includes('whole'))?.category).toBe('E06');
+ expect(normalizeEngineeringModel('scope',[...rows].reverse())).toEqual(snapshot);
+});

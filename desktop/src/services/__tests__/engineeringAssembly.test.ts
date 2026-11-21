@@ -123,3 +123,20 @@ it('reuses unchanged source facts across model frames and refuses foreign or mis
   await expect(decodeEngineeringWorkerResult(delta,()=>true,{})).rejects.toThrow('graph reference unavailable');
   g.revision=(g.revision??0)+1;expect((await encodeEngineeringWorkerResultAsync(result,sender)).graphFrame?.reference).toBe(false);
 });
+
+it('publishes unaffected equipment and the known boundary of an independently declared object with disputed type',async()=>{
+  const files:Record<string,string>={
+    'project.cbm':'SUBSYSTEM0=good.cbm\nSUBSYSTEM1=bad.cbm',
+    'good.cbm':'OBJECTMODELPOINTER=good.dev',
+    'bad.cbm':'OBJECTMODELPOINTER=bad.dev',
+    'good.dev':'TYPE=CircuitBreaker',
+    'bad.dev':'TYPE=GIS\nEQUIPMENTTYPE=HGIS\nOBJECTROLE=independent',
+  };
+  const source=await extractEngineeringSourceGraph({paths:Object.keys(files),readText:async path=>files[path]});
+  const {snapshot,stageErrors}=assembleEngineeringView('scope',source,[],[]);
+  const normal=source.records.find(row=>row.source==='good.dev')!,disputed=source.records.find(row=>row.source==='bad.dev')!;
+  expect(stageErrors.recognition).toBeUndefined();
+  expect(snapshot.entities.find(row=>row.sourceIds.includes(normal.id))).toMatchObject({category:'E06'});
+  expect(snapshot.entities.find(row=>row.sourceIds.includes(disputed.id))).toMatchObject({category:'U-OBJECT',boundaryStatus:'confirmed',classificationStatus:'unresolved'});
+  expect(snapshot.memberships.find(row=>row.sourceId===disputed.id)?.interpretation).toMatchObject({independent:true,conflict:'equipment_type_conflict'});
+});

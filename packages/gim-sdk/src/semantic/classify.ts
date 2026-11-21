@@ -16,7 +16,7 @@ import {
 } from "./catalogClassification.js";
 import { ENGINEERING_CATEGORIES } from "./catalog/catalogLabels.js";
 
-export const ENGINEERING_RULES_VERSION = `recognition-evidence-policy-v1|${STANDARD_CATALOG_VERSION}|${POLICY_CONTENT}`;
+export const ENGINEERING_RULES_VERSION = `recognition-evidence-policy-v1|decision-revision:1|${STANDARD_CATALOG_VERSION}|${POLICY_CONTENT}`;
 export function normalizedObjectName(name: string): string {
   return name.normalize("NFKC").replace(/\s+/g, "");
 }
@@ -489,6 +489,13 @@ export function interpretRecognitionObject(
   )
     result.classificationStatus = "candidate";
   result.categoryStatus = result.classificationStatus ?? "unresolved";
+  // Category conflicts do not erase a separately confirmed object boundary.
+  const independentBoundary =
+    result.meaning === "object" &&
+    !!object.objectRoles?.length &&
+    object.objectRoles.every((role) => role.value === "independent");
+  if (independentBoundary && result.basis === "attribute_conflict")
+    result.independent = true;
   const roleEvidence = [
     ...new Set([
       ...(object.objectRoles?.map((p) => p.evidenceId) ?? []),
@@ -503,7 +510,7 @@ export function interpretRecognitionObject(
   result.objectRole = {
     id: result.meaning,
     status:
-      result.basis === "attribute_conflict"
+      result.basis === "attribute_conflict" && !independentBoundary
         ? "unresolved"
         : roleEvidence.length ||
             object.traits.nonphysical ||
