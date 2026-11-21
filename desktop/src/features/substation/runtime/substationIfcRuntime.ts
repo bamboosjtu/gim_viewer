@@ -1,16 +1,11 @@
-import { projectPresentation } from '../../../services/projectPresentationPort.js';
 import * as statusPresentation from '../../../services/presentation/shell_statusBar.js';
 import { reportBackgroundError } from '../../../utils/backgroundErrors.js';
 
 import { setSubstationViewerInteractive } from './substationLoadingState.js';
 /** Sequential IFC loading, early geometry, cache profiles and background gates. */
-import {
-  setConnectionStatus,
-  setIfcStatus as publishIfcStatus,
-} from '../../../services/presentation/shell_statusBar.js';
+import { setConnectionStatus } from '../../../services/presentation/shell_statusBar.js';
 import type { IfcEntry } from '../../../gim/types.js';
 import type { AppState, ProjectLoadSession } from '../../../app/state.js';
-import { getFileByPath } from '../../../gim/fileLookup.js';
 import { logger } from '../../../utils/logger.js';
 import {
   SubstationBackgroundCoordinator,
@@ -23,7 +18,6 @@ import {
   perfMarkProductMoment,
   perfGeometryTracksEnabled,
   perfRecordTaskPhase,
-  perfRecordIfcLoadProfile,
 } from '../../../utils/perfTimings.js';
 import { startSubstationResourceMonitor } from '../../../services/substationResourceTelemetry.js';
 import { showLoading, hideLoading } from '../../../services/gimOpenCore.js';
@@ -37,7 +31,8 @@ import {
 import { sampleSubstationMemory } from './substationRuntimeTelemetry.js';
 import { stationViewPolicy } from '../../../services/stationViewPolicy.js';
 import { observeFirstGeometry } from '../../../services/geometryPresentationService.js';
-import { getIfcBufferForEntry } from './substationIfcSource.js';
+import { createSubstationIfcLoadProgress } from './substationIfcLoadProgress.js';
+import { loadSubstationIfcModel } from './substationIfcModelLoad.js';
 
 const trackedIfcCanvases = new WeakSet<HTMLCanvasElement>();
 
@@ -85,7 +80,6 @@ export async function loadAllIfcFiles(
     ) => void;
   } = {},
 ): Promise<void> {
-  const openingPolicy = 'bim-lod' as const;
   const session = options.session ?? state.captureProjectSession();
   const perfSession = perfCurrentSession();
   const measureGeometryTracks = perfGeometryTracksEnabled();
@@ -225,7 +219,6 @@ export async function loadAllIfcFiles(
   }
 
   showLoading('正在加载 IFC 模型...');
-  const failed: Array<{ name: string; message: string }> = [];
   let interactiveInitialized = false;
   let deferredStarted = false;
   let onIfcPresented: (() => void) | undefined;
@@ -452,38 +445,12 @@ export async function loadAllIfcFiles(
     });
   };
 
-  const ifcSources = new Map<string, string>();
-  const ifcStages = new Map<string, string>();
-  let activeIfcPath = '';
-  let ifcLifecycleSettled = false;
-  const cacheWriteFailures = new Set<string>();
-  const setIfcStatus = (text: string) => {
-    if (isCurrent() && !ifcLifecycleSettled) publishIfcStatus(text);
-  };
-  const ifcCacheProgress = () => {
-    const cold = [...ifcSources.values()].filter((source) => source === 'ifc').length;
-    const lod = [...ifcSources.values()].filter((source) => source === 'lod-cache').length;
-    return `冷转换 ${cold} · LOD缓存 ${lod}`;
-  };
-  const ifcStatus = (entry: IfcEntry, index: number, total: number, extra = '') => {
-    const skipped = state.ifcLoading.skippedLargeIfc.length;
-    return `IFC ${index + 1}/${total} · ${entry.name} · ${ifcStages.get(entry.path) ?? '待检查'}${extra ? ` · ${extra}` : ''} · ${ifcCacheProgress()}${skipped ? ` · 已跳过 ${skipped} 个超大 IFC` : ''}`;
-  };
-  const ifcStageLabels: Record<string, string> = {
-    'checking-cache': '查询LOD缓存',
-    'lod-cache-hit': 'LOD缓存命中',
-    'cold-convert': '冷转换中',
-    'far-ready': '远景就绪',
-    'cache-write-start': '缓存写入中',
-    'cache-written': '缓存已写',
-    'cache-write-failed': '远景就绪(缓存写入失败)',
-  };
-  const publishTerminalStatus = () => {
-    if (isCurrent())
-      publishIfcStatus(
-        `IFC 已结束 · 已加载 ${state.ifc.loadedModels.size}/${entries.length} · ${ifcCacheProgress()}${failed.length ? ` · 失败 ${failed.length}` : ''}${state.ifcLoading.skippedLargeIfc.length ? ` · 已跳过 ${state.ifcLoading.skippedLargeIfc.length} 个超大 IFC` : ''}${cacheWriteFailures.size ? ` · 缓存写入失败 ${cacheWriteFailures.size}` : ''}`,
-      );
-  };
+  const progress = createSubstationIfcLoadProgress({
+    total: entries.length,
+    isCurrent,
+    loadedCount: () => state.ifc.loadedModels.size,
+    skippedCount: () => state.ifcLoading.skippedLargeIfc.length,
+  });
   const lifecycleTask = (async (): Promise<void> => {
     try {
       const [{ ensureEngineReady }, { loadIfcEntry }, { shouldSkipLargeIfc }] = await Promise.all([
@@ -496,14 +463,14 @@ export async function loadAllIfcFiles(
       await ensureEngineReady(ctx, state, modelCallbacks);
       if (!isCurrent()) return;
       endEngineInit(undefined, { initialized: true });
-      let firstIfcLoadStarted = false;
-      const sizes = new Map(options.ifcSourceSizes);
-      for (const entry of entries) {
-        const file = state.currentFiles && getFileByPath(state.currentFiles, entry.path);
-        if (file) sizes.set(entry.path.toLowerCase(), file.size);
-      }
-      const { queue, skippedLargeIfc, evidencedConnections, hasConnections } =
-        planSubstationIfcLoad(entries, sizes, state.currentCbmTree, shouldSkipLargeIfc());
+      const { queue, skippedLargeIfc, evidencedConnections, hasConnections, sizes } =
+        planSubstationIfcLoad(
+          entries,
+          options.ifcSourceSizes,
+          state.currentCbmTree,
+          shouldSkipLargeIfc(),
+          state.currentFiles,
+        );
       if (skippedLargeIfc.length) {
         logger.warn('[IFC] 已按设置跳过超大文件:', skippedLargeIfc);
         perfMark('IFC 跳过超大文件', { skipped: skippedLargeIfc }, perfSession);
@@ -540,233 +507,91 @@ export async function loadAllIfcFiles(
             perfSession,
           );
         }
-        activeIfcPath = entry.path;
-        ifcStages.set(entry.path, ifcStageLabels['checking-cache']);
-        setIfcStatus(ifcStatus(entry, queueIndex, queue.length));
-        // After the first IFC the viewport and bottom status bar are the
-        // source of truth; do not cover them with the center loading pill.
-        if (!interactiveInitialized) showLoading(`正在加载 ${entry.name}...`);
-        let readEnded = false;
-        let readProfiled = false;
-        let lastIfcReadByteLength = 0;
-        let loadEnded = false;
-        const loadSource: { value: 'lod-cache' | 'ifc' | 'unknown' } = { value: 'unknown' };
-        const setIfcStage = (stage: string, meta?: Record<string, unknown>) => {
-          if (!isCurrent()) return;
-          if (stage === 'cache-write-failed') cacheWriteFailures.add(entry.path);
-          if (stage === 'cache-written') cacheWriteFailures.delete(entry.path);
-          if (ifcLifecycleSettled) {
-            if (stage === 'cache-write-failed' || stage === 'cache-written')
-              publishTerminalStatus();
-            return;
-          }
-          ifcStages.set(
-            entry.path,
-            (ifcStageLabels[stage] ?? stage) +
-              (typeof meta?.phase === 'string' && meta.phase ? ` · ${meta.phase}` : ''),
-          );
-          if (activeIfcPath === entry.path)
-            setIfcStatus(
-              ifcStatus(
-                entry,
-                queueIndex,
-                queue.length,
-                typeof meta?.ms === 'number' ? `${meta.ms}ms` : '',
-              ),
-            );
-        };
-        const statusStarted = performance.now();
-        const statusTimer = setInterval(() => {
-          if (isCurrent() && !ifcLifecycleSettled && activeIfcPath === entry.path)
-            setIfcStatus(
-              ifcStatus(
-                entry,
-                queueIndex,
-                queue.length,
-                `${Math.round((sizes.get(entry.path.toLowerCase()) ?? 0) / 1048576)} MiB · ${Math.floor((performance.now() - statusStarted) / 1000)}秒`,
-              ),
-            );
-        }, 1000);
-        const endRead = perfBegin(`变电 IFC read · ${entry.path}`, undefined, perfSession);
-        const endIfcLoad = perfBegin(
-          `变电 web-ifc / Fragments load · ${entry.path}`,
-          undefined,
+        await loadSubstationIfcModel({
+          state,
+          entry,
+          ctx,
+          session,
           perfSession,
-        );
-        try {
-          if (!firstIfcLoadStarted) {
-            firstIfcLoadStarted = true;
-            perfMarkProductMoment(
-              'firstIfcLoadStart',
-              {
-                name: entry.name,
-                path: entry.path,
-              },
-              perfSession,
-            );
-          }
-          const ifcBytes: { value: Uint8Array | null } = { value: null };
-          const readBytes = async (): Promise<Uint8Array | null> => {
-            ifcBytes.value = await getIfcBufferForEntry(entry, state, session);
-            if (!isCurrent()) return null;
-            lastIfcReadByteLength = ifcBytes.value?.byteLength ?? 0;
-            const readMeta = {
-              bytes: ifcBytes.value?.byteLength ?? 0,
-              source: state.currentFiles ? 'extracted' : 'disk-cache',
-              found: ifcBytes.value != null,
-            };
-            if (!readProfiled) {
-              endRead(undefined, readMeta);
-              readProfiled = true;
-            }
-            readEnded = true;
-            return ifcBytes.value;
-          };
-          let finePromise: Promise<void> | null = null;
-          const loadFine = (): Promise<void> => {
-            if (finePromise) return finePromise;
-            const task = loadIfcEntry(
-              ctx,
-              state,
-              entry,
-              readBytes,
-              (p) => {
-                if (isCurrent() && !ifcLifecycleSettled) {
-                  setIfcStatus(
-                    ifcStatus(entry, queueIndex, queue.length, `${Math.round(p * 100)}%`),
-                  );
-                  if (!interactiveInitialized)
-                    showLoading(`${entry.name}: ${Math.round(p * 100)}%`);
-                }
-              },
-              {
-                session,
-                perfSessionId: perfSession.id,
-                onLoadSource: (source) => {
-                  if (!isCurrent() || ifcLifecycleSettled) return;
-                  setSubstationViewerInteractive(true);
-                  loadSource.value = source;
-                  ifcSources.set(entry.path, source);
-                  ifcStages.set(
-                    entry.path,
-                    source === 'ifc'
-                      ? '冷转换完成'
-                      : source === 'lod-cache'
-                        ? 'LOD缓存恢复完成'
-                        : '完整缓存恢复完成',
-                  );
-                },
-                onStage: (stage, meta) => setIfcStage(stage, meta),
-                onProfile: (profile) => {
-                  if (isCurrent()) perfRecordIfcLoadProfile(profile, perfSession);
-                },
-                onRegionalBatch: (batch) => {
-                  if (isCurrent()) {
-                    const accepted = connectionPreview.acceptBatch({
-                      ...batch,
-                      modelId: entry.modelId,
-                      sourcePath: entry.path,
-                      sourceIdentity: session.sourceSha256 ?? `session:${session.generation}`,
-                      coordinateBasis: 'ifc-y-up-m',
-                    });
-                    if (
-                      accepted &&
-                      !connectionFirstBatches.has(entry.modelId) &&
-                      batch.chunks?.some((chunk) => chunk.vertices.length > 0)
-                    ) {
-                      connectionFirstBatches.add(entry.modelId);
-                      perfMark(
-                        'IFC connection preview first batch',
-                        {
-                          modelId: entry.modelId,
-                          entryPath: entry.path,
-                          sequence: batch.sequence,
-                          objects: batch.objects.length,
-                          bytes: batch.bytes,
-                          source: 'stream',
-                        },
-                        perfSession,
-                      );
-                    }
-                    updateConnectionStatus();
-                  }
-                },
-                onRegionalComplete: (meta) => {
-                  if (isCurrent()) {
-                    connectionPreview.markComplete(entry.modelId, meta);
-                    if (!connectionCompletions.has(entry.modelId)) {
-                      connectionCompletions.add(entry.modelId);
-                      perfMark(
-                        'IFC connection preview settled',
-                        {
-                          modelId: entry.modelId,
-                          entryPath: entry.path,
-                          objectCount: meta.objectCount,
-                          sequence: meta.sequence,
-                          source: 'regional-index-complete',
-                        },
-                        perfSession,
-                      );
-                    }
-                    updateConnectionStatus();
-                  }
-                },
-                transferInput: true,
-                openingPolicy,
-              },
-            );
-            const wrapped = task.catch((error) => {
-              if (finePromise === wrapped) {
-                ifcBytes.value = null;
-                readEnded = false;
-                finePromise = null;
-              }
-              throw error;
-            });
-            finePromise = wrapped;
-            return wrapped;
-          };
-          await loadFine();
-          if (!isCurrent()) return;
-          connectionPreview.markModelReady(
-            entry.modelId,
-            state.ifc.regionalRuntimes.get(entry.modelId)?.index.objects,
-          );
-          updateConnectionStatus();
-          if (!readEnded) {
-            // 浏览 LOD 缓存命中时不会调用 getIfcBuffer；显式记录“未读取 IFC”。
-            if (!readProfiled)
-              endRead(undefined, {
-                bytes: 0,
-                source: 'not-read',
-                found: false,
-              });
-            readEnded = true;
-          }
-          endIfcLoad(undefined, {
-            bytes: lastIfcReadByteLength,
-            source: loadSource.value,
-            cacheHit: loadSource.value === 'lod-cache',
-          });
-          loadEnded = true;
-          ifcStages.set(entry.path, loadSource.value === 'ifc' ? '冷转换完成' : 'LOD缓存恢复完成');
-          setIfcStatus(ifcStatus(entry, queueIndex, queue.length));
-          ifcBytes.value = null;
-          const runtimeModelId = state.ifc.runtimeModelIds.get(entry.modelId) ?? entry.modelId;
-          const usable =
-            state.ifc.loadedModels.has(entry.modelId) && ctx.fragments.list.has(runtimeModelId);
-          if (usable && measureGeometryTracks)
-            perfMarkProductMoment(
-              'ifcFirstUsable',
-              { source: loadSource.value, scope: 'registered-authoritative-base' },
-              perfSession,
-            );
-          if (usable && !interactiveInitialized) {
-            await initializeInteractiveAfterFirstIfc(entry, loadSource.value);
+          loadEntry: loadIfcEntry,
+          progress,
+          index: queueIndex,
+          queueSize: queue.length,
+          sourceSize: sizes.get(entry.path.toLowerCase()) ?? 0,
+          isInteractive: () => interactiveInitialized,
+          onRegionalBatch: (batch) => {
             if (!isCurrent()) return;
-          } else if (usable) {
-            // An empty/offscreen first IFC cannot certify a visible frame.
-            // Observe later models too, with one shared presentation callback.
+            const accepted = connectionPreview.acceptBatch({
+              ...batch,
+              modelId: entry.modelId,
+              sourcePath: entry.path,
+              sourceIdentity: session.sourceSha256 ?? `session:${session.generation}`,
+              coordinateBasis: 'ifc-y-up-m',
+            });
+            if (
+              accepted &&
+              !connectionFirstBatches.has(entry.modelId) &&
+              batch.chunks?.some((chunk) => chunk.vertices.length > 0)
+            ) {
+              connectionFirstBatches.add(entry.modelId);
+              perfMark(
+                'IFC connection preview first batch',
+                {
+                  modelId: entry.modelId,
+                  entryPath: entry.path,
+                  sequence: batch.sequence,
+                  objects: batch.objects.length,
+                  bytes: batch.bytes,
+                  source: 'stream',
+                },
+                perfSession,
+              );
+            }
+            updateConnectionStatus();
+          },
+          onRegionalComplete: (meta) => {
+            if (!isCurrent()) return;
+            connectionPreview.markComplete(entry.modelId, meta);
+            if (!connectionCompletions.has(entry.modelId)) {
+              connectionCompletions.add(entry.modelId);
+              perfMark(
+                'IFC connection preview settled',
+                {
+                  modelId: entry.modelId,
+                  entryPath: entry.path,
+                  objectCount: meta.objectCount,
+                  sequence: meta.sequence,
+                  source: 'regional-index-complete',
+                },
+                perfSession,
+              );
+            }
+            updateConnectionStatus();
+          },
+          onModelReady: () => {
+            connectionPreview.markModelReady(
+              entry.modelId,
+              state.ifc.regionalRuntimes.get(entry.modelId)?.index.objects,
+            );
+            updateConnectionStatus();
+          },
+          onModelFailed: () => {
+            connectionPreview.markFailed?.(entry.modelId);
+            updateConnectionStatus();
+          },
+          onUsableModel: async (source) => {
+            if (measureGeometryTracks)
+              perfMarkProductMoment(
+                'ifcFirstUsable',
+                { source, scope: 'registered-authoritative-base' },
+                perfSession,
+              );
+            if (!interactiveInitialized) {
+              await initializeInteractiveAfterFirstIfc(entry, source);
+              return;
+            }
+            // A first usable model does not guarantee a visible frame.
+            const runtimeModelId = state.ifc.runtimeModelIds.get(entry.modelId) ?? entry.modelId;
             const object = ctx.fragments.list.get(runtimeModelId)?.object;
             if (object)
               void observeFirstGeometry(
@@ -778,53 +603,11 @@ export async function loadAllIfcFiles(
                 perfSession,
                 'ifc',
               ).catch(reportBackgroundError);
-          }
-        } catch (err) {
-          if (!readEnded) {
-            endRead('（失败）', {
-              source: loadSource.value,
-              error: err instanceof Error ? err.message : String(err),
-            });
-            readEnded = true;
-          }
-          if (!loadEnded) {
-            endIfcLoad('（失败）', {
-              source: loadSource.value,
-              cacheHit: loadSource.value === 'lod-cache',
-              error: err instanceof Error ? err.message : String(err),
-            });
-            loadEnded = true;
-          }
-          const message = err instanceof Error ? err.message : String(err);
-          logger.error('[GIM] IFC 加载失败:', entry, err);
-          // IFC 加载可能在工程切换后才 reject；不要让旧工程继续进入
-          // 后续坐标同步、名称索引或 UI 渲染阶段。
-          if (!isCurrent()) return;
-          connectionPreview.markFailed?.(entry.modelId);
-          updateConnectionStatus();
-          ifcStages.set(entry.path, '失败');
-          setIfcStatus(ifcStatus(entry, queueIndex, queue.length, message.slice(0, 80)));
-          failed.push({ name: entry.name, message });
-          // 防御性清理
-          try {
-            const modelId = entry.modelId;
-            const runtimeModelId = state.ifc.runtimeModelIds.get(modelId) ?? modelId;
-            if (ctx.fragments.list.has(runtimeModelId)) {
-              void Promise.resolve(ctx.fragments.core.disposeModel(runtimeModelId)).catch(
-                reportBackgroundError,
-              );
-            }
-            state.ifc.loadedModels.delete(modelId);
-            projectPresentation().removeModelRows([modelId, runtimeModelId]);
-          } catch (cleanupErr) {
-            logger.warn('[GIM] cleanup failed model after load error', entry, cleanupErr);
-          }
-          continue;
-        } finally {
-          clearInterval(statusTimer);
-        }
+          },
+        });
+        if (!isCurrent()) return;
       }
-      activeIfcPath = '';
+      progress.finishQueue();
 
       // A first usable IFC normally establishes the coordinate anchor.  Retry
       // once after the sequential tail only when that first attempt had no
@@ -835,8 +618,7 @@ export async function loadAllIfcFiles(
         if (!isCurrent()) return;
       }
 
-      ifcLifecycleSettled = true;
-      publishTerminalStatus();
+      progress.settle();
       background.completeRemainingIfc();
       state.ifcLoading.pending = false;
       enqueueDevGeometry();
@@ -850,7 +632,7 @@ export async function loadAllIfcFiles(
           {
             total: entries.length,
             loaded: state.ifc.loadedModels.size,
-            failed: failed.length,
+            failed: progress.failedCount(),
             skipped: skippedLargeIfc.length,
           },
           perfSession,
@@ -860,7 +642,7 @@ export async function loadAllIfcFiles(
         {
           total: entries.length,
           loaded: state.ifc.loadedModels.size,
-          failed: failed.length,
+          failed: progress.failedCount(),
           firstInteractive: interactiveInitialized,
         },
         perfSession,
@@ -870,7 +652,11 @@ export async function loadAllIfcFiles(
           state,
           'allIfcReady',
           perfSession,
-          { total: entries.length, loaded: state.ifc.loadedModels.size, failed: failed.length },
+          {
+            total: entries.length,
+            loaded: state.ifc.loadedModels.size,
+            failed: progress.failedCount(),
+          },
           ctx,
         ),
       ).catch(reportBackgroundError);
@@ -927,8 +713,8 @@ export async function loadAllIfcFiles(
     // Interactive is reached after the first usable IFC.  The sequential tail
     // may still have failed entries, but it must no longer own the first-use
     // loading barrier.
-    if (failed.length > 0) {
-      showLoading(`部分 IFC 加载失败：${failed.length}/${entries.length}，详见控制台`);
+    if (progress.failedCount() > 0) {
+      showLoading(`部分 IFC 加载失败：${progress.failedCount()}/${entries.length}，详见控制台`);
       setTimeout(() => {
         if (isCurrent()) hideLoading();
       }, 4000);
@@ -942,9 +728,7 @@ export async function loadAllIfcFiles(
   // session/token guards after this promise resolves.
   void lifecycleTask
     .finally(() => {
-      ifcLifecycleSettled = true;
-      activeIfcPath = '';
-      publishTerminalStatus();
+      progress.settle();
       // If every IFC failed (or the session became stale) there is no usable
       // geometry event to signal. Release the caller rather than leaving an
       // unresolved readiness promise behind.

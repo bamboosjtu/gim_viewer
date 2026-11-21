@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { AppState } from '../../../../app/state.js';
 import type { CbmNode, IfcEntry } from '../../../../gim/types.js';
 import { loadAllIfcFiles } from '../../../../services/openGimService.js';
-import { perfMarkProductMoment, perfProductMomentSnapshot, perfReset } from '../../../../utils/perfTimings.js';
+import { perfMarkProductMoment, perfProductMomentSnapshot, perfReset, perfSnapshot } from '../../../../utils/perfTimings.js';
 
 const mocks = vi.hoisted(() => ({
   frames:[] as Array<()=>void>,
@@ -249,5 +249,65 @@ describe('Substation Loading readiness lifecycle', () => {
     callbacks.onStage('cache-written');expect(mocks.setIfcStatus).toHaveBeenLastCalledWith(terminal);
     state.activateProject(8,'next');nameIndexGate.resolve();const count=mocks.setIfcStatus.mock.calls.length;
     callbacks.onStage('cache-write-failed');progress(.5);expect(mocks.setIfcStatus).toHaveBeenCalledTimes(count);
+  });
+
+  it('continues after one IFC fails and records a later cache hit without reading its source', async () => {
+    vi.clearAllMocks();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const state = new AppState();
+    const session = state.activateProject(7, 'sha-substation');
+    const entries: IfcEntry[] = [
+      { name:'cold',path:'models/cold.ifc',modelId:'cold' },
+      { name:'warm',path:'models/warm.ifc',modelId:'warm' },
+    ];
+    const readFailedSource = vi.fn(async () => new ArrayBuffer(16));
+    const readWarmSource = vi.fn(async () => new ArrayBuffer(32));
+    state.currentFiles = new Map([
+      [entries[0].path, {size:16,arrayBuffer:readFailedSource} as unknown as File],
+      [entries[1].path, {size:32,arrayBuffer:readWarmSource} as unknown as File],
+    ]);
+    state.currentCbmTree = makeTree();
+    const list = new Map<string,{object:THREE.Group}>();
+    const ctx = { fragments:{list,core:{disposeModel:vi.fn()}}, world:{scene:{three:new THREE.Scene()}} };
+    mocks.getViewerRuntimeWithUI.mockResolvedValue({ctx,modelCallbacks:{}});
+    mocks.ensureEngineReady.mockResolvedValue(undefined);
+    mocks.buildIfcNameIndex.mockResolvedValue(undefined);
+    mocks.syncProjectSourceToViewerFromFragments.mockImplementation(async () => {
+      state.projectSourceToViewerMatrix = new THREE.Matrix4();
+    });
+    mocks.loadIfcEntry.mockImplementation(async (
+      _ctx: unknown,
+      _state: AppState,
+      entry: IfcEntry,
+      read: () => Promise<Uint8Array | null>,
+      _progress: unknown,
+      options: {onLoadSource?: (source: 'lod-cache') => void},
+    ) => {
+      if (entry.modelId === 'cold') {
+        await read();
+        throw new Error('source decode failed');
+      }
+      const runtimeModelId = state.ifc.getRuntimeModelId(entry.modelId, session);
+      state.ifc.loadedModels.set(entry.modelId, {modelId:entry.modelId,runtimeModelId,visible:true});
+      list.set(runtimeModelId, {object:new THREE.Group()});
+      options.onLoadSource?.('lod-cache');
+    });
+    perfReset({generation:session.generation,projectId:session.projectId,sourceSha256:session.sourceSha256});
+
+    await loadAllIfcFiles(state, entries, vi.fn(), {session});
+
+    await vi.waitFor(() => expect(perfProductMomentSnapshot().allIfcReady?.meta).toMatchObject({
+      total:2, loaded:1, failed:1,
+    }));
+    expect(readFailedSource).toHaveBeenCalledOnce();
+    expect(readWarmSource).not.toHaveBeenCalled();
+    expect(perfProductMomentSnapshot().firstUsableGeometryReady?.meta).toMatchObject({
+      name:'warm', cacheHit:true,
+    });
+    expect(perfSnapshot().spans).toContainEqual(expect.objectContaining({
+      label:'变电 IFC read · models/warm.ifc',
+      meta:{bytes:0,source:'not-read',found:false},
+    }));
+    expect(mocks.setIfcStatus).toHaveBeenLastCalledWith(expect.stringContaining('失败 1'));
   });
 });
