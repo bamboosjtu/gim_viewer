@@ -486,3 +486,36 @@ it('keeps all three engineering views browseable when a declared IFC is skipped 
  expect(app.engineering.navigation?.sourceNodes.size).toBeGreaterThan(0);
  expect(app.engineering.cacheStatus).toBe('partial');
 });
+
+it('rebuilds old semantic-version artifacts through the warm worker and reuses source and physical geometry',async()=>{
+  const app=state(),files=sourceFiles(),first=new LoopbackPort();
+  await beginEngineeringBuild(app,files,{createWorker:portFactory(first)});
+  const cold=app.engineering.snapshot,geometry=await app.sourceGeometry.ready;
+  const stale=(bytes:Uint8Array):Uint8Array=>{
+    const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength),end=4+view.getUint32(0,true);
+    const header=JSON.parse(new TextDecoder().decode(bytes.subarray(4,end))) as {contract:string};
+    expect(header.contract).toMatch(/[|]decision-revision:[0-9]+[|]/);
+    header.contract=header.contract.replace(/[|]decision-revision:[0-9]+[|]/,'|');
+    const encoded=new TextEncoder().encode(JSON.stringify(header)),body=bytes.subarray(end);
+    const result=new Uint8Array(4+encoded.length+body.length);
+    new DataView(result.buffer).setUint32(0,encoded.length,true);
+    result.set(encoded,4);result.set(body,4+encoded.length);
+    return result;
+  };
+  const source=[...store.entries()].find(([path])=>path.includes('engineering-source-'))!;
+  const physical=[...store.entries()].find(([path])=>path.includes('source-geometry-'))!;
+  expect(physical).toBeDefined();expect(source).toBeDefined();
+  const old=[...store.entries()].filter(([path])=>/engineering-(?:entity|navigation)-/.test(path));
+  expect(old).toHaveLength(2);
+  for(const [path,bytes] of old)store.set(path,stale(bytes));
+  const warm=new LoopbackPort();
+  await beginEngineeringBuild(app,files,{createWorker:portFactory(warm)});
+  expect(warm.commands).toEqual(['init','restore','encode-cache','encode-cache','release-model']);
+  expect(warm.sourceInputs).toHaveLength(0);
+  expect(app.engineering.cacheStatus).toBe('saved');expect(app.engineering.navigationCacheHit).toBe(false);
+  expect(app.engineering.snapshot).toEqual(cold);
+  expect(await app.sourceGeometry.ready).toEqual(geometry);
+  expect(store.get(source[0])).toBe(source[1]);expect(store.get(physical[0])).toBe(physical[1]);
+  await beginEngineeringBuild(app,files,{createWorker:portFactory(new LoopbackPort())});
+  expect(app.engineering.navigationCacheHit).toBe(true);
+});

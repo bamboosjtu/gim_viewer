@@ -67,10 +67,11 @@ export function engineeringObjectEvidence(
   if (possibleNeutral.size)
     for (const r of records) {
       if (r.track !== "dev" || !possibleNeutral.has(r.parent)) continue;
-      const own = `${r.source_type} ${r.name}`;
-      const part = /GroundTransformer|接地变/i.test(own)
+      // A display label can describe an accessory, not a typed device witness.
+      const type = r.source_type.trim();
+      const part = /^(?:GroundTransformer|接地变|接地变压器)$/i.test(type)
         ? 1
-        : /ArcExtinguishingCoil|消弧线圈/i.test(own)
+        : /^(?:ArcExtinguishingCoil|消弧线圈)$/i.test(type)
           ? 2
           : 0;
       neutralParts.set(r.parent, (neutralParts.get(r.parent) ?? 0) | part);

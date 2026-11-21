@@ -114,3 +114,20 @@ it('keeps a direct occurrence when an alias also contributes a competing host',a
     expect.objectContaining({kind:'semantic_composition',status:'ambiguous',parentSourceIds:[whole.id,other.id]}),
   );
 });
+
+it.each([
+ {'ground.dev':'TYPE=OTHERS\nSYMBOLNAME=接地变外壳','coil.dev':'TYPE=OTHERS\nSYMBOLNAME=消弧线圈支架'},
+ {'ground.dev':'TYPE=GroundTransformer','coil.dev':'TYPE=GroundTransformer'},
+ {'ground.dev':'TYPE=GroundTransformer\nSUBDEVICE0=subcoil.dev','coil.dev':'TYPE=OTHERS','subcoil.dev':'TYPE=ArcExtinguishingCoil'},
+])('does not confirm a nominal complete neutral set without both direct typed children: %j',async children=>{
+ const {graph,readText}=await read({
+   'project.cbm':'OBJECTMODELPOINTER=neutral.dev',
+   'neutral.dev':'TYPE=GroundTransformer/ArcExtinguishingCoil\nOBJECTROLE=independent\nSUBDEVICE0=ground.dev\nSUBDEVICE1=coil.dev',
+   ...children,
+ });
+ const parent=graph.records.find(record=>record.source==='neutral.dev')!;
+ const model=normalizeEngineeringSources('scope',collectEngineeringSources(graph,[],[]));
+ expect(model.entities.find(row=>row.sourceIds.includes(parent.id))).not.toMatchObject({standardClass:{id:'equipment:opengroundingequipment/neutralpointequipment',status:'confirmed'}});
+ expect(model.memberships.find(row=>row.sourceId===parent.id)?.disposition).toBe('whole_member');
+ for(const path of new Set(readText.mock.calls.map(([p])=>p)))expect(readText.mock.calls.filter(([p])=>p===path)).toHaveLength(1);
+});
