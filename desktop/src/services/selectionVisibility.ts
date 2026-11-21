@@ -110,9 +110,13 @@ export function createSelectionVisibility(
           if (!committedScopes.has(key)) committedScopes.set(key, empty());
           return committedScopes.get(key)!;
         };
-        for (const [id, ids] of Object.entries(ownsHighlight ? (state.highlightedItems ?? {}) : {}))
+        for (const [id, ids] of Object.entries(
+          ownsHighlight ? (state.selection.highlightedItems ?? {}) : {},
+        ))
           for (const localId of ids ?? []) scope(id).localIds.add(localId);
-        for (const group of ownsHighlight ? (state.highlightedModState?.groups ?? []) : []) {
+        for (const group of ownsHighlight
+          ? (state.selection.highlightedModState?.groups ?? [])
+          : []) {
           const data = group.userData;
           if (data.provider !== 'ifc-regional' && data.provider !== 'ifc-object-fine') continue;
           if (
@@ -151,7 +155,7 @@ export function createSelectionVisibility(
       );
       if (engineering) state.engineeringGeometryFilter?.();
       if (!state.deviceLodRuntime && !engineering) {
-        const selected = ownsHighlight ? (state.highlightedModState?.groups ?? []) : [];
+        const selected = ownsHighlight ? (state.selection.highlightedModState?.groups ?? []) : [];
         for (const group of [
           ...state.loadedXmlModGroups.values(),
           ...state.loadedStlGroups.values(),

@@ -33,7 +33,7 @@ async fn prepare_project(app: tauri::AppHandle, store: tauri::State<'_, Store>, 
     if s.busy.swap(true, Ordering::AcqRel) {
         return tauri::async_runtime::spawn_blocking(move || {
             storage::discard(&s.root, &input.path)?;
-            Err("已有导入正在进行，请稍后重试".into())
+            Err(NativeError::new(NativeErrorCode::OperationFailed, "已有导入正在进行，请稍后重试"))
         }).await.map_err(|error| NativeError::new(NativeErrorCode::Internal,error.to_string()))?;
     }
     s.cancelled.store(false, Ordering::Relaxed);
@@ -53,7 +53,14 @@ async fn discard_import(store: tauri::State<'_, Store>, path: String) -> Result<
 #[tauri::command]
 fn cancel_import(store: tauri::State<Store>) { store.cancelled.store(true, Ordering::Relaxed); }
 #[tauri::command]
-async fn get_project_cache(store: tauri::State<'_, Store>, id: String) -> Result<tauri::ipc::Response, NativeError> { let s = store.inner().clone(); tauri::async_runtime::spawn_blocking(move || { storage::touch(&s.root, &id)?; Ok(tauri::ipc::Response::new(storage::cached_json(&s.root, &id).unwrap_or(None).unwrap_or_else(|| "null".into()))) }).await.map_err(|e| NativeError::new(NativeErrorCode::Internal,e.to_string()))? }
+async fn get_project_cache(store: tauri::State<'_, Store>, id: String) -> Result<tauri::ipc::Response, NativeError> {
+    let root = store.root.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let cache = storage::recover_cache_miss(storage::cached_json(&root, &id))?;
+        storage::touch(&root, &id)?;
+        Ok(tauri::ipc::Response::new(cache.unwrap_or_else(|| "null".into())))
+    }).await.map_err(|error| NativeError::new(NativeErrorCode::Internal, error.to_string()))?
+}
 #[tauri::command]
 async fn read_text_entries(store: tauri::State<'_, Store>, id: String) -> Result<Vec<storage::TextEntry>, NativeError> { let root = store.root.clone(); tauri::async_runtime::spawn_blocking(move || storage::text_entries(&root, &id)).await.map_err(|e| NativeError::new(NativeErrorCode::Internal,e.to_string()))? }
 #[tauri::command]

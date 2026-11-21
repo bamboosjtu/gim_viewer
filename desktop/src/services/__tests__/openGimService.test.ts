@@ -64,6 +64,45 @@ it('exercises the early-semantic extraction policy branch',async()=>{
   expect(m.inspectEarly).toHaveBeenCalledOnce();expect(m.withEarly).toHaveBeenCalledOnce();expect(m.station).toHaveBeenCalledOnce();
 });
 
+it.each([null, ''])('uses full native extraction when early semantic is enabled without a source SHA (%j)', async sha256 => {
+  localStorage.setItem('gim-debug-substation-early-semantic','1');
+  m.register.mockResolvedValueOnce({id:1, sha256});
+  const extracted = vi.fn();
+  m.station.mockImplementationOnce(async (context: {getExtracted: () => Promise<unknown>}) => {
+    extracted(await context.getExtracted());
+  });
+
+  await openGimProjectFromId(new AppState(), vi.fn(), 1);
+
+  expect(m.inspectEarly).not.toHaveBeenCalled();
+  expect(m.withEarly).not.toHaveBeenCalled();
+  expect(m.startSubstation).not.toHaveBeenCalled();
+  expect(m.extract).toHaveBeenCalledOnce();
+  expect(m.extract).toHaveBeenCalledWith('tmp/open.gim', 1, {
+    traceEntries: false,
+    substationParseCopy: false,
+  });
+  expect(extracted).toHaveBeenCalledWith(expect.objectContaining({status:'ok'}));
+});
+
+it('surfaces an admitted early semantic failure without retrying extraction', async () => {
+  localStorage.setItem('gim-debug-substation-early-semantic','1');
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  m.withEarly.mockImplementationOnce(async (_capability: unknown, start: () => Promise<unknown>) => start());
+  m.startSubstation.mockRejectedValueOnce(Error('early semantic failed'));
+  m.station.mockImplementationOnce(async (context: {getExtracted: () => Promise<unknown>}) => {
+    await context.getExtracted();
+  });
+
+  await openGimProjectFromId(new AppState(), vi.fn(), 1);
+
+  expect(m.inspectEarly).toHaveBeenCalledWith('tmp/open.gim', 1, 'source-a');
+  expect(m.startSubstation).toHaveBeenCalledOnce();
+  expect(m.extract).not.toHaveBeenCalled();
+  expect(m.show).toHaveBeenCalledWith('GIM 解析失败: early semantic failed');
+  expect((await button()).disabled).toBe(false);
+});
+
 it('keeps debug path sampling bounded and still opens the project',async()=>{
   m.debugRuntime=true;
   const state=new AppState();

@@ -19,7 +19,8 @@ import app.tauri.annotation.PermissionCallback
 import android.content.Intent
 import android.provider.OpenableColumns
 import androidx.activity.result.ActivityResult
-import app.tauri.annotation.ActivityCallback
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import app.tauri.annotation.InvokeArg
 import app.tauri.plugin.Channel
 import app.tauri.annotation.Command
@@ -27,17 +28,34 @@ import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+import app.tauri.plugin.PluginManager
 import androidx.lifecycle.Lifecycle
 import java.io.File
+import java.io.IOException
 import java.security.MessageDigest
 import java.util.UUID
-import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.CompletableFuture
 
 @InvokeArg
-class PickArgs { lateinit var progress: Channel }
+class PickArgs {
+    lateinit var progress: Channel
+    var maxArchiveBytes: Long = 0
+}
 @InvokeArg
 class ImmersiveArgs { var enabled: Boolean = false }
+
+private class PickRequest(val invoke: Invoke, val args: PickArgs) {
+    var launcher: ActivityResultLauncher<Intent>? = null
+
+    fun unregister() {
+        launcher?.unregister()
+        launcher = null
+    }
+}
+
+private class ImportFailure(val code: String, message: String) : Exception(message)
+
+private typealias PickAttempt = SafImportSlot.Attempt<AppCompatActivity, PickRequest>
 
 @TauriPlugin(permissions = [
     Permission(strings = [Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION], alias = "location"),
@@ -50,9 +68,7 @@ class GimImportPlugin(private val activity: Activity): Plugin(activity) {
     fun getWindowState(invoke: Invoke) { activity.runOnUiThread { invoke.resolve(windowState.state()) } }
     @Command
     fun setImmersive(invoke: Invoke) { val args = invoke.parseArgs(ImmersiveArgs::class.java); activity.runOnUiThread { invoke.resolve(windowState.setImmersive(args.enabled)) } }
-    private val executor = Executors.newSingleThreadExecutor()
-    private val cancelled = AtomicBoolean(false)
-    private val busy = AtomicBoolean(false)
+    private val imports = SafImportSlot<AppCompatActivity, PickRequest>()
     private val main = Handler(Looper.getMainLooper())
     private var positionInvoke: Invoke? = null
     private var positionManager: LocationManager? = null
@@ -75,6 +91,10 @@ class GimImportPlugin(private val activity: Activity): Plugin(activity) {
         super.onPause(activity)
         windowState.leaveForeground()
         main.post { val pending = positionInvoke; stopPosition(); pending?.reject("定位已取消，应用已离开前台") }
+    }
+    override fun onDestroy(activity: AppCompatActivity) {
+        cancelPick(imports.cancel(activity))
+        super.onDestroy(activity)
     }
     @Command
     fun getPosition(invoke: Invoke) { activity.runOnUiThread {
@@ -106,62 +126,153 @@ class GimImportPlugin(private val activity: Activity): Plugin(activity) {
         catch (error: Exception) { stopPosition(); invoke.reject(error.message ?: "无法读取当前位置") }
     } }
     @Command
-    fun pick(invoke: Invoke) {
-        if (!busy.compareAndSet(false, true)) { invoke.reject("已有导入正在进行"); return }
-        cancelled.set(false)
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "*/*"
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    fun pick(invoke: Invoke) { main.post {
+        val owner = PluginManager.activity
+        if (owner == null || owner.isFinishing || owner.isDestroyed) {
+            invoke.reject("文件选择界面不可用", "BACKEND_UNAVAILABLE")
+            return@post
         }
-        startActivityForResult(invoke, intent, "picked")
-    }
+        val args = try { invoke.parseArgs(PickArgs::class.java) }
+        catch (_: Exception) {
+            invoke.reject("导入请求格式无效", "PROTOCOL_INVALID")
+            return@post
+        }
+        if (args.maxArchiveBytes <= 0) {
+            invoke.reject("导入资源配额无效", "PROTOCOL_INVALID")
+            return@post
+        }
+        val request = PickRequest(invoke, args)
+        val attempt = imports.begin(owner, request)
+        if (attempt == null) {
+            invoke.reject("已有导入正在进行", "OPERATION_FAILED")
+            return@post
+        }
+        try {
+            // A fresh registry key ties each result to its Activity and attempt,
+            // even when Android delivers a late result after Activity recreation.
+            request.launcher = owner.activityResultRegistry.register(
+                "gim-import-${UUID.randomUUID()}", ActivityResultContracts.StartActivityForResult()
+            ) { result -> picked(attempt, result) }
+            request.launcher?.launch(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            })
+        } catch (error: Exception) {
+            request.unregister()
+            if (imports.finish(attempt)) {
+                invoke.reject(error.message ?: "无法打开系统文件选择器", "BACKEND_UNAVAILABLE")
+            }
+        }
+    } }
+
     @Command
-    fun cancel(invoke: Invoke) { cancelled.set(true); invoke.resolve(JSObject()) }
-    @ActivityCallback
-    fun picked(invoke: Invoke, result: ActivityResult) {
+    fun cancel(invoke: Invoke) { main.post {
+        cancelPick(imports.cancel())
+        invoke.resolve(JSObject())
+    } }
+
+    private fun cancelPick(attempt: PickAttempt?) {
+        attempt?.request?.let {
+            it.unregister()
+            it.invoke.reject("导入已取消", "CANCELLED")
+        }
+    }
+
+    private fun picked(attempt: PickAttempt, result: ActivityResult) {
+        if (!imports.isCurrent(attempt)) return
+        val request = attempt.request
+        request.unregister()
         val uri = result.data?.data
-        if (result.resultCode != Activity.RESULT_OK || uri == null) { busy.set(false); invoke.reject("已取消选择"); return }
-        val progress = invoke.parseArgs(PickArgs::class.java).progress
-        val copyStarted = android.os.SystemClock.elapsedRealtime()
-        executor.execute {
+        if (result.resultCode != Activity.RESULT_OK || uri == null) {
+            cancelPick(imports.cancel(attempt.owner))
+            return
+        }
+        val context = attempt.owner.applicationContext
+        val copyStarted = SystemClock.elapsedRealtime()
+        val started = imports.startCopy(attempt) {
             var destination: File? = null
             try {
+                checkCancelled(attempt)
                 var name = "工程.gim"
                 var total = -1L
-                activity.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
+                val resolver = context.contentResolver
+                resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
                     if (c.moveToFirst()) {
                         val ni = c.getColumnIndex(OpenableColumns.DISPLAY_NAME); if (ni >= 0) name = c.getString(ni) ?: name
                         val si = c.getColumnIndex(OpenableColumns.SIZE); if (si >= 0 && !c.isNull(si)) total = c.getLong(si)
                     }
                 }
-                if (!name.endsWith(".gim", true)) throw IllegalArgumentException("请选择 .gim 文件")
-                if (total > 268435456L) throw IllegalArgumentException("文件超过 256 MiB 导入限额")
-                val dir = File(activity.filesDir, "projects/.imports/${UUID.randomUUID()}")
-                if (!dir.mkdirs()) throw IllegalStateException("无法创建工程私有目录")
+                checkCancelled(attempt)
+                if (!name.endsWith(".gim", true)) throw ImportFailure("INVALID_INPUT", "请选择 .gim 文件")
+                val limit = request.args.maxArchiveBytes
+                checkArchiveSize(total, limit)
+                checkCancelled(attempt)
+                val dir = File(context.filesDir, "projects/.imports/${UUID.randomUUID()}")
+                if (!dir.mkdirs()) throw IOException("无法创建工程私有目录")
                 destination = dir
                 val file = File(dir, "original.gim")
                 val digest = MessageDigest.getInstance("SHA-256")
                 var copied = 0L; var lastEvent = 0L
-                activity.contentResolver.openInputStream(uri)?.use { input ->
+                resolver.openInputStream(uri)?.use { input ->
                     file.outputStream().buffered().use { output ->
                         val buffer = ByteArray(262144)
                         while (true) {
-                            if (cancelled.get()) throw IllegalStateException("导入已取消")
-                            val n = input.read(buffer); if (n < 0) break
+                            checkCancelled(attempt)
+                            val n = input.read(buffer)
+                            checkCancelled(attempt)
+                            if (n < 0) break
                             copied += n
-                            if (copied > 268435456L) throw IllegalArgumentException("文件超过 256 MiB 导入限额")
+                            checkArchiveSize(copied, limit)
                             output.write(buffer, 0, n); digest.update(buffer, 0, n)
                             val now = System.currentTimeMillis()
-                            if (now - lastEvent > 100) { lastEvent = now; progress.send(JSObject().put("stage", "复制文件与 SHA 校验").put("done", copied).put("total", total)) }
+                            if (now - lastEvent > 100) {
+                                lastEvent = now
+                                val progress = JSObject().put("stage", "复制文件与 SHA 校验").put("done", copied)
+                                if (total >= 0) progress.put("total", total)
+                                request.args.progress.send(progress)
+                            }
                         }
                     }
-                } ?: throw IllegalStateException("无法读取所选文件")
-                if (cancelled.get()) throw IllegalStateException("导入已取消")
+                } ?: throw IOException("无法读取所选文件")
+                checkCancelled(attempt)
                 val sha = digest.digest().joinToString("") { "%02x".format(it) }
-                invoke.resolve(JSObject().put("path", file.absolutePath).put("name", name).put("sha256", sha).put("size", copied).put("copyMs", android.os.SystemClock.elapsedRealtime() - copyStarted))
-            } catch (error: Exception) { destination?.deleteRecursively(); invoke.reject(error.message ?: "导入失败") }
-            finally { busy.set(false) }
+                val response = JSObject().put("path", file.absolutePath).put("name", name).put("sha256", sha)
+                    .put("size", copied).put("copyMs", SystemClock.elapsedRealtime() - copyStarted)
+                // Keep cleanup on this copy's worker. The main thread only
+                // decides whether the completed file belongs to this request.
+                val accepted = CompletableFuture<Boolean>()
+                if (!main.post {
+                    val ownsResult = imports.finish(attempt)
+                    try {
+                        if (ownsResult) request.invoke.resolve(response)
+                    } finally {
+                        accepted.complete(ownsResult)
+                    }
+                } || !accepted.join()) dir.deleteRecursively()
+            } catch (error: Exception) {
+                destination?.deleteRecursively()
+                val code = when (error) {
+                    is ImportFailure -> error.code
+                    is SecurityException -> "UNAUTHORIZED"
+                    is IOException -> "IO"
+                    else -> "OPERATION_FAILED"
+                }
+                main.post {
+                    if (imports.finish(attempt)) request.invoke.reject(error.message ?: "导入失败", code)
+                }
+            }
         }
+        if (!started && imports.finish(attempt)) {
+            request.invoke.reject("文件提供方仍在结束先前的读取，请稍后重试", "OPERATION_FAILED")
+        }
+    }
+
+    private fun checkCancelled(attempt: PickAttempt) {
+        if (attempt.cancelled.get()) throw ImportFailure("CANCELLED", "导入已取消")
+    }
+
+    private fun checkArchiveSize(size: Long, limit: Long) {
+        if (size > limit) throw ImportFailure("RESOURCE_LIMIT", "文件超过 $limit 字节导入限额")
     }
 }

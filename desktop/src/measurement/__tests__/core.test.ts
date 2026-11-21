@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Collector, Probe, MemoryLedger, BufferLedger, uniqueBufferCapacity, calibrateClock, DurationStats, MEASUREMENT_VERSION, type MeasurementEvent, type TraceContext } from '../core.js';
+import { Collector, Probe, MEASUREMENT_VERSION, type MeasurementEvent, type TraceContext } from '../core.js';
 import {benchmarkRun} from '../../../scripts/benchmarks/test-fixtures.mjs';
 const context:TraceContext={runId:'run-1',sampleId:'sample-1',sourceSha256:null,buildId:'build-1',generation:1,geometryToken:2,requestId:'request-1',workerId:'worker-1',family:'dev',backend:'web-worker',taskId:'task-1',attemptId:1,parentTaskId:null,sourceId:null,geometryLod:0};
 function setup(limit=100){let now=0;const collector=new Collector({...context},'benchmark',limit),probe=new Probe('worker-1','clock-1','benchmark',()=>now,collector);return {collector,probe,tick:(value:number)=>{now=value;}};}
@@ -142,16 +142,6 @@ describe('measurement contracts (no engineering samples)',()=>{
     expect(collector.snapshot().slowestPhases.some(row=>row.stage==='aggregate-only')).toBe(false);
     expect(collector.snapshot().slowestTasks[0].durationMs).toBe(33);
     expect(collector.snapshot()).toMatchObject({detailComplete:false,aggregateComplete:true});
-  });
-  it('deduplicates shared views and conserves unique ownership across transfer/copy/eviction',()=>{
-    const buffer=new ArrayBuffer(64);expect(uniqueBufferCapacity([new Uint8Array(buffer),new Float32Array(buffer),buffer])).toBe(64);
-    const tracked=new BufferLedger();tracked.retain(buffer,'cache');tracked.retain(new Uint8Array(buffer),'cache');tracked.release(buffer,'cache');expect(tracked.bytes).toBe(64);tracked.transfer(buffer,'cache','host');tracked.release(buffer,'host');expect(tracked.bytes).toBe(0);
-    const ledger=new MemoryLedger();ledger.acquire('a','worker',64,'buffer-capacity');ledger.acquire('a','cache',64,'buffer-capacity');ledger.transfer('a','worker','worker');ledger.transfer('a','worker','in-flight');ledger.copy('a','b','host');
-    expect(ledger.snapshot().uniqueBytesByKind['buffer-capacity']).toBe(128);ledger.releaseOwner('in-flight');ledger.releaseOwner('cache');expect(ledger.snapshot().uniqueBytesByKind['buffer-capacity']).toBe(64);ledger.releaseOwner('host');ledger.releaseOwner('host');expect(ledger.snapshot().uniqueAllocations).toBe(0);
-  });
-  it('calibrates offset with uncertainty; does not subtract unaligned clocks for phases',()=>{
-    expect(calibrateClock(10,112,114,16)).toEqual({offsetMs:-100,uncertaintyMs:2});expect(()=>calibrateClock(10,112,110,16)).toThrow();
-    const stats=new DurationStats();for(let i=1;i<=100;i++)stats.add(i);const result=stats.snapshot();expect(result.count).toBe(100);expect(result.p95!.lowerMs).toBeLessThanOrEqual(95);expect(result.p95!.upperMs).toBeGreaterThanOrEqual(95);
   });
   it('off mode never reads the clock or sends an event',()=>{
     const fail=()=>{throw Error('off probe performed work');};const probe=new Probe('off','off','off',fail,{emit:fail});probe.phase(context,'parse').end();probe.record(context,'parse',1);expect(probe.measureSync(context,'parse',()=>42)).toBe(42);

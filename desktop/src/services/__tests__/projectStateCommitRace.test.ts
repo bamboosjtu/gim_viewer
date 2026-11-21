@@ -3,11 +3,10 @@ import { AppState } from '../../app/state.js';
 import type { CbmNode, FileDevEntry, IfcEntry } from '../../gim/types.js';
 import type { StdSldParseResult } from '../stdSldService.js';
 import { onGimExtracted } from '../openGimService.js';
-import {perfReset, perfProductMomentSnapshot} from '../../utils/perfTimings.js';
+import {perfReset, perfProductMomentSnapshot, perfSnapshot} from '../../utils/perfTimings.js';
 
 const mocks = vi.hoisted(() => ({
   discoverIfcFromCBM: vi.fn(),
-  scanIfcFiles: vi.fn(),
   buildIfcGuidIndex: vi.fn(() => new Map()),
   buildCbmTree: vi.fn(),
   buildCbmNodeIndex: vi.fn(() => new Map()),
@@ -34,7 +33,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../gim/gimIndexer.js', () => ({
   discoverIfcFromCBM: mocks.discoverIfcFromCBM,
-  scanIfcFiles: mocks.scanIfcFiles,
   buildIfcGuidIndex: mocks.buildIfcGuidIndex,
 }));
 vi.mock('../../gim/cbmParser.js', () => ({
@@ -159,9 +157,11 @@ describe('openGimService AppState commit race', () => {
     const files = new Map<string, File>([['CBM/marker.cbm', file]]);
     let startSpatialSemantic!: () => void;
     let startStdSld!: () => void;
-    mocks.discoverIfcFromCBM.mockResolvedValue([
-      { name: 'A.ifc', path: 'IFC/A.ifc', modelId: 'model-A' } satisfies IfcEntry,
-    ]);
+    mocks.discoverIfcFromCBM.mockResolvedValue({
+      entries: [{ name: 'A.ifc', path: 'IFC/A.ifc', modelId: 'model-A' } satisfies IfcEntry],
+      cbmDiscoveredCount: 0,
+      inventoryFallbackCount: 1,
+    });
     mocks.buildCbmTree.mockResolvedValue(tree);
     mocks.parseFileDevRelation.mockResolvedValue(relation);
     mocks.buildSubstationSpatialIndexFromFiles.mockReturnValue(spatialGate.promise);
@@ -194,6 +194,11 @@ describe('openGimService AppState commit race', () => {
     expect(mocks.parseStdSldOnGimExtracted).not.toHaveBeenCalled();
     const navigation = perfProductMomentSnapshot().navigationUiReady;
     expect(navigation).toMatchObject({meta:{scope:'navigation-dom', inputLatencyVerified:false, cbmNodes:1, ifcEntries:1}});
+    expect(perfSnapshot().spans.find(span => span.label === '变电 IFC discovery')?.meta).toEqual({
+      count: 1,
+      cbmDiscoveredCount: 0,
+      inventoryFallbackCount: 1,
+    });
     expect(perfProductMomentSnapshot().firstUsableGeometryReady).toBeNull();
     expect(perfProductMomentSnapshot().interactive).toBeNull();
 
@@ -232,7 +237,11 @@ describe('openGimService AppState commit race', () => {
 
     mocks.discoverIfcFromCBM.mockImplementation(async (files: Map<string, File>) => {
       const label = await readFileText(files, 'discover');
-      return [{ name: `${label}.ifc`, path: `IFC/${label}.ifc`, modelId: `model-${label}` } satisfies IfcEntry];
+      return {
+        entries: [{ name: `${label}.ifc`, path: `IFC/${label}.ifc`, modelId: `model-${label}` } satisfies IfcEntry],
+        cbmDiscoveredCount: 1,
+        inventoryFallbackCount: 0,
+      };
     });
     mocks.buildCbmTree.mockImplementation(async (files: Map<string, File>) => {
       const label = await readFileText(files, 'cbm');
@@ -301,9 +310,13 @@ describe('openGimService AppState commit race', () => {
       return files.get('CBM/marker.cbm')!.text();
     };
 
-    mocks.discoverIfcFromCBM.mockImplementation(async (files: Map<string, File>) => [{
-      name: `${labelOf(files)}.ifc`, path: `IFC/${labelOf(files)}.ifc`, modelId: `model-${labelOf(files)}`,
-    }]);
+    mocks.discoverIfcFromCBM.mockImplementation(async (files: Map<string, File>) => ({
+      entries: [{
+        name: `${labelOf(files)}.ifc`, path: `IFC/${labelOf(files)}.ifc`, modelId: `model-${labelOf(files)}`,
+      }],
+      cbmDiscoveredCount: 1,
+      inventoryFallbackCount: 0,
+    }));
     mocks.buildCbmTree.mockImplementation(async (files: Map<string, File>) => makeTree(labelOf(files)));
     mocks.parseFileDevRelation.mockImplementation(async (files: Map<string, File>) => {
       const label = await read(files, 'relation');

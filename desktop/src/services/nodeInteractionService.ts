@@ -123,7 +123,12 @@ export async function clearSelectionHighlight(
   showMessage: (text: string) => void,
 ): Promise<void> {
   if (!state.selection.isCurrentSelection(request)) return;
-  if (!state.initialized && !state.highlightedItems && !state.highlightedModState) return;
+  if (
+    !state.initialized &&
+    !state.selection.highlightedItems &&
+    !state.selection.highlightedModState
+  )
+    return;
   const { getViewerRuntimeWithUI } = await import('./viewerUIBinding.js');
   const { ctx } = await getViewerRuntimeWithUI(state, showMessage);
   const { commitSelectionHighlight } = await import('../viewer/highlight.js');
@@ -259,7 +264,7 @@ export async function handleNodeClick(
     if (isSelected() && !Object.keys(projected.items).length) message(projected.emptyMessage);
     if (!isSelected()) return;
     state.selection.selectionGeometry =
-      refs.size > 0 && state.highlightedItems
+      refs.size > 0 && state.selection.highlightedItems
         ? ifcFailure
           ? { status: 'partial', detail: `已定位当前可用的直接 GUID 构件；${ifcFailure}` }
           : { status: 'available', detail: '已定位直接 GUID 关联的 IFC 构件。' }
@@ -472,10 +477,10 @@ export async function frameAndHighlightDevice(
   }
   const { frameBox } = await import('../viewer/camera.js');
   if (!state.selection.canAutoLocate(request)) return;
-  const owned = state.highlightedModState;
+  const owned = state.selection.highlightedModState;
   const { resetModHighlight } = await import('../viewer/highlight.js');
   const clearOwned = () => {
-    if (state.highlightedModState === owned) resetModHighlight(state);
+    if (state.selection.highlightedModState === owned) resetModHighlight(state);
   };
   request.signal.addEventListener('abort', clearOwned, { once: true });
   const endFrame = beginSelectionStage(state, request, 'frame');

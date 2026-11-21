@@ -51,15 +51,18 @@ describe("independent engineering source graph", () => {
         ?.interpretation,
     ).toMatchObject({ category: "E06", categoryStatus: "confirmed" });
   });
-  it("reads a shared CBM/DEV source once across repeated references", async () => {
+  it("reads shared documents once and preserves reference order across repeated occurrences", async () => {
     const raw: Record<string, string> = {
       "project.cbm": "SUBSYSTEM0=unit.cbm\nSUBSYSTEM1=unit.cbm",
-      "unit.cbm": "OBJECTMODELPOINTER=unit.dev",
+      "unit.cbm":
+        "OBJECTMODELPOINTER=unit.dev\nIFCFILE=models/first.ifc$\nIFCFILE=models/second.ifc",
       "unit.dev": "SYMBOLNAME=断路器\nTYPE=CircuitBreaker",
+      "models/first.ifc": "",
+      "models/second.ifc": "",
     };
     const reads: Record<string, number> = {};
     const graph = await extractEngineeringSourceGraph({
-      paths: Object.keys(raw),
+      paths: Object.keys(raw).reverse(),
       readText: async (path) => {
         reads[path] = (reads[path] ?? 0) + 1;
         return raw[path];
@@ -67,6 +70,38 @@ describe("independent engineering source graph", () => {
     });
     expect(graph.records).toHaveLength(2);
     expect(reads).toEqual({ "project.cbm": 1, "unit.cbm": 1, "unit.dev": 1 });
+    expect(graph.cbmOccurrences.map((row) => row.viaField)).toEqual([
+      "",
+      "SUBSYSTEM0",
+      "SUBSYSTEM1",
+    ]);
+    expect(
+      graph.references.map(({ field, status, target }) => [
+        field,
+        status,
+        target,
+      ]),
+    ).toEqual([
+      ["project-entry", "resolved", "project.cbm"],
+      ["SUBSYSTEM0", "resolved", "unit.cbm"],
+      ["OBJECTMODELPOINTER", "resolved", "unit.dev"],
+      ["IFCFILE", "ambiguous", null],
+      ["SUBSYSTEM1", "resolved", "unit.cbm"],
+      ["OBJECTMODELPOINTER", "resolved", "unit.dev"],
+    ]);
+    expect(graph.references[3]).toMatchObject({
+      values: ["models/first.ifc$", "models/second.ifc"],
+      lines: [2, 3],
+      candidates: ["models/first.ifc", "models/second.ifc"],
+    });
+    expect(graph.diagnostics).toEqual([
+      {
+        kind: "ambiguous-field",
+        source: "unit.cbm",
+        field: "IFCFILE",
+        lines: [2, 3],
+      },
+    ]);
   });
 
   it("preserves same-template parent/child occurrences without actual assembly evidence", async () => {

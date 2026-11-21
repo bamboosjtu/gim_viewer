@@ -25,7 +25,7 @@ describe('属性检查器纯 DOM 交互', () => {
     const node: CbmNode = { path:'CBM/device.cbm',name:'设备',entityName:'F4System',children:[],famPath:'raw.fam',devPath:'',
       ifcFile:'',ifcGuid:'',classifyName:'',transformMatrix:'',systemNames:[],devSymbolName:'',devType:'',devExpanded:false };
     state.currentFiles = new Map([['CBM/raw.fam',new File([text],'raw.fam')]]);
-    await drawer.showNodePropertiesBasic(state,node);
+    await drawer.showNodePropertiesBasic(state, node, state.selection.beginSelection({kind:'cbm', key: node.path}));
     const cold = document.querySelector('#props-drawer-body')!.innerHTML;
     expect([...document.querySelectorAll('details tbody tr')].filter((row) => row.getAttribute('title')?.startsWith('材质=')))
       .toHaveLength(3);
@@ -34,7 +34,7 @@ describe('属性检查器纯 DOM 交互', () => {
     state.currentFiles=null;
     state.properties.cachedFamSourceProperties.set('CBM/raw.fam',parsed.properties);
     state.properties.cachedFamProperties.set('CBM/raw.fam',parsed.sections);
-    await drawer.showNodePropertiesBasic(state,node);
+    await drawer.showNodePropertiesBasic(state, node, state.selection.beginSelection({kind:'cbm', key: node.path}));
     expect(document.querySelector('#props-drawer-body')!.innerHTML).toBe(cold);
   });
 
@@ -91,7 +91,7 @@ describe('属性检查器纯 DOM 交互', () => {
       devExpanded: false,
     };
 
-    await drawer.showNodePropertiesBasic(state, node);
+    await drawer.showNodePropertiesBasic(state, node, state.selection.beginSelection({kind:'cbm', key: node.path}));
     const link = document.querySelector<HTMLButtonElement>('[data-reference-kind="ifc"]');
     expect(link?.dataset.referencePath).toBe('DEV/A/foo.ifc');
   });
@@ -116,7 +116,7 @@ describe('属性检查器纯 DOM 交互', () => {
       devExpanded: false,
     };
 
-    await drawer.showNodePropertiesBasic(state, node);
+    await drawer.showNodePropertiesBasic(state, node, state.selection.beginSelection({kind:'cbm', key: node.path}));
     expect(document.querySelector('[data-reference-kind="ifc"]')).toBeNull();
   });
 
@@ -148,7 +148,7 @@ describe('属性检查器纯 DOM 交互', () => {
       devExpanded: false,
     };
 
-    await drawer.showNodePropertiesBasic(state, node);
+    await drawer.showNodePropertiesBasic(state, node, state.selection.beginSelection({kind:'cbm', key: node.path}));
     expect(document.getElementById('props-drawer-body')?.textContent).toContain('部分可渲染');
     expect(document.getElementById('props-drawer-body')?.textContent).toContain('空几何源');
     expect(document.getElementById('props-drawer-body')?.textContent).toContain('VendorPrimitive × 2');
@@ -164,7 +164,7 @@ describe('属性检查器纯 DOM 交互', () => {
     state.currentCbmTree=node;
     state.selection.selectionGeometry={status:'failed',detail:geometryDiagnosticSummary(diagnostic)};
     const writeText=vi.fn(async()=>{});Object.defineProperty(navigator,'clipboard',{value:{writeText},configurable:true});
-    drawer.setupPropsDrawerInteractions();await drawer.showNodePropertiesBasic(state,node);
+    drawer.setupPropsDrawerInteractions();await drawer.showNodePropertiesBasic(state, node, state.selection.beginSelection({kind:'cbm', key: node.path}));
     expect(geometryDiagnosticSummary(diagnostic)).toBe('源模型几何异常，已跳过渲染。属性和来源信息仍可查看。');
     expect(document.body.textContent).toContain('模型坐标超出合理范围');
     const details=document.querySelector('[data-geometry-details] details') as HTMLDetailsElement;
@@ -205,7 +205,7 @@ describe('属性检查器纯 DOM 交互', () => {
       devExpanded: false,
     };
 
-    await drawer.showNodePropertiesBasic(state, node);
+    await drawer.showNodePropertiesBasic(state, node, state.selection.beginSelection({kind:'cbm', key: node.path}));
     expect(document.querySelector<HTMLButtonElement>('[data-reference-kind="ifc"]')?.dataset.referencePath)
       .toBe('DEV/A/foo.ifc');
   });
@@ -234,7 +234,7 @@ describe('属性检查器纯 DOM 交互', () => {
       devExpanded: false,
     };
 
-    await drawer.showNodePropertiesBasic(state, node);
+    await drawer.showNodePropertiesBasic(state, node, state.selection.beginSelection({kind:'cbm', key: node.path}));
     expect(document.querySelector('[data-reference-kind="ifc"]')).toBeNull();
   });
   it('精化运行中允许取消，迟到成功不覆盖返回浏览状态', async () => {
@@ -247,7 +247,7 @@ describe('属性检查器纯 DOM 交互', () => {
     const refine = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
     const releaseFine = vi.fn();
     state.deviceLodRuntime = { refine, releaseFine, select:vi.fn(), clearSelection:vi.fn(), release:vi.fn(), diagnostics:{} } as any;
-    await drawer.showNodePropertiesBasic(state, node);
+    await drawer.showNodePropertiesBasic(state, node, state.selection.beginSelection({kind:'cbm', key: node.path}));
     const button = document.querySelector<HTMLButtonElement>('[data-dev-refine]')!;
     const cancel = document.querySelector<HTMLButtonElement>('[data-dev-release-fine]')!;
     button.click();

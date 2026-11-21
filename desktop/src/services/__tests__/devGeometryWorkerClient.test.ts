@@ -13,7 +13,11 @@ class ControlledWorker {
   postMessage(data: any) { this.sent.push(data); }
   complete(error?: string, byteLength = 1, stages: Record<string, unknown> = {}) {
     const task = [...this.sent].reverse().find(data => data.kind === 'compile' || data.kind === 'bounds');
-    this.onmessage?.({ data: { ...task, kind: 'result', error, result: { status: 'ready', bytes: {byteLength}, diagnostics: {} }, wallMs: 1, stages } });
+    if (!task) return;
+    const result = task.kind === 'bounds'
+      ? { devPath: task.path, boundsQuality: 'empty', sourceBounds: null, primitiveCounts: {}, unsupportedTypes: [] }
+      : { status: 'complete', bytes: new Uint8Array(byteLength), diagnostics: splitDiagnostics(0) };
+    this.onmessage?.({ data: { ...task, kind: 'result', ...(error === undefined ? {result} : {error}), wallMs: 1, stages } });
   }
 }
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); ControlledWorker.instances = []; resetGeometryWorkGateForTests(); });
@@ -720,6 +724,51 @@ function deliver(worker: ControlledWorker, task: any, result: any, error?: strin
   worker.onmessage?.({ data: { kind: 'result', id: task.id, key: task.key, path: task.path,
     session: task.session, result, error, wallMs: 1, stages: {} } });
 }
+
+it('ignores unknown replies and discards late results after a request is cancelled and retried', async () => {
+  vi.stubGlobal('Worker', ControlledWorker);
+  vi.stubGlobal('navigator', { hardwareConcurrency: 4, deviceMemory: 8 });
+  const client = new DevGeometryPreprocessor([], new Map(), () => true);
+  try {
+    const pending = client.compile('DEV/a.dev', 0, 'a', 0);
+    const cancelled = expect(pending).rejects.toMatchObject({name:'AbortError'});
+    const original = sentTasks(data => data.kind === 'compile')[0];
+    const result = { status:'complete', bytes:new Uint8Array([7]), diagnostics:splitDiagnostics(0) };
+    original.worker.onmessage?.({data:null});
+    original.worker.onmessage?.({data:{...original.data,kind:'heartbeat',result}});
+    deliver(original.worker, {...original.data,path:'DEV/other.dev'}, result);
+    expect(client.schedulingSnapshot().active).toBe(1);
+    expect(original.worker.terminate).not.toHaveBeenCalled();
+
+    client.cancelTask('a');
+    await cancelled;
+    const retry = client.compile('DEV/a.dev', 0, 'a', 0);
+    const replacement = sentTasks(data => data.kind === 'compile')[1];
+    deliver(original.worker, original.data, result);
+    deliver(replacement.worker, original.data, result);
+    expect(client.schedulingSnapshot().active).toBe(1);
+    expect(client.resultPressure.bytes).toBe(0);
+    deliver(replacement.worker, replacement.data, result);
+    await expect(retry).resolves.toBe(result);
+    client.acknowledge('a');
+  } finally { client.cancel(); }
+});
+
+it('rejects a matching reply that has no transferable compile output or error', async () => {
+  vi.stubGlobal('Worker', ControlledWorker);
+  vi.stubGlobal('navigator', { hardwareConcurrency: 4, deviceMemory: 8 });
+  const client = new DevGeometryPreprocessor([], new Map(), () => true);
+  try {
+    const pending = client.compile('DEV/a.dev', 0, 'a', 0);
+    const rejected = expect(pending).rejects.toThrow('Invalid DEV worker result');
+    const { worker, data } = sentTasks(message => message.kind === 'compile')[0];
+    deliver(worker, data, { status:'complete', bytes:{byteLength:10}, diagnostics:splitDiagnostics(0) });
+    await rejected;
+    expect(client.schedulingSnapshot().active).toBe(0);
+    expect(client.resultPressure.bytes).toBe(0);
+    expect(worker.terminate).toHaveBeenCalledOnce();
+  } finally { client.cancel(); }
+});
 
 it('runs a large DEV as assembly-subtree parts on the whole pool and merges one template', async () => {
   vi.stubGlobal('Worker', ControlledWorker);

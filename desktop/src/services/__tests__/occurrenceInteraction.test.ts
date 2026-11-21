@@ -65,7 +65,7 @@ it.each(['raw','glb'] as const)('nested PARTINDEX uses the real root and parent 
   expect(scope.rootOccurrence).toBe(root.path);
   const groups=collectDeviceGroups(state,b.devPath,scope);
   expect(groups.map(g=>g.userData.assemblyPath).sort()).toEqual(['sub:0/sub:0','sub:1/sub:0']);
-  expect(state.highlightedModState?.groups).toEqual(groups);
+  expect(state.selection.highlightedModState?.groups).toEqual(groups);
   expect(groups.every(g=>{
     let owner: THREE.Object3D | null=g;
     while (owner && !owner.userData.rootOccurrence) owner=owner.parent;
@@ -140,7 +140,7 @@ it('a project switch during camera await cannot reset or highlight the new proje
   state.activateProject(2,'new');
   finish(); await pending;
   expect(mock.ctx.fragments.resetHighlight).not.toHaveBeenCalled();
-  expect(state.highlightedModState).toBeNull();
+  expect(state.selection.highlightedModState).toBeNull();
 });
 
 it('a project switch during IFC reset await preserves the new highlight state', async () => {
@@ -148,17 +148,17 @@ it('a project switch during IFC reset await preserves the new highlight state', 
   const group = new THREE.Group(); group.userData.devPath='root.dev'; group.userData.rootOccurrence='CBM/A.cbm';
   group.add(new THREE.Mesh(new THREE.BoxGeometry(),new THREE.MeshStandardMaterial()));
   state.loadedXmlModGroups.set('A',group);
-  state.highlightedItems = {};
+  state.selection.highlightedItems = {};
   let finish!: () => void;
   mock.ctx.fragments.resetHighlight.mockImplementation(() => new Promise<void>((resolve) => { finish=resolve; }));
   const pending = frameAndHighlightDevice(mock.ctx as ViewerContext,state,'root.dev',{rootOccurrence:'CBM/A.cbm'});
   await vi.waitFor(() => expect(finish).toBeDefined());
   state.activateProject(2,'new');
-  const newItems = {}; state.highlightedItems = newItems;
+  const newItems = {}; state.selection.highlightedItems = newItems;
   highlightModGroups(state,[group]);
-  const newHighlight = state.highlightedModState;
+  const newHighlight = state.selection.highlightedModState;
   finish(); await pending;
-  expect(state.highlightedItems).toBe(newItems);
-  expect(state.highlightedModState).toBe(newHighlight);
+  expect(state.selection.highlightedItems).toBe(newItems);
+  expect(state.selection.highlightedModState).toBe(newHighlight);
   resetModHighlight(state);
 });

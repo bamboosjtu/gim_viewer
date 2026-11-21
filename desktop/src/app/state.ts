@@ -12,7 +12,6 @@ import type { DeviceRuntime } from '../shared/deviceRuntime.js';
 
 import type { SubstationCapabilitySummary } from '../gim/substationEvidence.js';
 import type { IfcEntry, CbmNode, FileDevEntry } from '../gim/types.js';
-import type * as OBCF from '@thatopen/fragments';
 import type * as THREE from 'three';
 import type { GimProjectType } from '../gim/projectType.js';
 import type { GimGraph } from '@gim/powerline-core/gimGraphTypes.js';
@@ -185,17 +184,6 @@ export class AppState {
   // 后台几何加载 token（递增防竞态：项目切换后旧任务检测 token 不匹配则停止）
   geometryLoadToken = 0;
 
-  // 高亮
-  highlightedItems: OBCF.ModelIdMap | null = null;
-
-  // MOD/STL 高亮状态（保存 mesh 原始材质，用于恢复）
-  // MOD 材质是共享的（_sharedMaterialCache），高亮时必须 clone 后修改，
-  // reset 时恢复原始材质并 dispose clone，避免影响其他使用同一共享材质的 mesh。
-  highlightedModState: {
-    groups: THREE.Object3D[];
-    originalMaterials: Map<THREE.Mesh, THREE.Material | THREE.Material[]>;
-  } | null = null;
-
   /** 取得当前工程的不可变身份快照，供异步任务在 await 前后校验。 */
   captureProjectSession(): ProjectLoadSession {
     return Object.freeze({
@@ -347,9 +335,6 @@ export class AppState {
     this.stlRootGroup = null;
     // 清空项目级坐标转换矩阵（新项目需重新自动同步或手动设置）
     this.projectSourceToViewerMatrix = null;
-    // 清空高亮索引，避免切换项目后旧高亮状态残留
-    this.highlightedItems = null;
-    // 清空 MOD/STL 高亮状态（clone 材质由 resetModHighlight dispose）
-    this.highlightedModState = null;
+    this.selection.resetHighlightState();
   }
 }

@@ -17,6 +17,8 @@
 
 [工程 Worker](../../desktop/src/services/engineeringWorker.ts)执行来源抽取、归一化、投影和编码。[工程服务](../../desktop/src/services/engineeringService.ts)协调会话和发布。来源图修订相同时，后续模型结果引用已发布的图，修订变化时传递完整图。
 
+[来源引用解析](../../packages/gim-sdk/src/source/sourceReferenceResolver.ts)复用来源图的条目索引，按遍历次序登记引用，并且每份文档的同一歧义字段只报告一次。CBM/DEV 的遍历和预读继续由来源图负责，文档读取继续由共享的 `SourceDocumentReader` 管理。
+
 ## 导航与空间细化
 
 清册按目录类别与名称模板列整体，工程组成按建筑、系统和区域组织，来源视图按 CBM/DEV 引用关系与逐文件 IFC 结构浏览。清册与工程树以实体为叶子，部件通过属性和来源查看。待归原因与来源 ID 随导出元数据保留，质量提示显示待归数量。分组操作以去重的整体集合为准。

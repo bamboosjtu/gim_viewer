@@ -18,8 +18,9 @@ function fixture() {
     'desktop/scripts','desktop/node_modules'])mkdirSync(join(folder,dir),{recursive:true});
   symlinkSync(resolve('node_modules/typescript'),join(folder,'desktop/node_modules/typescript'),'junction');
   copyFileSync(resolve('package.json'),join(folder,'desktop/package.json'));
-  for(const name of ['check-engineering-boundaries','core-boundaries','package-boundaries','presentation-boundaries','native-contract-boundaries'])
+  for(const name of ['check-engineering-boundaries','core-boundaries','package-boundaries','presentation-boundaries','native-contract-boundaries','app-state-boundaries'])
     copyFileSync(resolve('scripts',`${name}.mjs`),join(folder,'desktop/scripts',`${name}.mjs`));
+  copyFileSync(resolve('src/app/state.ts'),join(folder,'desktop/src/app/state.ts'));
   files('packages/gim-sdk/src/projection/projection.ts',"export {projectEngineeringComposition} from './composition.js';");
   files('desktop/src/measurement/core.ts',"export * from '@gim/measurement-core/source';");
   // The whitelisted viewer bridge imports must exist in the fixture so the
@@ -34,6 +35,9 @@ function fixture() {
     'substationSpatialSemanticCache','substationWarmAttempt','substationWarmCore','substationLoadingState'])
     files(`desktop/src/features/substation/runtime/${name}.ts`,'export {};');
   files('desktop/src/features/substation/application/substationRuntime.ts','export {};');
+  files('desktop/src/features/substation/application/substationOpenStages.ts','export {};');
+  files('desktop/src/features/substation/application/substationColdSource.ts','export {};');
+  files('desktop/src/features/substation/application/substationColdPersistence.ts','export {};');
   files('desktop/src/features/substation/presentation/substationPresentation.ts','export {};');
   files('desktop/src/features/substation/runtime/substationRuntimeTelemetry.ts','export {};');
   const run=()=>spawnSync(process.execPath,[join(folder,'desktop/scripts/check-engineering-boundaries.mjs')],{
@@ -51,6 +55,15 @@ test('checker accepts a valid fixture and rejects a forbidden reverse import',()
   const rejected=run();
   assert.equal(rejected.status,1);
   assert.match(rejected.stderr,/forbidden import \.\.\/viewer\/demo\.js/);
+});
+
+test('checker rejects an AppState root field without a registered owner',()=>{
+  const {files,run}=fixture();
+  const source=readFileSync(resolve('src/app/state.ts'),'utf8');
+  files('desktop/src/app/state.ts',source.replace('class AppState {','class AppState { unownedFeature = null;'));
+  const rejected=run();
+  assert.equal(rejected.status,1);
+  assert.match(rejected.stderr,/unownedFeature has no AppState owner and release entry/);
 });
 
 test('checker rejects ui imports of measurement probes',()=>{

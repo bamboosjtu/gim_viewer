@@ -16,9 +16,10 @@ pub fn load(root: &Path) -> Settings {
     std::fs::read(root.join("settings.json")).map(|bytes| decode(&bytes)).unwrap_or_default()
 }
 pub fn save(root: &Path, settings: Settings) -> Result<(), NativeError> {
-    if settings.tianditu_key.len() > 128 || !settings.tianditu_key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') || !["imagery", "vector", "terrain", "osm", "canvas"].contains(&settings.base_layer.as_str()) { return Err("地图设置无效".into()); }
+    if settings.tianditu_key.len() > 128 || !settings.tianditu_key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') || !["imagery", "vector", "terrain", "osm", "canvas"].contains(&settings.base_layer.as_str()) { return Err(NativeError::new(NativeErrorCode::InvalidInput, "地图设置无效")); }
     let saved = SavedSettings { version: 1, settings };
-    std::fs::write(root.join("settings.json"), serde_json::to_vec(&saved).map_err(|e| e.to_string())?).map_err(|e| NativeError::new(NativeErrorCode::Io,e.to_string()))
+    let bytes = serde_json::to_vec(&saved).map_err(|error| NativeError::new(NativeErrorCode::Internal, error.to_string()))?;
+    std::fs::write(root.join("settings.json"), bytes).map_err(NativeError::from)
 }
 
 #[cfg(test)]

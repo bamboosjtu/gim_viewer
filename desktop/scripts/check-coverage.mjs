@@ -6,8 +6,13 @@ import {createRequire} from 'node:module';
 import {workspaceTemp} from './test-workspace.mjs';
 const require=createRequire(import.meta.url),{createCoverageMap}=require('istanbul-lib-coverage');
 const desktop=fileURLToPath(new URL('..',import.meta.url)),repo=resolve(desktop,'..'),temp=workspaceTemp();
+const env={...process.env,TEMP:temp,TMP:temp,TMPDIR:temp};
+const configTest=spawnSync(process.execPath,['--test','scripts/check-coverage.test.mjs'],{cwd:desktop,stdio:'inherit',windowsHide:true,env});
+if(configTest.error)throw configTest.error;
+if(configTest.status!==0)process.exitCode=configTest.status??1;
 for(const [cwd,extra] of [[resolve(repo,'packages/gim-sdk'),{GIM_COMBINED_COVERAGE:'1'}],[desktop,{GIM_SDK_COVERAGE_OWNED:'1'}]]){
- const child=spawnSync(process.execPath,['node_modules/vitest/vitest.mjs','run','--coverage'],{cwd,stdio:'inherit',windowsHide:true,env:{...process.env,TEMP:temp,TMP:temp,TMPDIR:temp,...extra}});
+ if(process.exitCode)break;
+ const child=spawnSync(process.execPath,['node_modules/vitest/vitest.mjs','run','--coverage'],{cwd,stdio:'inherit',windowsHide:true,env:{...env,...extra}});
  if(child.error)throw child.error;
  if(child.status!==0){process.exitCode=child.status??1;break;}
 }

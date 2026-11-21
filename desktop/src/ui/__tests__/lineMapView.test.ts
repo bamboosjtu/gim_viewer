@@ -324,7 +324,7 @@ describe('线路 Canvas 渐进绘制与运行时投影索引', () => {
     stubs.restore();
   });
 
-  it('相机切换后 hover/click 使用当前屏幕位置，销毁后迟到 RAF 不写 Canvas', () => {
+  it('相机切换后使用当前屏幕位置，销毁后忽略迟到的绘制和交互', () => {
     const stubs = installCanvasStubs();
     const raf = installRafQueue();
     const container = document.createElement('div');
@@ -335,9 +335,11 @@ describe('线路 Canvas 渐进绘制与运行时投影索引', () => {
     // 通过对象属性保存回调结果，避免 TypeScript 将闭包赋值的可变局部
     // 错误收窄为 never。
     const clicked: { current: GimGraphNode | null } = { current: null };
+    const fitBounds = vi.fn();
     const handle = renderLineMap(makeMapData(12), container, (nodeRef) => { clicked.current = nodeRef; }, {
       onRequestRedraw: (draw) => { requestRedraw.current = draw; },
       projection: {
+        fitBounds,
         project: (_lng, lat) => camera === 'B'
           ? { x: 220, y: 240 }
           : lat < 30.005 ? { x: 620, y: 440 } : { x: 100, y: 100 },
@@ -359,7 +361,16 @@ describe('线路 Canvas 渐进绘制与运行时投影索引', () => {
     camera = 'C';
     redraw?.('interactive');
     handle.destroy();
+    clicked.current = null;
+    handle.handlePointerMove?.(620, 440);
+    handle.handlePointerClick?.(620, 440);
+    handle.handlePointerLeave?.();
+    handle.fit();
+    redraw?.('interactive');
+    redraw?.('settled');
     raf.runAll();
+    expect(clicked.current).toBeNull();
+    expect(fitBounds).not.toHaveBeenCalled();
     expect(stubs.calls.clearRect || 0).toBe(clearBeforeDestroy);
     raf.restore();
     stubs.restore();

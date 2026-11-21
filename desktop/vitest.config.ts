@@ -38,7 +38,7 @@ export default defineConfig({
     poolOptions: {
       forks: { minForks: 1, maxForks: 2 },
     },
-    include: ['src/**/__tests__/**/*.test.ts', 'bridge/__tests__/**/*.test.ts', '../packages/powerline-core/src/**/__tests__/**/*.test.ts', ...(process.env.GIM_SDK_COVERAGE_OWNED ? [] : ['../packages/gim-sdk/src/**/__tests__/**/*.test.ts'])],
+    include: ['src/**/__tests__/**/*.test.ts', 'bridge/__tests__/**/*.test.ts', '../packages/powerline-core/src/**/__tests__/**/*.test.ts', '../packages/measurement-core/src/**/__tests__/**/*.test.ts', ...(process.env.GIM_SDK_COVERAGE_OWNED ? [] : ['../packages/gim-sdk/src/**/__tests__/**/*.test.ts'])],
     // Native and private-sample suites use explicit local entry points.
     exclude: ['src/features/substation/runtime/__tests__/substationSqlite.integration.test.ts'],
     setupFiles: ['./vitest.setup.ts'],
@@ -62,10 +62,10 @@ export default defineConfig({
       thresholds: {
         'src/gim/**': { statements:90, lines:90, functions:90, branches:80 },
         'src/services/openGimService.ts': {statements:70,lines:70,functions:80,branches:50},
-        'src/features/substation/application/substationRuntime.ts': {statements:70,lines:70,functions:45,branches:70},
+        'src/features/substation/application/{substationRuntime,substationOpenStages,substationColdPersistence,substationColdSource}.ts': {statements:70,lines:70,functions:45,branches:70},
         'src/services/viewerUIBinding.ts': {statements:80,lines:80,functions:50,branches:70},
         'src/ui/lineProjectView.ts': {statements:70,lines:70,functions:60,branches:65},
-        'src/ui/lineMapView.ts': {statements:65,lines:65,functions:65,branches:60},
+        'src/ui/{lineMapView,lineMapPainter,lineMapPointer,lineMapRenderer}.ts': {statements:65,lines:65,functions:65,branches:60},
       },
     },
   },

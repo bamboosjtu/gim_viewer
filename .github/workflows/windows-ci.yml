@@ -68,7 +68,9 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: desktop/package-lock.json
+          cache-dependency-path: |
+            desktop/package-lock.json
+            packages/gim-sdk/package-lock.json
 
       - name: Prepare workspace temporary directory
         run: |
@@ -104,6 +106,9 @@ jobs:
       - name: Check measurement value and protocol contracts (no model samples)
         run: npm run test:measurement-tools
 
+      - name: Test measurement core contracts
+        run: npm test -- ../packages/measurement-core/src
+
       - name: Check native acceptance tooling
         run: npm run test:acceptance-tools
 
@@ -126,7 +131,9 @@ jobs:
         run: npm run check:format
 
       - name: Install stable Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
 
       - name: Cache Cargo dependency downloads
         uses: actions/cache@v6

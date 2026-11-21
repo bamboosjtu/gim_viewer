@@ -1,3 +1,4 @@
+import type { Material, Mesh, Object3D } from 'three';
 import type { ProjectLoadSession } from './projectSession.js';
 import type {
   SelectionRequest,
@@ -30,6 +31,18 @@ export class ProjectSelectionState {
   selectionDecorationCleanup: (() => void) | null = null;
   selectionVisibility: SelectionVisibilityController | null = null;
   selectionHighlightRequestId: number | null = null;
+  highlightedItems: Readonly<Record<string, Iterable<number>>> | null = null;
+  highlightedModState: {
+    groups: Object3D[];
+    originalMaterials: Map<Mesh, Material | Material[]>;
+  } | null = null;
+
+  /** The Viewer restores and disposes material clones before project reset. */
+  resetHighlightState(): void {
+    this.highlightedItems = null;
+    this.highlightedModState = null;
+  }
+
   engineeringSelection: EngineeringSelectionScope | null = null;
   representationSelection:
     import('../shared/representationSelection.js').RepresentationSelectionScope | null = null;

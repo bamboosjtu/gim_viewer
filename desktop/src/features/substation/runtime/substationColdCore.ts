@@ -3,7 +3,7 @@ import { logger } from '../../../utils/logger.js';
 import type { AppState, ProjectLoadSession } from '../../../app/state.js';
 import type { CbmNode } from '../../../gim/types.js';
 import type { IfcEntry } from '../../../gim/types.js';
-import { discoverIfcFromCBM, scanIfcFiles, buildIfcGuidIndex } from '../../../gim/gimIndexer.js';
+import { discoverIfcFromCBM, buildIfcGuidIndex } from '../../../gim/gimIndexer.js';
 import { buildCbmTree, buildCbmNodeIndex } from '../../../gim/cbmParser.js';
 import { parseFileDevRelation } from '../../../gim/fileDevParser.js';
 import { perfBegin, perfCurrentSession } from '../../../utils/perfTimings.js';
@@ -44,9 +44,16 @@ export async function publishSubstationColdCore(
     });
 
     const endIfcDiscovery = perfBegin('变电 IFC discovery', undefined, perfSession);
-    let ifcEntries = await scope.read(async () => discoverIfcFromCBM(files));
-    if (ifcEntries.length === 0) ifcEntries = scanIfcFiles(files);
-    endIfcDiscovery(undefined, { count: ifcEntries.length });
+    const {
+      entries: ifcEntries,
+      cbmDiscoveredCount,
+      inventoryFallbackCount,
+    } = await scope.read(() => discoverIfcFromCBM(files));
+    endIfcDiscovery(undefined, {
+      count: ifcEntries.length,
+      cbmDiscoveredCount,
+      inventoryFallbackCount,
+    });
     void sampleSubstationMemory(state, 'IFC discovery 后', perfSession, {
       ifcCount: ifcEntries.length,
     }).catch(reportBackgroundError);

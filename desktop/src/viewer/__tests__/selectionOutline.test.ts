@@ -2,7 +2,7 @@ import { expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { AppState } from '../../app/state.js';
 import { highlightModGroups, resetModHighlight } from '../highlight.js';
-import { outlineFragmentItems, clearFragmentOutlines, showHoverOutline, clearHoverOutline } from '../selectionOutline.js';
+import { outlineFragmentItems, clearFragmentOutlines, showHoverOutline, clearHoverOutline, addSelectionOutline, removeSelectionOutline } from '../selectionOutline.js';
 
 it('keeps source colour and opacity, draws amber edges, and restores shared materials without disposing source geometry',()=>{
   const state=new AppState(),geometry=new THREE.BoxGeometry(),material=new THREE.MeshStandardMaterial({color:0x516b84,transparent:true,opacity:.7}),mesh=new THREE.Mesh(geometry,material),other=new THREE.Mesh(geometry,material),root=new THREE.Group();root.add(mesh);
@@ -15,6 +15,26 @@ it('keeps source colour and opacity, draws amber edges, and restores shared mate
 it('hover never replaces material and selected outlines remain after hover is cleared',()=>{
   const state=new AppState(),mesh=new THREE.Mesh(new THREE.BoxGeometry(),new THREE.MeshStandardMaterial()),original=mesh.material;
   showHoverOutline(state,mesh);expect(mesh.material).toBe(original);expect(mesh.children).toHaveLength(1);clearHoverOutline(state);highlightModGroups(state,[mesh]);showHoverOutline(state,mesh);clearHoverOutline(state);expect(mesh.children).toHaveLength(1);resetModHighlight(state);
+});
+
+it('releases shared outline geometry when its last owner is cleared on project reset', () => {
+  const state = new AppState();
+  const geometry = new THREE.BoxGeometry();
+  const first = new THREE.Mesh(geometry);
+  const second = new THREE.Mesh(geometry);
+  addSelectionOutline(state, first);
+  addSelectionOutline(state, second);
+  const edges = (first.children[0] as THREE.LineSegments).geometry;
+  expect((second.children[0] as THREE.LineSegments).geometry).toBe(edges);
+  const dispose = vi.spyOn(edges, 'dispose');
+  removeSelectionOutline(state, first);
+  expect(dispose).not.toHaveBeenCalled();
+
+  state.resetGimState();
+  expect(dispose).toHaveBeenCalledOnce();
+  expect(second.children).toHaveLength(0);
+  state.resetGimState();
+  expect(dispose).toHaveBeenCalledOnce();
 });
 
 it('draws Fragments contours in the model coordinate frame without changing original materials or requesting IFC precision',async()=>{

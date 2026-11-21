@@ -33,6 +33,11 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # A manual signing request keeps its own group, even when it selects the same SHA.
+  group: android-ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
 jobs:
   android:
     name: Android checks / manual signed APK
@@ -108,7 +113,7 @@ jobs:
 
       - name: Set up Android SDK
         if: github.event_name == 'workflow_dispatch'
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
         with:
           # Google removed the legacy 'tools' SDK package requested by v3.
           packages: 'platform-tools'
@@ -128,8 +133,9 @@ jobs:
 
       - name: Set up Rust Android target
         if: github.event_name == 'workflow_dispatch'
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
+          toolchain: stable
           targets: aarch64-linux-android
 
       - name: Build ARM64 release APK

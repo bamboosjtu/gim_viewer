@@ -14,14 +14,32 @@ it('discovers arbitrary CBM folders and repeated list references with one shared
     ['models/first.ifc',textFile('IFC','first.ifc')],['elsewhere/second.ifc',textFile('IFC','second.ifc')],
   ]);
   const keys=vi.spyOn(files,'keys'),left=vi.spyOn(files.get('source/left.cbm')!,'arrayBuffer'),right=vi.spyOn(files.get('source/right.cbm')!,'arrayBuffer');
-  expect(await discoverIfcFromCBM(files)).toHaveLength(2);expect(left).toHaveBeenCalledOnce();expect(right).toHaveBeenCalledOnce();
+  const discovery = await discoverIfcFromCBM(files);
+  expect(discovery.entries).toHaveLength(2);expect(left).toHaveBeenCalledOnce();expect(right).toHaveBeenCalledOnce();
+  expect(discovery).toMatchObject({cbmDiscoveredCount:2,inventoryFallbackCount:0});
   await discoverIfcFromCBM(files);expect(keys).toHaveBeenCalledOnce();
 });
 it('isolates a failed CBM read and preserves the delivered IFC inventory',async()=>{
   const file=textFile('','project.cbm'),files=new Map([['custom/project.cbm',file],['other/model.ifc',textFile('IFC','model.ifc')]]);
   vi.spyOn(file,'arrayBuffer').mockRejectedValue(Error('unreadable'));
   const warn=vi.spyOn(console,'warn').mockImplementation(()=>{});
-  expect((await discoverIfcFromCBM(files)).map(row=>row.path)).toEqual(['other/model.ifc']);expect(warn).toHaveBeenCalled();warn.mockRestore();
+  const discovery = await discoverIfcFromCBM(files);
+  expect(discovery.entries.map(row=>row.path)).toEqual(['other/model.ifc']);expect(warn).toHaveBeenCalled();warn.mockRestore();
+  expect(discovery).toMatchObject({cbmDiscoveredCount:0,inventoryFallbackCount:1});
+});
+
+it.each([false,true])('reports inventory fallback separately from CBM matches (with reference: %s)', async withReference => {
+  const files = new Map([
+    ['CBM/project.cbm', textFile(withReference ? 'IFC.NUM=1\nIFC0=a.ifc' : 'IFC.NUM=0', 'project.cbm')],
+    ['models/a.ifc', textFile('IFC', 'a.ifc')],
+    ['elsewhere/b.ifc', textFile('IFC', 'b.ifc')],
+  ]);
+  const enumerate = vi.spyOn(files, Symbol.iterator);
+  const discovery = await discoverIfcFromCBM(files);
+  expect(discovery.entries.map(entry => entry.path)).toEqual(['models/a.ifc', 'elsewhere/b.ifc']);
+  expect(discovery.cbmDiscoveredCount).toBe(withReference ? 1 : 0);
+  expect(discovery.inventoryFallbackCount).toBe(withReference ? 1 : 2);
+  expect(enumerate).toHaveBeenCalledOnce();
 });
 
 describe('scanIfcFiles', () => {
@@ -49,7 +67,7 @@ describe('discoverIfcFromCBM IFC 路径解析', () => {
       ['CBM/root.cbm', textFile('ENTITYNAME=F1System\nIFC.NUM=1\nIFC0=围墙.ifc', 'root.cbm')],
       ['CBM/围墙.ifc', textFile('ISO-10303-21', 'wall.ifc')],
     ]);
-    const entries = await discoverIfcFromCBM(files);
+    const { entries } = await discoverIfcFromCBM(files);
     expect(entries).toHaveLength(1);
     expect(entries[0].path).toBe('CBM/围墙.ifc');
     expect(entries[0].name).toBe('围墙');
@@ -61,7 +79,7 @@ describe('discoverIfcFromCBM IFC 路径解析', () => {
       ['CBM/root.cbm', textFile('ENTITYNAME=F1System\nIFC.NUM=1\nIFC0=一次设备.ifc', 'root.cbm')],
       ['DEV/一次设备.ifc', textFile('ISO-10303-21', 'dev.ifc')],
     ]);
-    const entries = await discoverIfcFromCBM(files);
+    const { entries } = await discoverIfcFromCBM(files);
     expect(entries).toHaveLength(1);
     expect(entries[0].path).toBe('DEV/一次设备.ifc');
   });
@@ -72,7 +90,7 @@ describe('discoverIfcFromCBM IFC 路径解析', () => {
       ['CBM/root.cbm', textFile('ENTITYNAME=F1System\nIFC.NUM=1\nIFC0=Model.IFC', 'root.cbm')],
       ['IFC/model.ifc', textFile('ISO-10303-21', 'm.ifc')],
     ]);
-    const entries = await discoverIfcFromCBM(files);
+    const { entries } = await discoverIfcFromCBM(files);
     expect(entries).toHaveLength(1);
     expect(entries[0].path).toBe('IFC/model.ifc');
   });
@@ -82,7 +100,7 @@ describe('discoverIfcFromCBM IFC 路径解析', () => {
       ['CBM/project.cbm', textFile('SUBSYSTEM=root.cbm', 'project.cbm')],
       ['CBM/root.cbm', textFile('ENTITYNAME=F1System\nIFC.NUM=1\nIFC0=缺失.ifc', 'root.cbm')],
     ]);
-    const entries = await discoverIfcFromCBM(files);
+    const { entries } = await discoverIfcFromCBM(files);
     expect(entries).toHaveLength(0);
   });
 
@@ -99,7 +117,7 @@ describe('discoverIfcFromCBM IFC 路径解析', () => {
       ['CBM/model.ifc', textFile('ISO-10303-21', 'model.ifc')],
     ]);
 
-    const entries = await discoverIfcFromCBM(files);
+    const { entries } = await discoverIfcFromCBM(files);
     expect(entries).toHaveLength(1);
     expect(entries[0].path).toBe('CBM/model.ifc');
     const tree = await buildCbmTree(files);

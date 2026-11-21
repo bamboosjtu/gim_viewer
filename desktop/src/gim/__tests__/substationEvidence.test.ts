@@ -38,7 +38,7 @@ describe('Substation source evidence and normalized projections', () => {
       'CBM/model.ifc': 'ISO-10303-21;',
     });
     const tree = await buildCbmTree(files);
-    const entries = await discoverIfcFromCBM(files);
+    const { entries } = await discoverIfcFromCBM(files);
     expect(entries.map((e) => e.path)).toEqual(['CBM/model.ifc']);
     const summary = await inspectSubstationCapabilities(files, tree, entries);
     expect(summary.ifc.linkMode).toBe(mode);
@@ -144,7 +144,7 @@ describe('Substation source evidence and normalized projections', () => {
     expect(tree!.systemNames).toEqual(['Actual readable system']);
     const relations = await parseFileDevRelation(files);
     expect(relations[0]).toMatchObject({ sourceDesignFile: 'design.DGN', ifcFile: '', modelId: '' });
-    const entries = await discoverIfcFromCBM(files);
+    const { entries } = await discoverIfcFromCBM(files);
     const payload = await buildGimIndexPayload(1, files, entries, tree, relations);
     expect(payload.file_dev_entries).toHaveLength(2);
     const state = new AppState();
@@ -215,7 +215,7 @@ describe('Substation source evidence and normalized projections', () => {
     });
     const tree = await buildCbmTree(files);
     const relations = await parseFileDevRelation(files);
-    const entries = await discoverIfcFromCBM(files);
+    const { entries } = await discoverIfcFromCBM(files);
     const fresh = await buildCbmTree(files);
     const device = tree!.children[0];
     const part = device.children.find((n) => n.entityName.toUpperCase() === 'PARTINDEX')!;
@@ -274,7 +274,7 @@ describe('Substation source evidence and normalized projections', () => {
     });
     const tree = await buildCbmTree(files);
     const relations = await parseFileDevRelation(files);
-    const entries = await discoverIfcFromCBM(files);
+    const { entries } = await discoverIfcFromCBM(files);
     const device = tree!.children[0];
     const state = {
       currentFiles: files,

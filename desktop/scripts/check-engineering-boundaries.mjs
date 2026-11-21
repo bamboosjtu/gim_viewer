@@ -6,6 +6,7 @@ import {checkPresentationSource} from './presentation-boundaries.mjs';
 import {dependencyCycles, packageBoundaryError} from './package-boundaries.mjs';
 import {coreBoundaryErrors} from './core-boundaries.mjs';
 import {nativeContractCallErrors} from './native-contract-boundaries.mjs';
+import {appStateFieldErrors} from './app-state-boundaries.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../src');
 const sdkRoot = resolve(root, '../../packages/gim-sdk/src');
@@ -20,7 +21,7 @@ function* files(dir) {
     else if (entry.name.endsWith('.ts')) yield path;
   }
 }
-const failures = [];
+const failures = appStateFieldErrors(readFileSync(resolve(root, 'app/state.ts'), 'utf8'));
 const sharedDependencies=JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8')).dependencies;
 for(const path of [...files(resolve(root,'..','bridge')),...files(root),...files(resolve(root,'..','..','app','src'))]) {
   failures.push(...nativeContractCallErrors(readFileSync(path,'utf8'),relative(root,path)));
@@ -190,6 +191,9 @@ for (const [entry, hit] of viewerBridgeImports) if (!hit)
 // runtime entry remains legal (for example IFC starting DEV LOD).
 const substationRuntimeFiles = [
   resolve(root, 'features/substation/application/substationRuntime.ts'),
+  resolve(root, 'features/substation/application/substationOpenStages.ts'),
+  resolve(root, 'features/substation/application/substationColdSource.ts'),
+  resolve(root, 'features/substation/application/substationColdPersistence.ts'),
   resolve(root, 'features/substation/runtime/substationBackgroundRuntime.ts'),
   resolve(root, 'features/substation/runtime/substationColdCore.ts'),
   resolve(root, 'features/substation/runtime/substationDevRuntime.ts'),

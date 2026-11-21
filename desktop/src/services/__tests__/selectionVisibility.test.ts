@@ -25,7 +25,7 @@ function fixture() {
   return {state,api,a,b,preview,select,update};
 }
 it('ordinary selection does not enumerate IFC visibility or force a scene update',async()=>{
-  const f=fixture();f.select();f.state.highlightedItems={A:[1]};await f.api.sync();
+  const f=fixture();f.select();f.state.selection.highlightedItems={A:[1]};await f.api.sync();
   expect(f.a.model.getVisible).not.toHaveBeenCalled();expect(f.a.model.getGuidsByLocalIds).not.toHaveBeenCalled();
   expect(f.update).not.toHaveBeenCalled();expect(f.preview.setSelectionScope).not.toHaveBeenCalled();
 });
@@ -33,7 +33,7 @@ it('a DEV selection hides every IFC representation and restores source-layer vis
   const f=fixture();f.select();f.state.selection.onlySelected=true;
   const selected=new THREE.Group(),other=new THREE.Group(),hidden=new THREE.Group();hidden.visible=false;
   f.state.loadedXmlModGroups.set('selected',selected);f.state.loadedXmlModGroups.set('other',other);f.state.loadedStlGroups.set('hidden',hidden);
-  f.state.highlightedModState={groups:[selected],originalMaterials:new Map()};
+  f.state.selection.highlightedModState={groups:[selected],originalMaterials:new Map()};
   f.api.setModelVisible('B',false);await f.api.sync();
   expect(f.a.model.object.visible).toBe(false);expect(f.b.model.object.visible).toBe(false);
   expect(f.a.runtime.setSelectionScope).toHaveBeenLastCalledWith(true,new Set());
@@ -45,7 +45,7 @@ it('a DEV selection hides every IFC representation and restores source-layer vis
   expect(other.visible).toBe(true);expect(hidden.visible).toBe(false);
 });
 it('an exact far pick selects its matching regional and connection identity, never another source',async()=>{
-  const f=fixture();f.select();f.state.highlightedItems={A:[2]};f.state.selection.onlySelected=true;
+  const f=fixture();f.select();f.state.selection.highlightedItems={A:[2]};f.state.selection.onlySelected=true;
   await f.api.sync();
   expect([...f.a.visibility.values()]).toEqual([false,true]);expect(f.b.model.object.visible).toBe(false);
   expect(f.a.runtime.setSelectionScope).toHaveBeenLastCalledWith(true,new Set([102]));
@@ -55,7 +55,7 @@ it('an exact far pick selects its matching regional and connection identity, nev
 it('a regional pick preserves its far counterpart and multiple explicit source references',async()=>{
   const f=fixture();f.select();f.state.selection.onlySelected=true;
   const group=new THREE.Group();group.userData={provider:'ifc-regional',modelId:'A',expressId:101,globalId:'g1'};
-  f.state.highlightedModState={groups:[group],originalMaterials:new Map()};f.state.highlightedItems={B:[2]};
+  f.state.selection.highlightedModState={groups:[group],originalMaterials:new Map()};f.state.selection.highlightedItems={B:[2]};
   await f.api.sync();
   expect([...f.a.visibility.values()]).toEqual([true,false]);expect([...f.b.visibility.values()]).toEqual([false,true]);
   expect(f.a.runtime.setSelectionScope).toHaveBeenLastCalledWith(true,new Set([101]));
@@ -63,9 +63,9 @@ it('a regional pick preserves its far counterpart and multiple explicit source r
 it('keeps committed source identity after precision replaces the highlighted regional group',async()=>{
   const f=fixture(),request=f.select();
   const group=new THREE.Group();group.userData={provider:'ifc-regional',modelId:'A',expressId:101,globalId:'g1'};
-  f.state.highlightedModState={groups:[group],originalMaterials:new Map()};
+  f.state.selection.highlightedModState={groups:[group],originalMaterials:new Map()};
   await f.api.sync(f.state.selection.selectionGuard(request));
-  f.state.highlightedModState=null;group.clear();
+  f.state.selection.highlightedModState=null;group.clear();
   f.state.selection.onlySelected=true;await f.api.sync();
   expect([...f.a.visibility.values()]).toEqual([true,false]);
   expect(f.a.runtime.setSelectionScope).toHaveBeenLastCalledWith(true,new Set([101]));
@@ -74,17 +74,17 @@ it('keeps committed source identity after precision replaces the highlighted reg
 });
 it('does not pick an arbitrary regional object for an ambiguous GUID and clears all on empty selection',async()=>{
   const f=fixture();f.a.runtime.index.objects.push({expressId:999,globalId:'g1'});
-  f.select();f.state.selection.onlySelected=true;f.state.highlightedItems={A:[1]};await f.api.sync();
+  f.select();f.state.selection.onlySelected=true;f.state.selection.highlightedItems={A:[1]};await f.api.sync();
   expect(f.a.runtime.setSelectionScope).toHaveBeenLastCalledWith(true,new Set());
   f.state.selection.beginSelection(null);await f.api.sync();
   expect(f.a.model.object.visible).toBe(false);expect(f.b.model.object.visible).toBe(false);
 });
 it('rejects late A identity lookups after B owns the selection',async()=>{
-  const f=fixture();const a=f.select('A');f.state.selection.onlySelected=true;f.state.highlightedItems={A:[1]};
+  const f=fixture();const a=f.select('A');f.state.selection.onlySelected=true;f.state.selection.highlightedItems={A:[1]};
   let unblock!:(ids:string[])=>void;
   f.a.model.getGuidsByLocalIds.mockImplementationOnce(()=>new Promise(resolve=>{unblock=resolve;}));
   const old=f.api.sync(f.state.selection.selectionGuard(a));await vi.waitFor(()=>expect(unblock).toBeTypeOf('function'));
-  const b=f.select('B');f.state.highlightedItems={B:[2]};await f.api.sync(f.state.selection.selectionGuard(b));
+  const b=f.select('B');f.state.selection.highlightedItems={B:[2]};await f.api.sync(f.state.selection.selectionGuard(b));
   unblock(['g1']);await old;
   expect(f.a.model.object.visible).toBe(false);expect([...f.b.visibility.values()]).toEqual([false,true]);
 });

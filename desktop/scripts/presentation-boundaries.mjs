@@ -8,7 +8,20 @@ export function checkPresentationSource(source,path) {
     const bindings=node.importClause?.namedBindings;
     if(bindings&&ts.isNamedImports(bindings))for(const item of bindings.elements)if((item.propertyName??item.name).text==='loadPresentation')loaders.add(item.name.text);
   }
+  const legacyLoader = (expression) => {
+    if (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression) ||
+        ts.isNonNullExpression(expression)) return legacyLoader(expression.expression);
+    if (ts.isIdentifier(expression)) return loaders.has(expression.text);
+    if (ts.isPropertyAccessExpression(expression)) return expression.name.text === 'loadPresentation';
+    return ts.isElementAccessExpression(expression) && ts.isStringLiteralLike(expression.argumentExpression) &&
+      expression.argumentExpression.text === 'loadPresentation';
+  };
   function visit(node) {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) &&
+        node.initializer && legacyLoader(node.initializer)) {
+      loaders.add(node.name.text);
+      failures.push(`${path}: generic presentation module loaders are forbidden`);
+    }
     if(ts.isBinaryExpression(node)&&node.operatorToken.kind>=ts.SyntaxKind.FirstAssignment&&node.operatorToken.kind<=ts.SyntaxKind.LastAssignment) {
       const target=node.left;
       if(ts.isPropertyAccessExpression(target)&&(['innerHTML','outerHTML','textContent','className'].includes(target.name.text)
@@ -17,7 +30,7 @@ export function checkPresentationSource(source,path) {
     }
     if(ts.isCallExpression(node)) {
       const fn=node.expression;
-      if((ts.isIdentifier(fn)&&loaders.has(fn.text))||(ts.isPropertyAccessExpression(fn)&&fn.name.text==='loadPresentation')) {
+      if(legacyLoader(fn)) {
         failures.push(`${path}: generic presentation module loaders are forbidden`);
       }
       if(ts.isPropertyAccessExpression(fn)&&ts.isIdentifier(fn.expression)&&fn.expression.text==='document')

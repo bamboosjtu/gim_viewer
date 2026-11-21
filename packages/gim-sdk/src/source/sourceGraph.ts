@@ -1,15 +1,6 @@
 import { engineeringSourceRecords } from "../shared/sourceRecordSelectors.js";
 import type { SourceDocument } from "./sourceDocuments.js";
-import {
-  sourceScalar,
-  sourceReferenceFields,
-  type SourceField,
-} from "./sourceDocument.js";
-import {
-  createEntryIndex,
-  sourceReferenceCandidates,
-  type EntryIndex,
-} from "./entryResolver.js";
+import { createEntryIndex, type EntryIndex } from "./entryResolver.js";
 export type { SourceDocument } from "./sourceDocuments.js";
 import { parseFamSectionsWithDiagnostics } from "./famParser.js";
 import { ENGINEERING_EVIDENCE_FIELDS } from "./recognitionFieldPolicy.js";
@@ -18,6 +9,11 @@ import type { SourceProperty, SourceRecord } from "./sourceEvidence.js";
 import { cbmRelationKind } from "./sourceComposition.js";
 import { SourceFamilyIndex } from "./sourceFamilyIndex.js";
 import { SourceDocumentReader } from "./sourceDocumentReader.js";
+import {
+  createSourceReferenceResolver,
+  type SourceReference,
+} from "./sourceReferenceResolver.js";
+export type { SourceReference } from "./sourceReferenceResolver.js";
 
 export interface SourceFileReader {
   /** Actual archive paths, including files not reached by CBM GUID references. */
@@ -26,16 +22,6 @@ export interface SourceFileReader {
   readDocument?(path: string): Promise<SourceDocument>;
   prefetchDocuments?(paths: readonly string[]): void;
   readText(path: string): Promise<string>;
-}
-export interface SourceReference {
-  lines?: number[];
-  values?: string[];
-  owner: string;
-  field: string;
-  value: string;
-  target: string | null;
-  candidates: string[];
-  status: "resolved" | "missing" | "ambiguous";
 }
 export interface CbmOccurrence {
   id: string;
@@ -109,69 +95,15 @@ export async function extractEngineeringSourceGraph(
       }),
     );
   };
-  function resolve(owner: string, field: string, value: string): string | null {
-    const candidates = sourceReferenceCandidates(entryIndex, value, owner);
-    const target = candidates.length === 1 ? candidates[0] : null;
-    result.references.push({
-      owner,
-      field,
-      value,
-      target,
-      candidates: [...candidates],
-      status: target ? "resolved" : candidates.length ? "ambiguous" : "missing",
-    });
-    return target;
-  }
+  const { resolve, scalar, edgesFor } = createSourceReferenceResolver(
+    entryIndex,
+    result.references,
+    (diagnostic) => result.diagnostics.push(diagnostic),
+  );
   const reader = new SourceDocumentReader(files);
   result.documents = reader.documents;
   const document = (path: string): Promise<SourceDocument> =>
     reader.document(path);
-  const ambiguousFields = new WeakMap<SourceDocument, Set<string>>();
-  const ambiguous = (
-    doc: SourceDocument,
-    key: string,
-    fields: readonly SourceField[],
-  ) => {
-    const seen = ambiguousFields.get(doc) ?? new Set<string>();
-    if (seen.has(key)) return;
-    seen.add(key);
-    ambiguousFields.set(doc, seen);
-    const lines = fields.flatMap((field) =>
-      field.line == null ? [] : [field.line],
-    );
-    result.diagnostics.push({
-      kind: "ambiguous-field",
-      source: doc.path,
-      field: key,
-      lines,
-    });
-    const candidates = [
-      ...new Set(
-        fields.flatMap((field) => [
-          ...sourceReferenceCandidates(entryIndex, field.value, doc.path),
-        ]),
-      ),
-    ];
-    result.references.push({
-      owner: doc.path,
-      field: key,
-      value: "",
-      values: fields.map((field) => field.value),
-      lines,
-      candidates,
-      target: null,
-      status: "ambiguous",
-    });
-  };
-  const scalar = (doc: SourceDocument, key: string) => {
-    const result = sourceScalar(doc, key);
-    if (result.status === "ambiguous") ambiguous(doc, key, result.fields);
-    return result.value;
-  };
-  const edgesFor = (doc: SourceDocument, pattern: RegExp) =>
-    sourceReferenceFields(doc, pattern, (key, fields) =>
-      ambiguous(doc, key, fields),
-    );
   // Object fields are attached only to their actual OMP occurrence. Ancestor
   // organization labels never become evidence on every descendant.
   const objectKeys = new Set(

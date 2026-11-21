@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - 'tools/**'
+      - '!tools/**/README.md'
       - '.github/**'
       - 'packages/gim-sdk/src/semantic/catalog/catalog.json'
       - '.gitignore'
@@ -11,6 +12,7 @@ on:
   pull_request:
     paths:
       - 'tools/**'
+      - '!tools/**/README.md'
       - '.github/**'
       - 'packages/gim-sdk/src/semantic/catalog/catalog.json'
       - '.gitignore'
@@ -46,20 +48,25 @@ jobs:
           "TMPDIR=$scratch" >> $env:GITHUB_ENV
       - name: Verify the frozen Blender converter snapshot
         run: python tools/gim_blender/verify_snapshot.py
-      - name: Test Blender snapshot verification on Windows line endings
-        run: python -B -m unittest discover -s tools/gim_blender/tests/unit -p test_snapshot.py -v
+      - name: Run Blender Python unit tests without model samples
+        run: python -B -m unittest discover -s tools/gim_blender/tests/unit -v
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: tools/gim_blender/package-lock.json
-      - name: Check GitHub Action version pins
-        run: node .github/scripts/check-action-versions.mjs
+      - name: Check GitHub Actions workflow contracts
+        run: |
+          node --test .github/scripts/check-action-versions.test.mjs .github/scripts/android-ci.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node .github/scripts/check-action-versions.mjs
       - name: Build the standalone Blender converter without model samples
         run: |
           npm ci --prefix tools/gim_blender
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run build --prefix tools/gim_blender
+      - name: Run Blender Node unit tests without model samples
+        run: node --test 'tools/gim_blender/tests/unit/test_*.cjs'
       - name: Reject unsafe build paths and preserve previous outputs
         shell: pwsh
         # Negative fixtures intentionally invoke Python with exit 17. A child

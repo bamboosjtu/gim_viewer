@@ -79,7 +79,7 @@ npm run tauri:dev     # Tauri 开发窗口
 
 Windows CI 保持一个串行任务：版本、测量协议、验收工具、本地注册表、分层、类型和 lint 检查在 Rust 编译及覆盖率之前执行；随后运行 Rust 单元测试、前端覆盖率、SQLite 集成、前端构建和 Rust 编译边界。`workflow_dispatch` 才构建、校验和上传便携 Benchmark 发布包。以上步骤均不执行工程性能样本；性能优化须取得可测的明显提升，功能和正确性修正应避免过大回退；实测收益、具体成本与未决项分别报告，没有统一时间、内存或增长比例验收线，是否接受及复核范围由开发者决定。
 
-CI Action 版本由 `.github/action-versions.json` 单一策略约束：每个 Action 固定一个主版本，不同 Action 的主版本互不替代；`node .github/scripts/check-action-versions.mjs` 在 Tools CI 中校验所有 workflow，同一 Action 出现第二个主版本即失败。
+CI Action 版本由 `.github/action-versions.json` 统一登记。GitHub 维护的 Action 固定于各自的主版本，第三方仓库 Action 固定于完整的提交 SHA。Tools CI 运行 `node .github/scripts/check-action-versions.mjs`，核对所有 workflow 的引用与登记值。
 
 单元测试随模块放入 `__tests__/`，共享包持有自己的测试，跨模块编排测试归编排模块；组织规则见[测试组织](validation.md#测试组织)。`test:module` 在 desktop 和 app 下均可使用，会加载各自的 Vitest 配置及排除规则；它不替代独立的原生/样本门禁。
 

@@ -283,12 +283,12 @@ cargo test --manifest-path app/src-tauri/Cargo.toml six_native_imports -- --igno
 | `packages/gim-sdk/src/{source,geometry,engineering,projection,adapters,shared}/` | 90% | 90% | 80% |
 | `gim/`（桌面按归属检查） | 90% | 90% | 80% |
 | `services/openGimService.ts` | 70% | 80% | 50% |
-| `features/substation/application/substationRuntime.ts` | 70% | 45% | 70% |
+| `features/substation/application/{substationRuntime,substationOpenStages,substationColdPersistence,substationColdSource}.ts`（合并计算） | 70% | 45% | 70% |
 | `services/viewerUIBinding.ts` | 80% | 50% | 70% |
 | `ui/lineProjectView.ts` | 70% | 60% | 65% |
 | `ui/lineMapView.ts` | 65% | 65% | 60% |
 
-`test:coverage` 先采集 SDK 自有用例，再采集桌面消费者，合并同一源码的 Istanbul 覆盖数据后对 SDK 的领域/来源实施原门槛；桌面热点门槛仍由原配置执行。SDK 与桌面报告分别在 output/coverage/sdk 和 desktop，合并摘要在 output/coverage/coverage-summary.json。两个采集范围必须非空，防止跨目录匹配失效被当成通过；SDK 用例不在同一命令中重复执行。桌面 npm test 是工作区全量入口，包含 SDK 用例；SDK npm test 也可单独运行。
+`test:coverage` 先用 Vitest 的阈值匹配器检查变电应用层四个模块是否受同一门禁约束，并用低覆盖夹具验证门禁会失败。随后采集 SDK 自有用例和桌面消费者，合并同一源码的 Istanbul 覆盖数据后对 SDK 的领域/来源实施原门槛。桌面热点门槛由 Vitest 配置执行。SDK 与桌面报告分别在 output/coverage/sdk 和 desktop，合并摘要在 output/coverage/coverage-summary.json。两个采集范围必须非空，防止跨目录匹配失效被当成通过。SDK 用例在同一命令中只执行一次。桌面 npm test 是工作区全量入口，包含 SDK 用例，SDK npm test 也可单独运行。
 
 `output/coverage/summary.json` 的 `largestModules` 按可执行行数列出前 20 个模块的行、函数与分支覆盖，供评审比较。现有覆盖率下限仍独立执行。
 

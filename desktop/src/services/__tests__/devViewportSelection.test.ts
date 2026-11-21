@@ -34,7 +34,7 @@ it('replaces old highlight/attributes with explicit source choices and waits for
   highlightModGroups(f.state,[old]);
   await selectViewportDev(f.ctx,f.state,'shared','instance',f.request,()=>{});
   expect(mocks.handle).not.toHaveBeenCalled();expect(mocks.properties).not.toHaveBeenCalled();
-  expect(f.state.highlightedModState?.groups).toEqual([f.picked]);
+  expect(f.state.selection.highlightedModState?.groups).toEqual([f.picked]);
   const choices=[...document.querySelectorAll<HTMLButtonElement>('.props-source-choice')];
   expect(choices.map(button=>button.textContent)).toEqual(['project / left / A','project / right / B']);
   expect(document.getElementById('props-drawer')?.classList.contains('collapsed')).toBe(false);
@@ -57,7 +57,7 @@ it('keeps the picked source highlighted but clears stale properties when no sema
   expect(openingFeedback).not.toHaveBeenCalled();
   expect(status.textContent).toContain('没有对应');
   expect(f.state.selection.selectionMessage).toBe(status.textContent);
-  expect(f.state.highlightedModState?.groups).toEqual([f.picked]);
+  expect(f.state.selection.highlightedModState?.groups).toEqual([f.picked]);
   expect(document.getElementById('props-drawer-body')?.textContent).toContain('没有对应');
   expect(document.querySelectorAll('.props-source-choice')).toHaveLength(0);
   expect(mocks.handle).not.toHaveBeenCalled();

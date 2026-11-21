@@ -904,7 +904,7 @@ export class DevLodRuntime {
     if (!camera) return;
     this.refreshMemoryPressure();
     this.notifyCoordinateAnchor();
-    const canvas = this.ctx.world.renderer?.three.domElement;
+    const canvas = this.ctx.world.renderer?.three?.domElement;
     const rect = canvas?.getBoundingClientRect();
     const view = createDeviceViewContext(camera, rect?.width || 1000, rect?.height || 800);
     const signature = [
@@ -1079,20 +1079,16 @@ export class DevLodRuntime {
               group.userData.deviceLod = lod;
               group.name = row.entry.instanceKey;
               const highlighted =
-                this.state.highlightedModState?.groups.filter((object) =>
+                this.state.selection.highlightedModState?.groups.filter((object) =>
                   belongsTo(object, row.group),
                 ) ?? [];
-              const highlightPath = (object: THREE.Object3D, key: string): string | undefined => {
-                const value: unknown = object.userData[key];
-                return typeof value === 'string' ? value : undefined;
-              };
               const highlightScopes = highlighted.map((object) =>
                 object === row.group
                   ? null
                   : {
-                      devPath: highlightPath(object, 'devPath'),
-                      assemblyPath: highlightPath(object, 'assemblyPath'),
-                      referencePath: highlightPath(object, 'referencePath'),
+                      devPath: object.userData.devPath as unknown,
+                      assemblyPath: object.userData.assemblyPath as unknown,
+                      referencePath: object.userData.referencePath as unknown,
                     },
               );
               for (const object of highlighted) removeModHighlightGroup(this.state, object);
@@ -1337,11 +1333,7 @@ export class DevLodRuntime {
       this.diagnostics.anchorReady && this.diagnostics.catalogReady && baseReady && allReady;
     if (nextBaseSettled && !this.diagnostics.baseRepresentationsSettled) {
       if (total > 0 && this.measureGeometryTracks)
-        perfMarkProductMoment(
-          'devBaseSettled',
-          { total, shown, empty, unsupported, failed },
-          this.perf,
-        );
+        perfMarkProductMoment('devBaseSettled', { total, shown, empty, unsupported, failed }, this.perf);
       perfMarkProductMoment(
         'devBaseRepresentationsSettled',
         {
@@ -1720,7 +1712,9 @@ export class DevLodRuntime {
     for (const row of this.rows.values()) {
       if (
         row.group &&
-        this.state.highlightedModState?.groups.some((object) => belongsTo(object, row.group))
+        this.state.selection.highlightedModState?.groups.some((object) =>
+          belongsTo(object, row.group),
+        )
       )
         resetModHighlight(this.state);
       row.group?.removeFromParent();

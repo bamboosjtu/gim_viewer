@@ -1,7 +1,32 @@
-import { renderFamSections, renderIfcItemData, sectionHtml, renderInspectorSummary, isUsefulPropertyValue, inspectorTabsHtml } from '../services/inspectorMarkup.js';
+import {
+  readInspectorIfcProperties,
+  type InspectorIfcProperties,
+} from '../services/inspectorIfcSelectors.js';
+import { logger } from '../utils/logger.js';
+import { bindRefinementControls } from './refinementControls.js';
+import { resolveIfcModelId } from '../gim/modelIdentity.js';
+import {
+  buildSpatialPath,
+  ifcReferencePath,
+  findDeviceIfcModel,
+  nodeIfcRefinement,
+  type IfcRefinementRuntime,
+} from '../services/inspectorIfcSelectors.js';
+import {
+  renderFamSections,
+  renderIfcItemData,
+  sectionHtml,
+  renderInspectorSummary,
+  isUsefulPropertyValue,
+  inspectorTabsHtml,
+} from '../services/inspectorMarkup.js';
 export { sectionHtml } from '../services/inspectorMarkup.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
-import { buildInspectorSummary, inspectNodeParameters, type InspectorFamilyData } from '../services/inspectorService.js';
+import {
+  buildInspectorSummary,
+  inspectNodeParameters,
+  type InspectorFamilyData,
+} from '../services/inspectorService.js';
 import type { FamSourceProperty } from '../gim/famParser.js';
 import { inspectAuxiliarySources, deviceOccurrenceScope } from '../services/inspectorService.js';
 import type { CbmNode } from '../gim/types.js';
@@ -10,7 +35,11 @@ import { beginSelectionStage } from '../services/selectionTiming.js';
 import { setSelectionStatus } from './shell/statusBar.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 import type { RegionalObject } from '../viewer/ifcRegionalData.js';
-import { inspectRegionalConnectionOwnership, connectionOwnershipRows, connectionEndpointRows } from '../services/inspectorService.js';
+import {
+  inspectRegionalConnectionOwnership,
+  connectionOwnershipRows,
+  connectionEndpointRows,
+} from '../services/inspectorService.js';
 import { escHtml } from '../shared/html.js';
 import { getFirstNonEmptyKv } from '../shared/gimParsing.js';
 import { getNodeDisplayName } from '../shared/displayName.js';
@@ -19,12 +48,6 @@ import {
   geometryReasonLabel,
   geometryStatusLabel,
 } from '../gim/geometry/geometryDiagnostics.js';
-import {
-  findIfcEntryByModelId,
-  normalizeEntryPath,
-  normalizedIfcBasename,
-  resolveIfcModelId,
-} from '../gim/modelIdentity.js';
 import { propsDrawerBody, propsDrawer, btnCloseProps, btnExportProps } from './dom.js';
 import { buildCsv, downloadTextFile } from '../shared/csv.js';
 import { shouldAutoShowProps } from './shell/viewerShell.js';
@@ -117,16 +140,25 @@ export function setupPropsDrawerInteractions(ctx?: ViewerContext): void {
     const element = ev.target instanceof Element ? ev.target : null;
     const copy = element?.closest<HTMLButtonElement>('[data-copy-geometry-diagnostic]');
     if (copy) {
-      const container=copy.closest('[data-geometry-details]');
-      const text=container?.querySelector('pre')?.textContent ?? '';
-      const status=container?.querySelector('[data-copy-result]');
-      const owner=propsDrawerBody.dataset.cbmSelection;
-      const report=(message:string)=>{
-        if(copy.isConnected&&status)status.textContent=message;
-        else if(owner&&propsDrawerBody.dataset.cbmSelection===owner){const current=propsDrawerBody.querySelector('[data-copy-result]');if(current)current.textContent=message;}
+      const container = copy.closest('[data-geometry-details]');
+      const text = container?.querySelector('pre')?.textContent ?? '';
+      const status = container?.querySelector('[data-copy-result]');
+      const owner = propsDrawerBody.dataset.cbmSelection;
+      const report = (message: string) => {
+        if (copy.isConnected && status) status.textContent = message;
+        else if (owner && propsDrawerBody.dataset.cbmSelection === owner) {
+          const current = propsDrawerBody.querySelector('[data-copy-result]');
+          if (current) current.textContent = message;
+        }
       };
-      if(!navigator.clipboard?.writeText){report('无法自动复制，请选中技术详情复制。');return;}
-      void navigator.clipboard.writeText(text).then(()=>report('已复制诊断信息')).catch(()=>report('复制未成功，请选中技术详情复制。'));
+      if (!navigator.clipboard?.writeText) {
+        report('无法自动复制，请选中技术详情复制。');
+        return;
+      }
+      void navigator.clipboard
+        .writeText(text)
+        .then(() => report('已复制诊断信息'))
+        .catch(() => report('复制未成功，请选中技术详情复制。'));
       return;
     }
     const ref = element?.closest<HTMLElement>('[data-prop-ref]');
@@ -135,28 +167,34 @@ export function setupPropsDrawerInteractions(ctx?: ViewerContext): void {
       const kind = ref.getAttribute('data-reference-kind');
       const path = ref.getAttribute('data-reference-path');
       if (kind && path) {
-        window.dispatchEvent(new CustomEvent('gim:file-reference-click', {
-          detail: { kind, path },
-        }));
+        window.dispatchEvent(
+          new CustomEvent('gim:file-reference-click', {
+            detail: { kind, path },
+          }),
+        );
       }
       return;
     }
     const target = element?.closest<HTMLElement>('[data-itab]');
     if (!target) return;
     const id = target.getAttribute('data-itab')!;
-    propsDrawerBody.querySelectorAll('[data-itab]').forEach((t) =>
-      t.classList.toggle('active', t === target),
-    );
-    propsDrawerBody.querySelectorAll('[data-itab-pane]').forEach((pane) =>
-      pane.classList.toggle('active', pane.getAttribute('data-itab-pane') === id),
-    );
+    propsDrawerBody
+      .querySelectorAll('[data-itab]')
+      .forEach((t) => t.classList.toggle('active', t === target));
+    propsDrawerBody
+      .querySelectorAll('[data-itab-pane]')
+      .forEach((pane) =>
+        pane.classList.toggle('active', pane.getAttribute('data-itab-pane') === id),
+      );
   });
 }
 
 /** 绑定属性面板按钮事件（Viewer 变电场景）。 */
 export function setupPropsDrawer(ctx: ViewerContext): () => void {
   setupPropsDrawerInteractions(ctx);
-  return () => {if(propsDrawerViewerContext===ctx)propsDrawerViewerContext=null;};
+  return () => {
+    if (propsDrawerViewerContext === ctx) propsDrawerViewerContext = null;
+  };
 }
 
 /** 检查器四页签内容桶 */
@@ -173,7 +211,11 @@ export interface InspectorBuckets {
  * @param titleHtml 对象标题（.props-header）
  * @param buckets 四个页签的内容 HTML（各页签内部使用 .props-section 结构）
  */
-export function renderInspectorTabs(titleHtml: string, buckets: InspectorBuckets, activeTab = 'overview'): void {
+export function renderInspectorTabs(
+  titleHtml: string,
+  buckets: InspectorBuckets,
+  activeTab = 'overview',
+): void {
   delete propsDrawerBody.dataset.cbmSelection;
   propsDrawerBody.innerHTML = inspectorTabsHtml(titleHtml, buckets, activeTab);
 
@@ -189,7 +231,9 @@ export function renderInspectorTabs(titleHtml: string, buckets: InspectorBuckets
     paramsPane.prepend(search);
     search.addEventListener('input', () => {
       const query = search.value.trim().toLowerCase();
-      const sections = Array.from(paramsPane.querySelectorAll<HTMLElement>('.props-section, details.props-advanced'));
+      const sections = Array.from(
+        paramsPane.querySelectorAll<HTMLElement>('.props-section, details.props-advanced'),
+      );
       for (const section of sections) {
         let visible = false;
         for (const row of Array.from(section.querySelectorAll<HTMLElement>('tr'))) {
@@ -204,20 +248,66 @@ export function renderInspectorTabs(titleHtml: string, buckets: InspectorBuckets
 }
 
 /** Product near representation uses the original IFC identity and source properties. */
-export async function showIfcRegionalProperties(ctx:ViewerContext,state:AppState,
-  runtime:import('../viewer/ifcRegionalRuntime.js').IfcRegionalRuntime,
-  object:import('../viewer/ifcRegionalData.js').RegionalObject,request:SelectionRequest):Promise<void>{
+export async function showIfcRegionalProperties(
+  ctx: ViewerContext,
+  state: AppState,
+  runtime: import('../viewer/ifcRegionalRuntime.js').IfcRegionalRuntime,
+  object: import('../viewer/ifcRegionalData.js').RegionalObject,
+  request: SelectionRequest,
+): Promise<void> {
   const refinement = ifcRefinementHtml(runtime, object);
-  const render=(properties:any,error='')=>{
-    if(!state.selection.isCurrentSelection(request))return;openPropsDrawer(ctx);setSelectionStatus(`${object.name||object.ifcType} · IFC 近景`);
-    const rows=properties?Object.entries(properties.attributes).map(([k,v])=>[k,typeof v==='object'?JSON.stringify(v):String(v)] as [string,string]):[];
-    renderInspectorTabs(`<div class="props-header">${escHtml(object.name||object.ifcType)} · 近景</div>`,{
-      overview:sectionHtml('原 IFC 对象',[['GlobalId',object.globalId],['ExpressId',String(object.expressId)],['IFC 类型',object.ifcType],['表示','近景区域；≤50mm 已识别关系孔省略，中型及未知开洞保留']]) + refinement,
-      params:properties?sectionHtml('IFC 原始属性',rows)+[...properties.propertySets,...(properties.typeProperties??[]),...(properties.materials??[])].map((set:unknown)=>sectionHtml('属性集 / 类型 / 材料',[['原始值',JSON.stringify(set)]],true)).join(''):`<div class="props-note">${escHtml(error||'正在读取属性…')}</div>`,
-      relations:'<div class="props-note">沿用原始 IFC 对象身份。</div>',source:sectionHtml('来源',[['IFC 文件',runtime.sourcePath],['几何','仅相机附近30m区域计算']]),
-    });
+  const render = (properties: InspectorIfcProperties | null, error = '') => {
+    if (!state.selection.isCurrentSelection(request)) return;
+    openPropsDrawer(ctx);
+    setSelectionStatus(`${object.name || object.ifcType} · IFC 近景`);
+    const rows = properties
+      ? Object.entries(properties.attributes).map(
+          ([k, v]) =>
+            [
+              k,
+              typeof v === 'object'
+                ? JSON.stringify(v)
+                : String(v as string | number | boolean | undefined),
+            ] as [string, string],
+        )
+      : [];
+    renderInspectorTabs(
+      `<div class="props-header">${escHtml(object.name || object.ifcType)} · 近景</div>`,
+      {
+        overview:
+          sectionHtml('原 IFC 对象', [
+            ['GlobalId', object.globalId],
+            ['ExpressId', String(object.expressId)],
+            ['IFC 类型', object.ifcType],
+            ['表示', '近景区域；≤50mm 已识别关系孔省略，中型及未知开洞保留'],
+          ]) + refinement,
+        params: properties
+          ? sectionHtml('IFC 原始属性', rows) +
+            [
+              ...properties.propertySets,
+              ...(properties.typeProperties ?? []),
+              ...(properties.materials ?? []),
+            ]
+              .map((set: unknown) =>
+                sectionHtml('属性集 / 类型 / 材料', [['原始值', JSON.stringify(set)]], true),
+              )
+              .join('')
+          : `<div class="props-note">${escHtml(error || '正在读取属性…')}</div>`,
+        relations: '<div class="props-note">沿用原始 IFC 对象身份。</div>',
+        source: sectionHtml('来源', [
+          ['IFC 文件', runtime.sourcePath],
+          ['几何', '仅相机附近30m区域计算'],
+        ]),
+      },
+    );
     bindIfcRefinementControls(state, runtime, object, request);
-  };render(null);try{render(await runtime.properties(object.expressId));}catch(error){render(null,String(error));}
+  };
+  render(null);
+  try {
+    render(await readInspectorIfcProperties(runtime, object.expressId));
+  } catch (error) {
+    render(null, String(error));
+  }
 }
 
 function countChildGeometryEntries(node: CbmNode): number {
@@ -240,21 +330,55 @@ function countChildGeometryEntries(node: CbmNode): number {
  */
 function renderNodeGeometryDiagnostics(state: AppState, node: CbmNode): string {
   const childDevCount = countChildGeometryEntries(node);
-  if (!node.devPath && childDevCount === 0 && state.selection.selectionRequest?.target?.key !== node.path) return '';
+  if (
+    !node.devPath &&
+    childDevCount === 0 &&
+    state.selection.selectionRequest?.target?.key !== node.path
+  )
+    return '';
 
   const diagnostic = getGeometryDiagnostic(state, node.devPath);
   const rows: PropertyRow[] = [];
-  if (state.selection.selectionRequest?.target?.kind === 'cbm' && state.selection.selectionRequest.target.key === node.path && state.selection.selectionGeometry) {
+  if (
+    state.selection.selectionRequest?.target?.kind === 'cbm' &&
+    state.selection.selectionRequest.target.key === node.path &&
+    state.selection.selectionGeometry
+  ) {
     rows.push({ key: '当前选择几何', value: state.selection.selectionGeometry.detail });
   }
   if (diagnostic) {
-    rows.push({ key: '几何状态', value: diagnostic.reason==='source-invalid' ? '源几何异常' : geometryStatusLabel(diagnostic.status) });
-    rows.push({ key: '诊断来源', value: diagnostic.source === 'cold' ? '首次打开/编译' : diagnostic.source === 'warm' ? '缓存 manifest' : '按需回退' });
-    if (diagnostic.reason) rows.push({ key: '原因', value: diagnostic.reason==='source-invalid' ? '模型坐标超出合理范围' : geometryReasonLabel(diagnostic.reason) });
-    if (diagnostic.discoveredModCount != null) rows.push({ key: '发现 MOD/GL', value: String(diagnostic.discoveredModCount) });
-    if (diagnostic.discoveredStlCount != null) rows.push({ key: '发现 STL', value: String(diagnostic.discoveredStlCount) });
-    if (diagnostic.renderableModCount != null) rows.push({ key: '可渲染 MOD/GL', value: String(diagnostic.renderableModCount) });
-    if (diagnostic.renderableStlCount != null) rows.push({ key: '可渲染 STL', value: String(diagnostic.renderableStlCount) });
+    rows.push({
+      key: '几何状态',
+      value:
+        diagnostic.reason === 'source-invalid'
+          ? '源几何异常'
+          : geometryStatusLabel(diagnostic.status),
+    });
+    rows.push({
+      key: '诊断来源',
+      value:
+        diagnostic.source === 'cold'
+          ? '首次打开/编译'
+          : diagnostic.source === 'warm'
+            ? '缓存 manifest'
+            : '按需回退',
+    });
+    if (diagnostic.reason)
+      rows.push({
+        key: '原因',
+        value:
+          diagnostic.reason === 'source-invalid'
+            ? '模型坐标超出合理范围'
+            : geometryReasonLabel(diagnostic.reason),
+      });
+    if (diagnostic.discoveredModCount != null)
+      rows.push({ key: '发现 MOD/GL', value: String(diagnostic.discoveredModCount) });
+    if (diagnostic.discoveredStlCount != null)
+      rows.push({ key: '发现 STL', value: String(diagnostic.discoveredStlCount) });
+    if (diagnostic.renderableModCount != null)
+      rows.push({ key: '可渲染 MOD/GL', value: String(diagnostic.renderableModCount) });
+    if (diagnostic.renderableStlCount != null)
+      rows.push({ key: '可渲染 STL', value: String(diagnostic.renderableStlCount) });
     if (diagnostic.emptySourceCount != null && diagnostic.emptySourceCount > 0) {
       rows.push({ key: '空几何源', value: String(diagnostic.emptySourceCount) });
     }
@@ -266,25 +390,50 @@ function renderNodeGeometryDiagnostics(state: AppState, node: CbmNode): string {
       .map(([type, count]) => `${type} × ${count}`)
       .join('、');
     if (unsupportedTypes) rows.push({ key: '未支持 primitive', value: unsupportedTypes });
-    if (diagnostic.detail && diagnostic.reason!=='source-invalid') rows.push({ key: '说明', value: diagnostic.detail });
+    if (diagnostic.detail && diagnostic.reason !== 'source-invalid')
+      rows.push({ key: '说明', value: diagnostic.detail });
   } else {
-    const selection=state.selection.selectionRequest?.target?.key===node.path ? state.selection.selectionGeometry : null;
-    const labels:Record<NonNullable<AppState['selection']['selectionGeometry']>['status'],string>={
-      'not-loaded':'尚未加载',unknown:'完整性或可达性尚未确认',available:'有可显示几何，完整性未确认',
-      renderable:'可渲染',empty:'确定性空几何',unsupported:'当前解析器不支持',partial:'部分可渲染',failed:'加载失败',
-      unlinked:'未关联真实装配',ambiguous:'多候选，完整性未确认','file-only':'仅 IFC 文件来源，无对象 GUID 关联',unassociated:'无直接几何关联',
+    const selection =
+      state.selection.selectionRequest?.target?.key === node.path
+        ? state.selection.selectionGeometry
+        : null;
+    const labels: Record<
+      NonNullable<AppState['selection']['selectionGeometry']>['status'],
+      string
+    > = {
+      'not-loaded': '尚未加载',
+      unknown: '完整性或可达性尚未确认',
+      available: '有可显示几何，完整性未确认',
+      renderable: '可渲染',
+      empty: '确定性空几何',
+      unsupported: '当前解析器不支持',
+      partial: '部分可渲染',
+      failed: '加载失败',
+      unlinked: '未关联真实装配',
+      ambiguous: '多候选，完整性未确认',
+      'file-only': '仅 IFC 文件来源，无对象 GUID 关联',
+      unassociated: '无直接几何关联',
     };
-    rows.push({ key: '几何状态', value: selection ? labels[selection.status] : '尚未完成几何发现或当前 DEV 尚未加载' });
+    rows.push({
+      key: '几何状态',
+      value: selection ? labels[selection.status] : '尚未完成几何发现或当前 DEV 尚未加载',
+    });
   }
   if (childDevCount > 0) {
     rows.push({ key: '子设备 DEV 入口', value: String(childDevCount) });
   }
-  const technical=diagnostic?.reason==='source-invalid' && diagnostic.detail
-    ? `<div data-geometry-details class="props-section"><details><summary>查看技术详情</summary><pre class="geometry-diagnostic-details">${escHtml(`${diagnostic.devPath}\n${diagnostic.reason}\n${diagnostic.detail}`)}</pre></details><button type="button" class="prop-ref-link" data-copy-geometry-diagnostic>复制诊断信息</button><span role="status" data-copy-result></span></div>` : '';
-  const retry = diagnostic?.status === 'failed' && diagnostic.reason !== 'source-invalid' && node.devPath && state.deviceLodRuntime?.retry
-    ? `<div class="props-actions" data-geometry-retry-box><button type="button" class="prop-ref-link" data-geometry-retry>局部重试</button><span role="status" data-geometry-retry-result>只重试该设备的浏览表示</span></div>`
-    : '';
-  return renderPropertySection('几何状态', 'substation-dev', rows)+technical+retry;
+  const technical =
+    diagnostic?.reason === 'source-invalid' && diagnostic.detail
+      ? `<div data-geometry-details class="props-section"><details><summary>查看技术详情</summary><pre class="geometry-diagnostic-details">${escHtml(`${diagnostic.devPath}\n${diagnostic.reason}\n${diagnostic.detail}`)}</pre></details><button type="button" class="prop-ref-link" data-copy-geometry-diagnostic>复制诊断信息</button><span role="status" data-copy-result></span></div>`
+      : '';
+  const retry =
+    diagnostic?.status === 'failed' &&
+    diagnostic.reason !== 'source-invalid' &&
+    node.devPath &&
+    state.deviceLodRuntime?.retry
+      ? `<div class="props-actions" data-geometry-retry-box><button type="button" class="prop-ref-link" data-geometry-retry>局部重试</button><span role="status" data-geometry-retry-result>只重试该设备的浏览表示</span></div>`
+      : '';
+  return renderPropertySection('几何状态', 'substation-dev', rows) + technical + retry;
 }
 
 /**
@@ -311,48 +460,42 @@ function devRefinementHtml(state: AppState, node: CbmNode): string {
   </div>`;
 }
 
-function bindDevRefinementControls(state: AppState, node: CbmNode, request: SelectionRequest): void {
+function bindDevRefinementControls(
+  state: AppState,
+  node: CbmNode,
+  request: SelectionRequest,
+): void {
   const root = deviceOccurrenceScope(state.currentCbmTree, node).rootOccurrence;
-  const refine = propsDrawerBody.querySelector<HTMLButtonElement>('[data-dev-refine]');
-  const release = propsDrawerBody.querySelector<HTMLButtonElement>('[data-dev-release-fine]');
-  const result = propsDrawerBody.querySelector<HTMLElement>('[data-dev-refine-result]');
-  let action = 0;
-  if (refine) refine.onclick = async () => {
-    if (!state.selection.isCurrentSelection(request) || !state.deviceLodRuntime?.refine) return;
-    const ownAction = ++action;
-    refine.disabled = true;
-    if (release) { release.disabled = false; release.textContent = '取消精化'; }
-    if (result) result.textContent = '正在生成…';
-    try {
-      await state.deviceLodRuntime.refine(root);
-      if (!state.selection.isCurrentSelection(request) || ownAction !== action) return;
-      state.selection.selectionGeometry = { status: 'renderable', detail: '已显示精细模型；返回浏览表示可释放 L2。' };
-      if (result) result.textContent = '精细模型已显示';
-      setSelectionStatus(`${getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries)} · 精细模型`);
-    } catch (error) {
-      if (state.selection.isCurrentSelection(request) && ownAction === action && result) result.textContent = `生成失败：${String(error)}`;
-    } finally {
-      if (ownAction === action) {
-        refine.disabled = false;
-        if (release) { release.disabled = false; release.textContent = '返回浏览表示'; }
-      }
-    }
-  };
-  if (release) release.onclick = () => {
-    if (!state.selection.isCurrentSelection(request) || !state.deviceLodRuntime?.releaseFine) return;
-    action++;
-    if (refine) refine.disabled = false;
-    release.textContent = '返回浏览表示';
-    state.deviceLodRuntime.releaseFine(root);
-    if (state.selection.isCurrentSelection(request)) {
+  const name = () => getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries);
+  bindRefinementControls(propsDrawerBody, 'dev', {
+    isCurrent: () => state.selection.isCurrentSelection(request),
+    refine: () => {
+      const runtime = state.deviceLodRuntime;
+      return runtime?.refine ? () => runtime.refine!(root) : undefined;
+    },
+    release: () => {
+      const runtime = state.deviceLodRuntime;
+      return runtime?.releaseFine ? () => runtime.releaseFine!(root) : undefined;
+    },
+    onRefined() {
+      state.selection.selectionGeometry = {
+        status: 'renderable',
+        detail: '已显示精细模型；返回浏览表示可释放 L2。',
+      };
+      setSelectionStatus(name() + ' · 精细模型');
+    },
+    onReleased() {
       state.selection.selectionGeometry = { status: 'available', detail: '已返回浏览表示。' };
-      if (result) result.textContent = '已返回浏览表示';
-      setSelectionStatus(getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries));
-    }
-  };
+      setSelectionStatus(name());
+    },
+  });
 }
 
-function bindDevGeometryRetryControls(state: AppState, node: CbmNode, request: SelectionRequest): void {
+function bindDevGeometryRetryControls(
+  state: AppState,
+  node: CbmNode,
+  request: SelectionRequest,
+): void {
   const retry = propsDrawerBody.querySelector<HTMLButtonElement>('[data-geometry-retry]');
   const result = propsDrawerBody.querySelector<HTMLElement>('[data-geometry-retry-result]');
   if (!retry || !node.devPath || !state.deviceLodRuntime?.retry) return;
@@ -364,7 +507,10 @@ function bindDevGeometryRetryControls(state: AppState, node: CbmNode, request: S
     try {
       await state.deviceLodRuntime.retry(root);
       if (!state.selection.isCurrentSelection(request)) return;
-      state.selection.selectionGeometry = { status: 'available', detail: '局部重试已提交，保留当前浏览表示。' };
+      state.selection.selectionGeometry = {
+        status: 'available',
+        detail: '局部重试已提交，保留当前浏览表示。',
+      };
       if (result) result.textContent = '重试已提交';
     } catch (error) {
       if (result) result.textContent = `重试失败：${String(error)}`;
@@ -374,12 +520,10 @@ function bindDevGeometryRetryControls(state: AppState, node: CbmNode, request: S
   };
 }
 
-type IfcRefinementRuntime = {
-  refine(object: RegionalObject): Promise<unknown>;
-  releaseFine(expressId: number): void;
-};
-
-function ifcRefinementHtml(runtime: IfcRefinementRuntime | undefined, object: RegionalObject): string {
+function ifcRefinementHtml(
+  runtime: IfcRefinementRuntime | undefined,
+  object: RegionalObject,
+): string {
   if (!runtime) return '';
   return `<div class="props-section ifc-refinement">
     <div class="props-section-title">IFC 表示</div>
@@ -392,54 +536,30 @@ function ifcRefinementHtml(runtime: IfcRefinementRuntime | undefined, object: Re
   </div>`;
 }
 
-function bindIfcRefinementControls(state: AppState, runtime: IfcRefinementRuntime | undefined, object: RegionalObject, request: SelectionRequest): void {
+function bindIfcRefinementControls(
+  state: AppState,
+  runtime: IfcRefinementRuntime | undefined,
+  object: RegionalObject,
+  request: SelectionRequest,
+): void {
   if (!runtime) return;
-  const refine = propsDrawerBody.querySelector<HTMLButtonElement>('[data-ifc-refine]');
-  const release = propsDrawerBody.querySelector<HTMLButtonElement>('[data-ifc-release-fine]');
-  const result = propsDrawerBody.querySelector<HTMLElement>('[data-ifc-refine-result]');
-  let action = 0;
-  if (refine) refine.onclick = async () => {
-    if (!state.selection.isCurrentSelection(request)) return;
-    const ownAction = ++action;
-    refine.disabled = true;
-    if (release) { release.disabled = false; release.textContent = '取消精化'; }
-    if (result) result.textContent = '正在生成…';
-    try {
-      await runtime.refine(object);
-      if (!state.selection.isCurrentSelection(request) || ownAction !== action) return;
-      state.selection.selectionGeometry = { status: 'renderable', detail: '已显示 IFC 精细模型；返回浏览表示可释放 L2。' };
-      if (result) result.textContent = '精细模型已显示';
-      setSelectionStatus(`${object.name || object.ifcType} · IFC 精细模型`);
-    } catch (error) {
-      if (state.selection.isCurrentSelection(request) && ownAction === action && result) result.textContent = `生成失败：${String(error)}`;
-    } finally {
-      if (ownAction === action) {
-        refine.disabled = false;
-        if (release) { release.disabled = false; release.textContent = '返回浏览表示'; }
-      }
-    }
-  };
-  if (release) release.onclick = () => {
-    if (!state.selection.isCurrentSelection(request)) return;
-    action++;
-    if (refine) refine.disabled = false;
-    release.textContent = '返回浏览表示';
-    runtime.releaseFine(object.expressId);
-    state.selection.selectionGeometry = { status: 'available', detail: '已返回 IFC 浏览表示。' };
-    if (result) result.textContent = '已返回浏览表示';
-    setSelectionStatus(`${object.name || object.ifcType} · IFC 近景`);
-  };
-}
-
-function nodeIfcRefinement(state: AppState, node: CbmNode): { runtime: IfcRefinementRuntime; object: RegionalObject } | undefined {
-  if (!node.ifcGuid) return undefined;
-  const modelId = node.ifcFile ? resolveIfcModelId(node.ifcFile, state.currentIfcEntries) : findDeviceIfcModel(state, node.path);
-  if (!modelId) return undefined;
-  const runtime = state.ifc.regionalRuntimes.get(modelId) as IfcRefinementRuntime | undefined;
-  if (!runtime) return undefined;
-  const matches = (state.ifc.regionalRuntimes.get(modelId) as import('../viewer/ifcRegionalRuntime.js').IfcRegionalRuntime).index.objects
-    .filter((object) => object.globalId === node.ifcGuid);
-  return matches.length === 1 ? { runtime, object: matches[0] } : undefined;
+  const name = object.name || object.ifcType;
+  bindRefinementControls(propsDrawerBody, 'ifc', {
+    isCurrent: () => state.selection.isCurrentSelection(request),
+    refine: () => () => runtime.refine(object),
+    release: () => () => runtime.releaseFine(object.expressId),
+    onRefined() {
+      state.selection.selectionGeometry = {
+        status: 'renderable',
+        detail: '已显示 IFC 精细模型；返回浏览表示可释放 L2。',
+      };
+      setSelectionStatus(name + ' · IFC 精细模型');
+    },
+    onReleased() {
+      state.selection.selectionGeometry = { status: 'available', detail: '已返回 IFC 浏览表示。' };
+      setSelectionStatus(name + ' · IFC 近景');
+    },
+  });
 }
 
 /**
@@ -449,10 +569,10 @@ function nodeIfcRefinement(state: AppState, node: CbmNode): { runtime: IfcRefine
 async function renderNodeFamDevProperties(state: AppState, node: CbmNode): Promise<string> {
   let html = renderNodeGeometryDiagnostics(state, node);
 
-  const data=await inspectNodeParameters(state,node);
-  const renderFamily = (family:InspectorFamilyData):void => {
-    const {path,sections,properties:records}=family;
-    if(sections)html+=renderFamSections(sections,'substation-fam');
+  const data = await inspectNodeParameters(state, node);
+  const renderFamily = (family: InspectorFamilyData): void => {
+    const { path, sections, properties: records } = family;
+    if (sections) html += renderFamSections(sections, 'substation-fam');
     html += sectionHtml('属性来源', [['FAM 文件', fileReferenceValue('fam', path)]]);
     if (records.length > 0) {
       const duplicates = new Map<string, FamSourceProperty[]>();
@@ -462,70 +582,105 @@ async function renderNodeFamDevProperties(state: AppState, node: CbmNode): Promi
       }
       const repeated = [...duplicates.values()].filter((rows) => rows.length > 1);
       const conflicts = repeated.filter((rows) => new Set(rows.map((r) => r.rawValue)).size > 1);
-      if (repeated.length) html += sectionHtml('重复属性诊断', [['重复键', String(repeated.length)], ['冲突键', String(conflicts.length)], ['单值查询策略', '按来源行顺序，最后一行生效；原始记录全部保留']]);
-      html += `<details class="props-section"><summary>原始属性键与值</summary><table><thead><tr><th>来源行</th><th>分节</th><th>标签</th><th>原始键</th><th>原始值</th></tr></thead><tbody>${records.map((p) =>
-        `<tr title="${escHtml(p.rawLine)}"><td>${p.sourceLine ?? ''}</td><td>${escHtml(p.section)}</td><td>${escHtml(p.label)}</td><td>${escHtml(p.rawKey)}</td><td>${escHtml(p.rawValue)}</td></tr>`).join('')}</tbody></table></details>`;
+      if (repeated.length)
+        html += sectionHtml('重复属性诊断', [
+          ['重复键', String(repeated.length)],
+          ['冲突键', String(conflicts.length)],
+          ['单值查询策略', '按来源行顺序，最后一行生效；原始记录全部保留'],
+        ]);
+      html += `<details class="props-section"><summary>原始属性键与值</summary><table><thead><tr><th>来源行</th><th>分节</th><th>标签</th><th>原始键</th><th>原始值</th></tr></thead><tbody>${records
+        .map(
+          (p) =>
+            `<tr title="${escHtml(p.rawLine)}"><td>${p.sourceLine ?? ''}</td><td>${escHtml(p.section)}</td><td>${escHtml(p.label)}</td><td>${escHtml(p.rawKey)}</td><td>${escHtml(p.rawValue)}</td></tr>`,
+        )
+        .join('')}</tbody></table></details>`;
     }
   };
-  for(const family of data.cbmFamilies)renderFamily(family);
-  const kv=data.dev;
-    if (kv) {
-      const deviceRows: PropertyRow[] = [
-        ...(isUsefulPropertyValue(getFirstNonEmptyKv(kv, ['SYMBOLNAME'])) ? [{ key: 'SYMBOLNAME', value: getFirstNonEmptyKv(kv, ['SYMBOLNAME']) }] : []),
-        ...(isUsefulPropertyValue(getFirstNonEmptyKv(kv, ['TYPE', 'DEVICETYPE'])) ? [{ key: 'TYPE', value: getFirstNonEmptyKv(kv, ['TYPE', 'DEVICETYPE']) }] : []),
-      ];
-      html += renderPropertySection('设备信息', 'substation-dev', deviceRows);
-      const otherDevRows = Object.entries(kv)
-        .filter(([key, value]) => isUsefulPropertyValue(value) && !['SYMBOLNAME', 'TYPE', 'DEVICETYPE'].includes(key.toUpperCase()))
-        .map(([key, value]) => ({ key, value }));
-      if (otherDevRows.length > 0) {
-        const primaryDevRows = otherDevRows.filter((row) => (getPropertyDefinition('substation-dev', row.key)?.priority ?? 2) < 2);
-        const technicalDevRows = otherDevRows.filter((row) => (getPropertyDefinition('substation-dev', row.key)?.priority ?? 2) >= 2);
-        html += renderPropertySection('DEV 参数', 'substation-dev', primaryDevRows);
-        html += renderTechnicalSection('DEV 技术字段', 'substation-dev', technicalDevRows);
-      }
+  for (const family of data.cbmFamilies) renderFamily(family);
+  const kv = data.dev;
+  if (kv) {
+    const deviceRows: PropertyRow[] = [
+      ...(isUsefulPropertyValue(getFirstNonEmptyKv(kv, ['SYMBOLNAME']))
+        ? [{ key: 'SYMBOLNAME', value: getFirstNonEmptyKv(kv, ['SYMBOLNAME']) }]
+        : []),
+      ...(isUsefulPropertyValue(getFirstNonEmptyKv(kv, ['TYPE', 'DEVICETYPE']))
+        ? [{ key: 'TYPE', value: getFirstNonEmptyKv(kv, ['TYPE', 'DEVICETYPE']) }]
+        : []),
+    ];
+    html += renderPropertySection('设备信息', 'substation-dev', deviceRows);
+    const otherDevRows = Object.entries(kv)
+      .filter(
+        ([key, value]) =>
+          isUsefulPropertyValue(value) &&
+          !['SYMBOLNAME', 'TYPE', 'DEVICETYPE'].includes(key.toUpperCase()),
+      )
+      .map(([key, value]) => ({ key, value }));
+    if (otherDevRows.length > 0) {
+      const primaryDevRows = otherDevRows.filter(
+        (row) => (getPropertyDefinition('substation-dev', row.key)?.priority ?? 2) < 2,
+      );
+      const technicalDevRows = otherDevRows.filter(
+        (row) => (getPropertyDefinition('substation-dev', row.key)?.priority ?? 2) >= 2,
+      );
+      html += renderPropertySection('DEV 参数', 'substation-dev', primaryDevRows);
+      html += renderTechnicalSection('DEV 技术字段', 'substation-dev', technicalDevRows);
     }
-  for(const family of data.devFamilies)renderFamily(family);
-  const identity=data.identity;
-  if (identity) html += sectionHtml('业务身份候选', [
-    ['身份值', identity.value], ['身份类型', identity.kind],
-    ['来源', fileReferenceValue('fam', identity.source.path)], ['原始键', identity.source.key],
-  ]);
+  }
+  for (const family of data.devFamilies) renderFamily(family);
+  const identity = data.identity;
+  if (identity)
+    html += sectionHtml('业务身份候选', [
+      ['身份值', identity.value],
+      ['身份类型', identity.kind],
+      ['来源', fileReferenceValue('fam', identity.source.path)],
+      ['原始键', identity.source.key],
+    ]);
   return html;
 }
 
-function appendAuxiliarySources(rows: Array<[string, string | FileReferenceValue]>, state: AppState, node: CbmNode): void {
-  for(const row of inspectAuxiliarySources(state,node)) rows.push([row.label,row.kind ? fileReferenceValue(row.kind,row.value) : row.value]);
+function appendAuxiliarySources(
+  rows: Array<[string, string | FileReferenceValue]>,
+  state: AppState,
+  node: CbmNode,
+): void {
+  for (const row of inspectAuxiliarySources(state, node))
+    rows.push([row.label, row.kind ? fileReferenceValue(row.kind, row.value) : row.value]);
 }
 
-function buildCbmOverviewAndSource(state: AppState, node: CbmNode, summaryHtml: string = ''): { overview: string; source: string } {
+function buildCbmOverviewAndSource(
+  state: AppState,
+  node: CbmNode,
+  summaryHtml: string = '',
+): { overview: string; source: string } {
   const ov: Array<[string, string | FileReferenceValue]> = [
     ['实体类型', node.entityName],
     ['分类名称', node.classifyName],
   ];
-  if (state.deviceUnknownBounds.has(node.path)) ov.push(['设备范围', '完整范围未确定，自动加载可支持几何；选择可查看细节']);
+  if (state.deviceUnknownBounds.has(node.path))
+    ov.push(['设备范围', '完整范围未确定，自动加载可支持几何；选择可查看细节']);
   const spatial = state.substationSpatialIndex?.linksByCbmPath.get(node.path);
   const ifcModelId = findDeviceIfcModel(state, node.path);
   // modelId 是 Fragments 的运行时标识（当前为 ifc_<hash>），不能拼成
   // 文件名；必须通过当前工程的 IfcEntry 反查真实包内路径。
-  const inferredIfcPath = ifcModelId
-    ? ifcReferencePath(ifcModelId, state.currentIfcEntries)
-    : '';
+  const inferredIfcPath = ifcModelId ? ifcReferencePath(ifcModelId, state.currentIfcEntries) : '';
   if (inferredIfcPath && !node.ifcFile) {
     ov.push(['所属 IFC 文件', fileReferenceValue('ifc', inferredIfcPath)]);
   }
   if (node.children.length > 0) ov.push(['子节点数', String(node.children.length)]);
 
-  const src: Array<[string, string | FileReferenceValue]> = [['CBM 文件', fileReferenceValue('cbm', node.path, '定位当前 CBM')]];
-  const directIfcPath = node.ifcFile
-    ? ifcReferencePath(node.ifcFile, state.currentIfcEntries)
-    : '';
+  const src: Array<[string, string | FileReferenceValue]> = [
+    ['CBM 文件', fileReferenceValue('cbm', node.path, '定位当前 CBM')],
+  ];
+  const directIfcPath = node.ifcFile ? ifcReferencePath(node.ifcFile, state.currentIfcEntries) : '';
   if (directIfcPath) src.push(['IFC 文件', fileReferenceValue('ifc', directIfcPath)]);
   if (node.ifcGuid) src.push(['IFC GUID', node.ifcGuid]);
   appendSourceDesignRows(src, spatial);
   appendAuxiliarySources(src, state, node);
 
-  return { overview: summaryHtml + sectionHtml('基本信息', ov), source: sectionHtml('来源引用', src) };
+  return {
+    overview: summaryHtml + sectionHtml('基本信息', ov),
+    source: sectionHtml('来源引用', src),
+  };
 }
 
 /** CbmNode → FAM/DEV 参数内容 */
@@ -538,7 +693,7 @@ function buildCbmRelations(state: AppState, node: CbmNode): string {
   const rel: Array<[string, string | FileReferenceValue]> = [];
   if (node.children.length > 0) rel.push(['子节点', `${node.children.length} 个`]);
   if (node.devPath) rel.push(['DEV 引用', fileReferenceValue('dev', node.devPath)]);
-  let html = sectionHtml('对象关系', rel);
+  const html = sectionHtml('对象关系', rel);
   const spatial = state.substationSpatialIndex?.linksByCbmPath.get(node.path);
   if (!spatial) return html;
   const spatialNode = spatial.spatialKey
@@ -547,158 +702,180 @@ function buildCbmRelations(state: AppState, node: CbmNode): string {
   const spatialPath = spatialNode
     ? buildSpatialPath(state.substationSpatialIndex!, spatialNode.key)
     : '';
-  const evidence = spatial.confidence === 'confirmed'
-    ? (spatial.spatialKey ? 'IFC 包含关系 + IFC GUID（已确认）' : 'IFC GUID 命中，但没有空间容器')
-    : spatial.confidence === 'inferred' ? 'CBM/DEV 变换矩阵（位置推断）' : '未关联';
+  const evidence =
+    spatial.confidence === 'confirmed'
+      ? spatial.spatialKey
+        ? 'IFC 包含关系 + IFC GUID（已确认）'
+        : 'IFC GUID 命中，但没有空间容器'
+      : spatial.confidence === 'inferred'
+        ? 'CBM/DEV 变换矩阵（位置推断）'
+        : '未关联';
   const spatialRows: Array<[string, string | FileReferenceValue]> = [
     ['空间状态', evidence],
     ...(spatialPath ? [['空间路径', spatialPath] as [string, string]] : []),
-    ...(spatial.sourceIfcFile ? [['IFC 文件', fileReferenceValue('ifc', spatial.sourceIfcFile)] as [string, string | FileReferenceValue]] : []),
+    ...(spatial.sourceIfcFile
+      ? [
+          ['IFC 文件', fileReferenceValue('ifc', spatial.sourceIfcFile)] as [
+            string,
+            string | FileReferenceValue,
+          ],
+        ]
+      : []),
     ...(spatial.sourceIfcGuid ? [['IFC GUID', spatial.sourceIfcGuid] as [string, string]] : []),
-    ...(spatial.sourceDesignNames?.length ? [['来源图纸', spatial.sourceDesignNames.join('、')] as [string, string]] : []),
-    ...(spatial.sourceDesignFiles?.length ? [['来源 IFC 文件', fileReferencesValue('ifc', spatial.sourceDesignFiles)] as [string, string | FileReferenceValue]] : []),
-    ...(spatial.unlocatedReason ? [['未定位原因', spatial.unlocatedReason] as [string, string]] : []),
-    ...(spatial.position ? [['位置（原始坐标）', spatial.position.map((value) => formatSpatialNumber(value)).join(', ')] as [string, string]] : []),
+    ...(spatial.sourceDesignNames?.length
+      ? [['来源图纸', spatial.sourceDesignNames.join('、')] as [string, string]]
+      : []),
+    ...(spatial.sourceDesignFiles?.length
+      ? [
+          ['来源 IFC 文件', fileReferencesValue('ifc', spatial.sourceDesignFiles)] as [
+            string,
+            string | FileReferenceValue,
+          ],
+        ]
+      : []),
+    ...(spatial.unlocatedReason
+      ? [['未定位原因', spatial.unlocatedReason] as [string, string]]
+      : []),
+    ...(spatial.position
+      ? [
+          [
+            '位置（原始坐标）',
+            spatial.position.map((value) => formatSpatialNumber(value)).join(', '),
+          ] as [string, string],
+        ]
+      : []),
   ];
   return html + sectionHtml('空间关系', spatialRows);
 }
 
-function buildSpatialPath(
-  index: NonNullable<AppState['substationSpatialIndex']>,
-  key: string,
-): string {
-  const labels: string[] = [];
-  const seen = new Set<string>();
-  let current = index.nodeByKey.get(key);
-  while (current && !seen.has(current.key)) {
-    seen.add(current.key);
-    labels.push(current.name);
-    current = current.parentKey ? index.nodeByKey.get(current.parentKey) : undefined;
-  }
-  return labels.reverse().join(' / ');
-}
-
 function formatSpatialNumber(value: number): string {
-  return Number.isInteger(value) ? String(value) : value.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
-}
-
-function ifcReferencePath(modelId: string, entries: readonly import('../gim/types.js').IfcEntry[] = []): string {
-  const value = modelId.trim();
-  if (!value) return '';
-  const entry = findIfcEntryByModelId(value, entries);
-  if (entry) return entry.path;
-
-  // CBM/FileDevRelation 中的引用经常只有 basename（例如 `foo.ifc`），
-  // 而 IfcEntry.path 才是 GIM 包内真实资源身份。优先通过同一套三态
-  // 解析规则反查真实路径；重复 basename 时返回 null，避免来源按钮
-  // 指向不确定的文件。
-  const resolvedModelId = resolveIfcModelId(value, entries);
-  if (resolvedModelId) {
-    const resolved = findIfcEntryByModelId(resolvedModelId, entries);
-    if (resolved) return resolved.path;
-  }
-
-  // `resolveIfcModelId` 返回 null 既可能表示未知引用，也可能表示重复
-  // basename。后者不能回退为 `foo.ifc`，否则 UI 会制造看似确定但实际
-  // 不可定位的来源。只有确实没有任何候选时才保留原始引用作为诊断文本。
-  const basename = normalizedIfcBasename(value);
-  const basenameCandidates = entries.filter((item) => normalizedIfcBasename(item.path) === basename);
-  if (basenameCandidates.length > 1) return '';
-
-  // `ifc_<hash>` 是运行时身份，不是包内文件名。若当前工程没有对应
-  // IfcEntry，宁可不显示来源按钮，也不能把内部 ID 拼成虚假的路径。
-  // 任意 `ifc_` 前缀都属于内部 runtime 身份；只有能在当前 entry 清单
-  // 反查成功时才显示来源，避免未知/未来格式的 ID 被拼成伪造路径。
-  if (/^ifc_/i.test(value)) return '';
-  return /\.ifc$/i.test(value) ? value : `${value}.ifc`;
-}
-
-function findDeviceIfcModel(state: AppState, cbmPath: string): string {
-  const direct = state.deviceToIfcFile.get(cbmPath);
-  if (direct) return direct;
-  const normalizedPath = normalizeEntryPath(cbmPath);
-  const exactMatches = Array.from(state.deviceToIfcFile)
-    .filter(([key, modelId]) => modelId && normalizeEntryPath(key) === normalizedPath)
-    .map(([, modelId]) => modelId);
-  const exactIds = [...new Set(exactMatches)];
-  if (exactIds.length === 1) return exactIds[0];
-  if (exactIds.length > 1) return '';
-
-  // FileDevRelation 既可能存完整 CBM 路径，也可能只存 basename。basename
-  // 只在候选 modelId 唯一时采用，避免多个同名 CBM 被静默关联到第一个 IFC。
-  const basename = normalizedPath.split('/').pop() || normalizedPath;
-  const basenameMatches = Array.from(state.deviceToIfcFile)
-    .filter(([key, modelId]) => {
-      const keyBase = normalizeEntryPath(key).split('/').pop() || normalizeEntryPath(key);
-      return Boolean(modelId) && keyBase === basename;
-    })
-    .map(([, modelId]) => modelId);
-  const basenameIds = [...new Set(basenameMatches)];
-  return basenameIds.length === 1 ? basenameIds[0] : '';
+  return Number.isInteger(value)
+    ? String(value)
+    : value.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
 }
 
 function appendSourceDesignRows(
   rows: Array<[string, string | FileReferenceValue]>,
-  link: Pick<NonNullable<AppState['substationSpatialIndex']>['links'][number], 'sourceDesignNames' | 'sourceDesignFiles'> | undefined,
+  link:
+    | Pick<
+        NonNullable<AppState['substationSpatialIndex']>['links'][number],
+        'sourceDesignNames' | 'sourceDesignFiles'
+      >
+    | undefined,
 ): void {
   if (link?.sourceDesignNames?.length) rows.push(['来源图纸', link.sourceDesignNames.join('、')]);
-  if (link?.sourceDesignFiles?.length) rows.push(['来源 IFC 文件', fileReferencesValue('ifc', link.sourceDesignFiles)]);
+  if (link?.sourceDesignFiles?.length)
+    rows.push(['来源 IFC 文件', fileReferencesValue('ifc', link.sourceDesignFiles)]);
 }
 
 /** 显示 CbmNode 属性（基础版，不需要 Viewer，不含 IFC 原生属性） */
-export function showUnlinkedSldProperties(state: AppState, gridId: string, request: SelectionRequest): void {
+export function showUnlinkedSldProperties(
+  state: AppState,
+  gridId: string,
+  request: SelectionRequest,
+): void {
   if (!state.selection.isCurrentSelection(request)) return;
   openPropsDrawerUI();
   setSelectionStatus(`SLD ${gridId}`);
-  state.selection.selectionGeometry={status:'unlinked',detail:'此拓扑对象未关联 CBM 设备，保留相机位置。'};
-  renderInspectorTabs('<div class="props-header">SLD 拓扑对象</div>',{
-    overview:sectionHtml('拓扑对象',[['gridId',gridId],['关联状态',state.selection.selectionGeometry.detail]]),
-    params:'',relations:'',source:'',
+  state.selection.selectionGeometry = {
+    status: 'unlinked',
+    detail: '此拓扑对象未关联 CBM 设备，保留相机位置。',
+  };
+  renderInspectorTabs('<div class="props-header">SLD 拓扑对象</div>', {
+    overview: sectionHtml('拓扑对象', [
+      ['gridId', gridId],
+      ['关联状态', state.selection.selectionGeometry.detail],
+    ]),
+    params: '',
+    relations: '',
+    source: '',
   });
 }
 
-export async function showNodePropertiesBasic(state: AppState, node: CbmNode, request: SelectionRequest = state.selection.beginSelection({kind:'cbm',key:node.path})): Promise<void> {
+export async function showNodePropertiesBasic(
+  state: AppState,
+  node: CbmNode,
+  request: SelectionRequest,
+): Promise<void> {
   if (!state.selection.isCurrentSelection(request)) return;
-  setSelectionStatus(getNodeDisplayName(node,state.ifcGuidToName,state.currentIfcEntries));
-  const endSummary=beginSelectionStage(state,request,'propertySummary');
+  setSelectionStatus(getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries));
+  const endSummary = beginSelectionStage(state, request, 'propertySummary');
   let summaryHtml: string;
-  try { summaryHtml=renderInspectorSummary(await buildInspectorSummary(state,node)); }
-  finally { endSummary(); }
+  try {
+    summaryHtml = renderInspectorSummary(await buildInspectorSummary(state, node));
+  } finally {
+    endSummary();
+  }
   if (!state.selection.isCurrentSelection(request)) return;
   const { overview, source } = buildCbmOverviewAndSource(state, node, summaryHtml);
   const title = `<div class="props-header">${escHtml(getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries))}</div>`;
-  const owner=`${request.session.generation}:${request.id}:${node.path}`;
+  const owner = `${request.session.generation}:${request.id}:${node.path}`;
   const devControl = devRefinementHtml(state, node);
   const ifcControl = nodeIfcRefinement(state, node);
-  const overviewWithRefinement = overview + devControl + (ifcControl ? ifcRefinementHtml(ifcControl.runtime, ifcControl.object) : '');
+  const overviewWithRefinement =
+    overview +
+    devControl +
+    (ifcControl ? ifcRefinementHtml(ifcControl.runtime, ifcControl.object) : '');
   // Same-request geometry refresh must not close a tab/details the user has
   // just opened. Keep the completed inspector visible while its refresh reads.
-  if(propsDrawerBody.dataset.cbmSelection!==owner){
-    renderInspectorTabs(title, { overview: overviewWithRefinement, params:'<div class="props-note">正在读取属性…</div>', relations:buildCbmRelations(state,node), source });
-    propsDrawerBody.dataset.cbmSelection=owner;
+  if (propsDrawerBody.dataset.cbmSelection !== owner) {
+    renderInspectorTabs(title, {
+      overview: overviewWithRefinement,
+      params: '<div class="props-note">正在读取属性…</div>',
+      relations: buildCbmRelations(state, node),
+      source,
+    });
+    propsDrawerBody.dataset.cbmSelection = owner;
     bindDevRefinementControls(state, node, request);
     bindDevGeometryRetryControls(state, node, request);
-    if (ifcControl) bindIfcRefinementControls(state, ifcControl.runtime, ifcControl.object, request);
+    if (ifcControl)
+      bindIfcRefinementControls(state, ifcControl.runtime, ifcControl.object, request);
   }
-  const endParams=beginSelectionStage(state,request,'propertyParams');
+  const endParams = beginSelectionStage(state, request, 'propertyParams');
   let params: string;
-  try { params=await buildCbmParams(state,node); } finally { endParams(); }
+  try {
+    params = await buildCbmParams(state, node);
+  } finally {
+    endParams();
+  }
   if (!state.selection.isCurrentSelection(request)) return;
   const relations = buildCbmRelations(state, node);
-  const activeTab=propsDrawerBody.dataset.cbmSelection===owner ? propsDrawerBody.querySelector('[data-itab].active')?.getAttribute('data-itab')??'overview' : 'overview';
-  const technicalOpen=propsDrawerBody.dataset.cbmSelection===owner && Boolean(propsDrawerBody.querySelector<HTMLDetailsElement>('[data-geometry-details] details')?.open);
-  renderInspectorTabs(title, { overview: overviewWithRefinement, params, relations, source }, activeTab);
-  propsDrawerBody.dataset.cbmSelection=owner;
+  const activeTab =
+    propsDrawerBody.dataset.cbmSelection === owner
+      ? (propsDrawerBody.querySelector('[data-itab].active')?.getAttribute('data-itab') ??
+        'overview')
+      : 'overview';
+  const technicalOpen =
+    propsDrawerBody.dataset.cbmSelection === owner &&
+    Boolean(
+      propsDrawerBody.querySelector<HTMLDetailsElement>('[data-geometry-details] details')?.open,
+    );
+  renderInspectorTabs(
+    title,
+    { overview: overviewWithRefinement, params, relations, source },
+    activeTab,
+  );
+  propsDrawerBody.dataset.cbmSelection = owner;
   bindDevRefinementControls(state, node, request);
   bindDevGeometryRetryControls(state, node, request);
   if (ifcControl) bindIfcRefinementControls(state, ifcControl.runtime, ifcControl.object, request);
-  if(technicalOpen){const details=propsDrawerBody.querySelector<HTMLDetailsElement>('[data-geometry-details] details');if(details)details.open=true;}
+  if (technicalOpen) {
+    const details = propsDrawerBody.querySelector<HTMLDetailsElement>(
+      '[data-geometry-details] details',
+    );
+    if (details) details.open = true;
+  }
 }
 
 /** 显示 CbmNode 属性（完整版，包含 IFC 原生属性，需要 Viewer） */
-export async function showNodeProperties(ctx: ViewerContext, state: AppState, node: CbmNode, request: SelectionRequest = state.selection.beginSelection({kind:'cbm',key:node.path})): Promise<void> {
+export async function showNodeProperties(
+  ctx: ViewerContext,
+  state: AppState,
+  node: CbmNode,
+  request: SelectionRequest,
+): Promise<void> {
   if (!state.selection.isCurrentSelection(request)) return;
-  setSelectionStatus(getNodeDisplayName(node,state.ifcGuidToName,state.currentIfcEntries));
+  setSelectionStatus(getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries));
   let overview = '';
   let params = '';
   let relations = buildCbmRelations(state, node);
@@ -711,26 +888,25 @@ export async function showNodeProperties(ctx: ViewerContext, state: AppState, no
   ];
   const spatialLink = state.substationSpatialIndex?.linksByCbmPath.get(node.path);
   const ifcModelId = findDeviceIfcModel(state, node.path);
-  const inferredIfcPath = ifcModelId
-    ? ifcReferencePath(ifcModelId, state.currentIfcEntries)
-    : '';
+  const inferredIfcPath = ifcModelId ? ifcReferencePath(ifcModelId, state.currentIfcEntries) : '';
   if (inferredIfcPath && !node.ifcFile) {
     bp.push(['所属 IFC 文件', fileReferenceValue('ifc', inferredIfcPath)]);
   }
   if (node.children.length > 0) bp.push(['子节点数', String(node.children.length)]);
   const ifcControl = nodeIfcRefinement(state, node);
-  overview += sectionHtml('基本信息', bp)
-    + devRefinementHtml(state, node)
-    + (ifcControl ? ifcRefinementHtml(ifcControl.runtime, ifcControl.object) : '');
+  overview +=
+    sectionHtml('基本信息', bp) +
+    devRefinementHtml(state, node) +
+    (ifcControl ? ifcRefinementHtml(ifcControl.runtime, ifcControl.object) : '');
 
   // 参数：FAM/DEV 属性
   params += await renderNodeFamDevProperties(state, node);
 
   // 来源：路径 + GUID + 变换矩阵
-  const sp: Array<[string, string | FileReferenceValue]> = [['CBM 文件', fileReferenceValue('cbm', node.path, '定位当前 CBM')]];
-  const directIfcPath = node.ifcFile
-    ? ifcReferencePath(node.ifcFile, state.currentIfcEntries)
-    : '';
+  const sp: Array<[string, string | FileReferenceValue]> = [
+    ['CBM 文件', fileReferenceValue('cbm', node.path, '定位当前 CBM')],
+  ];
+  const directIfcPath = node.ifcFile ? ifcReferencePath(node.ifcFile, state.currentIfcEntries) : '';
   if (directIfcPath) sp.push(['IFC 文件', fileReferenceValue('ifc', directIfcPath)]);
   if (node.ifcGuid) sp.push(['IFC GUID', node.ifcGuid]);
   appendSourceDesignRows(sp, spatialLink);
@@ -758,14 +934,14 @@ export async function showNodeProperties(ctx: ViewerContext, state: AppState, no
           try {
             const itemsData = await model.getItemsData([localId], { attributesDefault: true });
             if (itemsData.length > 0) {
-              params += renderIfcItemData(itemsData[0] as unknown as Record<string, unknown>);
+              params += renderIfcItemData(itemsData[0]);
             }
           } catch (err) {
-            console.warn('读取 IFC 属性失败:', err);
+            logger.warn('读取 IFC 属性失败:', err);
           }
         }
       } catch (err) {
-        console.warn(`IFC GUID 查找失败 (${node.ifcGuid}):`, err);
+        logger.warn(`IFC GUID 查找失败 (${node.ifcGuid}):`, err);
       }
     }
   }
@@ -786,16 +962,38 @@ export async function showNodeProperties(ctx: ViewerContext, state: AppState, no
 }
 
 /** 展示 IFC 构件属性（从 3D 点击触发） */
-export async function showIfcElementProperties(ctx: ViewerContext, state: AppState, modelId: string, localId: number, request: SelectionRequest = state.selection.beginSelection({kind:'ifc-element',key:`${modelId}:${localId}`})): Promise<void> {
+export async function showIfcElementProperties(
+  ctx: ViewerContext,
+  state: AppState,
+  modelId: string,
+  localId: number,
+  request: SelectionRequest,
+): Promise<void> {
   if (!state.selection.isCurrentSelection(request)) return;
   const logicalModelId = state.ifc.resolveLogicalModelId(modelId) ?? modelId;
   const runtimeModelId = state.ifc.runtimeModelIds.get(logicalModelId) ?? modelId;
   const model = ctx.fragments.list.get(runtimeModelId);
   setSelectionStatus(`IFC ${logicalModelId} / ${localId}`);
-  renderInspectorTabs('<div class="props-header">IFC 构件</div>',{overview:'<div class="props-note">正在读取选中 IFC 构件…</div>',params:'',relations:'',source:''});
+  renderInspectorTabs('<div class="props-header">IFC 构件</div>', {
+    overview: '<div class="props-note">正在读取选中 IFC 构件…</div>',
+    params: '',
+    relations: '',
+    source: '',
+  });
   if (!model) {
-    state.selection.selectionGeometry={status:'not-loaded',detail:'对应 IFC 模型尚未加载或已卸载，无法读取对象详情。'};
-    renderInspectorTabs('<div class="props-header">IFC 构件</div>',{overview:sectionHtml('当前选择',[['LocalId',String(localId)],['状态',state.selection.selectionGeometry.detail]]),params:'',relations:'',source:''});
+    state.selection.selectionGeometry = {
+      status: 'not-loaded',
+      detail: '对应 IFC 模型尚未加载或已卸载，无法读取对象详情。',
+    };
+    renderInspectorTabs('<div class="props-header">IFC 构件</div>', {
+      overview: sectionHtml('当前选择', [
+        ['LocalId', String(localId)],
+        ['状态', state.selection.selectionGeometry.detail],
+      ]),
+      params: '',
+      relations: '',
+      source: '',
+    });
     return;
   }
   let guid: string | null = null;
@@ -804,12 +1002,15 @@ export async function showIfcElementProperties(ctx: ViewerContext, state: AppSta
     const guids = await model.getGuidsByLocalIds([localId]);
     guid = guids[0] || null;
     if (guid) {
-      gimNode = state.ifcGuidIndex.get(`${logicalModelId}:${guid}`)
+      gimNode =
+        state.ifcGuidIndex.get(`${logicalModelId}:${guid}`) ??
         // 兼容升级前以 basename.ifc 为 key 的旧内存索引。
-        ?? state.ifcGuidIndex.get(`${logicalModelId}.ifc:${guid}`)
-        ?? null;
+        state.ifcGuidIndex.get(`${logicalModelId}.ifc:${guid}`) ??
+        null;
     }
-  } catch { /* GUID 获取失败 */ }
+  } catch {
+    /* GUID 获取失败 */
+  }
 
   // 概览：构件身份 + GIM 设备
   const ov: Array<[string, string | FileReferenceValue]> = [
@@ -819,49 +1020,78 @@ export async function showIfcElementProperties(ctx: ViewerContext, state: AppSta
   if (guid) {
     ov.push(['GUID', guid]);
   }
-  const regional=state.ifc.regionalRuntimes.get(logicalModelId);
+  const regional = state.ifc.regionalRuntimes.get(logicalModelId);
   const regionalObject = guid
     ? regional?.index.objects.find((object) => object.globalId === guid)
     : undefined;
-  const connectionEvidence = regionalObject && guid
-    ? inspectRegionalConnectionOwnership(state,logicalModelId,regionalObject)
-    : undefined;
+  const connectionEvidence =
+    regionalObject && guid
+      ? inspectRegionalConnectionOwnership(state, logicalModelId, regionalObject)
+      : undefined;
   // Connection objects may have a CBM identity without a physical DEV or any
   // electrical endpoint references. Do not select an arbitrary alias owner.
   if (connectionEvidence) {
-    gimNode = connectionEvidence.semanticNodes.length === 1 ? connectionEvidence.semanticNodes[0] : null;
-    ov.push(...connectionOwnershipRows(state,connectionEvidence));
-    ov.push(...connectionEndpointRows(state,logicalModelId,regionalObject?.connectionEndpoints));
+    gimNode =
+      connectionEvidence.semanticNodes.length === 1 ? connectionEvidence.semanticNodes[0] : null;
+    ov.push(...connectionOwnershipRows(state, connectionEvidence));
+    ov.push(...connectionEndpointRows(state, logicalModelId, regionalObject?.connectionEndpoints));
   }
   if (gimNode) {
-    ov.push([connectionEvidence ? 'CBM 来源对象' : 'GIM 设备', getNodeDisplayName(gimNode, state.ifcGuidToName, state.currentIfcEntries)]);
+    ov.push([
+      connectionEvidence ? 'CBM 来源对象' : 'GIM 设备',
+      getNodeDisplayName(gimNode, state.ifcGuidToName, state.currentIfcEntries),
+    ]);
     ov.push(['GIM 分类', gimNode.classifyName]);
   }
-  const overview = sectionHtml('基本信息', ov)
-    + (regionalObject && regional ? ifcRefinementHtml(regional, regionalObject) : '');
+  const overview =
+    sectionHtml('基本信息', ov) +
+    (regionalObject && regional ? ifcRefinementHtml(regional, regionalObject) : '');
 
   // 参数：IFC 原生属性 + GIM 设备 FAM/DEV
   let params = '';
   try {
     const itemsData = await model.getItemsData([localId], { attributesDefault: true });
     if (itemsData.length > 0) {
-      params += renderIfcItemData(itemsData[0] as unknown as Record<string, unknown>);
+      params += renderIfcItemData(itemsData[0]);
     }
   } catch (err) {
-    console.warn('读取 IFC 属性失败:', err);
+    logger.warn('读取 IFC 属性失败:', err);
   }
-  if(regional&&guid){
-    const matches=regional.index.objects.filter(object=>object.globalId===guid);
-    if(matches.length===1){
-      try{
-        if(!state.selection.isCurrentSelection(request))return;
+  if (regional && guid) {
+    const matches = regional.index.objects.filter((object) => object.globalId === guid);
+    if (matches.length === 1) {
+      try {
+        if (!state.selection.isCurrentSelection(request)) return;
         openPropsDrawer(ctx);
-        renderInspectorTabs('<div class="props-header">IFC 构件</div>',{overview,params:params+'<div class="props-note">正在读取源属性集、类型与材料…</div>',relations:'',source:''});
-        const source=await regional.properties(matches[0].expressId);
-        if(!state.selection.isCurrentSelection(request))return;
-        params+=sectionHtml('IFC 原始属性',Object.entries(source.attributes).map(([key,value])=>[key,typeof value==='object'?JSON.stringify(value):String(value)] as [string,string]));
-        for(const item of [...source.propertySets,...(source.typeProperties??[]),...(source.materials??[])])params+=sectionHtml('属性集 / 类型 / 材料',[['原始值',JSON.stringify(item)]],true);
-      }catch(error){params+=`<div class="props-note">${escHtml(`源属性暂不可用：${error}`)}</div>`;}
+        renderInspectorTabs('<div class="props-header">IFC 构件</div>', {
+          overview,
+          params: params + '<div class="props-note">正在读取源属性集、类型与材料…</div>',
+          relations: '',
+          source: '',
+        });
+        const source = await readInspectorIfcProperties(regional, matches[0].expressId);
+        if (!state.selection.isCurrentSelection(request)) return;
+        params += sectionHtml(
+          'IFC 原始属性',
+          Object.entries(source.attributes).map(
+            ([key, value]) =>
+              [
+                key,
+                typeof value === 'object'
+                  ? JSON.stringify(value)
+                  : String(value as string | number | boolean | undefined),
+              ] as [string, string],
+          ),
+        );
+        for (const item of [
+          ...source.propertySets,
+          ...(source.typeProperties ?? []),
+          ...(source.materials ?? []),
+        ])
+          params += sectionHtml('属性集 / 类型 / 材料', [['原始值', JSON.stringify(item)]], true);
+      } catch (error) {
+        params += `<div class="props-note">${escHtml(`源属性暂不可用：${String(error)}`)}</div>`;
+      }
     }
   }
   if (gimNode) {
@@ -871,20 +1101,32 @@ export async function showIfcElementProperties(ctx: ViewerContext, state: AppSta
   // 关系：GIM 设备关联
   const relations = connectionEvidence
     ? sectionHtml('连接对象来源证据', [
-        ['CBM 对象', connectionEvidence.semanticNodes.length
-          ? connectionEvidence.semanticNodes.map(node => `${getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries)} · ${node.path}`).join('；') : '没有匹配的源引用'],
+        [
+          'CBM 对象',
+          connectionEvidence.semanticNodes.length
+            ? connectionEvidence.semanticNodes
+                .map(
+                  (node) =>
+                    `${getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries)} · ${node.path}`,
+                )
+                .join('；')
+            : '没有匹配的源引用',
+        ],
         ['归属规则', '仅采用同一 IFC 来源中的精确 IFCGUID；空间邻近不作为已确认连接'],
       ])
     : gimNode
-    ? sectionHtml('GIM 设备关联', [
-        ['关联设备', getNodeDisplayName(gimNode, state.ifcGuidToName, state.currentIfcEntries)],
-        ['分类', gimNode.classifyName],
-      ])
-    : '';
+      ? sectionHtml('GIM 设备关联', [
+          ['关联设备', getNodeDisplayName(gimNode, state.ifcGuidToName, state.currentIfcEntries)],
+          ['分类', gimNode.classifyName],
+        ])
+      : '';
 
   // 来源：模型与 GUID
   const source = sectionHtml('来源引用', [
-    ['IFC 模型', fileReferenceValue('ifc', ifcReferencePath(logicalModelId, state.currentIfcEntries))],
+    [
+      'IFC 模型',
+      fileReferenceValue('ifc', ifcReferencePath(logicalModelId, state.currentIfcEntries)),
+    ],
     ['LocalId', String(localId)],
     ...(guid ? ([['GUID', guid]] as Array<[string, string | FileReferenceValue]>) : []),
   ]);
@@ -892,5 +1134,6 @@ export async function showIfcElementProperties(ctx: ViewerContext, state: AppSta
   const title = '<div class="props-header">IFC 构件</div>';
   if (!state.selection.isCurrentSelection(request)) return;
   renderInspectorTabs(title, { overview, params, relations, source });
-  if (regionalObject && regional) bindIfcRefinementControls(state, regional, regionalObject, request);
+  if (regionalObject && regional)
+    bindIfcRefinementControls(state, regional, regionalObject, request);
 }

@@ -79,3 +79,5 @@ adapters/
 - 拆分不重复读取 CBM/DEV/FAM；来源文档缓存仍由 Source 层持有。
 - Engineering 只消费 Semantic 快照做融合，Projection 不修正底层语义。
 - 解析语法归 Parser；Semantic 不直接读文件、不调用 DOM/Worker。
+
+来源图通过 `sourceReferenceResolver` 保留引用候选和歧义证据，通过 `sourceFamilyIndex` 管理 FAM 归属。`SourceDocumentReader` 共用在途读取和结果。来源顺序和每路径读取次数由 Source 测试约束。

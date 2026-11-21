@@ -3392,6 +3392,7 @@ dependencies = [
 name = "tauri-plugin-gim-import"
 version = "0.1.0"
 dependencies = [
+ "gim-native-core",
  "serde",
  "serde_json",
  "tauri",

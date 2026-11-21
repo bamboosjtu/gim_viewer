@@ -1,38 +1,12 @@
 import {
-  paintEmptyHint,
-  paintBorder,
-  paintGrid,
-  paintLegend,
-  paintScaleBar,
-  COLOR_BG,
-  COLOR_TOWER_STRAIGHT,
-  COLOR_TOWER_STRAIGHT_FILL,
-  COLOR_TOWER_TENSION,
-  COLOR_TOWER_TENSION_FILL,
-  COLOR_CROSS,
-  COLOR_LABEL,
-  WIRE_COLORS,
-  WIRE_COLOR_UNKNOWN,
-} from './lineMapBackground.js';
-import { nearestTower, nearestWire } from '../services/lineMapHitTesting.js';
-import { mountLineMapControls, LAYER_ITEMS, type LayerState } from './lineMapControls.js';
-import {
-  wireLayerKey,
-  wireScreenPoints,
-  isTensionTower,
-  towerLabel,
-} from '../services/lineMapGeometry.js';
-import {
-  lineMapStageBatchSize,
-  runLineMapStageSlice,
-  type LineMapStage,
-} from '../services/lineMapStages.js';
-import {
-  prepareLineMapGeometry,
   clamp,
+  prepareLineMapGeometry,
   type RuntimeGeoPoint,
-  type RuntimeWire,
 } from '../services/lineMapGeometry.js';
+import { mountLineMapControls, LAYER_ITEMS, type LayerState } from './lineMapControls.js';
+import { createLineMapRenderer } from './lineMapRenderer.js';
+import { createLineMapPointer } from './lineMapPointer.js';
+import type { LineMapSelection, LineMapViewport } from './lineMapPainter.js';
 /**
  * M3-5：线路工程地图渲染层（纯 UI/DOM，Canvas 2D）。
  *
@@ -62,10 +36,8 @@ import type { LineMapData, TowerMarker, WireSegment } from '../gim/lineMapData.j
 import type { GimGraphNode } from '@gim/powerline-core/gimGraphTypes.js';
 import type { LineMapProjection } from './lineMapProjection.js';
 import { ENABLE_CATENARY } from '../config/features.js';
-import { perfBegin, perfCurrentSession, perfMark, type PerfSession } from '../utils/perfTimings.js';
+import { perfCurrentSession, type PerfSession } from '../utils/perfTimings.js';
 import { bindLineMapCanvasInput } from './lineMapCanvasInput.js';
-import { createLineMapTooltip } from './lineMapTooltip.js';
-import { logger } from '../utils/logger.js';
 
 // ---------------------------------------------------------------------------
 // 常量
@@ -120,108 +92,10 @@ export interface RenderLineMapOptions {
   perfSession?: PerfSession;
 }
 
-/** 导线类型颜色 */
-
-const WIRE_WIDTH = 1.5;
-/** M4-B2：导线样式增强常量 */
-const WIRE_WIDTH_SPLIT = 2.5; // SPLIT > 1 加粗
-const WIRE_WIDTH_SELECTED = 3.5; // 选中导线高亮线宽
-const WIRE_DASH_JUMPER: number[] = [6, 4]; // 跳线虚线
-const WIRE_HIT_DIST = 6; // 导线命中距离阈值（像素）
-const WIRE_HIT_DIST_HOVER = 8; // hover 容差略放宽
-
-/** 背景 / 网格 / 边框颜色 */
-
-/** 塔位颜色 */
-
-const COLOR_TOWER_SELECTED = '#f59e0b';
-const TOWER_RADIUS = 5;
-const HIT_RADIUS = 11;
-
-/** 跨越点颜色 */
-
-/** 标签颜色 */
-
-const LABEL_FONT = '11px sans-serif';
-const LABEL_SHOW_ZOOM = 1.8; // 缩放达到此倍数以上才显示标签，避免 327 标签拥挤
-
-/** 图例 */
-
-// 防止图例底部被裁切
-
-/** 比例尺 */
-
-/** fit 边距 */
 const FIT_PADDING = 48;
-
-/** 缩放范围 */
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 200;
-
-/** focus 单塔时的放大倍数 */
 const FOCUS_TOWER_ZOOM = 12;
-
-/**
- * P1-2：地图绘制不再把全部导线放进一个 UI 长任务。
- *
- * 预算是“软”上限；每帧还会受 maxItems 限制，避免某一条复杂悬链线
- * 在低端 WebView 中连续占满事件循环。首帧只画背景/网格/图例，业务
- * 对象随后按塔位、导线、跨越物、标签分帧补齐。
- */
-
-type ScheduledFrame = {
-  id: number;
-  kind: 'raf' | 'timeout';
-};
-
-// ---------------------------------------------------------------------------
-// 渲染主函数
-// ---------------------------------------------------------------------------
-
-/** requestAnimationFrame 的可测试/可降级包装。 */
-function scheduleFrame(callback: FrameRequestCallback): ScheduledFrame {
-  if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
-    return { id: window.requestAnimationFrame(callback), kind: 'raf' };
-  }
-  const id =
-    typeof window !== 'undefined'
-      ? window.setTimeout(() => callback(performance.now()), 0)
-      : (setTimeout(() => callback(performance.now()), 0) as unknown as number);
-  return { id, kind: 'timeout' };
-}
-
-function cancelScheduledFrame(frame: ScheduledFrame | null): void {
-  if (!frame) return;
-  if (
-    frame.kind === 'raf' &&
-    typeof window !== 'undefined' &&
-    typeof window.cancelAnimationFrame === 'function'
-  ) {
-    window.cancelAnimationFrame(frame.id);
-    return;
-  }
-  if (typeof window !== 'undefined') window.clearTimeout(frame.id);
-  else clearTimeout(frame.id as unknown as ReturnType<typeof setTimeout>);
-}
-
-/**
- * 仅供开发期性能采集器判断渐进地图是否已经补绘完成。
- *
- * 该标志不参与业务逻辑，也不在生产构建中写入；每次新的 draw pass
- * 开始时重置，最后一个标签批次完成后置 true。这样采集器可以把“首帧
- * 可见”与“地图对象全部补齐”分开，而不会用固定 sleep 猜测完成时间。
- */
-function setDevMapRenderState(token: number, done: boolean, runId: string | null): void {
-  if (!import.meta.env.DEV) return;
-  const globals = globalThis as {
-    __GIM_DEV_LINE_MAP_RENDER_DONE__?: boolean;
-    __GIM_DEV_LINE_MAP_RENDER_STATE__?: { token: number; done: boolean; runId: string | null };
-  };
-  // 保留旧的 boolean 供已有诊断脚本/手工检查使用，同时提供 token，
-  // 让采集器不会把上一轮 Canvas handle 的完成状态误认为当前轮完成。
-  globals.__GIM_DEV_LINE_MAP_RENDER_DONE__ = done;
-  globals.__GIM_DEV_LINE_MAP_RENDER_STATE__ = { token, done, runId };
-}
 
 /**
  * 在 container 内渲染线路工程 2D 地图。
@@ -257,12 +131,12 @@ export function renderLineMap(
   // Canvas-only 兜底路径采用 Web Mercator（与 MapLibre/OSM 一致），
   // 替代原等距圆柱投影：等距投影纬线间距恒定，中高纬度东西向被压缩、
   // 形状畸变；Web Mercator 局部形状保真（正形），与主底图形态一致。
+  const geometry = prepareLineMapGeometry(mapData, enableCatenary);
   const {
     bbox,
     valid,
     mercY,
     centerLng,
-    centerLatRad,
     invMercY,
     centerWYAbs,
     worldW,
@@ -270,10 +144,7 @@ export function renderLineMap(
     centerWX,
     centerWY,
     getRuntimePoint,
-    runtimeTowers,
-    runtimeWires,
-    runtimeCrosses,
-  } = prepareLineMapGeometry(mapData, enableCatenary);
+  } = geometry;
 
   // ---- 视图状态 ----
   const layerState: LayerState = {
@@ -285,52 +156,44 @@ export function renderLineMap(
     cross: true,
     label: true,
   };
-  let cssW = 0;
-  let cssH = 0;
-  let dpr = 1;
-  let baseScale = 1;
-  let zoom = 1;
+  const viewport: LineMapViewport = { cssW: 0, cssH: 0, dpr: 1, baseScale: 1, zoom: 1 };
+  const selection: LineMapSelection = {
+    hoveredTower: null,
+    selectedWire: null,
+    selectedTowerPaths: new Set(),
+  };
   let panX = 0;
   let panY = 0;
-  let hoveredTower: TowerMarker | null = null;
-  /** M4-B2：当前选中的导线（点击导线后高亮） */
-  let selectedWire: WireSegment | null = null;
-  /** M4-B2：当前 hover 的导线（光标变化用，不展示 tooltip） */
-  let hoveredWire: WireSegment | null = null;
-  /** M4-B2：导线命中距离阈值（点击严格，hover 放宽） */
   let destroyed = false;
 
-  /** 渐进绘制代次；settled 重绘或销毁时取消旧 RAF。 */
-  let renderGeneration = 0;
-  let pendingFrame: ScheduledFrame | null = null;
-  let pendingInteractionFrame: ScheduledFrame | null = null;
-  let pendingSettledFrame: ScheduledFrame | null = null;
-  let activePhaseEnd: ((labelSuffix?: string, endMeta?: Record<string, unknown>) => void) | null =
-    null;
-  let instrumentNextRender = true;
-  /** MapLibre 相机变化期间使用轻量交互帧；停止后才启动完整 progressive。 */
-  let progressiveActive = false;
-  let interactionActive = false;
-  let interactionRequestStartedAt: number | null = null;
-  /** MapLibre move/zoom/resize 每次变化递增；所有投影缓存必须绑定该 revision。 */
-  let cameraRevision = 0;
-  let activeDevRenderToken = 0;
-  let devRenderTokenSequence = 0;
-  let activeDevRenderRunId: string | null = null;
-  /** 只在同一 camera revision 内复用投影结果；相机变化或新交互帧会重建。 */
-  let frameProjectionCache: {
-    revision: number;
-    points: Map<string, { x: number; y: number }>;
-  } | null = null;
-
-  /** 选中塔位的 nodePath 集合（树点击/地图 focus 时高亮） */
-  let selectedTowerPaths: Set<string> = new Set();
-
-  // 预投影塔位屏幕坐标缓存（每次 draw 时更新）
-  let towerScreen: { tower: TowerMarker; x: number; y: number }[] = [];
-  /** 标签阶段按屏幕 y 排序后的快照，避免每个分帧批次重复排序。 */
-  let labelQueue: { tower: TowerMarker; x: number; y: number }[] = [];
-  let labelLastDrawnY = -Infinity;
+  const renderer = createLineMapRenderer({
+    ctx,
+    geometry,
+    viewport,
+    layerState,
+    selection,
+    overlayMode,
+    showGrid,
+    showCanvasScaleBar,
+    enableCatenary,
+    perfSession,
+    projectCoordinate,
+  });
+  const { draw, requestInteractiveFrame, requestSettledFrame } = renderer;
+  const pointer = createLineMapPointer({
+    canvas,
+    tooltip,
+    layerState,
+    geometry,
+    viewport,
+    selection,
+    overlayMode,
+    onTowerClick,
+    onWireClick: options?.onWireClick,
+    geoToScreenPoint: renderer.geoToScreenPoint,
+    drawnTowers: renderer.drawnTowers,
+    requestVisualRender: renderer.requestVisualRender,
+  });
 
   /** nodePath → TowerMarker 索引（供 focus 查找用） */
   const pathToTower = new Map<string, TowerMarker>();
@@ -340,19 +203,20 @@ export function renderLineMap(
 
   // ---- 尺寸 / DPR ----
   function resize(): void {
-    const wasInitialized = cssW > 0 && cssH > 0;
+    if (destroyed) return;
+    const wasInitialized = viewport.cssW > 0 && viewport.cssH > 0;
     const rect = container.getBoundingClientRect();
-    cssW = Math.max(rect.width, 1);
-    cssH = Math.max(rect.height, 1);
-    dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.round(cssW * dpr);
-    canvas.height = Math.round(cssH * dpr);
-    canvas.style.width = cssW + 'px';
-    canvas.style.height = cssH + 'px';
+    viewport.cssW = Math.max(rect.width, 1);
+    viewport.cssH = Math.max(rect.height, 1);
+    viewport.dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(viewport.cssW * viewport.dpr);
+    canvas.height = Math.round(viewport.cssH * viewport.dpr);
+    canvas.style.width = viewport.cssW + 'px';
+    canvas.style.height = viewport.cssH + 'px';
     // 计算 fit 基准 scale
-    const availW = Math.max(cssW - 2 * FIT_PADDING, 1);
-    const availH = Math.max(cssH - 2 * FIT_PADDING, 1);
-    baseScale = Math.min(availW / worldW, availH / worldH);
+    const availW = Math.max(viewport.cssW - 2 * FIT_PADDING, 1);
+    const availH = Math.max(viewport.cssH - 2 * FIT_PADDING, 1);
+    viewport.baseScale = Math.min(availW / worldW, availH / worldH);
     if (overlayMode && wasInitialized) {
       // ResizeObserver 触发时 MapLibre 可能尚未发出 resize 事件；主动
       // 让缓存失效并安排一帧轻量重绘，随后补一轮完整 settled 绘制。
@@ -364,29 +228,20 @@ export function renderLineMap(
   }
 
   // ---- 投影 ----
-  function geoToScreenPoint(point: RuntimeGeoPoint): { x: number; y: number } {
-    // overlay 模式委托给外部投影（MapLibre project）。缓存只属于当前
-    // camera revision 的一个 Canvas frame，绝不跨相机变化复用屏幕坐标。
+  function projectCoordinate(point: RuntimeGeoPoint): { x: number; y: number } {
     if (projection) {
-      if (frameProjectionCache?.revision !== cameraRevision) {
-        frameProjectionCache = { revision: cameraRevision, points: new Map() };
-      }
-      const cached = frameProjectionCache.points.get(point.key);
-      if (cached) return cached;
-      const p = projection.project(point.lng, point.lat);
-      const result = { x: p.x, y: p.y };
-      frameProjectionCache.points.set(point.key, result);
-      return result;
+      const result = projection.project(point.lng, point.lat);
+      return { x: result.x, y: result.y };
     }
-    const s = baseScale * zoom;
+    const s = viewport.baseScale * viewport.zoom;
     return {
-      x: cssW / 2 + (point.worldX - centerWX) * s + panX,
-      y: cssH / 2 - (point.worldY - centerWY) * s + panY,
+      x: viewport.cssW / 2 + (point.worldX - centerWX) * s + panX,
+      y: viewport.cssH / 2 - (point.worldY - centerWY) * s + panY,
     };
   }
 
   function geoToScreen(lat: number, lng: number): { x: number; y: number } {
-    return geoToScreenPoint(getRuntimePoint(lat, lng));
+    return renderer.geoToScreenPoint(getRuntimePoint(lat, lng));
   }
 
   function screenToWorldGeo(sx: number, sy: number): { lat: number; lng: number } {
@@ -395,9 +250,9 @@ export function renderLineMap(
       const geo = projection.unproject(sx, sy);
       return { lat: geo.lat, lng: geo.lng };
     }
-    const s = baseScale * zoom;
-    const wx = centerWX + (sx - cssW / 2 - panX) / s;
-    const wy = centerWY - (sy - cssH / 2 - panY) / s;
+    const s = viewport.baseScale * viewport.zoom;
+    const wx = centerWX + (sx - viewport.cssW / 2 - panX) / s;
+    const wy = centerWY - (sy - viewport.cssH / 2 - panY) / s;
     return { lat: invMercY(wy + centerWYAbs), lng: wx + centerLng };
   }
 
@@ -412,330 +267,12 @@ export function renderLineMap(
         layerState[item.key] = cb.checked;
         // 关闭塔位图层时清除 hover，避免 tooltip 残留
         if (item.key === 'tower' && !cb.checked) {
-          hoveredTower = null;
-          towerTooltip.hide();
+          pointer.clearTowerHover();
         }
         draw();
       },
       { signal: layerEvents.signal },
     );
-  }
-
-  // ---- 绘制 ----
-  function draw(): void {
-    if (destroyed) return;
-    cancelProgressiveRender();
-    cancelScheduledFrame(pendingInteractionFrame);
-    pendingInteractionFrame = null;
-    cancelScheduledFrame(pendingSettledFrame);
-    pendingSettledFrame = null;
-    interactionRequestStartedAt = null;
-    interactionActive = false;
-    const generation = renderGeneration;
-    const cameraSnapshot = cameraRevision;
-    activeDevRenderToken = ++devRenderTokenSequence;
-    const devGlobals = globalThis as { __GIM_DEV_LINE_MAP_RENDER_RUN_ID__?: unknown };
-    activeDevRenderRunId =
-      typeof devGlobals.__GIM_DEV_LINE_MAP_RENDER_RUN_ID__ === 'string'
-        ? devGlobals.__GIM_DEV_LINE_MAP_RENDER_RUN_ID__
-        : null;
-    setDevMapRenderState(activeDevRenderToken, false, activeDevRenderRunId);
-    const instrument = instrumentNextRender;
-    const endFirstFrame = instrument ? perfBegin('线路 Canvas 首帧', undefined, perfSession) : null;
-
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    frameProjectionCache = { revision: cameraRevision, points: new Map() };
-    // 背景：overlay 模式下透明（让 MapLibre 底图透出），Canvas-only 模式填色
-    if (overlayMode) {
-      ctx.clearRect(0, 0, cssW, cssH);
-    } else {
-      ctx.fillStyle = COLOR_BG;
-      ctx.fillRect(0, 0, cssW, cssH);
-    }
-
-    if (!valid) {
-      drawEmptyHint('未提取到可定位塔位');
-      drawBorder();
-      frameProjectionCache = null;
-      endFirstFrame?.(undefined, { progressive: false, valid: false });
-      if (instrument) instrumentNextRender = false;
-      setDevMapRenderState(activeDevRenderToken, true, activeDevRenderRunId);
-      return;
-    }
-
-    if (showGrid) drawGrid();
-    if (showCanvasScaleBar) drawScaleBar();
-    drawLegend();
-    drawBorder();
-
-    // 这一步只绘制静态背景，保证 renderLineMap 返回后马上有可见首帧。
-    // 塔位/导线/跨越物/标签在后续 requestAnimationFrame 中分批补齐。
-    endFirstFrame?.(undefined, {
-      progressive: true,
-      towers: runtimeTowers.length,
-      wires: runtimeWires.length,
-      crosses: runtimeCrosses.length,
-    });
-    startProgressiveRender(generation, cameraSnapshot, instrument);
-  }
-
-  /** 清空 overlay 并绘制当前相机下的轻量交互层。 */
-  function drawInteractiveFrame(revision: number): void {
-    if (destroyed || !overlayMode) return;
-    if (revision !== cameraRevision) {
-      requestInteractiveFrame(false);
-      return;
-    }
-
-    activeDevRenderToken = ++devRenderTokenSequence;
-    const devGlobals = globalThis as { __GIM_DEV_LINE_MAP_RENDER_RUN_ID__?: unknown };
-    activeDevRenderRunId =
-      typeof devGlobals.__GIM_DEV_LINE_MAP_RENDER_RUN_ID__ === 'string'
-        ? devGlobals.__GIM_DEV_LINE_MAP_RENDER_RUN_ID__
-        : null;
-    setDevMapRenderState(activeDevRenderToken, false, activeDevRenderRunId);
-
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    // 交互帧每次都建立新的 revision-scoped cache；不携带上一帧的屏幕坐标。
-    frameProjectionCache = { revision, points: new Map() };
-    ctx.clearRect(0, 0, cssW, cssH);
-    if (!valid) {
-      drawEmptyHint('未提取到可定位塔位');
-      drawBorder();
-      frameProjectionCache = null;
-      interactionRequestStartedAt = null;
-      return;
-    }
-
-    // 底图由 MapLibre 提供，交互态只绘制必要工程元素；标签和悬链线
-    // 留给 moveend/zoomend 后的 settled progressive pass。
-    drawLegend();
-    drawBorder();
-    towerScreen = [];
-    drawTowerRange(0, runtimeTowers.length);
-    drawWireRange(0, runtimeWires.length, true);
-    drawSelectedWire(true);
-    drawCrossRange(0, runtimeCrosses.length);
-
-    frameProjectionCache = null;
-    const latencyMs =
-      interactionRequestStartedAt == null
-        ? null
-        : Math.max(0, performance.now() - interactionRequestStartedAt);
-    interactionRequestStartedAt = null;
-    // 同一 RAF 内不会被 MapLibre 插入新事件；结束后再次检查 revision，
-    // 防止测试替身或同步 fitBounds 触发的旧 camera frame 继续写入。
-    if (revision !== cameraRevision) {
-      requestInteractiveFrame(false);
-      return;
-    }
-    if (latencyMs != null) {
-      perfMark(
-        '线路 Canvas 交互帧',
-        {
-          cameraRevision: revision,
-          latencyMs: Math.round(latencyMs * 100) / 100,
-          towers: runtimeTowers.length,
-          wires: runtimeWires.length,
-          crosses: runtimeCrosses.length,
-        },
-        perfSession,
-      );
-    }
-  }
-
-  /** 终止当前渐进绘制并释放帧内投影缓存。 */
-  function cancelProgressiveRender(): void {
-    renderGeneration += 1;
-    cancelScheduledFrame(pendingFrame);
-    pendingFrame = null;
-    if (activePhaseEnd) {
-      activePhaseEnd('（取消）');
-      activePhaseEnd = null;
-    }
-    progressiveActive = false;
-    frameProjectionCache = null;
-  }
-
-  function beginProgressivePhase(label: string, instrument: boolean): void {
-    activePhaseEnd = instrument ? perfBegin(label, undefined, perfSession) : null;
-  }
-
-  function finishProgressivePhase(meta: Record<string, unknown>): void {
-    activePhaseEnd?.(undefined, meta);
-    activePhaseEnd = null;
-  }
-
-  function scheduleProgressive(
-    generation: number,
-    cameraSnapshot: number,
-    stage: LineMapStage,
-    offset: number,
-    instrument: boolean,
-  ): void {
-    pendingFrame = scheduleFrame(() => {
-      pendingFrame = null;
-      runProgressiveStage(generation, cameraSnapshot, stage, offset, instrument);
-    });
-  }
-
-  function startProgressiveRender(
-    generation: number,
-    cameraSnapshot: number,
-    instrument: boolean,
-  ): void {
-    progressiveActive = true;
-    towerScreen = [];
-    labelQueue = [];
-    labelLastDrawnY = -Infinity;
-    beginProgressivePhase('线路 Canvas 塔位分批绘制', instrument);
-    scheduleProgressive(generation, cameraSnapshot, 'towers', 0, instrument);
-  }
-
-  function runProgressiveStage(
-    generation: number,
-    cameraSnapshot: number,
-    stage: LineMapStage,
-    offset: number,
-    instrument: boolean,
-  ): void {
-    if (destroyed || generation !== renderGeneration || cameraSnapshot !== cameraRevision) return;
-    const sourceLength =
-      stage === 'towers'
-        ? runtimeTowers.length
-        : stage === 'wires'
-          ? runtimeWires.length
-          : stage === 'crosses'
-            ? runtimeCrosses.length
-            : layerState.label && zoom >= LABEL_SHOW_ZOOM
-              ? labelQueue.length
-              : 0;
-    const batchSize = lineMapStageBatchSize(stage);
-    // 同时设置数量上限和时间预算，避免一条复杂悬链线或低端 WebView
-    // 中的 Canvas 实现把一帧再次拉成长任务。
-    const next = runLineMapStageSlice(offset, sourceLength, batchSize, (index) => {
-      if (stage === 'towers') {
-        drawTowerRange(index, index + 1);
-      } else if (stage === 'wires') {
-        drawWireRange(index, index + 1);
-      } else if (stage === 'crosses') {
-        drawCrossRange(index, index + 1);
-      } else {
-        drawLabelRange(index, index + 1);
-      }
-    });
-
-    if (next < sourceLength) {
-      scheduleProgressive(generation, cameraSnapshot, stage, next, instrument);
-      return;
-    }
-
-    const stageMeta: Record<string, unknown> = { items: sourceLength, batchSize };
-    if (stage === 'towers') {
-      finishProgressivePhase(stageMeta);
-      beginProgressivePhase('线路 Canvas 导线分批绘制', instrument);
-      scheduleProgressive(generation, cameraSnapshot, 'wires', 0, instrument);
-    } else if (stage === 'wires') {
-      drawSelectedWire();
-      finishProgressivePhase({ ...stageMeta, catenary: enableCatenary });
-      beginProgressivePhase('线路 Canvas 跨越物分批绘制', instrument);
-      scheduleProgressive(generation, cameraSnapshot, 'crosses', 0, instrument);
-    } else if (stage === 'crosses') {
-      finishProgressivePhase(stageMeta);
-      labelQueue = towerScreen.slice().sort((a, b) => a.y - b.y);
-      beginProgressivePhase('线路 Canvas 标签分批绘制', instrument);
-      scheduleProgressive(generation, cameraSnapshot, 'labels', 0, instrument);
-    } else {
-      // 标签关闭或缩放不足时 sourceLength 为 0，也会在这里结束。
-      finishProgressivePhase({
-        ...stageMeta,
-        visible: layerState.label && zoom >= LABEL_SHOW_ZOOM,
-      });
-      frameProjectionCache = null;
-      if (instrument)
-        perfMark(
-          '线路 Canvas 地图绘制完成',
-          {
-            towers: runtimeTowers.length,
-            wires: runtimeWires.length,
-            crosses: runtimeCrosses.length,
-          },
-          perfSession,
-        );
-      progressiveActive = false;
-      if (instrument) instrumentNextRender = false;
-      setDevMapRenderState(activeDevRenderToken, true, activeDevRenderRunId);
-    }
-  }
-
-  function requestInteractiveFrame(cameraChanged: boolean): void {
-    if (destroyed) return;
-    if (!overlayMode) {
-      // Canvas-only 不引入两阶段调度，保持既有单阶段绘制与交互行为。
-      draw();
-      return;
-    }
-    if (cameraChanged) {
-      cameraRevision += 1;
-      interactionActive = true;
-      // 以最近一次相机事件为延迟起点；连续 move/zoom 时不把整段手势
-      // 累计成一个虚假的长延迟。
-      interactionRequestStartedAt = performance.now();
-      // 相机已改变，旧 progressive 的投影全部失效；只取消旧 pass，
-      // 不在这里启动新的完整 pass，避免连续 move 让大线路永远停在塔位阶段。
-      if (progressiveActive || pendingFrame || activePhaseEnd) {
-        cancelProgressiveRender();
-      }
-      cancelScheduledFrame(pendingSettledFrame);
-      pendingSettledFrame = null;
-      // 保留已经排队的 interaction RAF，并在回调执行时读取最新
-      // cameraRevision。MapLibre 可能每个 RAF 都发出 move/zoom；如果
-      // 每次事件都取消并重新排队，事件恰好在 RAF 前到达时会造成交互帧
-      // 饥饿，Canvas 反而无法持续跟随底图。
-    } else if (progressiveActive || pendingFrame || activePhaseEnd) {
-      // Hover/selection changes also replace the pixels on the overlay.  Do
-      // not let a previously scheduled progressive stage draw on top of the
-      // new interaction frame with stale ordering/state.
-      cancelProgressiveRender();
-    }
-    if (pendingInteractionFrame) return;
-    if (interactionRequestStartedAt == null) interactionRequestStartedAt = performance.now();
-    pendingInteractionFrame = scheduleFrame(() => {
-      pendingInteractionFrame = null;
-      // 不捕获事件到达时的旧 revision；连续相机事件合并到这一帧时，
-      // 只使用执行时的最新相机投影。
-      drawInteractiveFrame(cameraRevision);
-    });
-  }
-
-  function requestSettledFrame(): void {
-    if (destroyed) return;
-    if (!overlayMode) {
-      draw();
-      return;
-    }
-    interactionActive = false;
-    if (pendingSettledFrame) return;
-    const revision = cameraRevision;
-    pendingSettledFrame = scheduleFrame(() => {
-      pendingSettledFrame = null;
-      if (destroyed || revision !== cameraRevision || interactionActive) return;
-      draw();
-    });
-  }
-
-  /** 请求一次视觉更新；MapLibre overlay 只绘制轻量交互帧，Canvas-only 维持原行为。 */
-  function requestVisualRender(): void {
-    if (!overlayMode) {
-      draw();
-      return;
-    }
-
-    // 悬停/选中也需要先用当前相机快速刷新；如果它打断了正在进行的
-    // settled progressive pass，则排队一次完整补绘。相机仍在变化时不
-    // 提前启动 settled，继续由 moveend/zoomend 统一触发。
-    requestInteractiveFrame(false);
-    if (!interactionActive) requestSettledFrame();
   }
 
   // 向调用方注册 redraw 回调，供 MapLibre 视图变化时触发 Canvas 重绘。
@@ -747,353 +284,10 @@ export function renderLineMap(
     });
   }
 
-  function drawEmptyHint(text: string): void {
-    paintEmptyHint(ctx, cssW, cssH, text);
-  }
-
-  function drawBorder(): void {
-    paintBorder(ctx, cssW, cssH);
-  }
-
-  function drawGrid(): void {
-    paintGrid(ctx, bbox, cssW, cssH, geoToScreen);
-  }
-
-  function drawWireRange(start: number, end: number, simplified = false): void {
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    // M4-B2：先画非选中导线；选中导线在全部批次完成后补画，确保
-    // 选中态保持在最上层且不会被后续批次覆盖。
-    for (let index = start; index < end; index++) {
-      const runtimeWire = runtimeWires[index];
-      if (!runtimeWire) continue;
-      const { wire } = runtimeWire;
-      if (!layerState[wireLayerKey(wire.wireType)]) continue;
-      if (wire === selectedWire) continue;
-      drawWireSegment(runtimeWire, false, simplified);
-    }
-  }
-
-  function drawSelectedWire(simplified = false): void {
-    if (!selectedWire || !layerState[wireLayerKey(selectedWire.wireType)]) return;
-    const runtimeWire = runtimeWires.find((candidate) => candidate.wire === selectedWire);
-    if (runtimeWire) drawWireSegment(runtimeWire, true, simplified);
-  }
-
-  function drawTowerRange(start: number, end: number): void {
-    if (!layerState.tower) return;
-    for (let index = start; index < end; index++) {
-      const runtimeTower = runtimeTowers[index];
-      if (!runtimeTower) continue;
-      const { tower } = runtimeTower;
-      const p = geoToScreenPoint(runtimeTower.point);
-      towerScreen.push({ tower, x: p.x, y: p.y });
-      if (p.x < -12 || p.x > cssW + 12 || p.y < -12 || p.y > cssH + 12) continue;
-
-      const tension = isTensionTower(tower);
-      const isHover = hoveredTower === tower;
-      const isSelected = !!(tower.nodeRef && selectedTowerPaths.has(tower.nodeRef.path));
-      const r = isHover || isSelected ? TOWER_RADIUS + 2 : TOWER_RADIUS;
-
-      if (isHover || isSelected) {
-        // 高亮光晕
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, r + 4, 0, Math.PI * 2);
-        ctx.fillStyle = isSelected ? 'rgba(245,158,11,0.35)' : 'rgba(245,158,11,0.25)';
-        ctx.fill();
-      }
-
-      const fillColor = isHover || isSelected ? COLOR_TOWER_SELECTED : undefined;
-      if (tension) {
-        // 菱形（耐张塔/转角塔）
-        ctx.fillStyle = fillColor || COLOR_TOWER_TENSION_FILL;
-        ctx.strokeStyle = COLOR_TOWER_TENSION;
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(p.x, p.y - r);
-        ctx.lineTo(p.x + r, p.y);
-        ctx.lineTo(p.x, p.y + r);
-        ctx.lineTo(p.x - r, p.y);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-      } else {
-        // 圆形（直线塔/普通塔）
-        ctx.fillStyle = fillColor || COLOR_TOWER_STRAIGHT_FILL;
-        ctx.strokeStyle = COLOR_TOWER_STRAIGHT;
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-      }
-    }
-  }
-
-  /**
-   * M4-B2：绘制单条导线段，含样式分层。
-   *
-   * 样式规则：
-   * - isJumper=true → 虚线（setLineDash）
-   * - SPLIT > 1 → 线宽 WIRE_WIDTH_SPLIT
-   * - 选中态 → 线宽 WIRE_WIDTH_SELECTED + 高亮色（黄色描边）
-   * - UNKNOWN → 保持弱化样式（浅灰）
-   * - enableCatenary=true 且为 inter-point 真实档距 → 抛物线采样（M4-B3C）
-   *
-   * @param w 导线段
-   * @param isSelected 是否为选中态
-   */
-  function drawWireSegment(
-    runtimeWire: RuntimeWire,
-    isSelected: boolean,
-    simplified = false,
-  ): void {
-    const w = runtimeWire.wire;
-    const s = geoToScreenPoint(runtimeWire.start);
-    const e = geoToScreenPoint(runtimeWire.end);
-    // 视口剔除
-    if ((s.x < 0 && e.x < 0) || (s.x > cssW && e.x > cssW)) return;
-    if ((s.y < 0 && e.y < 0) || (s.y > cssH && e.y > cssH)) return;
-
-    const isJumper = runtimeWire.isJumper;
-    const split = runtimeWire.split;
-
-    // 选中态：先画一层黄色描边光晕（与导线主体同样形态）
-    if (isSelected) {
-      ctx.setLineDash([]);
-      ctx.strokeStyle = 'rgba(245,158,11,0.45)';
-      ctx.lineWidth = WIRE_WIDTH_SELECTED + 4;
-      drawWirePath(s, e, runtimeWire, simplified);
-    }
-
-    // 主体线
-    ctx.strokeStyle = WIRE_COLORS[w.wireType] || WIRE_COLOR_UNKNOWN;
-    if (isSelected) {
-      ctx.lineWidth = WIRE_WIDTH_SELECTED;
-    } else if (split && split > 1) {
-      ctx.lineWidth = WIRE_WIDTH_SPLIT;
-    } else {
-      ctx.lineWidth = WIRE_WIDTH;
-    }
-    if (isJumper) {
-      ctx.setLineDash(WIRE_DASH_JUMPER);
-    } else {
-      ctx.setLineDash([]);
-    }
-    drawWirePath(s, e, runtimeWire, simplified);
-
-    // 恢复默认
-    ctx.setLineDash([]);
-  }
-
-  /**
-   * M4-B3C：绘制导线路径（直线或抛物线悬链线）。
-   *
-   * 形态由 wireScreenPoints 统一给出（与 hit-test 一致）；
-   * 弧垂语义详见 computeSagPx。
-   */
-  function drawWirePath(
-    s: { x: number; y: number },
-    e: { x: number; y: number },
-    runtimeWire: RuntimeWire,
-    simplified = false,
-  ): void {
-    ctx.beginPath();
-    const pts = wireScreenPoints(s, e, runtimeWire, simplified);
-    ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-    ctx.stroke();
-  }
-
-  function drawCrossRange(start: number, end: number): void {
-    if (!layerState.cross) return;
-    for (let index = start; index < end; index++) {
-      const runtimeCross = runtimeCrosses[index];
-      if (!runtimeCross?.point) continue;
-      const p = geoToScreenPoint(runtimeCross.point);
-      if (p.x < -10 || p.x > cssW + 10 || p.y < -10 || p.y > cssH + 10) continue;
-      // 三角形警示符号
-      const r = 6;
-      ctx.fillStyle = COLOR_CROSS;
-      ctx.strokeStyle = '#b45309';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(p.x, p.y - r);
-      ctx.lineTo(p.x - r, p.y + r * 0.7);
-      ctx.lineTo(p.x + r, p.y + r * 0.7);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-      // 感叹号
-      ctx.fillStyle = '#fff';
-      ctx.font = 'bold 9px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('!', p.x, p.y + 1);
-    }
-  }
-
-  function drawLabelRange(start: number, end: number): void {
-    ctx.font = LABEL_FONT;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'bottom';
-    // 标签队列已按 y 排序，labelLastDrawnY 跨分帧保留碰撞状态。
-    for (let index = start; index < end; index++) {
-      const ts = labelQueue[index];
-      if (!ts) continue;
-      if (ts.x < 0 || ts.x > cssW || ts.y < 0 || ts.y > cssH) continue;
-      if (ts.y - labelLastDrawnY < 13) continue;
-      const label = towerLabel(ts.tower);
-      if (!label) continue;
-      ctx.fillStyle = COLOR_LABEL;
-      ctx.fillText(label, ts.x + 7, ts.y - 4);
-      labelLastDrawnY = ts.y;
-    }
-  }
-
-  function drawLegend(): void {
-    paintLegend(ctx, layerState, cssH);
-  }
-
-  function drawScaleBar(): void {
-    paintScaleBar(ctx, cssW, cssH, baseScale, zoom, centerLatRad);
-  }
-
-  // ---- 命中测试 ----
-  function hitTestTower(sx: number, sy: number): TowerMarker | null {
-    if (!layerState.tower) return null;
-    return overlayMode
-      ? nearestTower(runtimeTowers, (row) => geoToScreenPoint(row.point), sx, sy, HIT_RADIUS)
-      : nearestTower(towerScreen, (row) => row, sx, sy, HIT_RADIUS);
-  }
-
-  /**
-   * M4-B2：导线 hit-test。
-   *
-   * 规则：
-   * - 仅检测图层开启的导线类型
-   * - 优先返回距离最近的导线
-   * - 鼠标点到导线屏幕距离 <= threshold 时命中
-   * - 悬链线导线沿实际采样曲线计算距离（与 drawWirePath 同一形态来源 wireScreenPoints），
-   *   修复 hover/click 直线命中与可见抛物线不一致的问题
-   *
-   * @param threshold 像素阈值，点击用 WIRE_HIT_DIST，hover 用 WIRE_HIT_DIST_HOVER
-   */
-  function hitTestWire(sx: number, sy: number, threshold: number): WireSegment | null {
-    return nearestWire(
-      runtimeWires,
-      (layer) => layerState[layer],
-      geoToScreenPoint,
-      cssW,
-      cssH,
-      sx,
-      sy,
-      threshold,
-    );
-  }
-
-  const towerTooltip = createLineMapTooltip(tooltip);
-
-  // ---- 事件处理（内部可复用逻辑，供 Canvas 事件 + overlay 桥接共用） ----
-
-  /**
-   * 处理鼠标移动（hover 命中测试 + tooltip）。
-   * Canvas-only：由 onMouseMove 调用（dragging 时走拖拽分支）
-   * overlay：由 handlePointerMove → 外部 MapLibre 转发调用
-   *
-   * M4-B2：增加导线 hover 检测，命中导线时 cursor=pointer。
-   * 优先级：塔位 > 导线（hover 时塔位 tooltip 优先）。
-   */
-  function handlePointerMoveAt(mx: number, my: number): void {
-    // hover 命中测试（塔位优先）
-    const t = hitTestTower(mx, my);
-    if (t !== hoveredTower) {
-      hoveredTower = t;
-      requestVisualRender();
-    }
-    if (t) {
-      towerTooltip.show(t, mx, my, cssW, cssH);
-      canvas.style.cursor = 'pointer';
-      // 命中塔位时清除导线 hover 态
-      if (hoveredWire !== null) {
-        hoveredWire = null;
-      }
-      return;
-    }
-    // 未命中塔位：检测导线 hover（容差放宽到 WIRE_HIT_DIST_HOVER）
-    const w = options?.onWireClick ? hitTestWire(mx, my, WIRE_HIT_DIST_HOVER) : null;
-    if (w !== hoveredWire) {
-      hoveredWire = w;
-      // hover 不重绘（避免频繁 redraw），仅更新 cursor
-    }
-    if (w) {
-      towerTooltip.hide();
-      canvas.style.cursor = 'pointer';
-    } else {
-      towerTooltip.hide();
-      canvas.style.cursor = valid ? 'grab' : 'default';
-    }
-  }
-
-  /**
-   * 处理鼠标点击（命中塔位 → 选中 + 联动）。
-   * Canvas-only：由 onMouseUp 调用（未拖拽时）
-   * overlay：由 handlePointerClick → 外部 MapLibre 转发调用
-   *
-   * M4-B2：未命中塔位时尝试命中导线，命中则触发 onWireClick 回调并高亮。
-   * 优先级：塔位 > 导线 > CROSS（CROSS 当前无 hit-test）。
-   */
-  function handlePointerClickAt(mx: number, my: number): void {
-    const t = hitTestTower(mx, my);
-    if (t) {
-      hoveredTower = t;
-      if (t.nodeRef && t.nodeRef.path) {
-        selectedTowerPaths = new Set([t.nodeRef.path]);
-      }
-      // 命中塔位时清除导线选中态
-      selectedWire = null;
-      requestVisualRender();
-      try {
-        onTowerClick(t.nodeRef);
-      } catch (err) {
-        logger.error('[LineMap] onTowerClick 回调异常:', err);
-      }
-      return;
-    }
-    // 未命中塔位：尝试命中导线（严格阈值 WIRE_HIT_DIST）
-    if (options?.onWireClick) {
-      const w = hitTestWire(mx, my, WIRE_HIT_DIST);
-      if (w) {
-        selectedWire = w;
-        // 选中导线时清除塔位选中态（避免双重选中）
-        selectedTowerPaths = new Set();
-        requestVisualRender();
-        try {
-          options.onWireClick(w);
-        } catch (err) {
-          logger.error('[LineMap] onWireClick 回调异常:', err);
-        }
-      }
-    }
-  }
-
-  /**
-   * 处理鼠标离开（清除 hover + tooltip）。
-   * Canvas-only：由 onMouseLeave 调用
-   * overlay：由 handlePointerLeave → 外部 MapLibre 转发调用
-   */
-  function handlePointerLeaveInternal(): void {
-    hoveredTower = null;
-    // M4-B2 cleanup：鼠标离开地图区域时同时清理导线 hover 态
-    hoveredWire = null;
-    towerTooltip.hide();
-    requestVisualRender();
-  }
-
   function zoomAt(mx: number, my: number, factor: number): void {
     if (!valid) return;
     const before = screenToWorldGeo(mx, my);
-    zoom = clamp(zoom * factor, MIN_ZOOM, MAX_ZOOM);
+    viewport.zoom = clamp(viewport.zoom * factor, MIN_ZOOM, MAX_ZOOM);
     const after = geoToScreen(before.lat, before.lng);
     panX += mx - after.x;
     panY += my - after.y;
@@ -1106,9 +300,9 @@ export function renderLineMap(
 
   // ---- 公开方法 ----
   function fit(): void {
-    selectedTowerPaths = new Set();
-    // M4-B2：fit 时清除导线选中态
-    selectedWire = null;
+    if (destroyed) return;
+    selection.selectedTowerPaths = new Set();
+    selection.selectedWire = null;
     // M4-A2：overlay 模式下视图由 MapLibre 管理，委托 fitBounds
     if (projection?.fitBounds && valid) {
       projection.fitBounds({
@@ -1121,7 +315,7 @@ export function renderLineMap(
       requestSettledFrame();
       return;
     }
-    zoom = 1;
+    viewport.zoom = 1;
     panX = 0;
     panY = 0;
     draw();
@@ -1129,11 +323,11 @@ export function renderLineMap(
 
   /** 定位到单个塔位：居中 + 放大 + 高亮 */
   function focusTowerByNodePath(path: string): boolean {
-    if (!valid) return false;
+    if (destroyed || !valid) return false;
     const t = pathToTower.get(path);
     if (!t) return false;
-    selectedTowerPaths = new Set([path]);
-    hoveredTower = t;
+    selection.selectedTowerPaths = new Set([path]);
+    selection.hoveredTower = t;
     // M4-A2：overlay 模式下委托 MapLibre fitBounds（单塔小范围 bbox）
     if (projection?.fitBounds) {
       const pad = 0.002;
@@ -1147,8 +341,8 @@ export function renderLineMap(
       requestSettledFrame();
       return true;
     }
-    zoom = clamp(FOCUS_TOWER_ZOOM, MIN_ZOOM, MAX_ZOOM);
-    const s = baseScale * zoom;
+    viewport.zoom = clamp(FOCUS_TOWER_ZOOM, MIN_ZOOM, MAX_ZOOM);
+    const s = viewport.baseScale * viewport.zoom;
     const wx = t.lng - centerLng;
     const wy = mercY(t.lat) - centerWYAbs;
     panX = -(wx - centerWX) * s;
@@ -1159,7 +353,7 @@ export function renderLineMap(
 
   /** 定位到一组塔位的 bbox：fit + 高亮 */
   function focusBboxByNodePaths(paths: string[]): boolean {
-    if (!valid) return false;
+    if (destroyed || !valid) return false;
     const towers: TowerMarker[] = [];
     for (const p of paths) {
       const t = pathToTower.get(p);
@@ -1186,7 +380,7 @@ export function renderLineMap(
     minLng -= lngSpan * 0.2;
     maxLng += lngSpan * 0.2;
 
-    selectedTowerPaths = new Set(paths);
+    selection.selectedTowerPaths = new Set(paths);
 
     // M4-A2：overlay 模式下委托 MapLibre fitBounds
     if (projection?.fitBounds) {
@@ -1206,13 +400,17 @@ export function renderLineMap(
     const subCenterWX = (subMinWX + subMaxWX) / 2;
     const subCenterWY = (subMinWY + subMaxWY) / 2;
 
-    // 计算 zoom 使子 bbox 填满视口（减去 padding）
-    const availW = Math.max(cssW - 2 * FIT_PADDING, 1);
-    const availH = Math.max(cssH - 2 * FIT_PADDING, 1);
-    zoom = clamp(Math.min(availW / subW, availH / subH) / baseScale, MIN_ZOOM, MAX_ZOOM);
+    // 计算缩放级别，使子 bbox 填满扣除边距后的视口。
+    const availW = Math.max(viewport.cssW - 2 * FIT_PADDING, 1);
+    const availH = Math.max(viewport.cssH - 2 * FIT_PADDING, 1);
+    viewport.zoom = clamp(
+      Math.min(availW / subW, availH / subH) / viewport.baseScale,
+      MIN_ZOOM,
+      MAX_ZOOM,
+    );
 
     // pan 使子 bbox 中心居中
-    const s = baseScale * zoom;
+    const s = viewport.baseScale * viewport.zoom;
     panX = -(subCenterWX - centerWX) * s;
     panY = (subCenterWY - centerWY) * s;
 
@@ -1223,13 +421,8 @@ export function renderLineMap(
   function destroy(): void {
     if (destroyed) return;
     destroyed = true;
-    cancelProgressiveRender();
-    cancelScheduledFrame(pendingInteractionFrame);
-    pendingInteractionFrame = null;
-    cancelScheduledFrame(pendingSettledFrame);
-    pendingSettledFrame = null;
-    interactionRequestStartedAt = null;
-    interactionActive = false;
+    renderer.destroy();
+    pointer.destroy();
     disposeCanvasInput();
     fitBtn.removeEventListener('click', onFitBtnClick);
     layerEvents.abort();
@@ -1248,13 +441,8 @@ export function renderLineMap(
     if (tooltip.parentNode) tooltip.parentNode.removeChild(tooltip);
     if (fitBtn.parentNode) fitBtn.parentNode.removeChild(fitBtn);
     if (layerPanel.parentNode) layerPanel.parentNode.removeChild(layerPanel);
-    towerScreen = [];
-    labelQueue = [];
-    hoveredTower = null;
-    // M4-B2：清理导线选中/hover 态
-    selectedWire = null;
-    hoveredWire = null;
-    selectedTowerPaths.clear();
+    selection.selectedWire = null;
+    selection.selectedTowerPaths.clear();
     pathToTower.clear();
   }
 
@@ -1267,11 +455,11 @@ export function renderLineMap(
       draw();
     },
     zoomAt,
-    hover: handlePointerMoveAt,
-    click: handlePointerClickAt,
-    leave: handlePointerLeaveInternal,
+    hover: pointer.handlePointerMove,
+    click: pointer.handlePointerClick,
+    leave: pointer.handlePointerLeave,
     fit,
-    hasHover: () => Boolean(hoveredTower || hoveredWire),
+    hasHover: pointer.hasHover,
   });
   fitBtn.addEventListener('click', onFitBtnClick);
 
@@ -1286,15 +474,9 @@ export function renderLineMap(
     destroy,
     focusTowerByNodePath,
     focusBboxByNodePaths,
-    handlePointerMove: handlePointerMoveAt,
-    handlePointerClick: handlePointerClickAt,
-    handlePointerLeave: handlePointerLeaveInternal,
+    handlePointerMove: pointer.handlePointerMove,
+    handlePointerClick: pointer.handlePointerClick,
+    handlePointerLeave: pointer.handlePointerLeave,
     getLayerPanel: () => (destroyed ? null : layerPanel),
   };
 }
-
-// ---------------------------------------------------------------------------
-// 辅助函数
-// ---------------------------------------------------------------------------
-
-/** 数据是否可用（有可定位塔位且 bbox 非退化） */

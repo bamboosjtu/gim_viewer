@@ -1,7 +1,6 @@
 import type { SubstationFineQueue } from './selectionContracts.js';
 import type { ProjectSelectionState } from './projectSelectionState.js';
 import type { IfcRuntimeState } from './ifcRuntimeState.js';
-import type * as OBCF from '@thatopen/fragments';
 import type * as THREE from 'three';
 
 import type { ProjectLoadSession } from './projectSession.js';
@@ -14,6 +13,8 @@ export interface ViewerState {
     | 'selectionDecorationCleanup'
     | 'selectionVisibility'
     | 'selectionHighlightRequestId'
+    | 'highlightedItems'
+    | 'highlightedModState'
     | 'representationSelection'
     | 'selectionRequest'
     | 'beginSelection'
@@ -69,11 +70,6 @@ export interface ViewerState {
       sharedTextureCount: number;
     };
     diagnostics: Record<string, unknown>;
-  } | null;
-  highlightedItems: OBCF.ModelIdMap | null;
-  highlightedModState: {
-    groups: THREE.Object3D[];
-    originalMaterials: Map<THREE.Mesh, THREE.Material | THREE.Material[]>;
   } | null;
   captureProjectSession: () => ProjectLoadSession;
   isCurrentSession: (session: ProjectLoadSession) => boolean;

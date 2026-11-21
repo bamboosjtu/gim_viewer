@@ -22,7 +22,7 @@ function fixture() {
     const request=state.selection.beginSelection(regional ? {kind:'ifc-object',key:'ifc:source:object:7'}
       : {kind:'ifc-element',key:'runtime:17'});
     await commitSelectionHighlight(ctx,state,state.selection.selectionGuard(request),()=> {
-      if (!regional) state.highlightedItems={runtime:[17]};
+      if (!regional) state.selection.highlightedItems={runtime:[17]};
     }); return request;
   };
   return {state,ctx,model,migrate,select};
@@ -35,10 +35,10 @@ it('consumes a neutral representation scope and rejects stale scopes even with o
   f.state.selection.representationSelection={requestId:request.id,devRoots:new Set(),ifc:[{modelId:'source',expressId:7,globalId:'g7'}],isCurrent:()=>current};
   await commitSelectionHighlight(f.ctx,f.state,f.state.selection.selectionGuard(request),()=>{});
   const fine=group();await f.migrate(fine);
-  expect(f.state.highlightedModState?.groups).toEqual([fine]);
+  expect(f.state.selection.highlightedModState?.groups).toEqual([fine]);
   resetModHighlight(f.state);
-  f.state.highlightedItems={runtime:[17]};current=false;
-  await f.migrate(group());expect(f.state.highlightedModState).toBeNull();
+  f.state.selection.highlightedItems={runtime:[17]};current=false;
+  await f.migrate(group());expect(f.state.selection.highlightedModState).toBeNull();
   f.state.selection.invalidateSelection();expect(f.state.selection.representationSelection).toBeNull();
 });
 
@@ -48,11 +48,11 @@ it('migrates far highlight to L2 without resetting Fragments, re-highlighting ot
   const request=f.state.selection.selectionRequest;
   await f.migrate(fine); const material=(fine.children[0] as THREE.Mesh).material;
   await f.migrate(fine);
-  expect(f.state.highlightedModState?.groups).toEqual([other,fine]);
+  expect(f.state.selection.highlightedModState?.groups).toEqual([other,fine]);
   expect((other.children[0] as THREE.Mesh).material).toBe(otherMaterial);
   expect((fine.children[0] as THREE.Mesh).material).toBe(material);
   expect(f.ctx.fragments.highlight).not.toHaveBeenCalled();expect(f.ctx.fragments.resetHighlight).not.toHaveBeenCalled();
-  expect(f.state.selection.selectionRequest).toBe(request);expect(f.state.highlightedItems).toEqual({runtime:[17]});
+  expect(f.state.selection.selectionRequest).toBe(request);expect(f.state.selection.highlightedItems).toEqual({runtime:[17]});
   resetModHighlight(f.state);
 });
 
@@ -67,7 +67,7 @@ it('restores only the departing material clones, then returns a regional selecti
   expect((other.children[0] as THREE.Mesh).material).toBe(otherMaterial);
   removeModHighlightGroup(f.state,fine);await f.migrate(undefined);
   expect(f.model.getItemsGeometry).toHaveBeenCalledOnce(); expect(f.ctx.fragments.highlight).not.toHaveBeenCalled();
-  expect(f.state.highlightedItems).toEqual({runtime:[17]});
+  expect(f.state.selection.highlightedItems).toEqual({runtime:[17]});
   await f.migrate(undefined);expect(f.model.getItemsGeometry).toHaveBeenCalledOnce();
   resetModHighlight(f.state);
 });
@@ -75,18 +75,18 @@ it('restores only the departing material clones, then returns a regional selecti
 it('does no geometry traversal for unrelated replacements and rejects an obsolete representation',async()=>{
   const f=fixture();await f.select();const replacement=group(),traverse=vi.spyOn(replacement,'traverse');
   await f.migrate(replacement,18);await f.migrate(replacement,17,()=>false);
-  expect(traverse).not.toHaveBeenCalled();expect(f.state.highlightedModState).toBeNull();
+  expect(traverse).not.toHaveBeenCalled();expect(f.state.selection.highlightedModState).toBeNull();
 });
 
 it('waits for the far selection commit before migrating its representation',async()=>{
   const f=fixture();const request=f.state.selection.beginSelection({kind:'ifc-element',key:'runtime:17'});
   let finish!:()=>void;
   const commit=commitSelectionHighlight(f.ctx,f.state,f.state.selection.selectionGuard(request),async()=>{
-    await new Promise<void>(resolve=>{finish=resolve;});f.state.highlightedItems={runtime:[17]};
+    await new Promise<void>(resolve=>{finish=resolve;});f.state.selection.highlightedItems={runtime:[17]};
   });
   await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));
   const replacement=group(),migration=f.migrate(replacement);finish();await Promise.all([commit,migration]);
-  expect(f.state.highlightedModState?.groups).toEqual([replacement]);resetModHighlight(f.state);
+  expect(f.state.selection.highlightedModState?.groups).toEqual([replacement]);resetModHighlight(f.state);
 });
 
 it('does not apply a queued A migration after selection moves to B or the project changes',async()=>{
@@ -94,8 +94,8 @@ it('does not apply a queued A migration after selection moves to B or the projec
   const blocking=enqueueHighlightCommit(f.state,f.state.selection.selectionGuard(a),()=>new Promise<void>(resolve=>{finish=resolve;}));
   await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));
   const old=f.migrate(group());f.state.selection.beginSelection({kind:'ifc-element',key:'runtime:18'});
-  finish();await Promise.all([blocking,old]);expect(f.state.highlightedModState).toBeNull();
-  f.state.activateProject(2,'new');await f.migrate(group());expect(f.state.highlightedModState).toBeNull();
+  finish();await Promise.all([blocking,old]);expect(f.state.selection.highlightedModState).toBeNull();
+  f.state.activateProject(2,'new');await f.migrate(group());expect(f.state.selection.highlightedModState).toBeNull();
 });
 
 it('keeps an in-flight far restore resettable by the next selection',async()=>{
@@ -103,10 +103,10 @@ it('keeps an in-flight far restore resettable by the next selection',async()=>{
   f.model.getItemsGeometry.mockImplementationOnce(()=>new Promise<any>(resolve=>{finish=()=>resolve([]);}));
   const old=f.migrate(undefined);await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));
   const b=f.state.selection.beginSelection({kind:'ifc-element',key:'runtime:18'});
-  const next=commitSelectionHighlight(f.ctx,f.state,f.state.selection.selectionGuard(b),()=>{f.state.highlightedItems={runtime:[18]};});
+  const next=commitSelectionHighlight(f.ctx,f.state,f.state.selection.selectionGuard(b),()=>{f.state.selection.highlightedItems={runtime:[18]};});
   finish();await Promise.all([old,next]);
   expect(f.ctx.fragments.resetHighlight).toHaveBeenCalledWith({runtime:[17]});
-  expect(f.state.highlightedItems).toEqual({runtime:[18]});
+  expect(f.state.selection.highlightedItems).toEqual({runtime:[18]});
 });
 
 function runtimeFixture() {
@@ -134,10 +134,10 @@ it.each([false,true])('runtime swaps far/regional=%s to highlighted L2 and retur
   try {
     const [a,b]=await Promise.all([f.runtime.refine(object),f.runtime.refine(object)]);
     expect(a).toBe(b);expect(a?.userData.lod).toBe(2);expect(f.fine.load).toHaveBeenCalledOnce();
-    expect(f.state.highlightedModState?.groups).toEqual([a]);
+    expect(f.state.selection.highlightedModState?.groups).toEqual([a]);
     f.runtime.releaseFine(7);
-    await vi.waitFor(()=>expect(f.state.highlightedItems).toEqual({runtime:[17]}));
-    expect(f.state.highlightedModState).toBeNull();expect(f.fine.load).toHaveBeenCalledOnce();
+    await vi.waitFor(()=>expect(f.state.selection.highlightedItems).toEqual({runtime:[17]}));
+    expect(f.state.selection.highlightedModState).toBeNull();expect(f.fine.load).toHaveBeenCalledOnce();
     expect(f.model.setVisible).toHaveBeenLastCalledWith([17],true);
   } finally {f.runtime.release();}
 });
@@ -147,12 +147,12 @@ it('cancel and failure preserve browse highlight and reject late L2 without high
   try {
     f.fine.load.mockRejectedValueOnce(Error('precision failed'));
     await expect(f.runtime.refine(object)).rejects.toThrow('precision failed');
-    expect(f.state.highlightedItems).toEqual({runtime:[17]});expect(f.internal.groups.size).toBe(0);
+    expect(f.state.selection.highlightedItems).toEqual({runtime:[17]});expect(f.internal.groups.size).toBe(0);
     f.fine.load.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
     const late=f.runtime.refine(object);f.runtime.releaseFine(7);
     f.state.selection.beginSelection({kind:'ifc-element',key:'runtime:18'});finish(f.result);
     await expect(late).resolves.toBeUndefined();expect(f.internal.groups.size).toBe(0);
-    expect(f.state.highlightedModState).toBeNull();
+    expect(f.state.selection.highlightedModState).toBeNull();
   } finally {f.runtime.release();}
 });
 
@@ -163,7 +163,7 @@ it('adds only the selected instanced L1 overlay when a far representation is rep
   f.internal.instances.add({...f.result,ifcType:'IFCFASTENER',parts:f.result.parts.map(p=>({...p,geometryId:9}))});
   try {
     await f.internal.representationChanged(object,coarse,17);
-    expect(coarse.children).toHaveLength(1);expect(f.state.highlightedModState?.originalMaterials.size).toBe(1);
+    expect(coarse.children).toHaveLength(1);expect(f.state.selection.highlightedModState?.originalMaterials.size).toBe(1);
     const material=(coarse.children[0] as THREE.Mesh).material;
     await f.internal.representationChanged(object,coarse,17);
     expect((coarse.children[0] as THREE.Mesh).material).toBe(material);
@@ -178,7 +178,7 @@ it('retains the old highlighted L1 when a precision commit fails',async()=>{
   try {
     await expect(f.runtime.refine(object)).rejects.toThrow('visibility failed');
     expect(f.internal.groups.get(7)).toBe(old);expect(old.parent).toBe(f.runtime.root);
-    expect(f.state.highlightedModState?.groups).toEqual([old]);
+    expect(f.state.selection.highlightedModState?.groups).toEqual([old]);
     expect((old.children[0] as THREE.Mesh).material).toBe(material);
   } finally {f.runtime.release();}
 });
@@ -192,7 +192,7 @@ it('a cancelled commit cannot remove or unhighlight a newer retry of the same ob
     const replacement=await f.runtime.refine(object);finish();
     await expect(old).resolves.toBeUndefined();
     expect(f.internal.groups.get(7)).toBe(replacement);
-    expect(f.state.highlightedModState?.groups).toEqual([replacement]);
+    expect(f.state.selection.highlightedModState?.groups).toEqual([replacement]);
     expect(f.model.setVisible).toHaveBeenLastCalledWith([17],false);
     expect(f.fine.load).toHaveBeenCalledTimes(2);
   } finally {f.runtime.release();}

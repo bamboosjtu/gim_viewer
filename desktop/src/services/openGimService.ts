@@ -212,9 +212,11 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
 
     if (nativeFilePath) {
       let endNative: ReturnType<typeof perfBegin> | null = null;
+      const earlySourceSha = session.sourceSha256;
       const earlyRequested =
         source.magic === 'GIMPKGS' &&
         projectId != null &&
+        !!earlySourceSha &&
         (SUBSTATION_EARLY_SEMANTIC_DEFAULT ||
           localStorage.getItem('gim-debug-substation-early-semantic') === '1');
       try {
@@ -233,7 +235,6 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
           extracted = reused;
         } else {
           endNative = perfBegin('解压（Rust 原生）', undefined, perfSession);
-          const early = earlyRequested;
           const fullNative = () =>
             extractGimArchiveNative(nativeFilePath, projectId ?? undefined, {
               ...(session.sourceSha256 ? { expectedSourceSha256: session.sourceSha256 } : {}),
@@ -241,12 +242,12 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
               substationParseCopy: localStorage.getItem('gim-debug-substation-parse-copy') === '1',
             });
           let native: Awaited<ReturnType<typeof extractGimArchiveNative>> | ExtractedGimSource;
-          if (early) {
+          if (earlyRequested) {
             const policy = await import('./substationExtractionJob.js');
             const capability = await policy.inspectEarlySemanticEligibility(
               nativeFilePath,
               projectId,
-              session.sourceSha256!,
+              earlySourceSha,
             );
             (await import('../utils/perfTimings.js')).perfMark(
               'early semantic eligibility',

@@ -1,4 +1,4 @@
-import {requestObjectRender,requestViewerRender} from './demandRendering.js';
+import { requestObjectRender, requestViewerRender } from './demandRendering.js';
 import * as OBC from '@thatopen/components';
 import * as THREE from 'three';
 import type { ViewerContext } from './viewerEngine.js';
@@ -8,7 +8,14 @@ import type { SelectionRequest } from '../shared/selectionContracts.js';
 import { frameBox } from './camera.js';
 import { setDevInstanceHighlight } from './devInstanceBatches.js';
 import { perfBegin } from '../utils/perfTimings.js';
-import { addSelectionOutline, removeSelectionOutline, clearMeshOutlines, clearFragmentOutlines, outlineFragmentItems, SELECTION_AMBER } from './selectionOutline.js';
+import {
+  addSelectionOutline,
+  removeSelectionOutline,
+  clearMeshOutlines,
+  clearFragmentOutlines,
+  outlineFragmentItems,
+  SELECTION_AMBER,
+} from './selectionOutline.js';
 
 /** MOD/STL 高亮颜色（与 IFC 高亮保持一致） */
 const HIGHLIGHT_MOD_COLOR = new THREE.Color(SELECTION_AMBER);
@@ -22,8 +29,8 @@ const HIGHLIGHT_MOD_COLOR = new THREE.Color(SELECTION_AMBER);
  */
 export function resetModHighlight(state: AppState): void {
   clearMeshOutlines(state);
-  if (!state.highlightedModState) return;
-  const { originalMaterials } = state.highlightedModState;
+  if (!state.selection.highlightedModState) return;
+  const { originalMaterials } = state.selection.highlightedModState;
   for (const [mesh, originalMat] of originalMaterials) {
     const current = mesh.material;
     if (current !== originalMat) {
@@ -31,30 +38,34 @@ export function resetModHighlight(state: AppState): void {
       if (Array.isArray(current)) {
         current.forEach((m) => m.dispose());
       } else {
-        (current as THREE.Material).dispose();
+        current.dispose();
       }
     }
-    mesh.material = originalMat;requestObjectRender(mesh);
+    mesh.material = originalMat;
+    requestObjectRender(mesh);
     setDevInstanceHighlight(mesh, false);
   }
-  state.highlightedModState = null;
+  state.selection.highlightedModState = null;
 }
 
 /** Restore only a departing representation, preserving other selected sources. */
 export function removeModHighlightGroup(state: AppState, group: THREE.Object3D): void {
-  const owned = state.highlightedModState;
+  const owned = state.selection.highlightedModState;
   if (!owned?.groups.includes(group)) return;
-  group.traverse(object => {
-    const mesh = object as THREE.Mesh, original = owned.originalMaterials.get(mesh);
+  group.traverse((object) => {
+    const mesh = object as THREE.Mesh,
+      original = owned.originalMaterials.get(mesh);
     if (!original) return;
     removeSelectionOutline(state, mesh);
     const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    if (mesh.material !== original) materials.forEach(material => material.dispose());
-    mesh.material = original;requestObjectRender(mesh); setDevInstanceHighlight(mesh, false);
+    if (mesh.material !== original) materials.forEach((material) => material.dispose());
+    mesh.material = original;
+    requestObjectRender(mesh);
+    setDevInstanceHighlight(mesh, false);
     owned.originalMaterials.delete(mesh);
   });
-  owned.groups = owned.groups.filter(value => value !== group);
-  if (!owned.groups.length) state.highlightedModState = null;
+  owned.groups = owned.groups.filter((value) => value !== group);
+  if (!owned.groups.length) state.selection.highlightedModState = null;
 }
 
 /**
@@ -65,12 +76,9 @@ export function removeModHighlightGroup(state: AppState, group: THREE.Object3D):
  *   必须 clone 后修改，不能直接改原材质
  * - STL 使用 MeshPhongMaterial，同样 clone 后修改
  * - 两种材质都有 emissive 属性，使用 emissive 发光作为高亮效果
- * - 保存原始材质引用到 state.highlightedModState，供 resetModHighlight 恢复
+ * - 保存原始材质引用到 state.selection.highlightedModState，供 resetModHighlight 恢复
  */
-export function highlightModGroups(
-  state: AppState,
-  groups: THREE.Object3D[],
-): void {
+export function highlightModGroups(state: AppState, groups: THREE.Object3D[]): void {
   // 先重置已有高亮（恢复上一次高亮的 mesh 材质）
   resetModHighlight(state);
   for (const group of groups) addModHighlightGroup(state, group);
@@ -78,8 +86,8 @@ export function highlightModGroups(
 
 /** Add a replacement without recloning unchanged selected meshes. */
 export function addModHighlightGroup(state: AppState, group: THREE.Object3D): void {
-  const owned: NonNullable<AppState['highlightedModState']> = state.highlightedModState
-    ?? {groups: [], originalMaterials: new Map()};
+  const owned: NonNullable<AppState['selection']['highlightedModState']> = state.selection
+    .highlightedModState ?? { groups: [], originalMaterials: new Map() };
   if (owned.groups.includes(group)) return;
   const originalMaterials = owned.originalMaterials;
   group.traverse((obj) => {
@@ -97,77 +105,131 @@ export function addModHighlightGroup(state: AppState, group: THREE.Object3D): vo
       const cloned = mat.clone();
       // MeshStandardMaterial / MeshPhongMaterial 都有 emissive
       if ('emissive' in cloned) {
-        (cloned as THREE.MeshStandardMaterial).emissive.add(HIGHLIGHT_MOD_COLOR.clone().multiplyScalar(.025));
+        (cloned as THREE.MeshStandardMaterial).emissive.add(
+          HIGHLIGHT_MOD_COLOR.clone().multiplyScalar(0.025),
+        );
       }
-      if ('color' in cloned && (cloned as THREE.MeshStandardMaterial).color?.isColor) (cloned as THREE.MeshStandardMaterial).color.lerp(HIGHLIGHT_MOD_COLOR, .025);
+      if ('color' in cloned && (cloned as THREE.MeshStandardMaterial).color?.isColor)
+        (cloned as THREE.MeshStandardMaterial).color.lerp(HIGHLIGHT_MOD_COLOR, 0.025);
       cloned.needsUpdate = true;
       return cloned;
     });
-    mesh.material = highlighted.length === 1 ? highlighted[0] : highlighted;requestObjectRender(mesh);
+    mesh.material = highlighted.length === 1 ? highlighted[0] : highlighted;
+    requestObjectRender(mesh);
   });
   owned.groups.push(group);
-  state.highlightedModState = owned;
+  state.selection.highlightedModState = owned;
 }
 
 const highlightCommits = new WeakMap<AppState, Promise<void>>();
 
 /** Share ordering with representation changes; only the selected meshes change. */
-export async function enqueueHighlightCommit(state: AppState, guard: SelectionCommitGuard,
-  apply: () => Promise<void> | void): Promise<void> {
+export async function enqueueHighlightCommit(
+  state: AppState,
+  guard: SelectionCommitGuard,
+  apply: () => Promise<void> | void,
+): Promise<void> {
   if (!guard.isCurrent()) return;
   const previous = highlightCommits.get(state) ?? Promise.resolve();
-  const task = previous.catch(() => {}).then(() => { if (guard.isCurrent()) return apply(); });
+  const task = previous
+    .catch(() => {})
+    .then(() => {
+      if (guard.isCurrent()) return apply();
+    });
   highlightCommits.set(state, task);
-  try { await task; } finally { if (highlightCommits.get(state) === task) highlightCommits.delete(state); }
+  try {
+    await task;
+  } finally {
+    if (highlightCommits.get(state) === task) highlightCommits.delete(state);
+  }
 }
 
 /** Only the external reset/apply stage is serialized; reads and loads stay concurrent. */
 export async function commitSelectionHighlight(
-  ctx: ViewerContext, state: AppState, guard: SelectionCommitGuard,
+  ctx: ViewerContext,
+  state: AppState,
+  guard: SelectionCommitGuard,
   apply?: () => Promise<void> | void,
 ): Promise<void> {
   if (!guard.isCurrent()) return;
-  const meta={selectionId:state.selection.selectionRequest?.id,selectionKind:state.selection.selectionRequest?.target?.kind,sourcePath:state.selection.selectionRequest?.target?.key};
-  const end=perfBegin('selection.highlightCommit',meta);
-  try { await enqueueHighlightCommit(state,guard,async () => {
-    if (!guard.isCurrent()) return;
-    const items = state.highlightedItems;
-    if (items) {
-      await ctx.fragments.resetHighlight(items as any);
-      if (!guard.isSessionCurrent()) return;
-      if (state.highlightedItems === items) state.highlightedItems = null;
-    }
-    if (!guard.isCurrent()) return;
-    resetModHighlight(state);
-    clearFragmentOutlines(state);
-    for (const runtime of state.ifc.regionalRuntimes.values()) runtime.clearHighlight();
-    await apply?.();
-    if (guard.isCurrent()) {
-      state.selection.selectionHighlightRequestId = state.selection.selectionRequest?.id ?? null;
-      await state.selection.selectionVisibility?.sync(guard);
-    }
-  }); } finally {
-    requestViewerRender(ctx);end(undefined,{...meta,current:guard.isCurrent()});
+  const meta = {
+    selectionId: state.selection.selectionRequest?.id,
+    selectionKind: state.selection.selectionRequest?.target?.kind,
+    sourcePath: state.selection.selectionRequest?.target?.key,
+  };
+  const end = perfBegin('selection.highlightCommit', meta);
+  try {
+    await enqueueHighlightCommit(state, guard, async () => {
+      if (!guard.isCurrent()) return;
+      const items = state.selection.highlightedItems;
+      if (items) {
+        // Fragments consumes each ID collection as an iterable, including array-backed selections.
+        await ctx.fragments.resetHighlight(items as OBC.ModelIdMap);
+        if (!guard.isSessionCurrent()) return;
+        if (state.selection.highlightedItems === items) state.selection.highlightedItems = null;
+      }
+      if (!guard.isCurrent()) return;
+      resetModHighlight(state);
+      clearFragmentOutlines(state);
+      for (const runtime of state.ifc.regionalRuntimes.values()) runtime.clearHighlight();
+      await apply?.();
+      if (guard.isCurrent()) {
+        state.selection.selectionHighlightRequestId = state.selection.selectionRequest?.id ?? null;
+        await state.selection.selectionVisibility?.sync(guard);
+      }
+    });
+  } finally {
+    requestViewerRender(ctx);
+    end(undefined, { ...meta, current: guard.isCurrent() });
   }
 }
 
 /** 重置当前高亮（IFC + MOD），与选择的外部高亮提交使用同一短队列。 */
-export async function resetHighlight(ctx: ViewerContext, state: AppState, isCurrent: () => boolean = () => true): Promise<void> {
-  await commitSelectionHighlight(ctx,state,{isCurrent,isSessionCurrent:isCurrent});
+export async function resetHighlight(
+  ctx: ViewerContext,
+  state: AppState,
+  isCurrent: () => boolean = () => true,
+): Promise<void> {
+  await commitSelectionHighlight(ctx, state, { isCurrent, isSessionCurrent: isCurrent });
 }
 
 /** Render a resolved selection; source documents and GUID ownership stay in services. */
-export async function highlightIfcItems(ctx:ViewerContext,state:AppState,selected:Readonly<Record<string,readonly number[]>>,request:SelectionRequest):Promise<void> {
-  const guard=state.selection.selectionGuard(request);if(!guard.isCurrent())return;
-  const items:OBC.ModelIdMap={},boxes:THREE.Box3[]=[];
-  for(const [runtimeId,ids] of Object.entries(selected)) {
-    if(!guard.isCurrent())return;if(!ids.length)continue;
-    items[runtimeId]=new Set(ids);
-    try {const box=await ctx.fragments.list.get(runtimeId)?.getMergedBox([...ids]);if(box&&!box.isEmpty())boxes.push(box);}catch{/* Bounds are optional. */}
+export async function highlightIfcItems(
+  ctx: ViewerContext,
+  state: AppState,
+  selected: Readonly<Record<string, readonly number[]>>,
+  request: SelectionRequest,
+): Promise<void> {
+  const guard = state.selection.selectionGuard(request);
+  if (!guard.isCurrent()) return;
+  const items: OBC.ModelIdMap = {},
+    boxes: THREE.Box3[] = [];
+  for (const [runtimeId, ids] of Object.entries(selected)) {
+    if (!guard.isCurrent()) return;
+    if (!ids.length) continue;
+    items[runtimeId] = new Set(ids);
+    try {
+      const box = await ctx.fragments.list.get(runtimeId)?.getMergedBox([...ids]);
+      if (box && !box.isEmpty()) boxes.push(box);
+    } catch {
+      /* Bounds are optional. */
+    }
   }
-  await commitSelectionHighlight(ctx,state,guard,Object.keys(items).length?async()=>{
-    await outlineFragmentItems(ctx,state,items as any,guard);
-    if(guard.isSessionCurrent())state.highlightedItems=items as any;
-  }:undefined);
-  if(guard.isCurrent()&&boxes.length&&state.selection.canAutoLocate(request))await frameBox(ctx,boxes.reduce((box,next)=>box.union(next),boxes[0].clone()),guard);
+  await commitSelectionHighlight(
+    ctx,
+    state,
+    guard,
+    Object.keys(items).length
+      ? async () => {
+          await outlineFragmentItems(ctx, state, items, guard);
+          if (guard.isSessionCurrent()) state.selection.highlightedItems = items;
+        }
+      : undefined,
+  );
+  if (guard.isCurrent() && boxes.length && state.selection.canAutoLocate(request))
+    await frameBox(
+      ctx,
+      boxes.reduce((box, next) => box.union(next), boxes[0].clone()),
+      guard,
+    );
 }
