@@ -78,6 +78,14 @@ const viewerBridgeImports = new Map([
   ['viewer/ifcBimLoader.ts:@desktop/ifcLodCache.js', false],
   ['viewer/ifcRegionalRuntime.ts:@desktop/ifcLodCache.js', false],
 ]);
+// The engineering host reuses its existing worker-safe handler and codecs.
+const workerServicePorts = new Set([
+  'services/engineeringWorkerHandler.js',
+  'services/engineeringCacheCodec.js',
+  'services/engineeringNavigationCache.js',
+  'services/engineeringSourceCodec.js',
+  'services/engineeringTableJson.js',
+]);
 // Views may use explicit presentation selectors/formatters, never parsers or business classifiers.
 const uiPresentationValues = new Map([
   [
@@ -122,10 +130,9 @@ const adapterSemanticPorts = new Map([
   ['semantic/recognition/neutralAssemblyResolver', new Set(['completeNeutralAssemblies'])],
 ]);
 for (const [layer, sourceRoot] of [
-  ...['engineering', 'gim', 'viewer', 'ui', 'services', 'features', 'app'].map((layer) => [
-    layer,
-    root,
-  ]),
+  ...['engineering', 'gim', 'viewer', 'ui', 'services', 'features', 'app', 'infrastructure'].map(
+    (layer) => [layer, root],
+  ),
   ...['engineering', 'semantic', 'source', 'geometry', 'projection', 'adapters', 'shared'].map(
     (layer) => [layer, sdkRoot],
   ),
@@ -238,6 +245,22 @@ for (const [layer, sourceRoot] of [
           ? relative(sourceRoot, resolve(dirname(path), name)).replaceAll('\\', '/')
           : name;
         const target = targetPath.split('/')[0];
+        if (
+          targetPath.startsWith('infrastructure/workers/') &&
+          ['engineering', 'gim', 'viewer', 'ui'].includes(layer)
+        )
+          failures.push(
+            `${localPath}: Worker infrastructure belongs to host orchestration (${name})`,
+          );
+        if (
+          localPath.startsWith('infrastructure/workers/') &&
+          /^(?:app\/|features\/|viewer\/|ui\/|@desktop\/|@tauri-apps\/|three(?:\/|$)|web-ifc(?:\/|$)|maplibre-gl(?:\/|$))/.test(
+            targetPath,
+          )
+        )
+          failures.push(
+            `${localPath}: Worker infrastructure cannot depend on host composition or rendering (${name})`,
+          );
         if (localPath === 'services/geometryOnlyRuntime.ts' && target === 'features')
           failures.push(
             `${localPath}: shared DEV geometry must stay independent of features (${name})`,
@@ -409,6 +432,11 @@ for (const [layer, sourceRoot] of [
           banned.test(targetPath) &&
           !exception &&
           !(
+            layer === 'infrastructure' &&
+            localPath.startsWith('infrastructure/workers/') &&
+            workerServicePorts.has(targetPath)
+          ) &&
+          !(
             (layer === 'services' || layer === 'app') &&
             ts.isImportDeclaration(node) &&
             node.importClause?.isTypeOnly
@@ -486,6 +514,15 @@ const substationRuntimeFiles = [
 ];
 const runtimeFamilies = [
   substationRuntimeFiles,
+  [
+    ...[
+      'engineeringWorkerClient',
+      'engineeringWorker',
+      'engineeringWorkerTransport',
+      'workerRequests',
+    ].map((name) => resolve(root, 'infrastructure/workers', `${name}.ts`)),
+    resolve(root, 'services/engineeringWorkerHandler.ts'),
+  ],
   [
     'application/openEquipmentProject',
     'runtime/equipmentSource',

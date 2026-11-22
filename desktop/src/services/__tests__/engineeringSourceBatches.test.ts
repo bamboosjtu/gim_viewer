@@ -1,9 +1,9 @@
 // @vitest-environment node
 import{it,expect,vi}from'vitest';
 import{EngineeringSourceBatches}from'../engineeringSourceBatches.js';
-import{ENGINEERING_SOURCE_BATCH_BYTES}from'../engineeringWorkerProtocol.js';
-import{createEngineeringWorkerHandler}from'../engineeringWorker.js';
-import{decodeEngineeringWorkerResult}from'../engineeringWorkerTransport.js';
+import{ENGINEERING_SOURCE_BATCH_BYTES}from'../../infrastructure/workers/engineeringWorkerProtocol.js';
+import{createEngineeringWorkerHandler}from'../engineeringWorkerHandler.js';
+import{decodeEngineeringWorkerResult}from'../../infrastructure/workers/engineeringWorkerTransport.js';
 
 it('reads a carrier once, preserves byte boundaries and decodes each encoding independently',async()=>{
  const utf8=new TextEncoder().encode('\uFEFFNAME=匿名设备'),gbk=new Uint8Array([0xd6,0xd0,0xce,0xc4]);

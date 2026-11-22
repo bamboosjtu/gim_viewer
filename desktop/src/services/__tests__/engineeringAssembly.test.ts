@@ -7,9 +7,9 @@ import {failNextProjection} from '../../../../packages/gim-sdk/src/projection/__
 import {assertEngineeringNavigation} from '../engineeringNavigationCache.js';
 
 import {assertEngineeringPartition} from '@gim/gim-sdk/semantic';
-import {createEngineeringWorkerHandler} from '../engineeringWorker.js';
+import {createEngineeringWorkerHandler} from '../engineeringWorkerHandler.js';
 import {ModelEvidenceProvider} from '@gim/gim-sdk/source';
-import {decodeEngineeringWorkerResult,encodeEngineeringWorkerResultAsync,type TransportGraphCache} from '../engineeringWorkerTransport.js';
+import {decodeEngineeringWorkerResult,encodeEngineeringWorkerResultAsync,type TransportGraphCache} from '../../infrastructure/workers/engineeringWorkerTransport.js';
 import type { IfcSpatialObject } from '../../gim/ifcSpatialParser.js';
 afterEach(()=>{vi.restoreAllMocks();});
 it.each(['composition','source','inventory','inventory-search'] as const)('transfers an explicitly failed %s projection while rejecting it as a complete cache',async failure=>{

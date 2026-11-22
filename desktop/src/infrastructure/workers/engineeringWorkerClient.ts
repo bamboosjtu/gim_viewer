@@ -3,40 +3,40 @@ import {
   createMeasuredWorker,
   drainMeasuredWorker,
   measurementWorkerUrl,
-} from '../measurement/hostWorker.js';
+} from '../../measurement/hostWorker.js';
 import { WorkerRequests } from './workerRequests.js';
-import type { EngineeringSourceBatch } from './engineeringWorkerProtocol.js';
-import type { EngineeringSourceInput } from './engineeringWorkerProtocol.js';
 import type {
   IfcSpatialObject,
   IfcSpatialNode,
   SpatialModelSummary,
-} from '../gim/ifcSpatialParser.js';
-import type { EngineeringCacheIdentity } from './engineeringCacheCodec.js';
+} from '../../gim/ifcSpatialParser.js';
+import type { EngineeringCacheIdentity } from '../../services/engineeringCacheCodec.js';
 import type {
   EngineeringBuildResult,
   EngineeringCacheDomain,
   EngineeringCacheResult,
   EngineeringEvidenceCheckpoint,
   EngineeringExtractSummary,
+  EngineeringSourceBatch,
+  EngineeringSourceInput,
   EngineeringWorkerCommand,
   EngineeringWorkerRequest,
   EngineeringWorkerResponse,
 } from './engineeringWorkerProtocol.js';
-import type { SourceGeometryOccurrenceCatalog } from '../gim/engineering/geometryOccurrences.js';
+import type { SourceGeometryOccurrenceCatalog } from '../../gim/engineering/geometryOccurrences.js';
 import {
   decodeEngineeringWorkerResult,
   type TransportGraphCache,
   type EngineeringWorkerPayload,
 } from './engineeringWorkerTransport.js';
-import type { EngineeringNavigationCacheProjection } from './engineeringNavigationCache.js';
+import type { EngineeringNavigationCacheProjection } from '../../services/engineeringNavigationCache.js';
 import type {
   EvidenceInventory,
   EvidencePage,
   EvidenceQuery,
   EvidenceRange,
-} from '../engineering/evidence.js';
-import { checkEvidenceRange } from '../gim/engineering/evidenceProvider.js';
+} from '../../engineering/evidence.js';
+import { checkEvidenceRange } from '../../gim/engineering/evidenceProvider.js';
 
 export interface EngineeringWorkerPort {
   postMessage(message: EngineeringWorkerRequest, transfer?: Transferable[]): void;
@@ -45,6 +45,8 @@ export interface EngineeringWorkerPort {
   onerror: ((event: ErrorEvent) => void) | null;
   onmessageerror: ((event: MessageEvent) => void) | null;
 }
+
+const cancelled = () => new DOMException('Engineering build cancelled', 'AbortError');
 
 /** Session-scoped RPC; close rejects all pending requests and releases the Worker. */
 export class EngineeringWorkerClient {
@@ -81,38 +83,13 @@ export class EngineeringWorkerClient {
   private attach(port: EngineeringWorkerPort): void {
     this.port = port;
     port.onmessage = (event) => {
-      if (this.port !== port) return;
-      if (!this.isCurrent() || this.signal?.aborted) {
-        this.close();
-        return;
-      }
+      if (!this.usesPort(port)) return;
       const response = event.data;
       if (response.type === 'read-sources') {
         this.pending.touch(response.requestId);
-        const reply = async () => {
-          try {
-            if (!this.sourceReader) throw Error('Source input reader unavailable');
-            const input = await this.sourceReader(response.paths);
-            if (this.port === port && this.isCurrent() && !this.closed)
-              port.postMessage({
-                type: 'source-files',
-                requestId: 0,
-                readId: response.readId,
-                input,
-              });
-          } catch (error) {
-            if (this.port === port && !this.closed)
-              port.postMessage({
-                type: 'source-files',
-                requestId: 0,
-                readId: response.readId,
-                error: String(error),
-              });
-          }
-        };
-        void reply().catch((error) =>
-          this.close(error instanceof Error ? error : Error(String(error))),
-        );
+        void this.replyToSourceRequest(port, response).catch((error) => {
+          if (this.port === port) this.close(error instanceof Error ? error : Error(String(error)));
+        });
         return;
       }
       if (response.type === 'progress') {
@@ -137,6 +114,25 @@ export class EngineeringWorkerClient {
       if (this.port === port) this.close(new Error('Engineering worker returned unreadable data'));
     };
   }
+  private usesPort(port: EngineeringWorkerPort): boolean {
+    if (this.port !== port) return false;
+    if (this.isCurrent() && !this.signal?.aborted) return true;
+    this.close();
+    return false;
+  }
+  private async replyToSourceRequest(
+    port: EngineeringWorkerPort,
+    { paths, readId }: Extract<EngineeringWorkerResponse, { type: 'read-sources' }>,
+  ): Promise<void> {
+    const reply = { type: 'source-files', requestId: 0, readId } as const;
+    try {
+      if (!this.sourceReader) throw Error('Source input reader unavailable');
+      const input = await this.sourceReader(paths);
+      if (this.usesPort(port)) port.postMessage({ ...reply, input });
+    } catch (error) {
+      if (this.usesPort(port)) port.postMessage({ ...reply, error: String(error) });
+    }
+  }
   private stopPort(): void {
     const port = this.port;
     this.port = undefined;
@@ -152,6 +148,8 @@ export class EngineeringWorkerClient {
     signal?: AbortSignal,
     onProgress?: (stage: string, completed: number) => void,
   ) {
+    if (signal?.aborted) throw cancelled();
+    if (typeof Worker === 'undefined') throw Error('Worker is unavailable');
     const factory = () =>
       createMeasuredWorker(
         'engineering',
@@ -163,37 +161,40 @@ export class EngineeringWorkerClient {
       );
     return new EngineeringWorkerClient(factory(), isCurrent, signal, onProgress, factory);
   }
-  close(error: Error = new DOMException('Engineering build cancelled', 'AbortError')): void {
+  close(error: Error = cancelled()): void {
     if (this.closed) return;
     this.closed = true;
     this.signal?.removeEventListener('abort', this.abort);
     this.sourceReader = undefined;
     clearTimeout(this.idleTimer);
+    this.graphCache = {};
     this.checkpoint = undefined;
     this.metadataEntries.clear();
     this.metadataCoverage.clear();
-    this.stopPort();
     this.pending.rejectAll(error);
+    this.stopPort();
   }
   private assertCurrent(): void {
     if (this.closed || !this.isCurrent() || this.signal?.aborted) {
       this.close();
-      throw new DOMException('Engineering build cancelled', 'AbortError');
+      throw cancelled();
     }
   }
-  private send(
+  private async send(
     command: EngineeringWorkerCommand,
     transfer: Transferable[] = [],
   ): Promise<EngineeringWorkerResponse> {
     this.assertCurrent();
     const port = this.port;
-    if (!port) return Promise.reject(Error('Engineering worker unavailable'));
+    if (!port) throw Error('Engineering worker unavailable');
     const requestId = ++this.sequence;
-    return this.pending.request(
+    const response = await this.pending.request(
       requestId,
       () => port.postMessage({ ...command, requestId }, transfer),
       ['extract', 'extract-geometry'].includes(command.type) ? 60_000 : 120_000,
     );
+    this.assertCurrent();
+    return response;
   }
   private request(
     command: EngineeringWorkerCommand,
@@ -201,7 +202,7 @@ export class EngineeringWorkerClient {
   ): Promise<EngineeringWorkerResponse> {
     if (this.closed || !this.isCurrent() || this.signal?.aborted) {
       this.close();
-      return Promise.reject(new DOMException('Engineering build cancelled', 'AbortError'));
+      return Promise.reject(cancelled());
     }
     clearTimeout(this.idleTimer);
     if (this.parking) return this.parking.then(() => this.request(command, transfer));

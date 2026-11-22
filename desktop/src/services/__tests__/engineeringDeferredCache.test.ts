@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach,expect,it,vi } from 'vitest';
-import { createEngineeringWorkerHandler } from '../engineeringWorker.js';
-import { decodeEngineeringWorkerResult } from '../engineeringWorkerTransport.js';
+import { createEngineeringWorkerHandler } from '../engineeringWorkerHandler.js';
+import { decodeEngineeringWorkerResult } from '../../infrastructure/workers/engineeringWorkerTransport.js';
 import { createNavigationCacheProjection, decodeEngineeringNavigation, encodeEngineeringNavigation } from '../engineeringNavigationCache.js';
 import { decodeEngineeringSources } from '../engineeringCacheCodec.js';
 

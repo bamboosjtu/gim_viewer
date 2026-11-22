@@ -6,15 +6,15 @@ import { readEngineeringSourceInput } from './engineeringSourceInput.js';
 import {
   ENGINEERING_SOURCE_BATCH_BYTES,
   ENGINEERING_SOURCE_BATCH_FILES,
-} from './engineeringWorkerProtocol.js';
+} from '../infrastructure/workers/engineeringWorkerProtocol.js';
 import type { SubstationSpatialIndex } from '../gim/ifcSpatialParser.js';
 import {
   engineeringCacheEntry,
   engineeringSourceCacheMatchesFiles,
   type EngineeringCacheIdentity,
 } from './engineeringCacheCodec.js';
-import type { EngineeringBuildResult } from './engineeringWorkerProtocol.js';
-import { EngineeringWorkerClient } from './engineeringWorkerClient.js';
+import type { EngineeringBuildResult } from '../infrastructure/workers/engineeringWorkerProtocol.js';
+import { EngineeringWorkerClient } from '../infrastructure/workers/engineeringWorkerClient.js';
 import {
   SUBSTATION_PARSER_DOMAIN_VERSION,
   SUBSTATION_SPATIAL_SEMANTIC_VERSION,
@@ -33,7 +33,7 @@ interface EngineeringJob {
   evidenceReady: Promise<void>;
   resolveEvidence(): void;
   session: ProjectLoadSession;
-  controller: AbortController;
+  isSessionCurrent(): boolean;
   client: EngineeringWorkerClient;
   ready: Promise<void>;
   lastSpatial: SubstationSpatialIndex | null;
@@ -48,7 +48,7 @@ interface EngineeringJob {
 }
 const jobs = new WeakMap<AppState, EngineeringJob>();
 const current = (state: AppState, job: EngineeringJob) =>
-  jobs.get(state) === job && !job.controller.signal.aborted && state.isCurrentSession(job.session);
+  jobs.get(state) === job && job.isSessionCurrent();
 const currentBuild = (state: AppState, job: EngineeringJob, result: EngineeringBuildResult) =>
   current(state, job) && (!result.buildId || result.buildId === job.publishedBuildId);
 
@@ -411,7 +411,11 @@ export function beginEngineeringBuild(
   files: Map<string, File>,
   options: EngineeringBuildOptions = {},
 ): Promise<void> {
-  state.engineering.cleanup?.();
+  const session = state.captureProjectSession();
+  const scope = state.sessionScope(session);
+  if (!scope.isCurrent()) return Promise.resolve();
+  state.engineering.release();
+  if (!scope.isCurrent()) return Promise.resolve();
   state.engineering.buildPending = true;
   state.sourceGeometry.cachePending = false;
   state.sourceGeometry.cacheError = '';
@@ -430,11 +434,29 @@ export function beginEngineeringBuild(
     resolveGeometry = resolve;
   });
   state.sourceGeometry.catalog = null;
-  const session = state.captureProjectSession(),
-    controller = new AbortController();
-  if (typeof Worker === 'undefined' && !options.createWorker) {
-    state.engineering.buildPending = false;
+  const settleBuild = () => {
     resolveGeometry(null);
+    resolveProjection(false);
+    resolveEvidence();
+  };
+  let client: EngineeringWorkerClient;
+  const ownsJob = () => {
+    const job = jobs.get(state);
+    return job !== undefined && job.client === client && scope.isCurrent();
+  };
+  try {
+    client = (options.createWorker ?? EngineeringWorkerClient.create)(
+      ownsJob,
+      scope.signal,
+      (stage, completed) => {
+        if (ownsJob()) state.engineering.progress = { stage, completed };
+      },
+    );
+  } catch (error) {
+    settleBuild();
+    if (!scope.isCurrent()) return Promise.resolve();
+    logger.warn('[工程来源] Worker 启动失败', error);
+    state.engineering.buildPending = false;
     state.engineering.sources = null;
     state.engineering.snapshot = null;
     state.engineering.navigation = null;
@@ -446,24 +468,21 @@ export function beginEngineeringBuild(
     options.onUpdate?.();
     return Promise.resolve();
   }
+  if (!scope.isCurrent()) {
+    settleBuild();
+    client.close();
+    return Promise.resolve();
+  }
   const update = () => {
-    if (state.isCurrentSession(session) && !controller.signal.aborted) {
-      state.notifyEngineeringChanged();
-      options.onUpdate?.();
-    }
+    if (!ownsJob()) return;
+    state.notifyEngineeringChanged();
+    if (ownsJob()) options.onUpdate?.();
   };
-  const client = (options.createWorker ?? EngineeringWorkerClient.create)(
-    () => !!job && current(state, job),
-    controller.signal,
-    (stage, completed) => {
-      if (job && current(state, job)) state.engineering.progress = { stage, completed };
-    },
-  );
   const persistent =
     isTauri() && session.projectId != null && /^[a-f\d]{64}$/i.test(session.sourceSha256 ?? '');
   const job: EngineeringJob = {
     session,
-    controller,
+    isSessionCurrent: scope.isCurrent,
     client,
     resolveGeometry,
     projectionReady,
@@ -489,18 +508,21 @@ export function beginEngineeringBuild(
   const disposeProjection = installCompositionProjection(state, (complete) =>
     job.resolveProjection(complete),
   );
-  state.engineering.cleanup = () => {
-    disposeProjection();
-    resolveGeometry(null);
-    resolveProjection(false);
-    resolveEvidence();
-    controller.abort();
-    client.close();
+  const cleanup = () => release();
+  const release = scope.own(() => {
+    if (state.engineering.cleanup === cleanup) state.engineering.cleanup = null;
     if (jobs.get(state) === job) {
       state.engineering.buildPending = false;
       jobs.delete(state);
     }
-  };
+    settleBuild();
+    try {
+      client.close();
+    } finally {
+      disposeProjection();
+    }
+  });
+  state.engineering.cleanup = cleanup;
   state.engineering.sources = null;
   state.engineering.snapshot = null;
   state.engineering.navigation = null;
@@ -509,9 +531,10 @@ export function beginEngineeringBuild(
   state.engineering.error = '';
   state.engineering.cacheStatus = 'none';
   state.engineering.cacheError = '';
-  update();
   state.engineering.treeStatus = 'loading';
   state.engineering.pipelineMetrics = null;
+  update();
+  if (!ownsJob()) return job.ready;
   const run = async () => {
     const initialized = client
       .init(session.sourceSha256 || `session:${session.generation}`, [...files.keys()])

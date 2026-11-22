@@ -1,6 +1,6 @@
 import measuredWorkerAsset from './lineParserWorker.ts?worker&url';
 import { createMeasuredWorker, measurementWorkerUrl } from '../../../measurement/hostWorker.js';
-import { WorkerRequests } from '../../../services/workerRequests.js';
+import { WorkerRequests } from '../../../infrastructure/workers/workerRequests.js';
 import { decodeGimText } from '../../../shared/textDecode.js';
 import { StaleSessionError, type SessionScope } from '../../../shared/sessionScope.js';
 import { logger } from '../../../utils/logger.js';

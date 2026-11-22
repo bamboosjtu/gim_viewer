@@ -6,10 +6,10 @@ import type { ProjectionInput } from '../compositionProjectionWorker.js';
 import { AppState } from '../../app/state.js';
 import { buildSubstationSpatialIndexFromTexts } from '../../gim/ifcSpatialParser.js';
 import { beginEngineeringBuild, notifyEngineeringIfcEvidence,getEngineeringEvidenceSnapshot,queryEngineeringEvidence,ensureEngineeringEvidence } from '../engineeringService.js';
-import { EngineeringWorkerClient, type EngineeringWorkerPort } from '../engineeringWorkerClient.js';
-import { createEngineeringWorkerHandler } from '../engineeringWorker.js';
-import type { EngineeringWorkerRequest, EngineeringWorkerResponse,EngineeringSourceInput } from '../engineeringWorkerProtocol.js';
-import {WorkerRequests} from '../workerRequests.js';
+import { EngineeringWorkerClient, type EngineeringWorkerPort } from '../../infrastructure/workers/engineeringWorkerClient.js';
+import { createEngineeringWorkerHandler } from '../engineeringWorkerHandler.js';
+import type { EngineeringWorkerRequest, EngineeringWorkerResponse,EngineeringSourceInput } from '../../infrastructure/workers/engineeringWorkerProtocol.js';
+import {WorkerRequests} from '../../infrastructure/workers/workerRequests.js';
 import { readCachedEntry, writeCacheFile, batchReadCachedFiles } from '@desktop/database.js';
 import {createByteFile} from '@desktop/byteFile.js';
 import{createSpatialSemanticStarter}from'../../features/substation/runtime/spatial/spatialSemanticStarter.js';
@@ -32,6 +32,7 @@ class LoopbackPort implements EngineeringWorkerPort {
   holdCache = false;
   resumeCache: (()=>void)|null=null;
   resumeAssembly: (() => void) | null = null;
+  assemblyComplete?: Promise<void>;
   private sourceSequence=0;
   private activeRequest=0;
   private sourceRequests=new WorkerRequests<EngineeringSourceInput>();
@@ -47,7 +48,7 @@ class LoopbackPort implements EngineeringWorkerPort {
       this.sourceRequests.settle(request.readId,request.input,request.error?Error(request.error):undefined);return;
     }
     this.activeRequest=request.requestId;
-    void (async () => {
+    const work = (async () => {
       if (this.holdExtract && request.type === 'extract') await new Promise<void>(resolve => { this.resume = resolve; });
       if (this.holdAssemble && request.type === 'assemble') await new Promise<void>(resolve => { this.resumeAssembly = resolve; });
       if(this.holdRestore&&request.type==='restore')await new Promise<void>(resolve=>{this.resumeRestore=resolve;});
@@ -57,6 +58,7 @@ class LoopbackPort implements EngineeringWorkerPort {
     })().catch(error => {
       this.onmessage?.({ data: { type: 'error', requestId: request.requestId, message: String(error) } } as MessageEvent<EngineeringWorkerResponse>);
     });
+    if (request.type === 'assemble') this.assemblyComplete = work;
   }
   terminate(): void { this.terminated = true; }
 }
@@ -83,6 +85,47 @@ beforeEach(() => {
 });
 
 describe('session-owned production engineering build', () => {
+  it('releases a build immediately on scope disposal and leaves a replacement build intact', async () => {
+    const app = state();
+    const scope = app.sessionScope(app.captureProjectSession());
+    const old = new LoopbackPort();
+    old.holdAssemble = true;
+    const terminated = vi.spyOn(old, 'terminate');
+    const obsolete = beginEngineeringBuild(app, sourceFiles('旧设备'), { createWorker: portFactory(old) });
+    await expect.poll(() => old.resumeAssembly !== null).toBe(true);
+
+    scope.dispose();
+    expect(terminated).toHaveBeenCalledOnce();
+    expect(old.onmessage).toBeNull();
+    expect(app.engineering.cleanup).toBeNull();
+    expect(app.engineering.buildPending).toBe(false);
+    await obsolete;
+
+    app.activateProject(8, 'b'.repeat(64));
+    const replacement = new LoopbackPort();
+    await beginEngineeringBuild(app, sourceFiles('新设备'), { createWorker: portFactory(replacement) });
+    const published = app.engineering.snapshot;
+    expect(published).not.toBeNull();
+    old.resumeAssembly?.();
+    await old.assemblyComplete;
+    expect(app.engineering.snapshot).toBe(published);
+    expect(terminated).toHaveBeenCalledOnce();
+    expect(replacement.terminated).toBe(false);
+    app.invalidatePendingLoads();
+  });
+
+  it('settles geometry and the build state when Worker creation throws', async () => {
+    const app = state();
+    const update = vi.fn();
+    await beginEngineeringBuild(app, sourceFiles(), {
+      createWorker: () => { throw Error('Worker creation failed'); },
+      onUpdate: update,
+    });
+    await expect(app.sourceGeometry.ready).resolves.toBeNull();
+    expect(app.engineering).toMatchObject({ status: 'error', treeStatus: 'error', buildPending: false, cleanup: null });
+    expect(update).toHaveBeenCalledOnce();
+    app.invalidatePendingLoads();
+  });
   it('batches reachable CBM siblings and their DEV pointers on a semantic cache fallback',async()=>{
     const app=state(),port=new LoopbackPort(),rows=Array.from({length:48},(_,i)=>`u${i}`);
     const files=new Map<string,File>([

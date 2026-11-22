@@ -9,7 +9,7 @@ import { installCompositionProjection, reconcileProjectionSelection } from '../c
 import { projectSpatialComposition } from '../projections/compositionSpatial.js';
 import type { ProjectionInput } from '../compositionProjectionWorker.js';
 import { selectEngineeringTarget, clearEngineeringHighlight } from '../engineeringSelection.js';
-import { EngineeringWorkerClient } from '../engineeringWorkerClient.js';
+import { EngineeringWorkerClient } from '../../infrastructure/workers/engineeringWorkerClient.js';
 import { measurementWorkerTask } from '../../measurement/hostWorker.js';
 import { measurementSnapshot, resetMeasurementRun } from '../../measurement/runtime.js';
 

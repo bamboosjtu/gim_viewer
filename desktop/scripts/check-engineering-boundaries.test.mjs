@@ -30,6 +30,9 @@ function fixture() {
   for(const name of [
     'devLodRuntime','devLodTemplateStore','devLodArtifactWriter','devLodSourceWorkset','devLodReadiness','devLodDiagnostics','devLodTypes'])
     files(`desktop/src/services/${name}.ts`,'export {};');
+  files('desktop/src/services/engineeringWorkerHandler.ts', 'export {};');
+  for (const name of ['engineeringWorkerClient', 'engineeringWorker', 'engineeringWorkerTransport', 'workerRequests'])
+    files(`desktop/src/infrastructure/workers/${name}.ts`, 'export {};');
   for(const name of ['substationBackgroundRuntime','substationColdCore','substationDevRuntime','substationDocumentRuntime',
     'substationIfcRuntime','substationIfcSource','substationIndexPublication','substationSpatialRuntime',
     'substationSpatialSemanticCache','substationWarmAttempt','substationWarmCore','substationLoadingState'])
@@ -166,6 +169,25 @@ test('checker keeps equipment independent of station presentation and shared DEV
   assert.equal(rejected.status, 1);
   assert.match(rejected.stderr, /Equipment must not depend on another feature/);
   assert.match(rejected.stderr, /shared DEV geometry must stay independent of features/);
+});
+
+test('checker keeps Worker infrastructure between host orchestration and worker-safe dependencies', () => {
+  const { files, run } = fixture();
+  files('desktop/src/features/powerline/runtime/lineParserWorkerClient.ts',
+    "import { WorkerRequests } from '../../../infrastructure/workers/workerRequests.js';");
+  files('desktop/src/infrastructure/workers/engineeringWorker.ts',
+    "import { createEngineeringWorkerHandler } from '../../services/engineeringWorkerHandler.js';");
+  const accepted = run();
+  assert.equal(accepted.status, 0, accepted.stderr);
+  files('desktop/src/infrastructure/workers/engineeringWorkerClient.ts',
+    "export const lazy = () => import('../../app/state.js'); import '../../services/engineeringService.js';");
+  files('desktop/src/gim/model.ts',
+    "import { EngineeringWorkerClient } from '../infrastructure/workers/engineeringWorkerClient.js';");
+  const rejected = run();
+  assert.equal(rejected.status, 1);
+  assert.match(rejected.stderr, /Worker infrastructure cannot depend on host composition or rendering/);
+  assert.match(rejected.stderr, /Worker infrastructure belongs to host orchestration/);
+  assert.match(rejected.stderr, /forbidden import .*engineeringService\.js/);
 });
 
 test('checker rejects eager renderer dependencies behind an opening helper',()=>{

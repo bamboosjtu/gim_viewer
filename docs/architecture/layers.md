@@ -28,6 +28,7 @@
 | `desktop/src/features/substation/` | 变电打开工作流：application 编排、runtime 冷/暖/IFC/DEV/Spatial/遥测、presentation 导航与选择；专用 Spatial Worker 由变电会话持有 | gim、viewer、bridge、注入的展示端口、services 端口 | 把共享缓存/Worker 协议复制成第二份实现 |
 | `desktop/src/features/powerline/` | 线路冷暖打开、解析 Worker 的会话归属、地图与导航投影、视图句柄释放 | 共享线路 core、宿主来源/缓存端口、注入的 UI 端口 | Viewer、直接操作 DOM |
 | `desktop/src/features/equipment/` | 独立设备来源准备、导航、节点选择与会话发布 | gim 来源能力、共享 DEV 启动、注入的展示端口 | 其他 Feature 的内部模块、直接操作 DOM |
+| `desktop/src/infrastructure/workers/` | 工程 Worker 入口、协议、传输与请求释放；共享请求队列供变电 Spatial 与线路 Worker 使用 | Worker 安全的编解码、工程计算处理器和测量端口 | Feature、应用组合或渲染 |
 | `desktop/src/services/` | 跨域缓存、Worker、后台任务、选择、生命周期与未迁移能力的端口 | gim、viewer、bridge、注入的展示端口 | 把领域规则塞回 UI |
 | `desktop/src/config/` | 功能与调试开关 | 无 | 业务状态 |
 | `desktop/src/measurement/` | 宿主与 Worker 探针、产品证据、Trace/Profile/GPU 采样适配 | measurement-core、只读运行时快照 | 把测量状态变成产品业务状态 |
@@ -42,7 +43,7 @@ UI 可消费只读的稳定来源 ID 查找、路径格式化、空值判断及�
 
 1. `engineering/` 是无格式领域层。它不读取 XML/键值文本、不生成 Mesh、不访问数据库，也不接收 `CbmNode`、F2/F3/F4 标签、展示树深度或包围盒作为分类条件。新增分类规则应先落到这里和[目录](../engineering/catalogs/README.md)。
 2. `gim/engineering/` 是适配层。它只把来源事实转成 `ObjectEvidence`、`SourceRecord`、`SourceGraph` 和空间上下文；`SourceRecord` 可保留原始字段，但领域层不解析格式。
-3. `services/engineering*` 只做 Worker 调度、快照发布、缓存、表示绑定和取消；不重新判断工程类别。
+3. `services/engineering*` 编排工程计算、快照发布、缓存和表示绑定；Worker 通信与请求释放由 `infrastructure/workers/` 管理。工程类别继续由 SDK 判断。
 4. `viewer/` 只消费 `SourceGeometryOccurrence`、模板和 IFC 对象。几何编译器不接收工程组成分组，也不按实体名称选择 LOD。
 5. `ui/` 不直接访问数据库或原生 IPC；最近工程、缓存管理和工程打开均通过 `services/projectCacheService`、`services/gimOpenCore` 等入口。`engineeringTreeView` 只渲染投影结果并回调选择服务。
 6. 重依赖按需动态 import：入口和 `openGimService` 不静态引入 Three.js、web-ifc、MapLibre；IFC、几何、地图和工程实体 Worker 各自分包。Vite 生产构建从 HTML 入口检查生成块的静态依赖闭包，发现 Three.js、web-ifc 或 MapLibre 即失败。
@@ -97,7 +98,7 @@ SDK 的实现及模块测试归 `packages/gim-sdk/src/`，IFC 运行时解析器
 
 ## 宿主业务域收敛
 
-`desktop/src/services/` 当前仍按技术层集中打开、Worker、缓存、选择和展示端口。后续按业务能力逐步收敛，不在一次性搬迁中改变运行结果：
+`desktop/src/services/` 仍承载跨域打开、缓存、选择和展示端口，以及尚未迁移的 Worker。后续按业务能力逐步收敛，不在一次性搬迁中改变运行结果：
 
 ```text
 desktop/src/
@@ -107,18 +108,18 @@ desktop/src/
 │   ├── powerline/       # application / runtime / presentation
 │   └── equipment/       # application / runtime
 ├── viewer/              # scene / geometry / selection / rendering
-├── infrastructure/      # cache / workers / native
+├── infrastructure/      # workers
 ├── ui/
 └── measurement/
 ```
 
 约束：
 
-- 变电打开工作流已迁入 `features/substation/{application,runtime,presentation}`；提取任务、Spatial codec/Worker、资源遥测等跨域端口仍留在 `services/`，避免 services 反向依赖 feature 内部实现。
+- 变电打开工作流已迁入 `features/substation/{application,runtime,presentation}`；专用 Spatial Worker 由变电持有，并复用基础设施请求队列。Spatial 编码器和资源遥测端口留在 `services/`。
 - 每次只迁一个纵向工作流，先固定其输入、输出、会话守卫和资源释放器，再移动文件。
 - `packages/powerline-core/` 是独立可复用线路能力包，不并入 `features/powerline`；桌面 feature 只保留应用编排、宿主状态和展示接线。
 - `services/` 中的跨域入口先保留转发，迁移完成后删除；测试跟随被测模块移动，不复制到新目录。
-- 共享缓存、Worker 协议和原生 DTO 归 `infrastructure/` 或现有 `packages/`，不因目录调整复制第二份实现。
+- 工程 Worker 入口、通信契约和共享请求队列位于 `infrastructure/workers/`。共享缓存与原生 DTO 归 `infrastructure/` 或现有 `packages/`，不因目录调整复制第二份实现。
 
 ## 边界检查
 

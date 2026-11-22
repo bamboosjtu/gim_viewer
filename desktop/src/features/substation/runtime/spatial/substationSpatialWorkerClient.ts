@@ -1,6 +1,6 @@
 import measuredWorkerAsset from './substationSpatialWorker.ts?worker&url';
 import { createMeasuredWorker, measurementWorkerUrl } from '../../../../measurement/hostWorker.js';
-import { WorkerRequests } from '../../../../services/workerRequests.js';
+import { WorkerRequests } from '../../../../infrastructure/workers/workerRequests.js';
 import type { SessionScope } from '../../../../shared/sessionScope.js';
 import type { CbmNode, FileDevEntry, IfcEntry } from '../../../../gim/types.js';
 import {

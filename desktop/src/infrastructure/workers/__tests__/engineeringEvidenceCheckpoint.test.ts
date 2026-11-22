@@ -1,7 +1,7 @@
 // @vitest-environment node
 import {afterEach,expect,it,vi} from 'vitest';
 import {EngineeringWorkerClient,type EngineeringWorkerPort} from '../engineeringWorkerClient.js';
-import {createEngineeringWorkerHandler} from '../engineeringWorker.js';
+import {createEngineeringWorkerHandler} from '../../../services/engineeringWorkerHandler.js';
 import {ModelEvidenceProvider} from '@gim/gim-sdk/source';
 import type {EngineeringWorkerRequest,EngineeringWorkerReply,EngineeringWorkerResponse} from '../engineeringWorkerProtocol.js';
 
@@ -98,6 +98,21 @@ it('rejects a closed parked session without constructing a replacement Worker',a
   const {client,ports,model}=await fixture();await client.releaseModel(model.buildId);client.close();
   await expect(client.getEvidenceSnapshot()).rejects.toMatchObject({name:'AbortError'});
   await expect(client.ensureEvidence({entryIds:['a.fam'],kinds:['attributes']})).rejects.toMatchObject({name:'AbortError'});
+  expect(ports).toHaveLength(1);
+});
+it('releases a pending checkpoint and rejects its queued requests without restarting', async () => {
+  const { client, ports, model } = await fixture();
+  let finishCheckpoint!: () => void;
+  ports[0].checkpointGate = new Promise<void>((resolve) => { finishCheckpoint = resolve; });
+  const parking = expect(client.releaseModel(model.buildId)).rejects.toMatchObject({ name: 'AbortError' });
+  await expect.poll(() => ports[0].commands.includes('checkpoint-evidence')).toBe(true);
+  const queued = expect(client.ensureEvidence({ entryIds: ['a.fam'], kinds: ['attributes'] }))
+    .rejects.toMatchObject({ name: 'AbortError' });
+  client.close();
+  finishCheckpoint();
+  await Promise.all([parking, queued]);
+  expect(ports[0].terminate).toHaveBeenCalledOnce();
+  expect(ports[0].onmessage).toBeNull();
   expect(ports).toHaveLength(1);
 });
 it('serializes queries and concurrent detail requests across checkpoint ownership transfer',async()=>{

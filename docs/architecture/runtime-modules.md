@@ -15,6 +15,10 @@
 
 调用方可以继续从既有入口导入公开函数和类型；内部模块直接引用实际实现和小型契约，不反向依赖入口文件。Tauri 命令名、IPC 数据结构、缓存键和版本不因文件拆分而改变。
 
+## Worker 通信
+
+`infrastructure/workers` 持有工程 Worker 的创建、消息协议、传输编解码与请求释放。`SessionScope` 取消时，客户端解除监听、清除待处理请求及其定时器并终止 Worker。工程服务继续负责同一工程内的构建替换与结果发布。工程、线路与变电 Spatial Worker 复用 `WorkerRequests`，各业务保留自己的计算和回退。
+
 ## 纯 DEV 启动
 
 纯 DEV 启动复用 Viewer 与 DEV LOD 管线。LOD 运行时从创建起就归当前工程会话持有，切换工程时同步释放 Worker、定时器和场景资源。相机命令和坐标锚点按对应的发布实例释放，设备导航由独立设备 Feature 通过端口登记。
@@ -33,7 +37,7 @@
 | IFC 加载 | `loadAllIfcFiles` | 队列规划、逐模型装载、区域批次与终态诊断 |
 | IFC Spatial | `parseIfcModel` | 关系投影、空间对象投影、元数据/placement |
 | GLB 缓存 | `serializeDevToGlbDetailed` | 场景遍历、几何编码、诊断/预算 |
-| 工程实体 | `beginEngineeringBuild` | 输入准备、Worker 启动、发布与取消 |
+| 工程实体 | `beginEngineeringBuild` | 输入准备、结果发布和快照缓存；Worker 请求通过会话绑定的基础设施客户端执行 |
 | 线路导航 | `buildLineNavigationIndex` | 来源、塔位与档距索引已单独准备，投影负责业务行及来源回指 |
 | 线路 UI | `renderLineMap` | 图层装配、交互绑定、生命周期释放 |
 | CBM 来源树 | `buildCbmTree` | 物理树、名称/DEV 关联、展示映射 |
