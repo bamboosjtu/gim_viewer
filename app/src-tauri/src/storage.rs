@@ -9,7 +9,7 @@ use std::{
 };
 use std::{
     fs,
-    io::{ErrorKind, Read},
+    io::{ErrorKind, Read, Seek},
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
     time::{SystemTime, UNIX_EPOCH},
@@ -38,11 +38,9 @@ fn source_stamp(metadata: &fs::Metadata) -> SourceStamp {
         inode: metadata.ino(),
     }
 }
-// A private source is immutable after import. Reuse its verified SHA only while
-// filesystem identity is unchanged; a changed stamp must pass SHA validation again.
-static SOURCE_PROOFS: OnceLock<Mutex<HashMap<PathBuf, SourceStamp>>> = OnceLock::new();
-#[cfg(test)]
-static SOURCE_HASH_READS: OnceLock<Mutex<HashMap<PathBuf, u64>>> = OnceLock::new();
+// An imported source is app-owned and immutable. Detect changes observed by
+// this process without scanning the archive on the browse path.
+static SOURCE_STAMPS: OnceLock<Mutex<HashMap<PathBuf, SourceStamp>>> = OnceLock::new();
 
 pub use gim_native_core::MOBILE_PARSER_VERSION as PARSER;
 
@@ -128,81 +126,55 @@ pub fn read_meta(root: &Path, id: &str) -> Result<ProjectMeta, NativeError> {
     )
     .map_err(index_json_error)
 }
-pub fn validate_source(root: &Path, id: &str) -> Result<(), NativeError> {
+fn open_private_source(root: &Path, id: &str) -> Result<fs::File, NativeError> {
     let meta = read_meta(root, id)?;
     let path = dir(root, id)?.join("source/original.gim");
     let mut file = fs::File::open(&path).map_err(NativeError::from)?;
-    let before = source_stamp(&file.metadata().map_err(NativeError::from)?);
-    if meta.id != id || meta.sha256 != id || before.length != meta.size {
+    let stamp = source_stamp(&file.metadata().map_err(NativeError::from)?);
+    if meta.id != id || meta.sha256 != id || stamp.length != meta.size {
         return Err(NativeError::new(
             NativeErrorCode::SourceChanged,
             "私有源包身份或大小不匹配",
         ));
     }
-    let proofs = SOURCE_PROOFS.get_or_init(|| Mutex::new(HashMap::new()));
-    {
-        let mut verified = proofs.lock().map_err(internal)?;
-        if before.modified.is_some() && verified.get(&path) == Some(&before) {
-            return Ok(());
-        }
-        verified.remove(&path);
-    }
-    #[cfg(test)]
-    {
-        let mut reads = SOURCE_HASH_READS
-            .get_or_init(|| Mutex::new(HashMap::new()))
-            .lock()
-            .unwrap();
-        *reads.entry(path.clone()).or_default() += 1;
-    }
-    let mut header = [0u8; 7];
-    file.read_exact(&mut header).map_err(NativeError::from)?;
-    if &header != b"GIMPKGT" {
+    let mut magic = [0u8; 7];
+    file.read_exact(&mut magic).map_err(NativeError::from)?;
+    if &magic != b"GIMPKGT" {
         return Err(NativeError::new(
             NativeErrorCode::SourceChanged,
             "私有源包类型错误，不能使用线路缓存",
         ));
     }
-    let mut digest = Sha256::new();
-    digest.update(header);
-    let mut buffer = [0u8; 256 * 1024];
-    loop {
-        let n = file.read(&mut buffer).map_err(NativeError::from)?;
-        if n == 0 {
-            break;
+    file.rewind().map_err(NativeError::from)?;
+    let mut stamps = SOURCE_STAMPS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .map_err(internal)?;
+    if let Some(previous) = stamps.get(&path) {
+        if previous != &stamp {
+            return Err(NativeError::new(
+                NativeErrorCode::SourceChanged,
+                "私有源包在当前会话中已变化，请重新导入",
+            ));
         }
-        digest.update(&buffer[..n]);
-    }
-    if format!("{:x}", digest.finalize()) != id {
-        return Err(NativeError::new(
-            NativeErrorCode::SourceChanged,
-            "私有源包 SHA 校验失败，不能使用缓存",
-        ));
-    }
-    if source_stamp(&file.metadata().map_err(NativeError::from)?) != before
-        || source_stamp(&fs::metadata(&path).map_err(NativeError::from)?) != before
-    {
-        return Err(NativeError::new(
-            NativeErrorCode::SourceChanged,
-            "源包在身份验证期间已被替换",
-        ));
-    }
-    let mut verified = proofs.lock().map_err(internal)?;
-    if verified.len() >= 256 {
-        if let Some(old) = verified.keys().next().cloned() {
-            verified.remove(&old);
+    } else {
+        if stamps.len() >= 256 {
+            if let Some(old) = stamps.keys().next().cloned() {
+                stamps.remove(&old);
+            }
         }
+        stamps.insert(path, stamp);
     }
-    if before.modified.is_some() {
-        verified.insert(path, before);
-    }
-    Ok(())
+    Ok(file)
 }
-/// Source identity is rechecked; only the bounded header, never the archive, crosses IPC.
+
+pub fn validate_source(root: &Path, id: &str) -> Result<(), NativeError> {
+    open_private_source(root, id).map(drop)
+}
+
+/// Read only the bounded header from the already opened private source.
 pub fn header(root: &Path, id: &str) -> Result<Vec<u8>, NativeError> {
-    validate_source(root, id)?;
-    let file =
-        fs::File::open(dir(root, id)?.join("source/original.gim")).map_err(NativeError::from)?;
+    let file = open_private_source(root, id)?;
     let mut bytes = Vec::new();
     file.take(1024 * 1024 + 7)
         .read_to_end(&mut bytes)
@@ -460,7 +432,7 @@ pub fn touch(root: &Path, id: &str) -> Result<(), NativeError> {
 }
 pub fn delete(root: &Path, id: &str) -> Result<(), NativeError> {
     let d = dir(root, id)?;
-    if let Some(proofs) = SOURCE_PROOFS.get() {
+    if let Some(proofs) = SOURCE_STAMPS.get() {
         if let Ok(mut verified) = proofs.lock() {
             verified.remove(&d.join("source/original.gim"));
         }
@@ -826,7 +798,7 @@ pub fn preview(
 mod tests {
     use super::*;
     #[test]
-    fn source_details_reuse_identity_proof_and_reject_same_size_replacement() {
+    fn source_details_reuse_private_source_stamp_and_reject_same_size_replacement() {
         let root = crate::workspace_test_temp().join(format!(
             "source-detail-{}-{}",
             std::process::id(),
@@ -865,10 +837,6 @@ mod tests {
         for _ in 0..4 {
             assert_eq!(source(&root, &id, "unit.cbm").unwrap(), "original text");
         }
-        assert_eq!(
-            SOURCE_HASH_READS.get().unwrap().lock().unwrap().get(&path),
-            Some(&1)
-        );
         let db = Connection::open(project.join("cache/project.sqlite")).unwrap();
         db.pragma_update(None, "user_version", 2).unwrap();
         assert_eq!(
@@ -902,12 +870,8 @@ mod tests {
             source(&root, &id, "unit.cbm").unwrap_err().code,
             NativeErrorCode::SourceChanged
         );
-        assert_eq!(
-            SOURCE_HASH_READS.get().unwrap().lock().unwrap().get(&path),
-            Some(&2)
-        );
         delete(&root, &id).unwrap();
-        assert!(!SOURCE_PROOFS
+        assert!(!SOURCE_STAMPS
             .get()
             .unwrap()
             .lock()
@@ -1180,7 +1144,10 @@ mod tests {
         let mut m = read_meta(&root, &id).unwrap();
         m.size = 14;
         write_meta(&p, &m).unwrap();
-        assert!(cached_json(&root, &id).unwrap_err().message.contains("SHA"));
+        assert_eq!(
+            cached_json(&root, &id).unwrap_err().code,
+            NativeErrorCode::SourceChanged
+        );
         delete(&root, &id).unwrap();
         assert!(!p.exists());
         fs::remove_dir_all(root).unwrap();
@@ -1208,9 +1175,25 @@ mod tests {
         };
         write_meta(&p, &m).unwrap();
         assert_eq!(header(&root, &id).unwrap(), bytes[..784]);
+        let path = p.join("source/original.gim");
+        let original_modified = fs::metadata(&path).unwrap().modified().unwrap();
         bytes[20] = 1;
-        fs::write(p.join("source/original.gim"), &bytes).unwrap();
-        assert!(header(&root, &id).unwrap_err().message.contains("SHA"));
+        fs::write(&path, &bytes).unwrap();
+        // A same-size write can land in the same filesystem timestamp tick.
+        // Advance the stamp explicitly so the test exercises source change detection.
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(
+                fs::FileTimes::new()
+                    .set_modified(original_modified + std::time::Duration::from_secs(2)),
+            )
+            .unwrap();
+        assert_eq!(
+            header(&root, &id).unwrap_err().code,
+            NativeErrorCode::SourceChanged
+        );
         assert!(header(&root, "../escape").is_err());
         fs::remove_dir_all(root).unwrap();
     }
