@@ -189,6 +189,7 @@ async function collectPropertySources(
       famPaths.add(withEntryPrefix('DEV', ref.path));
   }
 
+  if (!state.currentFiles) await state.properties.loadWarmFamProperties(famPaths);
   for (const path of famPaths) {
     let sections = getCachedByPath(state.properties.cachedFamProperties, path);
     if (!sections && state.currentFiles) {
@@ -346,13 +347,19 @@ export async function inspectNodeParameters(state: InspectorState, node: CbmNode
   const refs = resolveBaseFamilyReferences(node.rawProperties ?? {});
   if (node.famPath && !refs.some((ref) => ref.path === node.famPath))
     refs.unshift({ key: 'BASEFAMILY', path: node.famPath });
-  for (const ref of refs) {
-    const family = await readFamily(withEntryPrefix('CBM', ref.path));
+  const cbmPaths = refs.map((ref) => withEntryPrefix('CBM', ref.path));
+  if (!state.currentFiles) await state.properties.loadWarmFamProperties(cbmPaths);
+  for (const path of cbmPaths) {
+    const family = await readFamily(path);
     if (family) cbmFamilies.push(family);
   }
   const dev = node.devPath ? await readDevKv(state, withEntryPrefix('DEV', node.devPath)) : null;
-  for (const ref of resolveBaseFamilyReferences(dev ?? {})) {
-    const family = await readFamily(withEntryPrefix('DEV', ref.path));
+  const devPaths = resolveBaseFamilyReferences(dev ?? {}).map((ref) =>
+    withEntryPrefix('DEV', ref.path),
+  );
+  if (!state.currentFiles) await state.properties.loadWarmFamProperties(devPaths);
+  for (const path of devPaths) {
+    const family = await readFamily(path);
     if (family) devFamilies.push(family);
   }
   return { cbmFamilies, devFamilies, dev, identity: resolveSubstationBusinessIdentity(properties) };

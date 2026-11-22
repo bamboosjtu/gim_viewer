@@ -2221,6 +2221,7 @@
         "write_geometry_cache_manifest",
         "invalidate_glb_cache_entry",
         "get_gim_index",
+        "get_gim_fam_properties",
         "validate_gim_cache",
         "get_db_path",
         "get_latest_project_cache_diagnostic",

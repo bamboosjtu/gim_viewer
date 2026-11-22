@@ -35,6 +35,8 @@ export function publishFamSourceRows(state: AppState, rows: readonly FamProperty
     state.properties.cachedFamSourceProperties.clear();
     return;
   }
+  // The repaired rows are already in SQLite. Discard any reads from before the repair.
+  if (state.properties.invalidateWarmFamProperties()) return;
   const families = new Map<string, import('../../../gim/famParser.js').FamSourceProperty[]>();
   for (const row of rows)
     if (row.raw_property_json) {

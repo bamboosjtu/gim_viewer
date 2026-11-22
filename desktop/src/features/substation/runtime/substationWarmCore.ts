@@ -3,6 +3,7 @@ import type { GimRuntimeOpenContext } from '../../../services/gimOpenCore.js';
 import { validateGimCache } from '@desktop/database.js';
 import type { GimIndexResult } from '@desktop/contracts.js';
 import type { CbmNode, FileDevEntry, IfcEntry } from '../../../gim/types.js';
+import { getFileEntryIndex } from '../../../gim/entryResolver.js';
 import { reportBackgroundError } from '../../../utils/backgroundErrors.js';
 import { DEBUG_GIM_CACHE } from '../../../config/debug.js';
 import { debugLog } from '../../../utils/logger.js';
@@ -44,6 +45,8 @@ export async function publishSubstationWarmCore(
   const { state, session } = context;
   const scope = state.sessionScope(session);
   if (!scope.isCurrent()) throw new Error('warm session changed');
+  const projectId = context.projectId;
+  if (projectId == null) throw new Error('warm project ID missing');
 
   if (validation.ifc_entry_count > 0) {
     // This is a confirmed IFC-backed open. Start module loading while
@@ -57,7 +60,9 @@ export async function publishSubstationWarmCore(
       if (scope.isCurrent()) reportBackgroundError(error);
     });
   }
-  const { getGimIndex } = await scope.read(async () => import('@desktop/database.js'));
+  const { getGimIndex, getGimFamProperties } = await scope.read(
+    async () => import('@desktop/database.js'),
+  );
   // 变电工程缓存命中 → 恢复 GIM 索引（原有逻辑）
   scope.withSession(() => {
     state.currentProjectType = 'substation';
@@ -77,10 +82,10 @@ export async function publishSubstationWarmCore(
     undefined,
     perfSession,
   );
-  const index = await scope.read(async () => getGimIndex(context.projectId!));
+  const index = await scope.read(async () => getGimIndex(projectId, false));
 
   scope.withSession(() => {
-    restoreGimIndexToState(state, index);
+    restoreGimIndexToState(state, index, false);
   });
   const { createDiskBackedFile: createEngineeringSourceFile } = await scope.read(
     async () => import('@desktop/gimExtract.js'),
@@ -89,15 +94,27 @@ export async function publishSubstationWarmCore(
   const engineeringFiles = new Map(
     index.entries.map((entry) => [
       entry.entry_path,
-      createEngineeringSourceFile(context.projectId!, entry.entry_path, entry.file_size),
+      createEngineeringSourceFile(projectId, entry.entry_path, entry.file_size),
     ]),
   );
+  scope.withSession(() => {
+    state.properties.setWarmFamReader(
+      (path) => {
+        if (!/\.fam$/i.test(path)) return null;
+        if (engineeringFiles.has(path)) return path;
+        const matches = getFileEntryIndex(engineeringFiles).exactCandidates(path);
+        return matches.length === 1 ? matches[0] : null;
+      },
+      (paths) => scope.read(() => getGimFamProperties(projectId, session.sourceSha256, paths)),
+    );
+  });
   endRestoreCore(undefined, {
     entries: index.entries.length,
     cbmNodes: index.cbm_nodes.length,
     ifcModels: index.ifc_models.length,
     fileDevRelations: index.file_dev_entries.length,
     famProperties: index.fam_properties.length,
+    famPropertiesDeferred: true,
     devProperties: index.dev_properties.length,
   });
   void sampleSubstationMemory(state, 'CBM/FAM/DEV/FileDevRelation 后（缓存命中）', perfSession, {

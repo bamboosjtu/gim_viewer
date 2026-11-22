@@ -4,7 +4,10 @@ import type { GimIndexResult } from '@desktop/database.js';
 import { buildIfcGuidIndex } from '../gim/gimIndexer.js';
 import { buildCbmNodeIndex, readSubstationSystemNames } from '../gim/cbmParser.js';
 import { getFirstNonEmptyKv, isGimEmptyValue } from '../gim/gimValueSemantics.js';
-import { substationDevIdentity } from '../gim/substationEvidence.js';
+import {
+  substationDevIdentity,
+  type SubstationCapabilitySummary,
+} from '../gim/substationEvidence.js';
 
 /**
  * 从 SQLite 读取的 GIM 索引恢复到 AppState。
@@ -19,21 +22,23 @@ import { substationDevIdentity } from '../gim/substationEvidence.js';
  * - deviceToIfcFile
  * - cachedFamProperties / cachedDevProperties（基础属性缓存）
  */
-export function restoreGimIndexToState(state: AppState, index: GimIndexResult): void {
+export function restoreGimIndexToState(
+  state: AppState,
+  index: GimIndexResult,
+  restoreFam = true,
+): void {
   // 1. currentFiles = null
   state.currentFiles = null;
   state.substationEntryPaths = index.entries.map((entry) => entry.entry_path);
-  state.substationEntrySizes = new Map(index.entries.map(entry => [entry.entry_path, entry.file_size]));
-  try { state.substationCapabilities = index.capability_summary_json ? JSON.parse(index.capability_summary_json) : null; }
-  catch { state.substationCapabilities = null; }
-  state.properties.cachedFamSourceProperties.clear();
-  for (const fp of index.fam_properties) {
-    if (!fp.raw_property_json) continue;
-    try {
-      const list = state.properties.cachedFamSourceProperties.get(fp.source_path) ?? [];
-      list.push(JSON.parse(fp.raw_property_json));
-      state.properties.cachedFamSourceProperties.set(fp.source_path, list);
-    } catch { /* Legacy property rows remain available in the Map below. */ }
+  state.substationEntrySizes = new Map(
+    index.entries.map((entry) => [entry.entry_path, entry.file_size]),
+  );
+  try {
+    state.substationCapabilities = index.capability_summary_json
+      ? (JSON.parse(index.capability_summary_json) as SubstationCapabilitySummary)
+      : null;
+  } catch {
+    state.substationCapabilities = null;
   }
 
   // 2. 恢复 currentIfcEntries
@@ -74,29 +79,14 @@ export function restoreGimIndexToState(state: AppState, index: GimIndexResult): 
   }
 
   // 8. 恢复 cachedFamProperties: sourcePath → sectionName → key → value
-  state.properties.cachedFamProperties.clear();
-  const populatedSources = new Set(index.fam_properties.map((fp) => fp.source_path.replace(/\\/g, '/').toLowerCase()));
-  for (const entry of index.entries) {
-    if (/\.fam$/i.test(entry.entry_path) && !populatedSources.has(entry.entry_path.replace(/\\/g, '/').toLowerCase())) {
-      state.properties.cachedFamProperties.set(entry.entry_path, new Map([['默认', new Map()]]));
-      state.properties.cachedFamSourceProperties.set(entry.entry_path, []);
-    }
-  }
-  for (const fp of index.fam_properties) {
-    let bySection = state.properties.cachedFamProperties.get(fp.source_path);
-    if (!bySection) {
-      bySection = new Map([['默认', new Map()]]);
-      state.properties.cachedFamProperties.set(fp.source_path, bySection);
-    }
-    let byKey = bySection.get(fp.section_name);
-    if (!byKey) {
-      byKey = new Map();
-      bySection.set(fp.section_name, byKey);
-    }
-    // Same last-row-wins projection as the cold parser. Raw rows stay separate.
-    if (typeof fp.prop_value === 'string') {
-      byKey.set(fp.prop_key, fp.prop_value);
-    }
+  if (restoreFam) {
+    const populated = new Set(
+      index.fam_properties.map((row) => row.source_path.replace(/\\/g, '/').toLowerCase()),
+    );
+    const emptyFamilies = index.entries.flatMap(({ entry_path: path }) =>
+      /\.fam$/i.test(path) && !populated.has(path.replace(/\\/g, '/').toLowerCase()) ? [path] : [],
+    );
+    state.properties.restoreFamProperties(index.fam_properties, emptyFamilies);
   }
 
   // 9. 恢复 cachedDevProperties: devPath → key → value
@@ -197,14 +187,17 @@ function rebuildCbmTree(index: GimIndexResult): CbmNode | null {
 /** 从扁平 file_dev_entries 重建 FileDevEntry[] */
 function rebuildFileDevRelations(index: GimIndexResult): FileDevEntry[] {
   // 按 model_id + ifc_name + ifc_file 分组
-  const groupMap = new Map<string, {
-    sourceDesignFile?: string;
-    modelId: string;
-    ifcName: string;
-    ifcFile: string;
-    deviceCount: number;
-    deviceCbms: { cbm: string; sortOrder: number }[];
-  }>();
+  const groupMap = new Map<
+    string,
+    {
+      sourceDesignFile?: string;
+      modelId: string;
+      ifcName: string;
+      ifcFile: string;
+      deviceCount: number;
+      deviceCbms: { cbm: string; sortOrder: number }[];
+    }
+  >();
 
   for (const r of index.file_dev_entries) {
     const key = `${r.model_id}\u0000${r.ifc_name}\u0000${r.ifc_file}\u0000${r.source_design_file ?? ''}`;
@@ -243,6 +236,10 @@ function parseRawProperties(json: string | null | undefined): Record<string, str
   try {
     const parsed: unknown = JSON.parse(json);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
-    return Object.fromEntries(Object.entries(parsed).filter(([, value]) => typeof value === 'string'));
-  } catch { return undefined; }
+    return Object.fromEntries(
+      Object.entries(parsed).filter(([, value]) => typeof value === 'string'),
+    );
+  } catch {
+    return undefined;
+  }
 }

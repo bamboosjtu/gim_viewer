@@ -521,20 +521,72 @@ fn row_to_dev_property(row: &rusqlite::Row<'_>) -> rusqlite::Result<DevPropertyR
     })
 }
 
-/// Tauri command：完整读取 GIM 索引（只读）
+/// Read the index. Warm opening can leave inspector-only FAM rows in SQLite.
 #[tauri::command]
 pub async fn get_gim_index(
     app_handle: tauri::AppHandle,
     project_id: i64,
+    include_fam_properties: Option<bool>,
 ) -> Result<GetGimIndexResult, NativeError> {
     crate::native_command::blocking("get_gim_index", move || {
         let state = app_handle.state::<DbState>();
         let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
-        get_gim_index_connection(&conn, project_id)
+        get_gim_index_connection(&conn, project_id, include_fam_properties.unwrap_or(true))
     }).await
 }
 
-pub(super) fn get_gim_index_connection(conn: &Connection, project_id: i64) -> Result<GetGimIndexResult, NativeError> {
+const MAX_FAM_PATHS_PER_QUERY: usize = 128;
+
+#[tauri::command]
+pub async fn get_gim_fam_properties(
+    app_handle: tauri::AppHandle,
+    project_id: i64,
+    source_sha256: Option<String>,
+    source_paths: Vec<String>,
+) -> Result<Vec<FamPropertyRecord>, NativeError> {
+    crate::native_command::blocking("get_gim_fam_properties", move || {
+        let state = app_handle.state::<DbState>();
+        let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
+        get_gim_fam_properties_connection(&conn, project_id, source_sha256.as_deref(), &source_paths)
+    }).await
+}
+
+fn get_gim_fam_properties_connection(
+    conn: &Connection,
+    project_id: i64,
+    source_sha256: Option<&str>,
+    source_paths: &[String],
+) -> Result<Vec<FamPropertyRecord>, NativeError> {
+    if source_paths.len() > MAX_FAM_PATHS_PER_QUERY {
+        return Err(NativeError::new(NativeErrorCode::ResourceLimit, "FAM 查询路径数超过上限"));
+    }
+    ensure_project_exists(conn, project_id)?;
+    ensure_project_source_sha(conn, project_id, source_sha256)?;
+    let mut stmt = conn.prepare_cached(
+        "SELECT id, project_id, source_path, section_name, prop_key, prop_value, sort_order, created_at_ms, raw_property_json, source_line
+         FROM substation_fam_property
+         WHERE project_id = ?1 AND source_path = ?2
+         ORDER BY sort_order ASC, id ASC",
+    ).map_err(|e| format!("预处理 FAM 来源属性失败: {}", e))?;
+    let mut result = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for path in source_paths {
+        validate_entry_path(path)?;
+        if !seen.insert(path) { continue }
+        let rows = stmt.query_map(params![project_id, path], row_to_fam_property)
+            .map_err(|e| format!("查询 FAM 来源属性失败: {}", e))?;
+        for row in rows {
+            result.push(row.map_err(|e| format!("读取 FAM 来源属性失败: {}", e))?);
+        }
+    }
+    Ok(result)
+}
+
+pub(super) fn get_gim_index_connection(
+    conn: &Connection,
+    project_id: i64,
+    include_fam_properties: bool,
+) -> Result<GetGimIndexResult, NativeError> {
     ensure_project_exists(&conn, project_id)?;
 
     // 1. substation_gim_entry
@@ -609,20 +661,22 @@ pub(super) fn get_gim_index_connection(conn: &Connection, project_id: i64) -> Re
     }
 
     // 5. substation_fam_property
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, project_id, source_path, section_name, prop_key, prop_value, sort_order, created_at_ms, raw_property_json, source_line
-             FROM substation_fam_property
-             WHERE project_id = ?1
-             ORDER BY source_path ASC, sort_order ASC, id ASC",
-        )
-        .map_err(|e| format!("预处理 substation_fam_property 失败: {}", e))?;
-    let rows = stmt
-        .query_map(params![project_id], row_to_fam_property)
-        .map_err(|e| format!("查询 substation_fam_property 失败: {}", e))?;
     let mut fam_properties = Vec::new();
-    for r in rows {
-        fam_properties.push(r.map_err(|e| format!("读取 substation_fam_property 失败: {}", e))?);
+    if include_fam_properties {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, project_id, source_path, section_name, prop_key, prop_value, sort_order, created_at_ms, raw_property_json, source_line
+                 FROM substation_fam_property
+                 WHERE project_id = ?1
+                 ORDER BY source_path ASC, sort_order ASC, id ASC",
+            )
+            .map_err(|e| format!("预处理 substation_fam_property 失败: {}", e))?;
+        let rows = stmt
+            .query_map(params![project_id], row_to_fam_property)
+            .map_err(|e| format!("查询 substation_fam_property 失败: {}", e))?;
+        for r in rows {
+            fam_properties.push(r.map_err(|e| format!("读取 substation_fam_property 失败: {}", e))?);
+        }
     }
 
     // 6. substation_dev_property
@@ -961,6 +1015,30 @@ mod property_publication_tests {
     fn payload(mode:&str)->serde_json::Value {
         serde_json::json!({"project_id":1,"source_sha256":"source-a","properties_mode":mode,
             "refs":{"project_id":1,"source_sha256":"source-a","dev_solid_models":[],"dev_sub_devices":[],"phm_solid_models":[]},"fam_properties":[],"dev_properties":[]})
+    }
+    #[test]
+    fn warm_index_omits_fam_rows_and_indexed_read_keeps_source_order_and_identity() {
+        let conn = connection();
+        conn.execute(
+            "INSERT INTO substation_fam_property(project_id,source_path,section_name,prop_key,prop_value,sort_order,created_at_ms,source_line,raw_property_json)
+             VALUES(1,'source.fam','design','name','second',1,0,2,'{\"value\":\"second\"}'),
+                   (1,'another.fam','design','name','unrequested',0,0,1,NULL)",
+            [],
+        ).unwrap();
+        let full = get_gim_index_connection(&conn, 1, true).unwrap();
+        let warm = get_gim_index_connection(&conn, 1, false).unwrap();
+        assert_eq!(full.fam_properties.len(), 3);
+        assert!(warm.fam_properties.is_empty());
+        assert_eq!(warm.cbm_nodes.len(), full.cbm_nodes.len());
+
+        let paths = ["empty.fam".to_string(), "source.fam".to_string(), "source.fam".to_string()];
+        let only = get_gim_fam_properties_connection(&conn, 1, Some("source-a"), &paths).unwrap();
+        assert_eq!(only.iter().map(|row| row.source_line).collect::<Vec<_>>(), vec![1, 2]);
+        assert_eq!(only[1].raw_property_json.as_deref(), Some("{\"value\":\"second\"}"));
+        assert_eq!(
+            get_gim_fam_properties_connection(&conn, 1, Some("source-b"), &paths).unwrap_err().code,
+            NativeErrorCode::SourceChanged,
+        );
     }
     #[test]
     fn property_publication_requires_explicit_empty_snapshot_semantics() {

@@ -82,6 +82,8 @@ export const architectureModules = [
   'src/services/viewerPresentationPort.ts',
   'src/services/sourceGeometryService.ts',
   'src/services/projectPropertyCache.ts',
+  'src/services/gimIndexRestoreService.ts',
+  'bridge/database.ts',
   'src/services/lineAttrRestoreService.ts',
   'src/services/lineGraphPersistenceService.ts',
   'src/services/lineGraphRestoreService.ts',

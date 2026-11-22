@@ -12,6 +12,7 @@ const m = vi.hoisted(() => ({
   native: false,
   validate: vi.fn(),
   index: vi.fn(),
+  famRows: vi.fn(),
   restore: vi.fn(),
   load: vi.fn(),
   geometry: vi.fn(),
@@ -31,6 +32,7 @@ vi.mock('@desktop/runtime.js', () => ({ isTauri: () => m.native }));
 vi.mock('@desktop/database.js', () => ({
   validateGimCache: m.validate,
   getGimIndex: m.index,
+  getGimFamProperties: m.famRows,
   saveGimIndex: vi.fn(),
   saveGeometryRefs: vi.fn(),
   saveSubstationSemanticRest: vi.fn(),
@@ -117,6 +119,7 @@ beforeEach(async () => {
     fam_properties: [],
     dev_properties: [],
   });
+  m.famRows.mockResolvedValue([]);
   m.restore.mockImplementation((state: AppState) => {
     state.currentCbmTree = { path: 'cached.cbm', children: [] } as unknown as CbmNode;
     state.currentIfcEntries = [{ path: 'cached.ifc', name: 'cached', modelId: 'cached' }];
@@ -339,7 +342,7 @@ it('a persistence task waiting for source materialization cannot publish after r
   expect(m.core).not.toHaveBeenCalled();
   expect(m.rest).not.toHaveBeenCalled();
 });
-it('warm open materializes cached engineering and IFC entries from the index', async () => {
+it('warm open materializes cached engineering and IFC entries without reading FAM rows', async () => {
   const { state, context } = fixture();
   m.native = true;
   context.projectId = 1;
@@ -347,6 +350,7 @@ it('warm open materializes cached engineering and IFC entries from the index', a
     entries: [
       { entry_path: 'model.ifc', entry_type: 'ifc', file_size: 4 },
       { entry_path: 'unit.dev', entry_type: 'dev', file_size: 4 },
+      { entry_path: 'Dev/unit.fam', entry_type: 'fam', file_size: 4 },
     ],
     cbm_nodes: [],
     ifc_models: [],
@@ -355,10 +359,15 @@ it('warm open materializes cached engineering and IFC entries from the index', a
     dev_properties: [],
   });
   await openSubstationProject(context);
+  expect(m.index).toHaveBeenCalledWith(1, false);
+  expect(m.famRows).not.toHaveBeenCalled();
+  expect(state.properties.cachedFamProperties.size).toBe(0);
   expect(state.currentIfcEntries[0].path).toBe('cached.ifc');
   expect(m.load).toHaveBeenCalledOnce();
   const options = m.load.mock.calls[0][3] as { ifcSourceSizes: Map<string, number> };
   expect([...options.ifcSourceSizes.keys()]).toEqual(['model.ifc']);
+  await state.properties.loadWarmFamProperties(['DEV\\UNIT.fam']);
+  expect(m.famRows).toHaveBeenCalledWith(1, 'a', ['Dev/unit.fam']);
 });
 
 it('warm property repair clears cached FAM rows when source files are present', async () => {
@@ -413,6 +422,11 @@ it('warm property repair preserves the warm path and owns publication callbacks'
   m.native = true;
   context.projectId = 1;
   m.validate.mockResolvedValue({ valid: true, substation_properties_complete: false });
+  m.index.mockResolvedValue({
+    entries: [{ entry_path: 'unit.fam', entry_type: 'fam', file_size: 4 }],
+    cbm_nodes: [], ifc_models: [], file_dev_entries: [], fam_properties: [], dev_properties: [],
+  });
+  m.famRows.mockResolvedValue([{ source_path: 'unit.fam', section_name: '设计', prop_key: 'key', prop_value: 'value', raw_property_json: '{"key":"value"}' }]);
   m.rest.mockImplementationOnce(async (_input, ports) => {
     ports.onPublished({
       fam_properties: [{ source_path: 'unit.fam', raw_property_json: '{"key":"value"}' }],
@@ -422,6 +436,8 @@ it('warm property repair preserves the warm path and owns publication callbacks'
   await openSubstationProject(context);
   await vi.waitFor(() => expect(m.rest).toHaveBeenCalledOnce());
   expect(context.getExtracted).not.toHaveBeenCalled();
+  expect(m.famRows).not.toHaveBeenCalled();
+  await state.properties.loadWarmFamProperties(['unit.fam']);
   expect(state.properties.cachedFamSourceProperties.get('unit.fam')).toEqual([{ key: 'value' }]);
   expect(m.rest.mock.calls[0][1].isCurrent()).toBe(true);
   state.activateProject(2, 'b');

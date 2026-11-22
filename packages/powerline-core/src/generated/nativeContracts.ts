@@ -77,6 +77,7 @@ export const DESKTOP_COMMANDS = {
   "write_geometry_cache_manifest": "write_geometry_cache_manifest",
   "invalidate_glb_cache_entry": "invalidate_glb_cache_entry",
   "get_gim_index": "get_gim_index",
+  "get_gim_fam_properties": "get_gim_fam_properties",
   "validate_gim_cache": "validate_gim_cache",
   "get_db_path": "get_db_path",
   "get_latest_project_cache_diagnostic": "get_latest_project_cache_diagnostic",

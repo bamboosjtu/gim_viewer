@@ -118,7 +118,7 @@ fn substation_sqlite_exchange() {
             tx.execute("UPDATE gim_project SET sha256='changed-source' WHERE id=?1",params![pid]).unwrap();
             assert!(!substation_index_receipt_matches(&tx,pid));
         }
-        let warm = get_gim_index_connection(&conn, pid).unwrap();
+        let warm = get_gim_index_connection(&conn, pid, true).unwrap();
         let fact = |sql: &str| -> serde_json::Value {
             let text: String = conn.query_row(sql, params![pid], |row| row.get(0)).unwrap();
             serde_json::from_str(&text).unwrap()

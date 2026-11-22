@@ -551,6 +551,7 @@ pub fn run() {
             db::write_geometry_cache_manifest,
             db::invalidate_glb_cache_entry,
             db::get_gim_index,
+            db::get_gim_fam_properties,
             db::validate_gim_cache,
             db::get_db_path,
             db::get_latest_project_cache_diagnostic,
