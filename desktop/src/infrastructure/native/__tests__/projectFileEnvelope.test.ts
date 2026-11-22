@@ -1,4 +1,4 @@
-import {GimError} from '../contracts.js';
+import {GimError} from '@desktop/contracts.js';
 import { describe, expect, it, vi } from 'vitest';
 
 const invokeMock = vi.hoisted(() => vi.fn());
@@ -7,7 +7,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 import {
   parseBatchCachePayload,
   parseLineSemanticPackFullPayload,
-} from '../database.js';
+} from '../projectFileEnvelope.js';
 
 /** 构造与 Rust read_line_semantic_pack_all 对齐的 GIMF v1 envelope。 */
 function fullEnvelope(

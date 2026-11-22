@@ -20,8 +20,10 @@ export async function restorePowerlineProject(
     try {
       showLoading('正在读取线路 semantic pack...');
       const endPack = perfBegin('线路 semantic pack 读取（缓存命中）', undefined, perfSession);
-      const { readLineSemanticPackAll } = await scope.read(() => import('@desktop/database.js'));
-      const full = await scope.read(() => readLineSemanticPackAll(projectId));
+      const { readLineSemanticPackAll } = await scope.read(
+        () => import('../../../infrastructure/native/projectFiles.js'),
+      );
+      const full = await scope.read(() => readLineSemanticPackAll(projectId, scope.isCurrent));
       if (!scope.isCurrent()) return;
       endPack(undefined, {
         entries: full.profile.entryCount,
@@ -34,9 +36,13 @@ export async function restorePowerlineProject(
         totalMs: full.profile.totalMs,
       });
 
-      const { createDiskBackedFile } = await scope.read(() => import('@desktop/gimExtract.js'));
+      const { createDiskBackedFile } = await scope.read(
+        () => import('../../../infrastructure/native/gimExtract.js'),
+      );
       if (!scope.isCurrent()) return;
-      const prepared = buildLineSemanticWarmFiles(projectId, full.items, createDiskBackedFile);
+      const prepared = buildLineSemanticWarmFiles(projectId, full.items, (id, path, size, packed) =>
+        createDiskBackedFile(id, path, size, packed, scope.isCurrent),
+      );
       showLoading('正在由 Worker 恢复线路图与属性...');
       const endWorker = perfBegin(
         '线路图构建+属性解析（semantic warm Worker）',

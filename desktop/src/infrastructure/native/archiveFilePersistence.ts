@@ -1,6 +1,27 @@
-import { writeCacheFile } from '@desktop/database.js';
-import type { IfcEntry } from '../gim/types.js';
-import { getFileByPath } from '../gim/fileLookup.js';
+import { writeCacheFile } from './projectFiles.js';
+import { requireNativeOwner, type NativeOwner } from './invokeTimed.js';
+import type { IfcEntry } from '../../gim/types.js';
+import { getFileByPath } from '../../gim/fileLookup.js';
+
+interface ArchiveOwner {
+  sourceSha256: string | null;
+  isCurrent: NativeOwner;
+}
+
+async function persistFile(projectId: number, path: string, file: File, owner: ArchiveOwner) {
+  requireNativeOwner(owner.isCurrent);
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  requireNativeOwner(owner.isCurrent);
+  const cachedPath = await writeCacheFile(
+    projectId,
+    path,
+    bytes,
+    owner.sourceSha256,
+    owner.isCurrent,
+  );
+  requireNativeOwner(owner.isCurrent);
+  return cachedPath;
+}
 
 /** IFC 缓存结果 */
 export interface IfcCacheResult {
@@ -33,20 +54,22 @@ export interface ExtractedCacheResult {
 export async function cacheExtractedFiles(
   projectId: number,
   files: Map<string, File>,
-  alreadyCached: ReadonlyMap<string,string> = new Map(),
+  owner: ArchiveOwner,
+  alreadyCached: ReadonlyMap<string, string> = new Map(),
 ): Promise<ExtractedCacheResult> {
+  requireNativeOwner(owner.isCurrent);
   const errors: Array<{ entryPath: string; message: string }> = [];
   let cachedCount = 0;
-  const pathMap = new Map<string,string>();
+  const pathMap = new Map<string, string>();
 
   for (const [entryPath, file] of files) {
     if (alreadyCached.has(entryPath)) continue;
     try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const localPath = await writeCacheFile(projectId, entryPath, bytes);
-      pathMap.set(entryPath,localPath);
+      const localPath = await persistFile(projectId, entryPath, file, owner);
+      pathMap.set(entryPath, localPath);
       cachedCount++;
     } catch (err) {
+      requireNativeOwner(owner.isCurrent);
       errors.push({
         entryPath,
         message: err instanceof Error ? err.message : String(err),
@@ -69,7 +92,9 @@ export async function cacheIfcEntries(
   projectId: number,
   files: Map<string, File>,
   ifcEntries: IfcEntry[],
+  owner: ArchiveOwner,
 ): Promise<IfcCacheResult> {
+  requireNativeOwner(owner.isCurrent);
   const pathMap = new Map<string, string>();
   const errors: Array<{ entryPath: string; message: string }> = [];
 
@@ -80,10 +105,10 @@ export async function cacheIfcEntries(
       continue;
     }
     try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const localPath = await writeCacheFile(projectId, entry.path, bytes);
+      const localPath = await persistFile(projectId, entry.path, file, owner);
       pathMap.set(entry.path, localPath);
     } catch (err) {
+      requireNativeOwner(owner.isCurrent);
       errors.push({
         entryPath: entry.path,
         message: err instanceof Error ? err.message : String(err),

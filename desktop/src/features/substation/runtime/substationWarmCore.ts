@@ -88,13 +88,19 @@ export async function publishSubstationWarmCore(
     restoreGimIndexToState(state, index, false);
   });
   const { createDiskBackedFile: createEngineeringSourceFile } = await scope.read(
-    async () => import('@desktop/gimExtract.js'),
+    async () => import('../../../infrastructure/native/gimExtract.js'),
   );
 
   const engineeringFiles = new Map(
     index.entries.map((entry) => [
       entry.entry_path,
-      createEngineeringSourceFile(projectId, entry.entry_path, entry.file_size),
+      createEngineeringSourceFile(
+        projectId,
+        entry.entry_path,
+        entry.file_size,
+        false,
+        scope.isCurrent,
+      ),
     ]),
   );
   scope.withSession(() => {

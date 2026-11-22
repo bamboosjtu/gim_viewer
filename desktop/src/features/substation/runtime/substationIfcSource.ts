@@ -47,9 +47,11 @@ export async function getIfcBufferForEntry(
         path: entry.path,
         cachePath,
       });
-      const { readCachedIfc } = await import('@desktop/database.js');
+      const { readCachedIfc } = await import('../../../infrastructure/native/projectFiles.js');
       if (!state.isCurrentSession(session)) return null;
-      const bytes = await readCachedIfc(projectId, cachedEntryPath);
+      const bytes = await readCachedIfc(projectId, cachedEntryPath, () =>
+        state.isCurrentSession(session),
+      );
       if (!state.isCurrentSession(session)) return null;
 
       // 可疑缓存定位日志：MVP 阶段用于排查缓存 IFC 是否被截断/损坏

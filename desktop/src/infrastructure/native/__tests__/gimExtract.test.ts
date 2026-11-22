@@ -10,7 +10,7 @@ import { parseExtractionPayload, createDiskBackedFile, extractGimArchiveNative }
 const native = vi.hoisted(()=>({invoke:vi.fn()}));
 vi.mock('@tauri-apps/api/core',async importActual=>({...await importActual<typeof import('@tauri-apps/api/core')>(),invoke:native.invoke}));
 const reads = vi.hoisted(() => ({ readCachedEntry: vi.fn() }));
-vi.mock('../database.js', () => reads);
+vi.mock('../projectFiles.js', () => reads);
 
 it('distinguishes response decoding failures from native safety failures for receipt recovery',async()=>{
   native.invoke.mockResolvedValue(new ArrayBuffer(0));

@@ -81,7 +81,7 @@ const viewerBridgeImports = new Map([
 const infrastructurePorts = new Map([
   ['infrastructure/workers/engineeringWorker.ts', 'services/engineeringWorkerHandler.js'],
   ['infrastructure/cache/engineeringCacheCodec.ts', 'services/projections/compositionSpatial.js'],
-  ['infrastructure/cache/engineeringCacheStore.ts', '@desktop/database.js'],
+  ['infrastructure/native/invokeTimed.ts', '@tauri-apps/api/core'],
 ]);
 // Views may use explicit presentation selectors/formatters, never parsers or business classifiers.
 const uiPresentationValues = new Map([
@@ -242,6 +242,23 @@ for (const [layer, sourceRoot] of [
           ? relative(sourceRoot, resolve(dirname(path), name)).replaceAll('\\', '/')
           : name;
         const target = targetPath.split('/')[0];
+        const native = localPath.startsWith('infrastructure/native/');
+        if (
+          targetPath.startsWith('infrastructure/native/') &&
+          ['engineering', 'gim', 'viewer', 'ui'].includes(layer)
+        )
+          failures.push(
+            `${localPath}: Native project files belong to host orchestration (${name})`,
+          );
+        if (
+          native &&
+          /^(?:features\/|viewer\/|three(?:\/|$)|web-ifc(?:\/|$)|maplibre-gl(?:\/|$)|infrastructure\/(?:cache|workers)\/)/.test(
+            targetPath,
+          )
+        )
+          failures.push(
+            `${localPath}: Native project files cannot depend on application runtimes (${name})`,
+          );
         if (
           targetPath.startsWith('infrastructure/workers/') &&
           ['engineering', 'gim', 'viewer', 'ui'].includes(layer)
@@ -443,6 +460,13 @@ for (const [layer, sourceRoot] of [
           banned.test(targetPath) &&
           !exception &&
           infrastructurePorts.get(localPath) !== targetPath &&
+          !(
+            native &&
+            (targetPath === '@desktop/contracts.js' ||
+              (targetPath === '@desktop/substationParseCopy.js' &&
+                ts.isImportDeclaration(node) &&
+                node.importClause?.isTypeOnly))
+          ) &&
           !(
             (layer === 'services' || layer === 'app') &&
             ts.isImportDeclaration(node) &&

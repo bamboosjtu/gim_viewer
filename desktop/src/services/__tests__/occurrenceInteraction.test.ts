@@ -12,7 +12,7 @@ import { nestedPartFixture } from './nestedPartIndexFixture.js';
 import {createDeviceRuntimeMock} from './helpers/deviceRuntime.js';
 
 const mock = vi.hoisted(() => ({ ctx: null as any, frame: vi.fn(), bytes: null as Uint8Array | null }));
-vi.mock('@desktop/database.js', () => ({ readGlbFile: async () => mock.bytes }));
+vi.mock('../../infrastructure/native/projectFiles.js', () => ({ readGlbFile: async () => mock.bytes }));
 vi.mock('../viewerUIBinding.js', () => ({ getViewerRuntimeWithUI: async () => ({ ctx: mock.ctx }) }));
 vi.mock('../../viewer/camera.js', () => ({ frameBox: (...args: any[]) => mock.frame(...args) }));
 const identity = new THREE.Matrix4().toArray();

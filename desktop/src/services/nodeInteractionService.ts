@@ -315,7 +315,7 @@ async function getIfcBufferForEntry(
         path: entry.path,
         cachePath,
       });
-      const { readCachedIfc } = await import('@desktop/database.js');
+      const { readCachedIfc } = await import('../infrastructure/native/projectFiles.js');
       const bytes = await readCachedIfc(projectId, cachedEntryPath);
       return state.isCurrentSession(session) ? bytes : null;
     }
@@ -941,7 +941,7 @@ async function tryLoadDevGlbForNode(
   // 读取 DEV.glb
   let glbBytes: Uint8Array | null = null;
   try {
-    const { readGlbFile } = await import('@desktop/database.js');
+    const { readGlbFile } = await import('../infrastructure/native/projectFiles.js');
     glbBytes = await readGlbFile(projectId, devPath);
     if (!state.isCurrentSession(session)) return false;
   } catch {
@@ -1102,7 +1102,7 @@ async function buildGeometryFilesMapFromCache(
   state?: AppState,
   session?: ProjectLoadSession,
 ): Promise<Map<string, File>> {
-  const { batchReadCachedFiles } = await import('@desktop/database.js');
+  const { batchReadCachedFiles } = await import('../infrastructure/native/projectFiles.js');
   const { hydrateSubstationGeometryGraph } =
     await import('../gim/geometry/substationSourceGraph.js');
   if (!node.devPath) return new Map();
@@ -1140,7 +1140,7 @@ async function ensureModFilesInCacheMap(
   state?: AppState,
   session?: ProjectLoadSession,
 ): Promise<void> {
-  const { readCachedIfc } = await import('@desktop/database.js');
+  const { readCachedIfc } = await import('../infrastructure/native/projectFiles.js');
   for (const geo of discovered) {
     if (state && session && !state.isCurrentSession(session)) return;
     if (hasFileByPath(files, geo.modPath)) continue;
@@ -1175,7 +1175,7 @@ async function ensureStlFilesInCacheMap(
   state?: AppState,
   session?: ProjectLoadSession,
 ): Promise<void> {
-  const { readCachedIfc } = await import('@desktop/database.js');
+  const { readCachedIfc } = await import('../infrastructure/native/projectFiles.js');
   for (const geo of discovered) {
     if (state && session && !state.isCurrentSession(session)) return;
     if (hasFileByPath(files, geo.stlPath)) continue;

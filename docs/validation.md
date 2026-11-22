@@ -144,7 +144,7 @@
 | IFC 加载/转换 | `npm run test:ifc-critical`；连接几何真实指针和固定 WebView2 验证还须执行下述本地门禁，单测不代替 |
 | 静态容器矩阵 | `src/viewer/__tests__/staticContainer.test.ts` |
 | 视角历史 | `src/viewer/__tests__/viewHistory.test.ts`、`src/ui/__tests__/viewHistoryFeedback.test.ts` |
-| 原生批读/GIMR 协议 | `bridge/__tests__/devLodCache.test.ts`、`bridge/__tests__/devLodNativeBatch.test.ts`、`bridge/__tests__/database.test.ts` |
+| 原生批读/GIMR 协议 | `bridge/__tests__/devLodCache.test.ts`、`bridge/__tests__/devLodNativeBatch.test.ts`、`src/infrastructure/native/__tests__/projectFileEnvelope.test.ts`、`projectFiles.test.ts` |
 | DEV 几何/缓存/选择 | `devGeometryWorkerClient`、`devLodRuntime`、`devGlbTemplateRuntime`、`xmlModGeometry` 对应测试 |
 | 按需绘制/相机取景 | `src/viewer/__tests__/demandRendering.test.ts`、`src/viewer/__tests__/cameraFraming.test.ts` |
 | 真实几何门禁 | `GIM_VERIFY_SUBSTATION01=1` 后运行 `devGeometryGate.test.ts --maxWorkers=1 --minWorkers=1` |

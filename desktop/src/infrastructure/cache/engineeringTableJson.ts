@@ -1,3 +1,4 @@
+import { releaseOwnedBytes } from '../../shared/ownedBytes.js';
 import type { PackedEngineeringSource } from './engineeringSourceCodec.js';
 
 const encoder = new TextEncoder(),
@@ -27,23 +28,6 @@ export function yieldEngineeringCodec(): Promise<void> {
 const check = (current: () => boolean) => {
   if (!current()) throw new DOMException('Engineering codec cancelled', 'AbortError');
 };
-
-/** Only a fully owned allocation may be detached. Drop its storage immediately
- * after consumption instead of keeping native bytes until a later GC. */
-export function releaseEngineeringBytes(bytes: Uint8Array): void {
-  const buffer = bytes.buffer;
-  if (
-    !(buffer instanceof ArrayBuffer) ||
-    bytes.byteOffset !== 0 ||
-    bytes.byteLength !== buffer.byteLength
-  )
-    return;
-  try {
-    (buffer as ArrayBuffer & { transfer?: (length: number) => ArrayBuffer }).transfer?.(0);
-  } catch {
-    /* Native/non-detachable storage keeps the existing GC fallback. */
-  }
-}
 
 /** Exact JSON.stringify(table) UTF-8 bytes, with bounded temporary strings.
  * The persisted and runtime formats remain unchanged. */
@@ -112,7 +96,7 @@ export async function stringifyEngineeringTable(
   for (const chunk of chunks) {
     result.set(chunk, offset);
     offset += chunk.byteLength;
-    releaseEngineeringBytes(chunk);
+    releaseOwnedBytes(chunk);
   }
   return result;
 }
@@ -223,6 +207,6 @@ export async function parseEngineeringTable(
   )
     return fail();
   check(current);
-  releaseEngineeringBytes(scratch);
+  releaseOwnedBytes(scratch);
   return { encoding: header.encoding, shapes: header.shapes, nodes, root: footer.root! };
 }

@@ -1,13 +1,14 @@
 import {beforeEach,afterEach,it,expect,vi} from 'vitest';
 import {AppState} from '../../app/state.js';
 import {openGimProjectFromId,openGimWithDialog} from '../openGimService.js';
-const m=vi.hoisted(()=>({native:true,debugRuntime:false,info:vi.fn(),head:vi.fn(),register:vi.fn(),cleanup:vi.fn(),station:vi.fn(),line:vi.fn(),equipment:vi.fn(),extract:vi.fn(),choose:vi.fn(),detect:vi.fn(),hide:vi.fn(),show:vi.fn(),scheduleHide:vi.fn(),manifest:vi.fn(),batchRead:vi.fn(),inspectEarly:vi.fn(),withEarly:vi.fn(),startSubstation:vi.fn()}));
+const m=vi.hoisted(()=>({native:true,debugRuntime:false,authorize:vi.fn(),info:vi.fn(),head:vi.fn(),register:vi.fn(),cleanup:vi.fn(),station:vi.fn(),line:vi.fn(),equipment:vi.fn(),extract:vi.fn(),choose:vi.fn(),detect:vi.fn(),hide:vi.fn(),show:vi.fn(),scheduleHide:vi.fn(),manifest:vi.fn(),batchRead:vi.fn(),inspectEarly:vi.fn(),withEarly:vi.fn(),startSubstation:vi.fn()}));
 vi.mock('../../config/debug.js',()=>({get DEBUG_RUNTIME_LOGS(){return m.debugRuntime;}}));
 vi.mock('@desktop/runtime.js',()=>({isTauri:()=>m.native}));
 vi.mock('@desktop/fileDialog.js',()=>({openGimFilePath:async()=> 'tmp/open.gim'}));
-vi.mock('@desktop/fileReader.js',()=>({getFileInfo:m.info,readFileHead:m.head}));
-vi.mock('@desktop/database.js',()=>({authorizeCachedGimProject:async()=> 'tmp/open.gim',upsertGimProject:m.register,touchGimProjectOpened:async()=>{},readExtractionManifest:async()=>null,batchReadCachedFiles:m.batchRead}));
-vi.mock('@desktop/gimExtract.js',async original=>({...await original<typeof import('@desktop/gimExtract.js')>(),extractGimArchiveNative:m.extract,readExtractionManifest:m.manifest}));
+vi.mock("../../infrastructure/native/fileReader.js",()=>({getFileInfo:m.info,readFileHead:m.head}));
+vi.mock('../../infrastructure/native/projectFiles.js', () => ({ authorizeCachedGimProject:m.authorize, batchReadCachedFiles:m.batchRead }));
+vi.mock('@desktop/database.js', () => ({ upsertGimProject:m.register, touchGimProjectOpened:async()=>{} }));
+vi.mock("../../infrastructure/native/gimExtract.js",async original=>({...await original<typeof import("../../infrastructure/native/gimExtract.js")>(),extractGimArchiveNative:m.extract,readExtractionManifest:m.manifest}));
 vi.mock('../substationExtractionJob.js',()=>({inspectEarlySemanticEligibility:m.inspectEarly,withEarlySemanticCapability:m.withEarly,startSubstationExtractionJob:m.startSubstation}));
 vi.mock('../projectCleanupService.js',()=>({cleanupBeforeOpenNewProject:m.cleanup}));
 vi.mock('../../features/substation/application/substationRuntime.js',()=>({openSubstationProject:m.station,onGimExtracted:vi.fn(),loadAllIfcFiles:vi.fn()}));
@@ -23,6 +24,7 @@ const bytes=(magic='GIMPKGS')=>new TextEncoder().encode(magic).buffer;
 const sourceFiles=()=>new Map([['unit.cbm',new File(['ENTITYNAME=PROJECT'],'unit.cbm')]]);
 beforeEach(async()=>{
   vi.clearAllMocks();m.native=true;
+  m.authorize.mockResolvedValue('tmp/open.gim');
   loadButton=document.createElement('button');
   const {bindProjectOpenPresentation}=await import('../projectOpenPresentationPort.js');
   bindProjectOpenPresentation({chooseGim:()=>m.choose(),chooseIfc:async()=>[],setBusy:(kind,busy)=>{if(kind==='gim')loadButton.disabled=busy;},resetInput:vi.fn()});
@@ -81,7 +83,7 @@ it.each([null, ''])('uses full native extraction when early semantic is enabled 
   expect(m.extract).toHaveBeenCalledWith('tmp/open.gim', 1, {
     traceEntries: false,
     substationParseCopy: false,
-  });
+  }, expect.any(Function));
   expect(extracted).toHaveBeenCalledWith(expect.objectContaining({status:'ok'}));
 });
 
@@ -130,6 +132,23 @@ it('an older request cannot re-enable the button or dispatch after a newer open 
   const info={name:'open.gim',path:'tmp/open.gim',size:7,modified_ms:1,sha256:'source-a'};
   first.resolve(info);await a;expect((await button()).disabled).toBe(true);expect(m.station).not.toHaveBeenCalled();
   second.resolve(info);await b;expect((await button()).disabled).toBe(false);expect(m.station).toHaveBeenCalledOnce();
+});
+it('ignores late recent-project authorization after a newer project opens', async () => {
+  const state = new AppState();
+  const oldPath = deferred<string>();
+  m.authorize.mockReturnValueOnce(oldPath.promise).mockResolvedValueOnce('tmp/new.gim');
+  m.register.mockResolvedValueOnce({ id: 2, sha256: 'source-b' });
+  const oldOpen = openGimProjectFromId(state, vi.fn(), 1);
+  await vi.waitFor(() => expect(m.authorize).toHaveBeenCalledTimes(1));
+  await openGimProjectFromId(state, vi.fn(), 2);
+  const published = state.captureProjectSession();
+  oldPath.resolve('tmp/old.gim');
+  await oldOpen;
+  expect(state.isCurrentSession(published)).toBe(true);
+  expect(published.projectId).toBe(2);
+  expect(m.info).toHaveBeenCalledOnce();
+  expect(m.info).toHaveBeenCalledWith('tmp/new.gim', expect.any(Function));
+  expect(m.station).toHaveBeenCalledOnce();
 });
 it('reports a current runtime failure and permits the next request to succeed',async()=>{
   const state=new AppState(),error=vi.spyOn(console,'error').mockImplementation(()=>{});m.station.mockRejectedValueOnce(Error('runtime load'));

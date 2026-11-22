@@ -110,19 +110,29 @@ async function reuseExtractedSources(
   projectId: number | null,
   sourceSha256: string | null,
   magic: string,
+  isCurrent: () => boolean,
 ): Promise<ExtractedGimSource | null> {
   if (projectId == null || !sourceSha256 || !isTauri()) return null;
   try {
-    const { readExtractionManifest, createDiskBackedFile } = await import('@desktop/gimExtract.js');
-    const manifest = await readExtractionManifest(projectId);
-    if (!manifest || manifest.source_sha256 !== sourceSha256 || manifest.entries.length === 0)
+    const { readExtractionManifest, createDiskBackedFile } =
+      await import('../infrastructure/native/gimExtract.js');
+    const manifest = await readExtractionManifest(projectId, isCurrent);
+    if (
+      !isCurrent() ||
+      !manifest ||
+      manifest.source_sha256 !== sourceSha256 ||
+      manifest.entries.length === 0
+    )
       return null;
     const files = new Map<string, File>();
     const cachePaths = new Map<string, string>();
     const packedPaths = new Set<string>();
     for (const entry of manifest.entries) {
       if (!entry || typeof entry.path !== 'string' || !Number.isFinite(entry.size)) continue;
-      files.set(entry.path, createDiskBackedFile(projectId, entry.path, entry.size));
+      files.set(
+        entry.path,
+        createDiskBackedFile(projectId, entry.path, entry.size, false, isCurrent),
+      );
       if (entry.packed) packedPaths.add(entry.path);
       if (entry.cache_path) cachePaths.set(entry.path, entry.cache_path);
     }
@@ -178,6 +188,7 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
   resetLoadingClock();
 
   const session = state.activateProject(projectId, sourceSha256);
+  const scope = state.sessionScope(session);
   input.onSession?.(session);
   perfUpdateSessionIdentity({
     generation: session.generation,
@@ -220,10 +231,16 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
         (SUBSTATION_EARLY_SEMANTIC_DEFAULT ||
           localStorage.getItem('gim-debug-substation-early-semantic') === '1');
       try {
-        const { extractGimArchiveNative } = await import('@desktop/gimExtract.js');
+        const { extractGimArchiveNative } = await import('../infrastructure/native/gimExtract.js');
         // 上次解压成功但语义索引尚未提交时（首开期间切换/关闭工程），
         // 复用同一源 SHA 的已解压文件，避免再次解压 3.6 万条目。
-        const reused = await reuseExtractedSources(projectId, session.sourceSha256, source.magic);
+        const reused = await reuseExtractedSources(
+          projectId,
+          session.sourceSha256,
+          source.magic,
+          scope.isCurrent,
+        );
+        if (!scope.isCurrent()) return { status: 'cancelled' };
         if (reused) {
           (await import('../utils/perfTimings.js')).perfMark(
             '解压复用（已解压缓存，索引未提交）',
@@ -236,11 +253,17 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
         } else {
           endNative = perfBegin('解压（Rust 原生）', undefined, perfSession);
           const fullNative = () =>
-            extractGimArchiveNative(nativeFilePath, projectId ?? undefined, {
-              ...(session.sourceSha256 ? { expectedSourceSha256: session.sourceSha256 } : {}),
-              traceEntries: localStorage.getItem('gim-debug-substation-extraction-trace') === '1',
-              substationParseCopy: localStorage.getItem('gim-debug-substation-parse-copy') === '1',
-            });
+            extractGimArchiveNative(
+              nativeFilePath,
+              projectId ?? undefined,
+              {
+                ...(session.sourceSha256 ? { expectedSourceSha256: session.sourceSha256 } : {}),
+                traceEntries: localStorage.getItem('gim-debug-substation-extraction-trace') === '1',
+                substationParseCopy:
+                  localStorage.getItem('gim-debug-substation-parse-copy') === '1',
+              },
+              scope.isCurrent,
+            );
           let native: Awaited<ReturnType<typeof extractGimArchiveNative>> | ExtractedGimSource;
           if (earlyRequested) {
             const policy = await import('./substationExtractionJob.js');
@@ -288,6 +311,10 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
           extracted = native;
         }
       } catch (nativeError) {
+        if (!scope.isCurrent()) {
+          endNative?.('（取消）');
+          return { status: 'cancelled' };
+        }
         const nativeMessage =
           nativeError instanceof Error ? nativeError.message : String(nativeError);
         endNative?.('（失败）', { error: nativeMessage });
@@ -303,20 +330,23 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
           projectId,
           session.sourceSha256,
           source.magic,
+          scope.isCurrent,
         );
+        if (!scope.isCurrent()) return { status: 'cancelled' };
         if (recovered) {
           extracted = recovered;
         } else {
           if (!canFallbackFromNativeExtraction(nativeError)) throw nativeError;
           logger.warn('[Shared Core] 原生解压不可用，回退 libarchive.js WASM 路径:', nativeError);
-          const { readFileBytes } = await import('@desktop/fileReader.js');
+          const { readFileBytes } = await import('../infrastructure/native/fileReader.js');
+          if (!scope.isCurrent()) return { status: 'cancelled' };
           showLoading('正在读取 GIM 文件...');
           const endRead = perfBegin(
             '冷启动：读取 GIM 原始文件（WASM 回退）',
             undefined,
             perfSession,
           );
-          const bytes = sourceBuffer ?? (await readFileBytes(nativeFilePath));
+          const bytes = sourceBuffer ?? (await readFileBytes(nativeFilePath, scope.isCurrent));
           if (!state.isCurrentSession(session)) return { status: 'cancelled' };
           const observed = inspectGimSourceBuffer(source.fileName, bytes);
           assertGimSourceMagicStable(source.magic, observed.magic);
@@ -482,6 +512,7 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
 }
 
 const openRequests = new WeakMap<AppState, symbol>();
+const nativeOpenIntents = new WeakMap<AppState, symbol>();
 function beginOpenRequest(state: AppState): () => boolean {
   const request = Symbol('open');
   openRequests.set(state, request);
@@ -492,10 +523,28 @@ async function openTauriGim(
   state: AppState,
   showMessage: (text: string) => void,
   requestedPath?: string,
-  options: { rethrowError?: boolean } = {},
+  options: { rethrowError?: boolean; recentProjectId?: number } = {},
 ): Promise<void> {
-  const filePath = requestedPath ?? getDevPerformanceFilePath() ?? (await openGimFilePath());
-  if (!filePath) return;
+  const intent = Symbol('native-open');
+  const generation = state.projectGeneration;
+  nativeOpenIntents.set(state, intent);
+  const ownsIntent = () =>
+    nativeOpenIntents.get(state) === intent && state.projectGeneration === generation;
+  let filePath: string | null;
+  try {
+    if (options.recentProjectId !== undefined) {
+      const { authorizeCachedGimProject } =
+        await import('../infrastructure/native/projectFiles.js');
+      if (!ownsIntent()) return;
+      filePath = await authorizeCachedGimProject(options.recentProjectId, ownsIntent);
+    } else {
+      filePath = requestedPath ?? getDevPerformanceFilePath() ?? (await openGimFilePath());
+    }
+  } catch (error) {
+    if (ownsIntent()) throw error;
+    return;
+  }
+  if (!filePath || !ownsIntent()) return;
 
   state.invalidatePendingLoads();
   const requestGeneration = state.projectGeneration;
@@ -511,13 +560,14 @@ async function openTauriGim(
 
   try {
     showLoading('正在读取 GIM 文件信息...');
-    const { getFileInfo, readFileHead } = await import('@desktop/fileReader.js');
+    const { getFileInfo, readFileHead } = await import('../infrastructure/native/fileReader.js');
     const endInfo = perfBegin('冷启动：读取 GIM 文件信息');
-    const info = await getFileInfo(filePath);
+    if (!ownsOpen()) return;
+    const info = await getFileInfo(filePath, ownsOpen);
     if (state.projectGeneration !== requestGeneration) return;
 
     const endHead = perfBegin('冷启动：读取 GIM source header');
-    const head = await readFileHead(filePath);
+    const head = await readFileHead(filePath, undefined, ownsOpen);
     if (state.projectGeneration !== requestGeneration) return;
     endHead(undefined, { bytes: head.byteLength });
 
@@ -662,9 +712,7 @@ export async function openGimProjectFromId(
   projectId: number,
 ): Promise<void> {
   if (!isTauri()) return;
-  const { authorizeCachedGimProject } = await import('@desktop/database.js');
-  const path = await authorizeCachedGimProject(projectId);
-  await openTauriGim(state, showMessage, path);
+  await openTauriGim(state, showMessage, undefined, { recentProjectId: projectId });
 }
 
 /** Path has already been checked against the private native benchmark manifest. */

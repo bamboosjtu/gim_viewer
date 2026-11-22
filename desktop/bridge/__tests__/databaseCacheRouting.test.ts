@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 const invokeTimed = vi.hoisted(() => vi.fn().mockResolvedValue({ valid: false }));
 
-vi.mock('../invokeTimed.js', () => ({ invokeTimed }));
+vi.mock("../../src/infrastructure/native/invokeTimed.js", () => ({ invokeTimed }));
 
 import { validateGimCache } from '../database.js';
 

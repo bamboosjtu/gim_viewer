@@ -1,7 +1,7 @@
 import {expect,it,vi} from 'vitest';
 const mocks=vi.hoisted(()=>({invoke:vi.fn()}));
 vi.mock('../runtime.js',()=>({isTauri:()=>true}));
-vi.mock('../invokeTimed.js',()=>({invokeTimed:mocks.invoke}));
+vi.mock("../../src/infrastructure/native/invokeTimed.js",()=>({invokeTimed:mocks.invoke}));
 import {packDevArtifact,readDevArtifact} from '../devLodCache.js';
 function envelope(paths:string[],corrupt=false):ArrayBuffer {
   const chunks=paths.map(entry=>({path:new TextEncoder().encode(entry),bytes:packDevArtifact(corrupt && entry.endsWith('broken') ? 'wrong' : entry.slice(entry.indexOf('/')+1),{value:entry})}));

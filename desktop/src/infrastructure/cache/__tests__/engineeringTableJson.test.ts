@@ -1,8 +1,9 @@
+import { releaseOwnedBytes } from '../../../shared/ownedBytes.js';
 // @vitest-environment node
 import assert from 'node:assert/strict';
 import {expect,it} from 'vitest';
 import {packEngineeringSource,unpackEngineeringSourceAsync} from '../engineeringSourceCodec.js';
-import {engineeringTableChunks,parseEngineeringTable,releaseEngineeringBytes,stringifyEngineeringTable} from '../engineeringTableJson.js';
+import {engineeringTableChunks,parseEngineeringTable,stringifyEngineeringTable} from '../engineeringTableJson.js';
 
 it('keeps the exact canonical bytes and shared references across bounded UTF-8 batches',async()=>{
   const shared={name:'中文😀 \\ " ],"nodes":[ and \n',value:null};
@@ -42,10 +43,10 @@ it('streams the exact bytes while releasing owned encoded rows and enforcing the
 });
 it('releases only full owned buffers and keeps borrowed views and legacy allocations valid',()=>{
   const owned=new Uint8Array([1,2,3]),buffer=owned.buffer;
-  releaseEngineeringBytes(owned);expect(buffer.byteLength).toBe(0);
-  const shared=new Uint8Array([4,5,6]);releaseEngineeringBytes(shared.subarray(1));expect([...shared]).toEqual([4,5,6]);
+  releaseOwnedBytes(owned);expect(buffer.byteLength).toBe(0);
+  const shared=new Uint8Array([4,5,6]);releaseOwnedBytes(shared.subarray(1));expect([...shared]).toEqual([4,5,6]);
   const legacy=new Uint8Array([7,8]);Object.defineProperty(legacy.buffer,'transfer',{value:undefined});
-  releaseEngineeringBytes(legacy);expect([...legacy]).toEqual([7,8]);
+  releaseOwnedBytes(legacy);expect([...legacy]).toEqual([7,8]);
 });
 it('rejects byte-budget overflow, malformed tails and an obsolete session without publishing a partial table',async()=>{
   const table=packEngineeringSource(Array.from({length:5000},(_,i)=>({i})));let current=true;

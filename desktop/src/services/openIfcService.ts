@@ -20,15 +20,18 @@ export async function openIfcWithDialog(
   presentation.setBusy('ifc', true);
   try {
     showLoading('正在加载 3D 引擎...');
-    const [{ getViewerRuntimeWithUI }, { ensureEngineReady, loadStandaloneIfc }, { fitCameraToScene }] =
-      await Promise.all([
-        import('./viewerUIBinding.js'),
-        import('../viewer/ifcLoader.js'),
-        import('../viewer/camera.js'),
-      ]);
+    const [
+      { getViewerRuntimeWithUI },
+      { ensureEngineReady, loadStandaloneIfc },
+      { fitCameraToScene },
+    ] = await Promise.all([
+      import('./viewerUIBinding.js'),
+      import('../viewer/ifcLoader.js'),
+      import('../viewer/camera.js'),
+    ]);
     const runtime = await getViewerRuntimeWithUI(state, showMessage);
     if (!state.isCurrentSession(session)) return;
-    const reader = native ? await import('@desktop/fileReader.js') : undefined;
+    const reader = native ? await import('../infrastructure/native/fileReader.js') : undefined;
     await ensureEngineReady(runtime.ctx, state, runtime.modelCallbacks);
     if (!state.isCurrentSession(session)) return;
     const sources = native
@@ -39,7 +42,10 @@ export async function openIfcWithDialog(
             label: path,
             progressLabel: name,
             key: path,
-            read: async () => new Uint8Array(await reader!.readFileBytes(path)),
+            read: async () =>
+              new Uint8Array(
+                await reader!.readFileBytes(path, () => state.isCurrentSession(session)),
+              ),
           };
         })
       : (files ?? []).map((file) => ({

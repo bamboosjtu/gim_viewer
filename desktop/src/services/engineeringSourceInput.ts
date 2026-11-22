@@ -1,5 +1,5 @@
 import { isByteFile, copyByteFileBytes } from '@desktop/byteFile.js';
-import { batchReadCachedFiles } from '@desktop/database.js';
+import { batchReadCachedFiles } from '../infrastructure/native/projectFiles.js';
 import {
   ENGINEERING_SOURCE_BATCH_BYTES,
   ENGINEERING_SOURCE_BATCH_FILES,

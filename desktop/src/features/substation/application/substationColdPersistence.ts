@@ -82,6 +82,7 @@ export function prepareSubstationColdPersistence({
       persistProjectId != null
         ? (async () => {
             const projectId = persistProjectId;
+            const fileOwner = { sourceSha256: session.sourceSha256, isCurrent: scope.isCurrent };
             // Early session sources are never a published source cache or a v26 receipt.
             await scope.read(async () => preExtracted.sourceMaterialization);
             if (!scope.isCurrent()) return;
@@ -105,10 +106,10 @@ export function prepareSubstationColdPersistence({
               showLoadingBeforeInteractive(state, '正在缓存 IFC 文件...');
               try {
                 const { cacheIfcEntries } = await scope.read(
-                  async () => import('../../../services/gimExtractedCacheService.js'),
+                  async () => import('../../../infrastructure/native/archiveFilePersistence.js'),
                 );
                 const cacheResult = await scope.read(async () =>
-                  cacheIfcEntries(projectId, filesForPersist, ifcEntriesForPersist),
+                  cacheIfcEntries(projectId, filesForPersist, ifcEntriesForPersist, fileOwner),
                 );
                 if (!scope.isCurrent()) return;
                 localCachePathMap = cacheResult.pathMap;
@@ -121,6 +122,7 @@ export function prepareSubstationColdPersistence({
                   logger.warn('[Tauri] 部分 IFC 缓存失败:', cacheResult.errors);
                 }
               } catch (err) {
+                if (!scope.isCurrent()) return;
                 logger.error('[Tauri] IFC 文件缓存失败:', err);
               }
 
@@ -130,10 +132,10 @@ export function prepareSubstationColdPersistence({
                 showLoadingBeforeInteractive(state, '正在缓存 GIM 来源文件...');
                 try {
                   const { cacheExtractedFiles } = await scope.read(
-                    async () => import('../../../services/gimExtractedCacheService.js'),
+                    async () => import('../../../infrastructure/native/archiveFilePersistence.js'),
                   );
                   const geoCacheResult = await scope.read(async () =>
-                    cacheExtractedFiles(projectId, filesForPersist, localCachePathMap),
+                    cacheExtractedFiles(projectId, filesForPersist, fileOwner, localCachePathMap),
                   );
                   if (!scope.isCurrent()) return;
                   debugLog(DEBUG_GIM_CACHE, '[Tauri] 来源文件缓存结果:', {
@@ -146,6 +148,7 @@ export function prepareSubstationColdPersistence({
                     logger.warn('[Tauri] 部分来源文件缓存失败:', geoCacheResult.errors);
                   }
                 } catch (err) {
+                  if (!scope.isCurrent()) return;
                   logger.error('[Tauri] 来源文件缓存失败:', err);
                 }
               }

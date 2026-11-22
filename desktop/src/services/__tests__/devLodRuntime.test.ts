@@ -68,7 +68,7 @@ it('owns a pending DEV startup in its project scope and leaves a replacement run
 
 it('uses a valid warm template without rehashing bytes, reading sources or recompiling',async()=>{
   const {webcrypto}=await import('node:crypto');vi.stubGlobal('crypto',webcrypto);
-  const glb=await import('../glbCacheService.js'),database=await import('@desktop/database.js');
+  const glb=await import('../glbCacheService.js'),database=await import('../../infrastructure/native/projectFiles.js');
   const scene=new THREE.Group(),geometry=new THREE.BoxGeometry(1,1,1);geometry.computeBoundingBox();
   scene.add(new THREE.Mesh(geometry,new THREE.MeshBasicMaterial()));
   const parse=vi.spyOn(glb,'parseDevGlbAsset').mockResolvedValue({scene,animations:[]});
@@ -249,7 +249,7 @@ it.each([2,3,4])('materializes only exact source lengths in targeted recovery (r
   const {internal}=fixture();internal.session.projectId=7;internal.worker=createDevWorkerMock();
   const original={size:3,name:'a.dev',text:vi.fn().mockResolvedValue('SOLIDMODELS.NUM=0')} as unknown as File;
   const files=new Map([['DEV/a.dev',original]]);internal.sources.sourceFiles=files;
-  const database=await import('@desktop/database.js');
+  const database=await import('../../infrastructure/native/projectFiles.js');
   const read=vi.spyOn(database,'batchReadCachedFiles').mockResolvedValue(new Map([['DEV/a.dev',new Uint8Array(length).fill(32)]]));
   try{
     await internal.prepareMissingTemplateSources('DEV/a.dev');
@@ -269,7 +269,7 @@ it.each([false, true])('batches reachable lazy sources for a cache miss (cold=%s
   internal.sources.sourceFiles.set('MOD/unrelated.mod',{size:10});
   const scans=vi.spyOn(internal.sources.sourceFiles,'keys');
   internal.worker=createDevWorkerMock();
-  const database=await import('@desktop/database.js');
+  const database=await import('../../infrastructure/native/projectFiles.js');
   const read=vi.spyOn(database,'batchReadCachedFiles').mockImplementation(async(_id,paths)=>
     new Map(paths.map(path=>[path,new TextEncoder().encode(texts.get(path)!)])));
   try {

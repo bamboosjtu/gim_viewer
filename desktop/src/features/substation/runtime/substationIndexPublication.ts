@@ -176,8 +176,8 @@ async function prepareSourceTexts(
   onPhase?: (phase: string, counts?: Record<string, number>) => void,
 ): Promise<Map<string, File> | null> {
   onPhase?.('sourceTextStart');
-  const { isDiskBackedFile } = await import('@desktop/gimExtract.js');
-  const { batchReadCachedFiles } = await import('@desktop/database.js');
+  const { isDiskBackedFile } = await import('../../../infrastructure/native/gimExtract.js');
+  const { batchReadCachedFiles } = await import('../../../infrastructure/native/projectFiles.js');
   const prepared = new Map(input.files);
   // CBM 复用树上的 rawProperties，DEV/FAM 的属性由收集器各解析一次。
   const candidates = [...input.files].filter(([path]) => /\.(dev|fam)$/i.test(path));

@@ -10,9 +10,9 @@ import { GIM_LIMITS } from '../shared/gimLimits.js';
  */
 
 import { readSubstationParseCopy, type ParseCopyReceipt } from '@desktop/substationParseCopy.js';
-import { batchReadCachedFiles } from '@desktop/database.js';
-import { isDiskBackedFile, isSemanticPackBackedFile } from '@desktop/gimExtract.js';
-import {createByteFile} from '@desktop/byteFile.js';
+import { batchReadCachedFiles } from '../infrastructure/native/projectFiles.js';
+import { isDiskBackedFile, isSemanticPackBackedFile } from '../infrastructure/native/gimExtract.js';
+import { createByteFile } from '@desktop/byteFile.js';
 
 /** 单个条目的上限；substation 的 CBM/DEV/FAM/PHM/小 MOD 均远低于该值。 */
 export const NATIVE_SMALL_FILE_MAX_BYTES = GIM_LIMITS.smallTextBytes;
@@ -57,14 +57,19 @@ function toFile(bytes: Uint8Array, path: string, original: File): File {
   const name = path.split(/[\\/]/).pop() || path;
   // Keep bounded IPC views instead of registering thousands of tiny browser
   // Blobs and routing each semantic read through Blob.arrayBuffer.
-  const owned=bytes.buffer instanceof ArrayBuffer?bytes as Uint8Array<ArrayBuffer>:bytes.slice()as Uint8Array<ArrayBuffer>;
+  const owned =
+    bytes.buffer instanceof ArrayBuffer ? (bytes as Uint8Array<ArrayBuffer>) : bytes.slice();
   return createByteFile(owned, name, {
     type: original.type || 'application/octet-stream',
     lastModified: original.lastModified || 0,
   });
 }
 
-function chunkCandidates(candidates: Candidate[], maxFiles: number, maxBytes: number): Candidate[][] {
+function chunkCandidates(
+  candidates: Candidate[],
+  maxFiles: number,
+  maxBytes: number,
+): Candidate[][] {
   const chunks: Candidate[][] = [];
   let current: Candidate[] = [];
   let currentBytes = 0;
@@ -126,24 +131,45 @@ export async function hydrateNativeSmallFiles(
     // 物化到全局 Map，避免这条修复重新引入内存峰值。
     if (extensionOf(path) === 'ifc') continue;
     if (!allowed.has(extensionOf(path))) continue;
-    if (!Number.isFinite(file.size) || file.size < 0 || file.size > NATIVE_SMALL_FILE_MAX_BYTES) continue;
+    if (!Number.isFinite(file.size) || file.size < 0 || file.size > NATIVE_SMALL_FILE_MAX_BYTES)
+      continue;
     requestedCandidates.push({ path, file });
   }
 
   if (options.parseCopy) {
     try {
       const packed = await readSubstationParseCopy(projectId, options.parseCopy, files);
-      if (!isCurrent()) return { files: output, requested: requestedCandidates.length, hydrated: 0, bytes: 0, batches: 1, misses: 0, cancelled: true };
+      if (!isCurrent())
+        return {
+          files: output,
+          requested: requestedCandidates.length,
+          hydrated: 0,
+          bytes: 0,
+          batches: 1,
+          misses: 0,
+          cancelled: true,
+        };
       // All-or-fallback: never turn a partial acceleration copy into parser inputs.
-      if (!requestedCandidates.every(candidate => packed.has(candidate.path))) throw Error('parse copy missing input');
+      if (!requestedCandidates.every((candidate) => packed.has(candidate.path)))
+        throw Error('parse copy missing input');
       let bytes = 0;
       for (const candidate of requestedCandidates) {
         const value = packed.get(candidate.path)!;
         output.set(candidate.path, toFile(value, candidate.path, candidate.file));
         bytes += value.byteLength;
       }
-      return { files: output, requested: requestedCandidates.length, hydrated: requestedCandidates.length, bytes, batches: 1, misses: 0, cancelled: false };
-    } catch { /* Acceleration copy is optional; independent sources remain readable. */ }
+      return {
+        files: output,
+        requested: requestedCandidates.length,
+        hydrated: requestedCandidates.length,
+        bytes,
+        batches: 1,
+        misses: 0,
+        cancelled: false,
+      };
+    } catch {
+      /* Acceleration copy is optional; independent sources remain readable. */
+    }
   }
 
   const maxFiles = Math.max(1, Math.floor(options.maxFiles ?? NATIVE_SMALL_FILE_BATCH_MAX_FILES));
@@ -155,18 +181,37 @@ export async function hydrateNativeSmallFiles(
 
   for (const chunk of chunkCandidates(requestedCandidates, maxFiles, maxBytes)) {
     if (!isCurrent()) {
-      return { files: output, requested: requestedCandidates.length, hydrated, bytes, batches, misses, cancelled: true };
+      return {
+        files: output,
+        requested: requestedCandidates.length,
+        hydrated,
+        bytes,
+        batches,
+        misses,
+        cancelled: true,
+      };
     }
     batches += 1;
     let result: Map<string, Uint8Array | null>;
     try {
-      result = await batchReadCachedFiles(projectId, chunk.map((candidate) => candidate.path));
+      result = await batchReadCachedFiles(
+        projectId,
+        chunk.map((candidate) => candidate.path),
+      );
     } catch {
       // 保留 lazy source；后续解析仍可通过 read_cached_entry 正常降级。
       continue;
     }
     if (!isCurrent()) {
-      return { files: output, requested: requestedCandidates.length, hydrated, bytes, batches, misses, cancelled: true };
+      return {
+        files: output,
+        requested: requestedCandidates.length,
+        hydrated,
+        bytes,
+        batches,
+        misses,
+        cancelled: true,
+      };
     }
     const normalized = new Map<string, Uint8Array | null>();
     for (const [path, value] of result) {
@@ -197,4 +242,3 @@ export async function hydrateNativeSmallFiles(
     cancelled: false,
   };
 }
-

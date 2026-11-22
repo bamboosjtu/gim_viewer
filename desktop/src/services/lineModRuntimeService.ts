@@ -58,8 +58,8 @@ function getEntryIndex(runtime: LineModSession): Promise<EntryIndex> {
       if (files) return getFileEntryIndex(files);
       const { projectId, sourceSha256 } = scope.session;
       if (projectId == null) return createEntryIndex([]);
-      const { readExtractionManifest } = await import('@desktop/gimExtract.js');
-      const manifest = await scope.read(() => readExtractionManifest(projectId));
+      const { readExtractionManifest } = await import('../infrastructure/native/gimExtract.js');
+      const manifest = await scope.read(() => readExtractionManifest(projectId, scope.isCurrent));
       if (!manifest || (sourceSha256 && manifest.source_sha256 !== sourceSha256)) {
         throw new Error('线路来源清单不可用，请重新打开工程');
       }
@@ -82,8 +82,8 @@ async function readText(runtime: LineModSession, path: string): Promise<string |
     }
     const { projectId } = scope.session;
     if (projectId == null) return null;
-    const { readCachedEntry } = await import('@desktop/database.js');
-    const bytes = await scope.read(() => readCachedEntry(projectId, path));
+    const { readCachedEntry } = await import('../infrastructure/native/projectFiles.js');
+    const bytes = await scope.read(() => readCachedEntry(projectId, path, scope.isCurrent));
     return new TextDecoder().decode(bytes);
   });
 }

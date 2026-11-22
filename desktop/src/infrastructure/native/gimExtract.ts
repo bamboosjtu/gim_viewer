@@ -1,9 +1,20 @@
-import {DESKTOP_COMMANDS} from './contracts.js';
-import type {NativeExtractionProfile, NativeExtractionEntryTiming, ExtractManifest, ExtractionManifest} from './contracts.js';
-export type {NativeExtractionProfile, NativeExtractionEntryTiming, ExtractManifestEntry, ExtractManifest, ExtractionManifest} from './contracts.js';
-import { GIM_LIMITS } from '../src/shared/gimLimits.js';
-import {GimError} from './contracts.js';
-import type { ParseCopyReceipt } from './substationParseCopy.js';
+import { DESKTOP_COMMANDS } from '@desktop/contracts.js';
+import type {
+  NativeExtractionProfile,
+  NativeExtractionEntryTiming,
+  ExtractManifest,
+  ExtractionManifest,
+} from '@desktop/contracts.js';
+export type {
+  NativeExtractionProfile,
+  NativeExtractionEntryTiming,
+  ExtractManifestEntry,
+  ExtractManifest,
+  ExtractionManifest,
+} from '@desktop/contracts.js';
+import { GIM_LIMITS } from '../../shared/gimLimits.js';
+import { GimError } from '@desktop/contracts.js';
+import type { ParseCopyReceipt } from '@desktop/substationParseCopy.js';
 /**
  * 原生解压 Tauri 桥接（acc-plan P0-2）。
  *
@@ -14,7 +25,7 @@ import type { ParseCopyReceipt } from './substationParseCopy.js';
  * 浏览器模式或原生解压失败时由调用方回退 libarchive.js WASM 路径。
  */
 
-import { invokeTimed } from './invokeTimed.js';
+import { invokeTimed, requireNativeOwner, type NativeOwner } from './invokeTimed.js';
 
 export interface NativeExtractionResult {
   /** GIM 魔数（GIMPKGS/GIMPKGT） */
@@ -39,15 +50,9 @@ export interface NativeExtractionResult {
   semanticCheckpoint?: Record<string, number | boolean>;
 }
 
-
-
-
-
 /** manifest 条目 */
 
-
 /** manifest 结构 */
-
 
 /**
  * 磁盘条目的最小 File 兼容实现。
@@ -67,24 +72,34 @@ class DiskBackedBlob {
     private readonly start = 0,
     private readonly end = size,
     type = '',
+    private readonly isCurrent?: NativeOwner,
   ) {
     this.size = Math.max(0, this.end - this.start);
     this.type = type;
   }
 
   async arrayBuffer(): Promise<ArrayBuffer> {
+    requireNativeOwner(this.isCurrent);
     // 空切片不需要触发 IPC；这也让不存在/已清理的源条目仍保持标准
     // Blob.slice() 的空结果语义。
     if (this.size === 0) return new ArrayBuffer(0);
-    const { readCachedEntry } = await import('./database.js');
-    const bytes = await readCachedEntry(this.projectId, this.entryPath);
+    const { readCachedEntry } = await import('./projectFiles.js');
+    const bytes = await readCachedEntry(this.projectId, this.entryPath, this.isCurrent);
+    requireNativeOwner(this.isCurrent);
     if (bytes.byteLength < this.end) {
-      throw new Error(`缓存条目长度不足: ${this.entryPath} (expected >= ${this.end}, actual ${bytes.byteLength})`);
+      throw new Error(
+        `缓存条目长度不足: ${this.entryPath} (expected >= ${this.end}, actual ${bytes.byteLength})`,
+      );
     }
     const view = bytes.subarray(this.start, this.end);
     // The IPC response is freshly owned. A full, exact view can be returned
     // directly; slices still need their own precisely bounded allocation.
-    if (view.buffer instanceof ArrayBuffer && view.byteOffset === 0 && view.byteLength === view.buffer.byteLength) return view.buffer;
+    if (
+      view.buffer instanceof ArrayBuffer &&
+      view.byteOffset === 0 &&
+      view.byteLength === view.buffer.byteLength
+    )
+      return view.buffer;
     return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer;
   }
 
@@ -93,11 +108,10 @@ class DiskBackedBlob {
   }
 
   stream(): ReadableStream<Uint8Array> {
-    const self = this;
     return new ReadableStream<Uint8Array>({
-      async start(controller) {
+      start: async (controller) => {
         try {
-          controller.enqueue(new Uint8Array(await self.arrayBuffer()));
+          controller.enqueue(new Uint8Array(await this.arrayBuffer()));
           controller.close();
         } catch (error) {
           controller.error(error);
@@ -121,6 +135,7 @@ class DiskBackedBlob {
       this.start + (empty ? relativeStart : boundedStart),
       this.start + (empty ? relativeStart : boundedEnd),
       contentType,
+      this.isCurrent,
     ) as unknown as Blob;
   }
 }
@@ -134,8 +149,15 @@ class DiskBackedFile extends DiskBackedBlob {
 
   readonly __gimSemanticPackBacked: boolean;
 
-  constructor(projectId: number, entryPath: string, size: number, name: string, semanticPackBacked = false) {
-    super(projectId, entryPath, size);
+  constructor(
+    projectId: number,
+    entryPath: string,
+    size: number,
+    name: string,
+    semanticPackBacked = false,
+    isCurrent?: NativeOwner,
+  ) {
+    super(projectId, entryPath, size, 0, size, '', isCurrent);
     this.name = name;
     this.__gimSemanticPackBacked = semanticPackBacked;
   }
@@ -150,9 +172,17 @@ export function createDiskBackedFile(
   entryPath: string,
   size: number,
   semanticPackBacked = false,
+  isCurrent?: NativeOwner,
 ): File {
   const name = entryPath.split(/[\\/]/).pop() || entryPath;
-  return new DiskBackedFile(projectId, entryPath, size, name, semanticPackBacked) as unknown as File;
+  return new DiskBackedFile(
+    projectId,
+    entryPath,
+    size,
+    name,
+    semanticPackBacked,
+    isCurrent,
+  ) as unknown as File;
 }
 
 /** 判断条目是否由原生解压落盘并按需从缓存读取。 */
@@ -162,7 +192,10 @@ export function isDiskBackedFile(value: File | undefined): boolean {
 
 /** 判断 native manifest 条目是否由线路 semantic pack 支撑。 */
 export function isSemanticPackBackedFile(value: File | undefined): boolean {
-  return Boolean(value && (value as File & { __gimSemanticPackBacked?: boolean }).__gimSemanticPackBacked === true);
+  return Boolean(
+    value &&
+    (value as File & { __gimSemanticPackBacked?: boolean }).__gimSemanticPackBacked === true,
+  );
 }
 
 const MAX_NATIVE_ENTRIES = GIM_LIMITS.maxEntries;
@@ -173,10 +206,14 @@ const UTF8_ENCODER = new TextEncoder();
 
 function assertSafeEntryPath(path: string): void {
   const normalized = path.replace(/\\/g, '/');
-  if (!normalized || UTF8_ENCODER.encode(normalized).byteLength > MAX_NATIVE_PATH_BYTES
-    || normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized)
-    || normalized.split('/').some((part) => !part || part === '.' || part === '..')) {
-    throw new GimError('INVALID_PATH',`原生解压条目路径不安全: ${path}`);
+  if (
+    !normalized ||
+    UTF8_ENCODER.encode(normalized).byteLength > MAX_NATIVE_PATH_BYTES ||
+    normalized.startsWith('/') ||
+    /^[A-Za-z]:\//.test(normalized) ||
+    normalized.split('/').some((part) => !part || part === '.' || part === '..')
+  ) {
+    throw new GimError('INVALID_PATH', `原生解压条目路径不安全: ${path}`);
   }
 }
 
@@ -188,7 +225,7 @@ function assertSafeEntryPath(path: string): void {
  */
 export function parseExtractionPayload(
   buf: ArrayBuffer,
-  options: { cacheProjectId?: number } = {},
+  options: { cacheProjectId?: number; isCurrent?: NativeOwner } = {},
 ): Omit<NativeExtractionResult, 'files'> & {
   files: Map<string, File>;
 } {
@@ -197,12 +234,18 @@ export function parseExtractionPayload(
   const manifestLen = dv.getUint32(0, true);
   const base = 4 + manifestLen;
   if (base > buf.byteLength) throw new Error('manifest 长度越界');
-  const manifest: ExtractManifest = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, manifestLen)));
-  if (typeof manifest.magic !== 'string' || !['GIMPKGS','GIMPKGT','7z','zip'].includes(manifest.magic)) {
+  const manifest = JSON.parse(
+    new TextDecoder().decode(new Uint8Array(buf, 4, manifestLen)),
+  ) as ExtractManifest;
+  if (
+    typeof manifest.magic !== 'string' ||
+    !['GIMPKGS', 'GIMPKGT', '7z', 'zip'].includes(manifest.magic)
+  ) {
     throw new Error('manifest GIM 魔数无效');
   }
   if (!Array.isArray(manifest.entries)) throw new Error('manifest 缺少 entries');
-  if (manifest.entries.length > MAX_NATIVE_ENTRIES) throw new GimError('RESOURCE_LIMIT',`manifest 条目数超过 ${MAX_NATIVE_ENTRIES}`);
+  if (manifest.entries.length > MAX_NATIVE_ENTRIES)
+    throw new GimError('RESOURCE_LIMIT', `manifest 条目数超过 ${MAX_NATIVE_ENTRIES}`);
 
   const files = new Map<string, File>();
   const cachePaths = new Map<string, string>();
@@ -211,8 +254,10 @@ export function parseExtractionPayload(
   let totalBytes = 0;
   for (const e of manifest.entries) {
     assertSafeEntryPath(e.path);
-    if (!Number.isSafeInteger(e.offset) || !Number.isSafeInteger(e.size)) throw new Error(`条目 ${e.path} 大小无效或超限`);
-    if (e.size > MAX_NATIVE_FILE_BYTES) throw new GimError('RESOURCE_LIMIT',`条目 ${e.path} 大小无效或超限`);
+    if (!Number.isSafeInteger(e.offset) || !Number.isSafeInteger(e.size))
+      throw new Error(`条目 ${e.path} 大小无效或超限`);
+    if (e.size > MAX_NATIVE_FILE_BYTES)
+      throw new GimError('RESOURCE_LIMIT', `条目 ${e.path} 大小无效或超限`);
     if (e.offset < 0 || e.size < 0 || e.offset > Number.MAX_SAFE_INTEGER - e.size) {
       throw new Error(`条目 ${e.path} 数据越界`);
     }
@@ -224,7 +269,7 @@ export function parseExtractionPayload(
     }
     totalBytes += e.size;
     if (!Number.isSafeInteger(totalBytes) || totalBytes > MAX_NATIVE_TOTAL_BYTES) {
-      throw new GimError('RESOURCE_LIMIT',`原生解压总大小超过 ${MAX_NATIVE_TOTAL_BYTES}`);
+      throw new GimError('RESOURCE_LIMIT', `原生解压总大小超过 ${MAX_NATIVE_TOTAL_BYTES}`);
     }
     const name = e.path.split('/').pop() || e.path;
     if (hasInlineBlob || options.cacheProjectId == null) {
@@ -236,11 +281,12 @@ export function parseExtractionPayload(
       files.set(
         e.path,
         new DiskBackedFile(
-          options.cacheProjectId!,
+          options.cacheProjectId,
           e.path,
           e.size,
           name,
           e.semantic_pack_offset !== undefined,
+          options.isCurrent,
         ) as unknown as File,
       );
     }
@@ -273,22 +319,42 @@ export function parseExtractionPayload(
 export async function extractGimArchiveNative(
   filePath: string,
   projectId?: number,
-  experiments: { traceEntries?: boolean; substationParseCopy?: boolean; expectedSourceSha256?: string } = {},
+  experiments: {
+    traceEntries?: boolean;
+    substationParseCopy?: boolean;
+    expectedSourceSha256?: string;
+  } = {},
+  isCurrent?: NativeOwner,
 ): Promise<NativeExtractionResult> {
-  const buf = await invokeTimed<ArrayBuffer>(DESKTOP_COMMANDS.extract_gim_archive, { filePath, projectId, ...experiments });
-  try {return parseExtractionPayload(buf, { cacheProjectId: projectId });}
-  catch(error){
-    if(error instanceof GimError)throw error;
-    throw new GimError('RESPONSE_INVALID',error instanceof Error?error.message:'原生解压响应无效');
+  const buf = await invokeTimed<ArrayBuffer>(
+    DESKTOP_COMMANDS.extract_gim_archive,
+    { filePath, projectId, ...experiments },
+    { isCurrent },
+  );
+  requireNativeOwner(isCurrent);
+  try {
+    return parseExtractionPayload(buf, { cacheProjectId: projectId, isCurrent });
+  } catch (error) {
+    if (error instanceof GimError) throw error;
+    throw new GimError(
+      'RESPONSE_INVALID',
+      error instanceof Error ? error.message : '原生解压响应无效',
+    );
   }
 }
 
 /** 上次成功解压留下的清单（索引未提交就切换工程时复用已解压文件）。 */
 
-
-export async function readExtractionManifest(projectId: number): Promise<ExtractionManifest | null> {
-  const result = await invokeTimed<ExtractionManifest | null>(DESKTOP_COMMANDS.read_extraction_manifest, { projectId });
-  if (!result || typeof result.source_sha256 !== 'string' || !Array.isArray(result.entries)) return null;
+export async function readExtractionManifest(
+  projectId: number,
+  isCurrent?: NativeOwner,
+): Promise<ExtractionManifest | null> {
+  const result = await invokeTimed<ExtractionManifest | null>(
+    DESKTOP_COMMANDS.read_extraction_manifest,
+    { projectId },
+    { isCurrent },
+  );
+  if (!result || typeof result.source_sha256 !== 'string' || !Array.isArray(result.entries))
+    return null;
   return result;
 }
-

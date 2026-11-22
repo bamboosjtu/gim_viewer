@@ -3,7 +3,7 @@ import {AppState} from '../../app/state.js';
 import {prepareConnectionOwnership} from '../connectionOwnershipService.js';
 const mocks=vi.hoisted(()=>({read:vi.fn()}));
 vi.mock('@desktop/runtime.js',()=>({isTauri:()=>true}));
-vi.mock('@desktop/database.js',()=>({batchReadCachedFiles:mocks.read}));
+vi.mock('../../infrastructure/native/projectFiles.js', () => ({ batchReadCachedFiles:mocks.read }));
 const uuid='12345678-1234-1234-1234-123456789abc',port='87654321-4321-4321-4321-cba987654321';
 const path=`MOD/${uuid}.gl`,xml=`<Device><Entities><Entity ID="4"><GimGeCableConcentration ConnectGuid="${port}"/></Entity></Entities></Device>`;
 function setup(){

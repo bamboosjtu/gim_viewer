@@ -8,7 +8,7 @@ import type { SpatialWorkerRequest, SpatialWorkerResponse } from '../substationS
 import { isTauri } from '@desktop/runtime.js';
 import{encodeSubstationSpatialCache}from'../../../../../services/substationSpatialCodec.js';
 vi.mock('@desktop/runtime.js',()=>({isTauri:vi.fn(()=>false)}));
-vi.mock('@desktop/database.js',()=>({readCachedEntry:vi.fn(),writeCacheFile:vi.fn()}));
+vi.mock('../../../../../infrastructure/native/projectFiles.js', () => ({ readCachedEntry:vi.fn(), writeCacheFile:vi.fn() }));
 
 class SpatialWorker {
   static instances:SpatialWorker[]=[];

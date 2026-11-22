@@ -9,12 +9,9 @@ import {
   validateSubstationSpatialSnapshot,
 } from '../../../../services/substationSpatialCodec.js';
 import {readSubstationSpatialSemanticCache,writeSubstationSpatialSemanticCache} from '../substationSpatialSemanticCache.js';
-import { readCachedEntry, writeCacheFile } from '@desktop/database.js';
+import { readCachedEntry, writeCacheFile } from '../../../../infrastructure/native/projectFiles.js';
 
-vi.mock('@desktop/database.js', () => ({
-  readCachedEntry: vi.fn(),
-  writeCacheFile: vi.fn(),
-}));
+vi.mock('../../../../infrastructure/native/projectFiles.js', () => ({ readCachedEntry: vi.fn(), writeCacheFile: vi.fn() }));
 
 const readCachedEntryMock = vi.mocked(readCachedEntry);
 const writeCacheFileMock = vi.mocked(writeCacheFile);

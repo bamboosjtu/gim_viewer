@@ -190,10 +190,12 @@ test('checker keeps Worker infrastructure between host orchestration and worker-
   assert.match(rejected.stderr, /forbidden import .*engineeringService\.js/);
 });
 
-test('checker allows the cache store to use its native port and keeps codecs usable in Workers', () => {
+test('checker keeps the native port outside domain code and cache codecs usable in Workers', () => {
   const { files, run } = fixture();
   files('desktop/src/infrastructure/cache/engineeringCacheStore.ts',
-    "import { writeCacheFile } from '@desktop/database.js';");
+    "import { writeCacheFile } from '../native/projectFiles.js';");
+  files('desktop/src/infrastructure/native/invokeTimed.ts',
+    "import { invoke } from '@tauri-apps/api/core';");
   files('desktop/src/infrastructure/cache/engineeringCacheCodec.ts',
     "import { SPATIAL_PROJECTION_POLICY } from '../../services/projections/compositionSpatial.js';");
   assert.equal(run().status, 0);
@@ -201,11 +203,18 @@ test('checker allows the cache store to use its native port and keeps codecs usa
     "import '@desktop/database.js'; import '../workers/engineeringWorkerClient.js';");
   files('desktop/src/gim/source.ts',
     "import '../infrastructure/cache/engineeringCacheStore.js';");
+  files('desktop/src/gim/native.ts',
+    "import '../infrastructure/native/projectFiles.js';");
+  files('desktop/src/infrastructure/native/projectFiles.ts',
+    "import '../workers/engineeringWorkerClient.js'; import '@tauri-apps/api/core';");
   const rejected = run();
   assert.equal(rejected.status, 1);
   assert.match(rejected.stderr, /forbidden import @desktop\/database\.js/);
   assert.match(rejected.stderr, /Cache infrastructure cannot depend on feature, Worker or rendering runtimes/);
   assert.match(rejected.stderr, /Engineering cache belongs to host infrastructure/);
+  assert.match(rejected.stderr, /Native project files belong to host orchestration/);
+  assert.match(rejected.stderr, /Native project files cannot depend on application runtimes/);
+  assert.match(rejected.stderr, /forbidden import @tauri-apps\/api\/core/);
 });
 
 test('checker rejects eager renderer dependencies behind an opening helper',()=>{

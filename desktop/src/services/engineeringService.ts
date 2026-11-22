@@ -16,7 +16,7 @@ import {
   SUBSTATION_SPATIAL_SEMANTIC_VERSION,
 } from './substationSpatialCodec.js';
 import { isTauri } from '@desktop/runtime.js';
-import { readCachedEntry } from '@desktop/database.js';
+import { readCachedEntry } from '../infrastructure/native/projectFiles.js';
 import { perfMark, perfMarkProductMoment } from '../utils/perfTimings.js';
 import type { SourceGeometryOccurrenceCatalog } from '../gim/engineering/geometryOccurrences.js';
 import { installCompositionProjection } from './compositionProjectionService.js';

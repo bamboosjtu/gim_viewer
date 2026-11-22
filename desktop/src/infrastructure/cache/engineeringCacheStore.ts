@@ -1,4 +1,5 @@
-import { readCachedEntry, writeCacheFile } from '@desktop/database.js';
+import { releaseOwnedBytes } from '../../shared/ownedBytes.js';
+import { readCachedEntry, writeCacheFile } from '../native/projectFiles.js';
 import { StaleSessionError } from '../../shared/sessionScope.js';
 import {
   engineeringCacheEntry,
@@ -6,7 +7,6 @@ import {
   type EngineeringCacheIdentity,
   type EngineeringCacheResult,
 } from './engineeringCacheCodec.js';
-import { releaseEngineeringBytes } from './engineeringTableJson.js';
 import { decodeSourceGeometryCache, sourceGeometryCacheEntry } from './sourceGeometryCache.js';
 
 type WriteResult = { status: 'saved' } | { status: 'disabled' | 'error'; error: string };
@@ -61,19 +61,23 @@ export class EngineeringCacheStore {
   async readGeometry(entries: ReadonlyMap<string, unknown>) {
     this.requireCurrent();
     const { sourceSha256 } = this.identity;
-    const bytes = await readCachedEntry(this.projectId, sourceGeometryCacheEntry(sourceSha256));
+    const bytes = await readCachedEntry(
+      this.projectId,
+      sourceGeometryCacheEntry(sourceSha256),
+      this.isCurrent,
+    );
     try {
       this.requireCurrent();
       return decodeSourceGeometryCache(bytes, sourceSha256, entries);
     } finally {
-      releaseEngineeringBytes(bytes);
+      releaseOwnedBytes(bytes);
     }
   }
 
   async readDomains() {
     this.requireCurrent();
     const read = (domain: EngineeringCacheDomain) =>
-      readCachedEntry(this.projectId, engineeringCacheEntry(this.identity, domain));
+      readCachedEntry(this.projectId, engineeringCacheEntry(this.identity, domain), this.isCurrent);
     const [sources, entities, navigation] = await Promise.allSettled([
       read('sources'),
       read('entities'),
@@ -106,7 +110,7 @@ export class EngineeringCacheStore {
       await this.write(engineeringCacheEntry(this.identity, domain), artifact.bytes, current);
       return { status: 'saved' };
     } finally {
-      if (artifact.bytes) releaseEngineeringBytes(artifact.bytes);
+      if (artifact.bytes) releaseOwnedBytes(artifact.bytes);
       artifact.bytes = undefined;
     }
   }
@@ -123,7 +127,7 @@ export class EngineeringCacheStore {
       await this.write(sourceGeometryCacheEntry(this.identity.sourceSha256), bytes, this.isCurrent);
       return true;
     } finally {
-      releaseEngineeringBytes(bytes);
+      releaseOwnedBytes(bytes);
     }
   }
 
@@ -135,7 +139,13 @@ export class EngineeringCacheStore {
       previous = pendingWrites.get(key);
     }
     this.requireCurrent(current);
-    const writing = writeCacheFile(this.projectId, entry, bytes, this.identity.sourceSha256);
+    const writing = writeCacheFile(
+      this.projectId,
+      entry,
+      bytes,
+      this.identity.sourceSha256,
+      current,
+    );
     pendingWrites.set(
       key,
       writing.then(

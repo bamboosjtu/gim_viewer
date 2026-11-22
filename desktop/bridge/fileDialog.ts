@@ -1,6 +1,6 @@
-import {DESKTOP_COMMANDS} from './contracts.js';
+import { DESKTOP_COMMANDS } from './contracts.js';
 import { isTauri } from './runtime.js';
-import { invokeTimed } from './invokeTimed.js';
+import { invokeTimed } from '../src/infrastructure/native/invokeTimed.js';
 
 /**
  * 在 Tauri 环境下打开 GIM 文件选择对话框，返回选中的文件路径。

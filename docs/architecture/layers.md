@@ -30,10 +30,11 @@
 | `desktop/src/features/equipment/` | 独立设备来源准备、导航、节点选择与会话发布 | gim 来源能力、共享 DEV 启动、注入的展示端口 | 其他 Feature 的内部模块、直接操作 DOM |
 | `desktop/src/infrastructure/workers/` | 工程 Worker 入口、协议、传输与请求释放；共享请求队列供变电 Spatial 与线路 Worker 使用 | Worker 安全的编解码、工程计算处理器和测量端口 | Feature、应用组合或渲染 |
 | `desktop/src/infrastructure/cache/` | 工程来源、实体、导航与物理目录的 v1 编解码及会话持久化 | 领域投影契约、原生缓存端口 | Worker 客户端、Feature、应用组合或渲染 |
+| `desktop/src/infrastructure/native/` | 工程路径授权、源文件与缓存条目读写、原生解压载体、v1 错误映射及会话守卫 | 生成契约、Tauri invoke、宿主路径解析和测量 | UI、Viewer、Worker 客户端、业务 Feature |
 | `desktop/src/services/` | 跨域缓存、Worker、后台任务、选择、生命周期与未迁移能力的端口 | gim、viewer、bridge、注入的展示端口 | 把领域规则塞回 UI |
 | `desktop/src/config/` | 功能与调试开关 | 无 | 业务状态 |
 | `desktop/src/measurement/` | 宿主与 Worker 探针、产品证据、Trace/Profile/GPU 采样适配 | measurement-core、只读运行时快照 | 把测量状态变成产品业务状态 |
-| `desktop/bridge/` | Tauri IPC DTO/命令封装 | `@tauri-apps/api` | UI、Viewer |
+| `desktop/bridge/` | 生成契约出口、SQLite 索引/设置、文件选择与专用缓存封装 | `@tauri-apps/api` | UI、Viewer |
 | `desktop/src-tauri/src/` | SQLite、SHA、解压、文件校验 | Rust crates | 前端状态 |
 
 Benchmark 注册表位于根目录 `benchmarks/l0|l1|l2/`，CLI、Trace/Profile 与无样本协议测试位于 `desktop/scripts/benchmarks/`，本地功能夹具位于 `desktop/tests/`；权威报告在 `tmp/`，`output/` 默认只保存匿名派生视图（非匿名 survey 例外）。这些目录不承担应用运行时业务逻辑。
@@ -109,7 +110,7 @@ desktop/src/
 │   ├── powerline/       # application / runtime / presentation
 │   └── equipment/       # application / runtime
 ├── viewer/              # scene / geometry / selection / rendering
-├── infrastructure/      # workers / cache
+├── infrastructure/      # workers / cache / native
 ├── ui/
 └── measurement/
 ```
@@ -120,7 +121,7 @@ desktop/src/
 - 每次只迁一个纵向工作流，先固定其输入、输出、会话守卫和资源释放器，再移动文件。
 - `packages/powerline-core/` 是独立可复用线路能力包，不并入 `features/powerline`；桌面 feature 只保留应用编排、宿主状态和展示接线。
 - `services/` 中的跨域入口先保留转发，迁移完成后删除；测试跟随被测模块移动，不复制到新目录。
-- 工程 Worker 入口、通信契约和共享请求队列位于 `infrastructure/workers/`。工程派生缓存的共享编解码和读写归 `infrastructure/cache/`，原生传输仍由 bridge 提供。
+- 工程 Worker 入口、通信契约和共享请求队列位于 `infrastructure/workers/`。工程派生缓存的共享编解码和读写归 `infrastructure/cache/`，工程文件传输由 `infrastructure/native/` 提供。SQLite 索引和设置命令由 bridge 接线。
 
 ## 边界检查
 

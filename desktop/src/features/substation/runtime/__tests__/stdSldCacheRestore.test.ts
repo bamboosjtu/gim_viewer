@@ -7,7 +7,7 @@ import { buildCbmTree } from '../../../../gim/cbmParser.js';
 import { perfCurrentSession } from '../../../../utils/perfTimings.js';
 
 const { batchRead } = vi.hoisted(() => ({ batchRead: vi.fn() }));
-vi.mock('@desktop/database.js', () => ({ batchReadCachedFiles: batchRead }));
+vi.mock('../../../../infrastructure/native/projectFiles.js', () => ({ batchReadCachedFiles: batchRead }));
 
 function result(overrides: Partial<StdSldParseResult> = {}): StdSldParseResult {
   return {

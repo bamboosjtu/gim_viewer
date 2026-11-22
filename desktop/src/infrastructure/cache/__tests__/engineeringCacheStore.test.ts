@@ -1,10 +1,10 @@
 // @vitest-environment node
 import { beforeEach, expect, it, vi } from 'vitest';
-import { readCachedEntry, writeCacheFile } from '@desktop/database.js';
+import { readCachedEntry, writeCacheFile } from '../../native/projectFiles.js';
 import type { EngineeringCacheResult } from '../engineeringCacheCodec.js';
 import { EngineeringCacheStore } from '../engineeringCacheStore.js';
 
-vi.mock('@desktop/database.js', () => ({ readCachedEntry: vi.fn(), writeCacheFile: vi.fn() }));
+vi.mock('../../native/projectFiles.js', () => ({ readCachedEntry: vi.fn(), writeCacheFile: vi.fn() }));
 
 const identity = { sourceSha256: 'a'.repeat(64), parserVersion: 'test-v1', entries: ['entry.cbm'] };
 const current = () => true;

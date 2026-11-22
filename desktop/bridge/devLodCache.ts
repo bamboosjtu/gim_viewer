@@ -1,4 +1,4 @@
-import {DESKTOP_COMMANDS} from './contracts.js';
+import { DESKTOP_COMMANDS } from './contracts.js';
 import { reportBackgroundError } from '../src/utils/backgroundErrors.js';
 /** Separate derived device domain. Each template/catalog row commits atomically;
  * no whole-project completion marker is written for an on-demand view.
@@ -8,12 +8,22 @@ import { reportBackgroundError } from '../src/utils/backgroundErrors.js';
  * reader are different facts: only `miss` may trigger a cold compile, while
  * `read-error`/`invalid` must remain visible in diagnostics. */
 import { isTauri } from './runtime.js';
-import { invokeTimed } from './invokeTimed.js';
-import { packBinaryCacheWriteParts, parseBatchCachePayload } from './database.js';
-interface CacheContext { projectId: number | null; sourceSha256: string | null }
+import { invokeTimed } from '../src/infrastructure/native/invokeTimed.js';
+import {
+  packBinaryCacheWriteParts,
+  parseBatchCachePayload,
+} from '../src/infrastructure/native/projectFileEnvelope.js';
+interface CacheContext {
+  projectId: number | null;
+  sourceSha256: string | null;
+}
 function nativeArgs(store: string, key: string, context?: CacheContext) {
   if (context?.projectId == null || !context.sourceSha256) return null;
-  return { projectId: context.projectId, sourceGimSha256: context.sourceSha256, entryPath: `${store}/${key}` };
+  return {
+    projectId: context.projectId,
+    sourceGimSha256: context.sourceSha256,
+    entryPath: `${store}/${key}`,
+  };
 }
 /** Metadata stays JSON; GLB bytes stay binary, without a JSON numeric array. */
 export interface PreparedDevArtifact {
@@ -23,20 +33,28 @@ export interface PreparedDevArtifact {
   /** Buffers retained before the bounded writer creates its transport copy. */
   readonly retainedBytes: number;
 }
-export function prepareDevArtifact(key: string, value: any): PreparedDevArtifact {
-  const data: Uint8Array | null = value?.result?.bytes ?? null;
-  if (data != null && !(data instanceof Uint8Array)) throw Error('DEV artifact payload must be Uint8Array');
-  const json = new TextEncoder().encode(JSON.stringify({ key, value: data ? { ...value, result: { ...value.result, bytes: null } } : value }));
+export function prepareDevArtifact(key: string, value: unknown): PreparedDevArtifact {
+  const artifact = value as { result?: { bytes?: unknown } } | null | undefined;
+  const data = artifact?.result?.bytes ?? null;
+  if (data != null && !(data instanceof Uint8Array))
+    throw Error('DEV artifact payload must be Uint8Array');
+  const json = new TextEncoder().encode(
+    JSON.stringify({
+      key,
+      value: data ? { ...artifact, result: { ...artifact?.result, bytes: null } } : value,
+    }),
+  );
   if (json.length > 1024 * 1024) throw Error('DEV artifact metadata exceeds 1 MiB quota');
-  return {key, metadata: json, data, retainedBytes: json.byteLength + (data?.byteLength ?? 0)};
+  return { key, metadata: json, data, retainedBytes: json.byteLength + (data?.byteLength ?? 0) };
 }
 function packPreparedDevArtifact(prepared: PreparedDevArtifact): Uint8Array {
   const out = new Uint8Array(4 + prepared.retainedBytes);
-  new DataView(out.buffer).setUint32(0, prepared.metadata.length, true); out.set(prepared.metadata, 4);
+  new DataView(out.buffer).setUint32(0, prepared.metadata.length, true);
+  out.set(prepared.metadata, 4);
   if (prepared.data) out.set(prepared.data, 4 + prepared.metadata.length);
   return out;
 }
-export function packDevArtifact(key: string, value: any): Uint8Array {
+export function packDevArtifact(key: string, value: unknown): Uint8Array {
   return packPreparedDevArtifact(prepareDevArtifact(key, value));
 }
 export function unpackDevArtifact<T>(key: string, bytes: Uint8Array): T | null {
@@ -44,11 +62,15 @@ export function unpackDevArtifact<T>(key: string, bytes: Uint8Array): T | null {
   if (bytes.length < 4) throw Error('DEV artifact header truncated');
   const len = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0, true);
   if (len > 1024 * 1024 || len + 4 > bytes.length) throw Error('DEV artifact metadata invalid');
-  const record = JSON.parse(new TextDecoder().decode(bytes.subarray(4, len + 4)));
+  const record = JSON.parse(new TextDecoder().decode(bytes.subarray(4, len + 4))) as {
+    key: unknown;
+    value?: { result?: { bytes?: Uint8Array } };
+  };
   if (record.key !== key) throw Error('DEV artifact key mismatch');
-  if (record.value?.result && bytes.length > len + 4) record.value.result.bytes = bytes.slice(len + 4);
+  if (record.value?.result && bytes.length > len + 4)
+    record.value.result.bytes = bytes.slice(len + 4);
   else if (bytes.length > len + 4) throw Error('DEV artifact unexpected binary body');
-  return record.value;
+  return record.value as T;
 }
 
 export type DevArtifactReadStatus = 'hit' | 'miss' | 'read-error' | 'invalid' | 'deferred';
@@ -79,16 +101,28 @@ function decode<T>(key: string, bytes: Uint8Array | null | undefined): DevArtifa
 const name = 'gim-dev-lod-v1';
 let opening: Promise<IDBDatabase> | null = null;
 function open(): Promise<IDBDatabase> {
-  if (!opening) opening = new Promise<IDBDatabase>((resolve, reject) => {
-    const req = indexedDB.open(name, 1);
-    req.onupgradeneeded = () => { req.result.createObjectStore('templates'); req.result.createObjectStore('catalog'); };
-    req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error);
-  }); // A failed storage open stays failed for this page; do not retry for every DEV.
+  if (!opening)
+    opening = new Promise<IDBDatabase>((resolve, reject) => {
+      const req = indexedDB.open(name, 1);
+      req.onupgradeneeded = () => {
+        req.result.createObjectStore('templates');
+        req.result.createObjectStore('catalog');
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error ?? Error('DEV cache open failed'));
+    }); // A failed storage open stays failed for this page; do not retry for every DEV.
   return opening;
 }
 
-interface NativeRead { entry: string; key: string; resolve: (value: DevArtifactRead<unknown>) => void }
-const queuedReads = new Map<string, { args: ReturnType<typeof nativeArgs> & {}; rows: NativeRead[] }>();
+interface NativeRead {
+  entry: string;
+  key: string;
+  resolve: (value: DevArtifactRead<unknown>) => void;
+}
+const queuedReads = new Map<
+  string,
+  { args: ReturnType<typeof nativeArgs> & {}; rows: NativeRead[] }
+>();
 
 /** Read a bounded native batch, splitting on transport failure so one bad row
  * cannot turn every other valid template into a cache miss. */
@@ -104,7 +138,10 @@ async function readNativeBatchRaw<T>(
   let remainingBytes = maxBytes;
   const invokeChunk = async (chunk: string[]): Promise<Map<string, DevArtifactRead<T>>> => {
     const result = new Map<string, DevArtifactRead<T>>();
-    if (remainingBytes === 0) return new Map(chunk.map(entry => [entry.slice(store.length + 1), {status:'deferred' as const}]));
+    if (remainingBytes === 0)
+      return new Map(
+        chunk.map((entry) => [entry.slice(store.length + 1), { status: 'deferred' as const }]),
+      );
     try {
       const payload = await invokeTimed<ArrayBuffer>(DESKTOP_COMMANDS.read_device_lod_artifacts, {
         projectId: args.projectId,
@@ -118,7 +155,8 @@ async function readNativeBatchRaw<T>(
       const items = parseBatchCachePayload(payload, { copyBytes: false }).items;
       const found = new Map(items.map((item) => [item.entry_path, item.bytes]));
       const consumed = items.reduce((total, item) => total + (item.bytes?.byteLength ?? 0), 0);
-      if (remainingBytes != null && consumed > remainingBytes) throw Error('DEV cache batch exceeded byte ceiling');
+      if (remainingBytes != null && consumed > remainingBytes)
+        throw Error('DEV cache batch exceeded byte ceiling');
       if (remainingBytes != null) remainingBytes -= consumed;
       for (const entry of chunk) {
         const key = entry.slice(store.length + 1);
@@ -131,7 +169,8 @@ async function readNativeBatchRaw<T>(
       }
     } catch (error) {
       if (chunk.length <= 1) {
-        for (const entry of chunk) result.set(entry.slice(store.length + 1), { status: 'read-error', error: String(error) });
+        for (const entry of chunk)
+          result.set(entry.slice(store.length + 1), { status: 'read-error', error: String(error) });
         return result;
       }
       const mid = Math.ceil(chunk.length / 2);
@@ -150,25 +189,47 @@ async function readNativeBatchRaw<T>(
   return out;
 }
 
-function readNativeArtifact<T>(args: NonNullable<ReturnType<typeof nativeArgs>>, key: string): Promise<DevArtifactRead<T>> {
+function readNativeArtifact<T>(
+  args: NonNullable<ReturnType<typeof nativeArgs>>,
+  key: string,
+): Promise<DevArtifactRead<T>> {
   // A flush derives its native paths from one store. Mixing catalog and
   // template reads would silently query the other store with the same key.
-  const groupKey = JSON.stringify([args.projectId, args.sourceGimSha256, args.entryPath.split('/', 1)[0]]);
+  const groupKey = JSON.stringify([
+    args.projectId,
+    args.sourceGimSha256,
+    args.entryPath.split('/', 1)[0],
+  ]);
   let group = queuedReads.get(groupKey);
   if (!group) {
-    group = { args, rows: [] }; queuedReads.set(groupKey, group);
-    setTimeout(() => { const batch = queuedReads.get(groupKey)!; queuedReads.delete(groupKey); void Promise.resolve(flushNativeReads(batch)).catch(reportBackgroundError); }, 0);
+    group = { args, rows: [] };
+    queuedReads.set(groupKey, group);
+    setTimeout(() => {
+      const batch = queuedReads.get(groupKey)!;
+      queuedReads.delete(groupKey);
+      void Promise.resolve(flushNativeReads(batch)).catch(reportBackgroundError);
+    }, 0);
   }
   const target = group;
-  return new Promise((resolve) => target.rows.push({ entry: args.entryPath, key, resolve: resolve as (value: DevArtifactRead<unknown>) => void }));
+  return new Promise((resolve) =>
+    target.rows.push({
+      entry: args.entryPath,
+      key,
+      resolve: resolve as (value: DevArtifactRead<unknown>) => void,
+    }),
+  );
 }
-async function flushNativeReads(group: { args: NonNullable<ReturnType<typeof nativeArgs>>; rows: NativeRead[] }): Promise<void> {
+async function flushNativeReads(group: {
+  args: NonNullable<ReturnType<typeof nativeArgs>>;
+  rows: NativeRead[];
+}): Promise<void> {
   for (let start = 0; start < group.rows.length; start += 64) {
     const rows = group.rows.slice(start, start + 64);
     const store = rows[0].entry.split('/', 1)[0];
     const keys = rows.map((row) => row.key);
     const values = await readNativeBatchRaw<unknown>(group.args, keys, store);
-    for (const row of rows) row.resolve(values.get(row.key) ?? { status: 'read-error', error: 'missing batch row' });
+    for (const row of rows)
+      row.resolve(values.get(row.key) ?? { status: 'read-error', error: 'missing batch row' });
   }
 }
 
@@ -181,8 +242,20 @@ export async function readDevArtifactBatch<T>(
   if (!keys.length) return new Map();
   if (isTauri()) {
     const first = nativeArgs(store, keys[0], context);
-    if (!first) return new Map(keys.map((key) => [key, { status: 'read-error' as const, error: 'missing-cache-context' }]));
-    return readNativeBatchRaw<T>({ projectId: first.projectId, sourceGimSha256: first.sourceGimSha256, entryPath: first.entryPath }, keys, store, maxBytes);
+    if (!first)
+      return new Map(
+        keys.map((key) => [key, { status: 'read-error' as const, error: 'missing-cache-context' }]),
+      );
+    return readNativeBatchRaw<T>(
+      {
+        projectId: first.projectId,
+        sourceGimSha256: first.sourceGimSha256,
+        entryPath: first.entryPath,
+      },
+      keys,
+      store,
+      maxBytes,
+    );
   }
   try {
     const db = await open();
@@ -193,29 +266,41 @@ export async function readDevArtifactBatch<T>(
       for (const key of keys) {
         const request = objectStore.get(key);
         request.onsuccess = () => {
-          const value = request.result;
+          const value = request.result as T | null | undefined;
           rows.set(key, value == null ? { status: 'miss' } : { status: 'hit', value });
         };
-        request.onerror = () => rows.set(key, { status: 'read-error', error: String(request.error) });
+        request.onerror = () =>
+          rows.set(key, { status: 'read-error', error: String(request.error) });
       }
       tx.oncomplete = () => resolve(rows);
-      tx.onerror = tx.onabort = () => reject(tx.error);
+      tx.onerror = tx.onabort = () => reject(tx.error ?? Error('DEV cache read failed'));
     });
-    for (const key of keys) if (!values.has(key)) values.set(key, { status: 'read-error', error: 'missing idb row' });
+    for (const key of keys)
+      if (!values.has(key)) values.set(key, { status: 'read-error', error: 'missing idb row' });
     return values;
   } catch (error) {
-    return new Map(keys.map((key) => [key, { status: 'read-error' as const, error: String(error) }]));
+    return new Map(
+      keys.map((key) => [key, { status: 'read-error' as const, error: String(error) }]),
+    );
   }
 }
 
 /** Backward-compatible value-only view. New callers that need to distinguish
  * miss/read-error/invalid should use `readDevArtifactResult`. */
-export async function readDevArtifact<T>(store: 'templates' | 'catalog', key: string, context?: CacheContext): Promise<T | null> {
+export async function readDevArtifact<T>(
+  store: 'templates' | 'catalog',
+  key: string,
+  context?: CacheContext,
+): Promise<T | null> {
   const result = await readDevArtifactResult<T>(store, key, context);
   return result.status === 'hit' ? result.value! : null;
 }
 
-export async function readDevArtifactResult<T>(store: 'templates' | 'catalog', key: string, context?: CacheContext): Promise<DevArtifactRead<T>> {
+export async function readDevArtifactResult<T>(
+  store: 'templates' | 'catalog',
+  key: string,
+  context?: CacheContext,
+): Promise<DevArtifactRead<T>> {
   if (isTauri()) {
     const args = nativeArgs(store, key, context);
     if (!args) return { status: 'read-error', error: 'missing-cache-context' };
@@ -240,27 +325,42 @@ export async function writeDevArtifactDetailed(
   value: unknown,
   context?: CacheContext,
   prepared?: PreparedDevArtifact,
-  observe?:import('../src/measurement/core.js').BufferObserver,
+  observe?: import('../src/measurement/core.js').BufferObserver,
 ): Promise<DevArtifactWriteResult> {
-  if (prepared && prepared.key !== key) return {ok: false, error: 'prepared artifact key mismatch'};
+  if (prepared && prepared.key !== key)
+    return { ok: false, error: 'prepared artifact key mismatch' };
   if (isTauri()) {
     const args = nativeArgs(store, key, context);
     if (!args) return { ok: false, error: 'missing-cache-context' };
     try {
-      const packStarted=performance.now();
-      const artifact=prepared??prepareDevArtifact(key,value);
-      const artifactHeader=new Uint8Array(4);
-      new DataView(artifactHeader.buffer).setUint32(0,artifact.metadata.byteLength,true);
-      const packet=packBinaryCacheWriteParts(args.projectId,args.entryPath,
-        artifact.data?[artifactHeader,artifact.metadata,artifact.data]:[artifactHeader,artifact.metadata],args.sourceGimSha256);
-      const packMs=performance.now()-packStarted;
-      const releasePacket=observe?.('ipc-wire-copy',[packet]);
-      let timing:{resolveMs?:number;writeMs?:number}|undefined;
-      const invokeStarted=performance.now();
-      try{timing=await invokeTimed(DESKTOP_COMMANDS.write_device_lod_artifact,packet);}finally{releasePacket?.();}
-      return { ok: true,packMs,invokeWallMs:performance.now()-invokeStarted,
-        ...(Number.isFinite(timing?.resolveMs)?{nativeResolveMs:timing!.resolveMs}:{}),
-        ...(Number.isFinite(timing?.writeMs)?{nativeWriteMs:timing!.writeMs}:{}) };
+      const packStarted = performance.now();
+      const artifact = prepared ?? prepareDevArtifact(key, value);
+      const artifactHeader = new Uint8Array(4);
+      new DataView(artifactHeader.buffer).setUint32(0, artifact.metadata.byteLength, true);
+      const packet = packBinaryCacheWriteParts(
+        args.projectId,
+        args.entryPath,
+        artifact.data
+          ? [artifactHeader, artifact.metadata, artifact.data]
+          : [artifactHeader, artifact.metadata],
+        args.sourceGimSha256,
+      );
+      const packMs = performance.now() - packStarted;
+      const releasePacket = observe?.('ipc-wire-copy', [packet]);
+      let timing: { resolveMs?: number; writeMs?: number } | undefined;
+      const invokeStarted = performance.now();
+      try {
+        timing = await invokeTimed(DESKTOP_COMMANDS.write_device_lod_artifact, packet);
+      } finally {
+        releasePacket?.();
+      }
+      return {
+        ok: true,
+        packMs,
+        invokeWallMs: performance.now() - invokeStarted,
+        ...(Number.isFinite(timing?.resolveMs) ? { nativeResolveMs: timing!.resolveMs } : {}),
+        ...(Number.isFinite(timing?.writeMs) ? { nativeWriteMs: timing!.writeMs } : {}),
+      };
     } catch (error) {
       return { ok: false, error: String(error) };
     }
@@ -268,8 +368,10 @@ export async function writeDevArtifactDetailed(
   try {
     const db = await open();
     await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(store, 'readwrite'); tx.objectStore(store).put(value, key);
-      tx.oncomplete = () => resolve(); tx.onerror = tx.onabort = () => reject(tx.error);
+      const tx = db.transaction(store, 'readwrite');
+      tx.objectStore(store).put(value, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = tx.onabort = () => reject(tx.error ?? Error('DEV cache write failed'));
     });
     return { ok: true };
   } catch (error) {
@@ -277,15 +379,30 @@ export async function writeDevArtifactDetailed(
   }
 }
 
-export async function deleteDevArtifact(store: 'templates' | 'catalog', key: string, context?: CacheContext): Promise<void> {
+export async function deleteDevArtifact(
+  store: 'templates' | 'catalog',
+  key: string,
+  context?: CacheContext,
+): Promise<void> {
   if (isTauri()) {
-    const args = nativeArgs(store, key, context); if (!args) return;
-    try { await invokeTimed(DESKTOP_COMMANDS.delete_device_lod_artifact, args); } catch { /* source rebuild */ } return;
+    const args = nativeArgs(store, key, context);
+    if (!args) return;
+    try {
+      await invokeTimed(DESKTOP_COMMANDS.delete_device_lod_artifact, args);
+    } catch {
+      /* source rebuild */
+    }
+    return;
   }
   try {
-    const db = await open(); await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(store, 'readwrite'); tx.objectStore(store).delete(key);
-      tx.oncomplete = () => resolve(); tx.onerror = tx.onabort = () => reject(tx.error);
+    const db = await open();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(store, 'readwrite');
+      tx.objectStore(store).delete(key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = tx.onabort = () => reject(tx.error ?? Error('DEV cache delete failed'));
     });
-  } catch { /* source rebuild */ }
+  } catch {
+    /* source rebuild */
+  }
 }

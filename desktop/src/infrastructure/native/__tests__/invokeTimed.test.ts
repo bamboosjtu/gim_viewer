@@ -4,7 +4,7 @@ const invokeMock = vi.hoisted(() => vi.fn());
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 
 import { invokeTimed } from '../invokeTimed.js';
-import { perfReset, perfSnapshot } from '../../src/utils/perfTimings.js';
+import { perfReset, perfSnapshot } from '../../../utils/perfTimings.js';
 
 describe('invokeTimed', () => {
   beforeEach(() => {

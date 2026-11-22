@@ -1,5 +1,5 @@
 import type { SubstationSpatialIndex } from '../../../gim/ifcSpatialParser.js';
-import { readCachedEntry, writeCacheFile } from '@desktop/database.js';
+import { readCachedEntry, writeCacheFile } from '../../../infrastructure/native/projectFiles.js';
 import {
   SUBSTATION_PARSER_DOMAIN_VERSION,
   SUBSTATION_SPATIAL_SEMANTIC_VERSION,

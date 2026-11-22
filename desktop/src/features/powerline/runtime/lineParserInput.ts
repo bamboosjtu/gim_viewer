@@ -10,8 +10,14 @@ import { logger } from '../../../utils/logger.js';
  */
 
 import { isTauri } from '@desktop/runtime.js';
-import { batchReadCachedFiles, readLineSemanticPack } from '@desktop/database.js';
-import { isDiskBackedFile, isSemanticPackBackedFile } from '@desktop/gimExtract.js';
+import {
+  batchReadCachedFiles,
+  readLineSemanticPack,
+} from '../../../infrastructure/native/projectFiles.js';
+import {
+  isDiskBackedFile,
+  isSemanticPackBackedFile,
+} from '../../../infrastructure/native/gimExtract.js';
 import type { LineParserWorkerFile } from './lineParserWorker.js';
 
 const TEXT_EXTENSIONS = new Set(['cbm', 'dev', 'fam', 'phm']);

@@ -4,11 +4,9 @@ const batchReadMock = vi.hoisted(() => vi.fn());
 const copyReadMock = vi.hoisted(() => vi.fn());
 vi.mock('@desktop/substationParseCopy.js', () => ({ readSubstationParseCopy: copyReadMock }));
 
-vi.mock('@desktop/database.js', () => ({
-  batchReadCachedFiles: batchReadMock,
-}));
+vi.mock('../../infrastructure/native/projectFiles.js', () => ({ batchReadCachedFiles: batchReadMock }));
 
-vi.mock('@desktop/gimExtract.js', () => ({
+vi.mock("../../infrastructure/native/gimExtract.js", () => ({
   isDiskBackedFile: (file: File | undefined) => Boolean((file as File & { __gimDiskBacked?: boolean } | undefined)?.__gimDiskBacked),
   isSemanticPackBackedFile: (file: File | undefined) => Boolean((file as File & { __gimSemanticPackBacked?: boolean } | undefined)?.__gimSemanticPackBacked),
 }));

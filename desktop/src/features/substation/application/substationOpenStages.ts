@@ -236,13 +236,21 @@ export async function tryOpenSubstationWarm(
     const warm = await publishSubstationWarmCore(context, showMessage, perfSession, validation);
     warmCorePublished = true;
     const { index, engineeringFiles, cbmTree, fileDevRelations, cachedIfcEntries } = warm;
-    const { createDiskBackedFile } = await scope.read(async () => import('@desktop/gimExtract.js'));
+    const { createDiskBackedFile } = await scope.read(
+      async () => import('../../../infrastructure/native/gimExtract.js'),
+    );
     const cachedIfcFiles = new Map<string, File>();
     for (const cachedEntry of index.entries) {
       if (!/^ifc$/i.test(cachedEntry.entry_type)) continue;
       cachedIfcFiles.set(
         cachedEntry.entry_path,
-        createDiskBackedFile(context.projectId!, cachedEntry.entry_path, cachedEntry.file_size),
+        createDiskBackedFile(
+          context.projectId!,
+          cachedEntry.entry_path,
+          cachedEntry.file_size,
+          false,
+          scope.isCurrent,
+        ),
       );
     }
 
@@ -346,13 +354,19 @@ export async function tryOpenSubstationWarm(
           scope.own(publication.resetCachePublishStatus);
           const { beginCachePublish, setCachePublishPhase, failCachePublish } = publication;
           const { createDiskBackedFile } = await scope.read(
-            async () => import('@desktop/gimExtract.js'),
+            async () => import('../../../infrastructure/native/gimExtract.js'),
           );
           const files = new Map<string, File>();
           for (const entry of index.entries) {
             files.set(
               entry.entry_path,
-              createDiskBackedFile(projectId, entry.entry_path, entry.file_size),
+              createDiskBackedFile(
+                projectId,
+                entry.entry_path,
+                entry.file_size,
+                false,
+                scope.isCurrent,
+              ),
             );
           }
           beginCachePublish('rest', '上次会话未完成属性补写');

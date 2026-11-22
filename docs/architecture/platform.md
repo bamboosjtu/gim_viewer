@@ -4,7 +4,7 @@
 
 ## 原生命令线程边界
 
-原生命令错误采用 `contracts/native-v1.json` 生成的 `NativeError`，结构为 code、message 和可选 context。桌面、Android 应用及 SAF/定位/窗口插件共用生成模型；bridge 将其规范化为 `GimError`，只按 code 选择恢复或重试。FAM/DEV、图、几何引用/manifest、提取和平台元数据 DTO、原生命令名及共享版本常量同样由该文件生成。来源、字段 null/缺省和生成规则见 [v1 契约](../../contracts/README.md)。错误结构与生成器固定 v1，不提供旧字符串或旧开发格式迁移。
+原生命令错误采用 `contracts/native-v1.json` 生成的 `NativeError`，结构为 code、message 和可选 context。桌面、Android 应用及 SAF/定位/窗口插件共用生成模型；桌面 `infrastructure/native/invokeTimed` 将其规范化为 `GimError`，只按 code 选择恢复或重试。FAM/DEV、图、几何引用/manifest、提取和平台元数据 DTO、原生命令名及共享版本常量同样由该文件生成。来源、字段 null/缺省和生成规则见 [v1 契约](../../contracts/README.md)。错误结构与生成器固定 v1，不提供旧字符串或旧开发格式迁移。
 
 桌面与 Android 注册的 Tauri 工作命令使用 async 入口。文件 I/O、路径 canonicalize/stat、SHA、解压、同步数据库锁/查询/事务和大 JSON 导出解析均在 `spawn_blocking` 内执行；桌面的 `native_command::blocking` 统一转发任务及 JoinError，已有直接 `spawn_blocking` 入口保留。工作闭包持有 AppHandle、路径、payload 等所有权，数据库锁和事务在闭包内取得并释放，不跨 await。
 
@@ -13,6 +13,8 @@
 借用的 Raw IPC Request 在进入池前只完成原有 metadata 解码与一次拥有字节的交接；磁盘写入、路径和源 SHA 检查留在工作闭包。本轮移入池的批读保留命令入口处既有 total 起点，新增线程池等待包含在 total 和外层 invoke wall 中；原本已在线程池内的内部阶段计时保持原口径。线路 begin 在首个 await 前取得内存票据，worker 在数据库锁内完成来源校验后认领，拒绝晚到的旧 begin 清表；chunk/finish 继续在事务内核对持久 session_id。缓存协议、配额与 staging 发布契约不变。
 
 注册表静态门禁位于 [command_registry_tests.rs](../../desktop/src-tauri/src/command_registry_tests.rs)，使用 Rust AST 对照 `generate_handler!` 与命令声明，检查异步入口、阻塞边界和内存控制例外；未知调用、数据库锁、宏或未执行的 async closure 不能绕过检查。新注册命令必须进入检查面。该门禁随桌面 Rust 单测执行，Windows CI 也运行 Android 主机侧原生单测；两者都不启动 WebView 或工程样本。
+
+桌面文件入口在发 IPC 和交付结果前验证工程会话或打开请求。旧回执和迟到错误归属原请求，已进入原生端的写入按源 SHA 和原子提交契约结算。前端在 IPC 结束后释放独占的写入封包，WASM 逐条回退只收录成功文件并在会话失效时停止派发。
 
 ## 安全边界
 

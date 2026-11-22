@@ -1,3 +1,4 @@
+import { releaseOwnedBytes } from '../../shared/ownedBytes.js';
 import type { EngineeringBuildResult } from './engineeringWorkerProtocol.js';
 import {
   engineeringNavigationFromWire,
@@ -10,7 +11,6 @@ import {
 import type { EngineeringSourceGraph } from '../../gim/engineering/sourceGraph.js';
 import {
   parseEngineeringTable,
-  releaseEngineeringBytes,
   stringifyEngineeringTable,
   yieldEngineeringCodec,
 } from '../cache/engineeringTableJson.js';
@@ -94,7 +94,7 @@ export async function decodeEngineeringWorkerResult(
     throw Error('工程来源传输无效');
   const table = await parseEngineeringTable(payload.body, isCurrent);
   if (consume) {
-    releaseEngineeringBytes(payload.body);
+    releaseOwnedBytes(payload.body);
     payload.body = new Uint8Array();
   }
   const data = (await unpackEngineeringSourceAsync(

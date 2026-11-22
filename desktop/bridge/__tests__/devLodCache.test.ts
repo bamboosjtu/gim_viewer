@@ -1,9 +1,9 @@
 import { expect, it, vi } from 'vitest';
 import { packDevArtifact, prepareDevArtifact, writeDevArtifactDetailed, readDevArtifactBatch, unpackDevArtifact } from '../devLodCache.js';
-import {packBinaryCacheWrite,packBinaryCacheWriteParts} from '../database.js';
+import { packBinaryCacheWrite, packBinaryCacheWriteParts } from '../../src/infrastructure/native/projectFileEnvelope.js';
 
 const invoke = vi.hoisted(() => vi.fn());
-vi.mock('@desktop/invokeTimed.js', () => ({ invokeTimed: invoke }));
+vi.mock("../../src/infrastructure/native/invokeTimed.js", () => ({ invokeTimed: invoke }));
 
 function envelope(items: { path: string; bytes: Uint8Array | null }[]): ArrayBuffer {
   const encoder = new TextEncoder();

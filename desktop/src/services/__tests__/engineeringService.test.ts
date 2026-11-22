@@ -10,13 +10,13 @@ import { EngineeringWorkerClient, type EngineeringWorkerPort } from '../../infra
 import { createEngineeringWorkerHandler } from '../engineeringWorkerHandler.js';
 import type { EngineeringWorkerRequest, EngineeringWorkerResponse,EngineeringSourceInput } from '../../infrastructure/workers/engineeringWorkerProtocol.js';
 import {WorkerRequests} from '../../infrastructure/workers/workerRequests.js';
-import { readCachedEntry, writeCacheFile, batchReadCachedFiles } from '@desktop/database.js';
+import { readCachedEntry, writeCacheFile, batchReadCachedFiles } from '../../infrastructure/native/projectFiles.js';
 import {createByteFile} from '@desktop/byteFile.js';
 import{createSpatialSemanticStarter}from'../../features/substation/runtime/spatial/spatialSemanticStarter.js';
 import {benchmarkProgress} from '../../measurement/modelEvidence.js';
 
 vi.mock('@desktop/runtime.js', () => ({ isTauri: () => true }));
-vi.mock('@desktop/database.js', () => ({ readCachedEntry: vi.fn(), writeCacheFile: vi.fn(), batchReadCachedFiles: vi.fn() }));
+vi.mock('../../infrastructure/native/projectFiles.js', () => ({ readCachedEntry: vi.fn(), writeCacheFile: vi.fn(), batchReadCachedFiles: vi.fn() }));
 
 class LoopbackPort implements EngineeringWorkerPort {
   onmessage: EngineeringWorkerPort['onmessage'] = null;

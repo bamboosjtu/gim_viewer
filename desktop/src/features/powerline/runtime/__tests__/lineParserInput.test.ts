@@ -3,14 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const batchReadMock = vi.hoisted(() => vi.fn());
 const semanticPackReadMock = vi.hoisted(() => vi.fn());
 vi.mock('@desktop/runtime.js', () => ({ isTauri: () => true }));
-vi.mock('@desktop/gimExtract.js', () => ({
+vi.mock("../../../../infrastructure/native/gimExtract.js", () => ({
   isDiskBackedFile: () => true,
   isSemanticPackBackedFile: (file: File | undefined) => Boolean((file as File & { __semantic?: boolean } | undefined)?.__semantic),
 }));
-vi.mock('@desktop/database.js', () => ({
-  batchReadCachedFiles: batchReadMock,
-  readLineSemanticPack: semanticPackReadMock,
-}));
+vi.mock('../../../../infrastructure/native/projectFiles.js', () => ({ batchReadCachedFiles: batchReadMock, readLineSemanticPack: semanticPackReadMock }));
 
 import { LINE_PARSER_SMALL_MOD_MAX_BYTES, readLineParserInput } from '../lineParserInput.js';
 

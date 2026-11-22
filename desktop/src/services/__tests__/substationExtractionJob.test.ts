@@ -3,8 +3,8 @@ import { AppState } from '../../app/state.js';
 import {GimError} from '@desktop/contracts.js';
 import { startSubstationExtractionJob, cancelSubstationExtraction, isSubstationSourceMaterializing, withEarlySemanticCapability, type EarlySemanticEligibility } from '../substationExtractionJob.js';
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), decode: vi.fn(), mark: vi.fn() }));
-vi.mock('@desktop/database.js', () => ({ batchReadCachedFiles: async (_id: number, paths: string[]) => new Map(paths.map(p => [p, new TextEncoder().encode('exact')])) }));
-vi.mock('@desktop/invokeTimed.js', () => ({ invokeTimed: mocks.invoke }));
+vi.mock('../../infrastructure/native/projectFiles.js', () => ({ batchReadCachedFiles: async (_id: number, paths: string[]) => new Map(paths.map(p => [p, new TextEncoder().encode('exact')])) }));
+vi.mock("../../infrastructure/native/invokeTimed.js", () => ({ invokeTimed: mocks.invoke }));
 vi.mock('@desktop/substationParseCopy.js', () => ({ decodeSubstationParseCopy: mocks.decode, readSubstationParseCopy: vi.fn() }));
 vi.mock('../../utils/perfTimings.js', () => ({ perfCurrentSession: () => ({}), perfMark: mocks.mark, perfBegin: () => () => {} }));
 function deferred<T>() { let resolve!: (v: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }

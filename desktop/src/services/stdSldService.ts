@@ -60,7 +60,7 @@ async function parseAndIndexStdSld(
   let batchRead = false;
   if (cacheProjectId != null && paths.size) {
     try {
-      const { batchReadCachedFiles } = await import('@desktop/database.js');
+      const { batchReadCachedFiles } = await import('../infrastructure/native/projectFiles.js');
       const bytesMap = await batchReadCachedFiles(cacheProjectId, [...paths]);
       const decoder = new TextDecoder();
       for (const [path, bytes] of bytesMap) {

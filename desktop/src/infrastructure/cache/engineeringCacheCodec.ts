@@ -1,3 +1,4 @@
+import { releaseOwnedBytes } from '../../shared/ownedBytes.js';
 import { engineeringSourceRecords } from '../../gim/engineering/sourceGraph.js';
 import {
   ENGINEERING_SOURCE_SCHEMA,
@@ -20,7 +21,6 @@ import { packEngineeringSource, unpackEngineeringSourceAsync } from './engineeri
 import {
   engineeringTableChunks,
   parseEngineeringTable,
-  releaseEngineeringBytes,
   yieldEngineeringCodec,
 } from './engineeringTableJson.js';
 
@@ -278,7 +278,7 @@ async function decode(
   }
   requireValid(expanded === meta.plainBytes, 'expanded length');
   const parsed = await parseEngineeringTable(plain);
-  releaseEngineeringBytes(plain);
+  releaseOwnedBytes(plain);
   plain = new Uint8Array();
   return {
     payload: await unpackEngineeringSourceAsync(parsed, () => true, yieldEngineeringCodec, true),

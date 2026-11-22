@@ -11,8 +11,8 @@ const native = vi.hoisted(() => ({
   readExtractionManifest: vi.fn(),
   readCachedEntry: vi.fn(),
 }));
-vi.mock('@desktop/gimExtract.js', () => ({ readExtractionManifest: native.readExtractionManifest }));
-vi.mock('@desktop/database.js', () => ({ readCachedEntry: native.readCachedEntry }));
+vi.mock("../../infrastructure/native/gimExtract.js", () => ({ readExtractionManifest: native.readExtractionManifest }));
+vi.mock('../../infrastructure/native/projectFiles.js', () => ({ readCachedEntry: native.readCachedEntry }));
 
 beforeEach(() => { vi.resetAllMocks(); });
 
@@ -61,8 +61,8 @@ it.each(['cold', 'warm'] as const)('resolves nested paths and reuses in-flight r
     expect(enumeratePaths).toHaveBeenCalledOnce();
   } else {
     expect(native.readExtractionManifest).toHaveBeenCalledOnce();
-    expect(native.readExtractionManifest).toHaveBeenCalledWith(7);
-    expect(native.readCachedEntry.mock.calls).toEqual(expected.map(path => [7, path]));
+    expect(native.readExtractionManifest).toHaveBeenCalledWith(7, expect.any(Function));
+    expect(native.readCachedEntry.mock.calls).toEqual(expected.map(path => [7, path, expect.any(Function)]));
   }
 });
 

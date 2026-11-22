@@ -1,8 +1,8 @@
 import {it,expect,vi,afterEach} from 'vitest';
 import {DevLodSourceWorkset} from '../devLodSourceWorkset.js';
-import {batchReadCachedFiles} from '@desktop/database.js';
+import { batchReadCachedFiles } from '../../infrastructure/native/projectFiles.js';
 import {hydrateSubstationGeometryGraph} from '../../gim/geometry/substationSourceGraph.js';
-vi.mock('@desktop/database.js',()=>({batchReadCachedFiles:vi.fn()}));
+vi.mock('../../infrastructure/native/projectFiles.js', () => ({ batchReadCachedFiles:vi.fn() }));
 const owned:DevLodSourceWorkset[]=[];
 afterEach(()=>{owned.forEach(source=>source.close());owned.length=0;vi.clearAllMocks();});
 function source(texts:Map<string,string>){

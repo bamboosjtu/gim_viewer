@@ -41,11 +41,11 @@ vi.mock('../../runtime/substationIndexPublication.js', () => ({
   publishSubstationCore: m.core,
   publishSubstationRest: m.rest,
 }));
-vi.mock('../../../../services/gimExtractedCacheService.js', () => ({
+vi.mock("../../../../infrastructure/native/archiveFilePersistence.js", () => ({
   cacheIfcEntries: m.cacheIfc,
   cacheExtractedFiles: m.cacheSources,
 }));
-vi.mock('@desktop/gimExtract.js', () => ({
+vi.mock("../../../../infrastructure/native/gimExtract.js", () => ({
   createDiskBackedFile: (_id: number, path: string) => new File([''], path),
 }));
 vi.mock('../../../../services/gimIndexRestoreService.js', () => ({ restoreGimIndexToState: m.restore }));
