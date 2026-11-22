@@ -1,4 +1,3 @@
-import { sourceGeometryCacheEntry, decodeSourceGeometryCache } from './sourceGeometryCache.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import { logger } from '../utils/logger.js';
 import { hasErrorCode } from '@desktop/contracts.js';
@@ -8,11 +7,8 @@ import {
   ENGINEERING_SOURCE_BATCH_FILES,
 } from '../infrastructure/workers/engineeringWorkerProtocol.js';
 import type { SubstationSpatialIndex } from '../gim/ifcSpatialParser.js';
-import {
-  engineeringCacheEntry,
-  engineeringSourceCacheMatchesFiles,
-  type EngineeringCacheIdentity,
-} from './engineeringCacheCodec.js';
+import { engineeringSourceCacheMatchesFiles } from '../infrastructure/cache/engineeringCacheCodec.js';
+import { EngineeringCacheStore } from '../infrastructure/cache/engineeringCacheStore.js';
 import type { EngineeringBuildResult } from '../infrastructure/workers/engineeringWorkerProtocol.js';
 import { EngineeringWorkerClient } from '../infrastructure/workers/engineeringWorkerClient.js';
 import {
@@ -20,11 +16,11 @@ import {
   SUBSTATION_SPATIAL_SEMANTIC_VERSION,
 } from './substationSpatialCodec.js';
 import { isTauri } from '@desktop/runtime.js';
-import { readCachedEntry, writeCacheFile } from '@desktop/database.js';
+import { readCachedEntry } from '@desktop/database.js';
 import { perfMark, perfMarkProductMoment } from '../utils/perfTimings.js';
 import type { SourceGeometryOccurrenceCatalog } from '../gim/engineering/geometryOccurrences.js';
 import { installCompositionProjection } from './compositionProjectionService.js';
-import { createNavigationCacheProjection } from './engineeringNavigationCache.js';
+import { createNavigationCacheProjection } from '../infrastructure/cache/engineeringNavigationCache.js';
 import type { EvidenceQuery, EvidenceRange } from '../engineering/evidence.js';
 import { checkEvidenceRange } from '../gim/engineering/evidenceProvider.js';
 
@@ -39,9 +35,8 @@ interface EngineeringJob {
   lastSpatial: SubstationSpatialIndex | null;
   finished: boolean;
   enriching: boolean;
-  identity?: EngineeringCacheIdentity;
+  cache?: EngineeringCacheStore;
   update: () => void;
-  beforeCacheWrite?: Promise<unknown>;
   resolveGeometry(catalog: SourceGeometryOccurrenceCatalog | null): void;
   projectionReady: Promise<boolean>;
   resolveProjection(complete: boolean): void;
@@ -129,7 +124,7 @@ export async function ensureEngineeringEvidence(state: AppState, range: Evidence
     ) &&
     result.revision !== inventory.revision
   ) {
-    const rebuilt = await job.client.recognizeEvidence(job.identity);
+    const rebuilt = await job.client.recognizeEvidence(job.cache?.identity);
     if (!current(state, job)) throw Error('Stale evidence session');
     publish(state, job, rebuilt);
     await finishBuild(state, job, rebuilt);
@@ -158,31 +153,26 @@ async function saveResult(
   job: EngineeringJob,
   result: EngineeringBuildResult,
 ): Promise<void> {
-  if (
-    !currentBuild(state, job, result) ||
-    !job.identity ||
-    job.session.projectId == null ||
-    !result.cachePlan?.length ||
-    !result.buildId
-  )
-    return;
+  const { cache } = job;
+  const { buildId, cachePlan } = result;
+  const isCurrent = () => currentBuild(state, job, result);
+  if (!isCurrent() || !cache || !cachePlan?.length || !buildId) return;
   state.engineering.cacheStatus = 'saving';
   job.update();
   try {
-    await job.beforeCacheWrite;
-    if (!currentBuild(state, job, result)) return;
+    await cache.waitForSourceCommit(isCurrent);
     // Request only after publication and the source commit barrier. Persist and
     // release each buffer before asking the Worker to encode the next domain.
-    for (const domain of result.cachePlan) {
-      if (!currentBuild(state, job, result)) return;
+    for (const domain of cachePlan) {
+      if (!isCurrent()) return;
       if (domain === 'navigation' && !(await job.projectionReady)) {
-        if (currentBuild(state, job, result)) {
+        if (isCurrent()) {
           state.engineering.cacheStatus = 'partial';
           job.update();
         }
         return;
       }
-      if (!currentBuild(state, job, result)) return;
+      if (!isCurrent()) return;
       let projection: ReturnType<typeof createNavigationCacheProjection> | undefined;
       if (domain === 'navigation' && state.engineering.navigation) {
         try {
@@ -194,7 +184,7 @@ async function saveResult(
           // The Worker base may not contain the final composition. Never fall
           // back to persisting it as a complete view, or invalidate domains
           // already saved because an optional projection cannot be constructed.
-          if (currentBuild(state, job, result)) {
+          if (isCurrent()) {
             state.engineering.cacheStatus = 'partial';
             state.engineering.cacheError = 'navigation-projection-unavailable';
             job.update();
@@ -202,26 +192,24 @@ async function saveResult(
           return;
         }
       }
-      const encoded = await job.client.encodeCache(result.buildId, domain, projection);
-      if (!currentBuild(state, job, result)) return;
-      perfMark('工程缓存域编码', { domain, ...encoded.metrics });
-      state.engineering.pipelineMetrics?.caches.push({ domain, ...encoded.metrics });
-      if (encoded.error || !encoded.bytes) {
-        state.engineering.cacheStatus = encoded.disabled ? 'disabled' : 'error';
-        state.engineering.cacheError =
-          encoded.disabled ?? encoded.error ?? '工程缓存编码未返回内容';
+      const saved = await cache.saveDomain(
+        domain,
+        () => job.client.encodeCache(buildId, domain, projection),
+        isCurrent,
+        (metrics) => {
+          perfMark('工程缓存域编码', { domain, ...metrics });
+          state.engineering.pipelineMetrics?.caches.push({ domain, ...metrics });
+        },
+      );
+      if (!isCurrent()) return;
+      if (saved.status !== 'saved') {
+        state.engineering.cacheStatus = saved.status;
+        state.engineering.cacheError = saved.error;
         job.update();
         return;
       }
-      await writeCacheFile(
-        job.session.projectId,
-        engineeringCacheEntry(job.identity, domain),
-        encoded.bytes,
-        job.identity.sourceSha256,
-      );
-      encoded.bytes = undefined;
     }
-    if (currentBuild(state, job, result)) {
+    if (isCurrent()) {
       state.engineering.cacheStatus = Object.keys(result.stageErrors ?? {}).length
         ? 'partial'
         : 'saved';
@@ -229,7 +217,7 @@ async function saveResult(
       job.update();
     }
   } catch (error) {
-    if (currentBuild(state, job, result)) {
+    if (isCurrent()) {
       state.engineering.cacheStatus = 'error';
       state.engineering.cacheError = String(error);
       job.update();
@@ -336,7 +324,7 @@ async function enrich(state: AppState, job: EngineeringJob): Promise<void> {
       const result = await job.client.assemble(
         spatial.objects,
         spatial.models,
-        job.identity,
+        job.cache?.identity,
         spatial.nodes,
       );
       if (!current(state, job)) return;
@@ -478,8 +466,16 @@ export function beginEngineeringBuild(
     state.notifyEngineeringChanged();
     if (ownsJob()) options.onUpdate?.();
   };
-  const persistent =
-    isTauri() && session.projectId != null && /^[a-f\d]{64}$/i.test(session.sourceSha256 ?? '');
+  const { projectId, sourceSha256 } = session;
+  const cache =
+    isTauri() && projectId != null && sourceSha256 && /^[a-f\d]{64}$/i.test(sourceSha256)
+      ? new EngineeringCacheStore(
+          projectId,
+          { sourceSha256, parserVersion: ENGINEERING_PARSER_CONTRACT, entries: [...files.keys()] },
+          ownsJob,
+          options.beforeCacheWrite,
+        )
+      : undefined;
   const job: EngineeringJob = {
     session,
     isSessionCurrent: scope.isCurrent,
@@ -495,14 +491,7 @@ export function beginEngineeringBuild(
     finished: false,
     enriching: false,
     update,
-    beforeCacheWrite: options.beforeCacheWrite,
-    identity: persistent
-      ? {
-          sourceSha256: session.sourceSha256!,
-          parserVersion: ENGINEERING_PARSER_CONTRACT,
-          entries: [...files.keys()],
-        }
-      : undefined,
+    cache,
   };
   jobs.set(state, job);
   const disposeProjection = installCompositionProjection(state, (complete) =>
@@ -513,8 +502,10 @@ export function beginEngineeringBuild(
     if (state.engineering.cleanup === cleanup) state.engineering.cleanup = null;
     if (jobs.get(state) === job) {
       state.engineering.buildPending = false;
+      state.sourceGeometry.cachePending = false;
       jobs.delete(state);
     }
+    cache?.close();
     settleBuild();
     try {
       client.close();
@@ -573,16 +564,9 @@ export function beginEngineeringBuild(
       }
     };
     let physical: SourceGeometryOccurrenceCatalog | undefined;
-    if (job.identity) {
+    if (cache) {
       try {
-        physical = await decodeSourceGeometryCache(
-          await readCachedEntry(
-            session.projectId!,
-            sourceGeometryCacheEntry(job.identity.sourceSha256),
-          ),
-          job.identity.sourceSha256,
-          files,
-        );
+        physical = await cache.readGeometry(files);
       } catch {
         /* Rebuild only the small physical directory; semantic caches are independent. */
       }
@@ -594,7 +578,7 @@ export function beginEngineeringBuild(
       physicalRebuilt = true;
       if (!current(state, job)) return;
       try {
-        physical = await client.extractGeometry(!!job.identity);
+        physical = await client.extractGeometry(!!cache);
       } catch (error) {
         if (!current(state, job)) return;
         resolveGeometry(null);
@@ -611,7 +595,7 @@ export function beginEngineeringBuild(
         diagnostics: physical.diagnostics.length,
       });
       if (
-        job.identity &&
+        cache &&
         physicalRebuilt &&
         !physical.diagnostics.some((d) => d.reason === 'source-read-failed')
       ) {
@@ -622,23 +606,11 @@ export function beginEngineeringBuild(
           if (!current(state, job)) return;
           // Encode the Worker's retained catalog; no clone back to the Worker
           // and no model-sized stringify on the rendering thread.
-          const bytes = await client.encodeGeometryCache();
-          if (!bytes) {
-            if (current(state, job)) {
-              state.sourceGeometry.cacheError = '来源物理目录缓存编码未返回内容';
-              job.update();
-            }
-            return;
+          const saved = await cache.saveGeometry(() => client.encodeGeometryCache());
+          if (!saved && current(state, job)) {
+            state.sourceGeometry.cacheError = '来源物理目录缓存编码未返回内容';
+            job.update();
           }
-          await job.beforeCacheWrite;
-          if (!current(state, job)) return;
-          if (current(state, job))
-            await writeCacheFile(
-              session.projectId!,
-              sourceGeometryCacheEntry(job.identity!.sourceSha256),
-              bytes,
-              job.identity!.sourceSha256,
-            );
         })()
           .catch((error) => {
             if (current(state, job)) {
@@ -657,20 +629,16 @@ export function beginEngineeringBuild(
     // Allow the independently resolved geometry consumer to dispatch work first.
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     await initialized;
-    if (job.identity) {
-      const reads = await Promise.allSettled([
-        readCachedEntry(session.projectId!, engineeringCacheEntry(job.identity, 'sources')),
-        readCachedEntry(session.projectId!, engineeringCacheEntry(job.identity, 'entities')),
-        readCachedEntry(session.projectId!, engineeringCacheEntry(job.identity, 'navigation')),
-      ]);
+    if (cache) {
+      const reads = await cache.readDomains();
       if (!current(state, job)) return;
-      if (reads[0].status === 'fulfilled') {
+      if (reads.sources) {
         try {
           const result = await client.restore(
-            reads[0].value,
-            reads[1].status === 'fulfilled' ? reads[1].value : undefined,
-            job.identity,
-            reads[2].status === 'fulfilled' ? reads[2].value : undefined,
+            reads.sources,
+            reads.entities,
+            cache.identity,
+            reads.navigation,
           );
           if (!current(state, job)) return;
           if (
@@ -732,7 +700,7 @@ export function beginEngineeringBuild(
     const result = await client.assemble(
       spatial?.objects ?? [],
       spatial?.models ?? [],
-      job.identity,
+      cache?.identity,
       spatial?.nodes ?? [],
     );
     if (!current(state, job)) return;

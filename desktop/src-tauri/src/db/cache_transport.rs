@@ -1,7 +1,8 @@
 //! Raw binary IPC envelopes and authorized cached-source reads.
 
 use super::cache_paths::{
-    atomic_write, cache_file_path, cache_project_root_for_batch, BatchCachePathResolver,
+    atomic_write, cache_file_path, cache_project_root_for_batch, prepare_cache_write,
+    BatchCachePathResolver, PreparedCacheWrite,
 };
 use super::cache_protocol::{
     decode_binary_cache_write_request, encode_batch_cache_response, BatchCacheFileResult,
@@ -34,17 +35,34 @@ pub async fn write_cache_file_binary(
             .lock()
             .map_err(|e| format!("获取数据库锁失败: {}", e))?;
         ensure_project_exists(&guard, meta.project_id)?;
-        // Derived semantic snapshots also run in background.  Bind the raw file
-        // write to the captured source identity while the project row is locked,
-        // matching the GLB/Fragments cache write contract.  A stale A→B task must
-        // not overwrite the cache directory for the newer source.
         ensure_project_source_sha(&guard, meta.project_id, meta.source_gim_sha256.as_deref())?;
         drop(guard);
         let path = cache_file_path(&app_handle, meta.project_id, &meta.entry_path)?;
-        atomic_write(&path, &bytes, "")?;
+        if let Some(source_sha256) = meta.source_gim_sha256.as_deref() {
+            let prepared = prepare_cache_write(&path, &bytes, "", true)?;
+            commit_source_cache_write(&conn, meta.project_id, source_sha256, prepared)?;
+        } else {
+            atomic_write(&path, &bytes, "")?;
+        }
         Ok(path.to_string_lossy().to_string())
     })
     .await
+}
+
+fn commit_source_cache_write(
+    state: &DbState,
+    project_id: i64,
+    source_sha256: &str,
+    prepared: PreparedCacheWrite<'_>,
+) -> Result<(), NativeError> {
+    // Hold the identity lock across rename only. Disk writes and sync happen
+    // before this lock so unrelated projects can continue to use the database.
+    let guard = state
+        .0
+        .lock()
+        .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+    ensure_project_source_sha(&guard, project_id, Some(source_sha256))?;
+    prepared.commit("")
 }
 
 /// Tauri command：读取缓存的 IFC 文件（路径由 project_id + entry_path 计算，不接受任意路径）
@@ -226,4 +244,69 @@ pub async fn batch_read_cached_files(
         Ok(tauri::ipc::Response::new(out))
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gim_native_core::NativeErrorCode;
+    use rusqlite::Connection;
+    use std::sync::Mutex;
+
+    #[test]
+    fn source_replacement_rejects_prepared_cache_and_removes_its_temporary_file() {
+        let root = crate::workspace_test_temp().join(format!(
+            "gim-cache-publish-{}-{}",
+            std::process::id(),
+            crate::db::now_ms()
+        ));
+        stdfs::create_dir_all(&root).unwrap();
+        let path = root.join("engineering.bin");
+        stdfs::write(&path, b"previous").unwrap();
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE gim_project(id INTEGER PRIMARY KEY, sha256 TEXT);
+             INSERT INTO gim_project VALUES (1, 'old');",
+        )
+        .unwrap();
+        let state = DbState(Mutex::new(conn));
+
+        let stale = prepare_cache_write(&path, b"stale", "", true).unwrap();
+        assert_eq!(stdfs::read_dir(&root).unwrap().count(), 2);
+        state
+            .0
+            .lock()
+            .unwrap()
+            .execute("UPDATE gim_project SET sha256='new' WHERE id=1", [])
+            .unwrap();
+        let error = commit_source_cache_write(&state, 1, "old", stale).unwrap_err();
+        assert_eq!(error.code, NativeErrorCode::SourceChanged);
+        assert_eq!(stdfs::read(&path).unwrap(), b"previous");
+        assert_eq!(stdfs::read_dir(&root).unwrap().count(), 1);
+
+        let current = prepare_cache_write(&path, b"replacement", "", true).unwrap();
+        commit_source_cache_write(&state, 1, "new", current).unwrap();
+        assert_eq!(stdfs::read(&path).unwrap(), b"replacement");
+        assert_eq!(stdfs::read_dir(&root).unwrap().count(), 1);
+        stdfs::remove_file(path).unwrap();
+        stdfs::remove_dir(root).unwrap();
+    }
+
+    #[test]
+    fn unsuccessful_cache_replacement_removes_the_staging_file() {
+        let root = crate::workspace_test_temp().join(format!(
+            "gim-failed-cache-publish-{}-{}",
+            std::process::id(),
+            crate::db::now_ms()
+        ));
+        let destination = root.join("existing-directory");
+        stdfs::create_dir_all(&destination).unwrap();
+        let prepared = prepare_cache_write(&destination, b"failed", "", true).unwrap();
+        assert_eq!(stdfs::read_dir(&root).unwrap().count(), 2);
+        assert!(prepared.commit("").is_err());
+        assert!(destination.is_dir());
+        assert_eq!(stdfs::read_dir(&root).unwrap().count(), 1);
+        stdfs::remove_dir(destination).unwrap();
+        stdfs::remove_dir(root).unwrap();
+    }
 }

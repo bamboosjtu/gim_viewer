@@ -78,13 +78,10 @@ const viewerBridgeImports = new Map([
   ['viewer/ifcBimLoader.ts:@desktop/ifcLodCache.js', false],
   ['viewer/ifcRegionalRuntime.ts:@desktop/ifcLodCache.js', false],
 ]);
-// The engineering host reuses its existing worker-safe handler and codecs.
-const workerServicePorts = new Set([
-  'services/engineeringWorkerHandler.js',
-  'services/engineeringCacheCodec.js',
-  'services/engineeringNavigationCache.js',
-  'services/engineeringSourceCodec.js',
-  'services/engineeringTableJson.js',
+const infrastructurePorts = new Map([
+  ['infrastructure/workers/engineeringWorker.ts', 'services/engineeringWorkerHandler.js'],
+  ['infrastructure/cache/engineeringCacheCodec.ts', 'services/projections/compositionSpatial.js'],
+  ['infrastructure/cache/engineeringCacheStore.ts', '@desktop/database.js'],
 ]);
 // Views may use explicit presentation selectors/formatters, never parsers or business classifiers.
 const uiPresentationValues = new Map([
@@ -251,6 +248,20 @@ for (const [layer, sourceRoot] of [
         )
           failures.push(
             `${localPath}: Worker infrastructure belongs to host orchestration (${name})`,
+          );
+        if (
+          targetPath.startsWith('infrastructure/cache/') &&
+          ['engineering', 'gim', 'viewer', 'ui'].includes(layer)
+        )
+          failures.push(`${localPath}: Engineering cache belongs to host infrastructure (${name})`);
+        if (
+          localPath.startsWith('infrastructure/cache/') &&
+          /^(?:features\/|viewer\/|three(?:\/|$)|web-ifc(?:\/|$)|maplibre-gl(?:\/|$)|infrastructure\/workers\/)/.test(
+            targetPath,
+          )
+        )
+          failures.push(
+            `${localPath}: Cache infrastructure cannot depend on feature, Worker or rendering runtimes (${name})`,
           );
         if (
           localPath.startsWith('infrastructure/workers/') &&
@@ -431,11 +442,7 @@ for (const [layer, sourceRoot] of [
         if (
           banned.test(targetPath) &&
           !exception &&
-          !(
-            layer === 'infrastructure' &&
-            localPath.startsWith('infrastructure/workers/') &&
-            workerServicePorts.has(targetPath)
-          ) &&
+          infrastructurePorts.get(localPath) !== targetPath &&
           !(
             (layer === 'services' || layer === 'app') &&
             ts.isImportDeclaration(node) &&

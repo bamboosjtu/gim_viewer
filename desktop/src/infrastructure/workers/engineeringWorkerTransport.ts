@@ -2,18 +2,18 @@ import type { EngineeringBuildResult } from './engineeringWorkerProtocol.js';
 import {
   engineeringNavigationFromWire,
   engineeringNavigationToWire,
-} from '../../services/engineeringNavigationCache.js';
+} from '../cache/engineeringNavigationCache.js';
 import {
   packEngineeringSource,
   unpackEngineeringSourceAsync,
-} from '../../services/engineeringSourceCodec.js';
+} from '../cache/engineeringSourceCodec.js';
 import type { EngineeringSourceGraph } from '../../gim/engineering/sourceGraph.js';
 import {
   parseEngineeringTable,
   releaseEngineeringBytes,
   stringifyEngineeringTable,
   yieldEngineeringCodec,
-} from '../../services/engineeringTableJson.js';
+} from '../cache/engineeringTableJson.js';
 export interface TransportGraphCache {
   scope?: string;
   revision?: number;

@@ -460,13 +460,45 @@ describe('session-owned production engineering build', () => {
   });
 
   it('keeps a published model usable after a cache write failure', async () => {
-    vi.mocked(writeCacheFile).mockRejectedValue(Error('disk-full'));
+    const write = vi.mocked(writeCacheFile).getMockImplementation()!;
+    vi.mocked(writeCacheFile).mockImplementation(async (...args) => {
+      if (args[1].includes('/engineering-navigation-v1/')) throw Error('disk-full');
+      return write(...args);
+    });
     const app = state();
     await beginEngineeringBuild(app, sourceFiles(), { createWorker: portFactory(new LoopbackPort()) });
     expect(app.engineering.status).toBe('ready');
     expect(app.engineering.snapshot?.entities).toHaveLength(2);
     expect(app.engineering.cacheStatus).toBe('error');
     expect(app.engineering.cacheError).toContain('disk-full');
+    expect([...store.keys()].some(path => path.includes('/engineering-source-v1/'))).toBe(true);
+    expect([...store.keys()].some(path => path.includes('/engineering-entity-v1/'))).toBe(true);
+    expect([...store.keys()].some(path => path.includes('/engineering-navigation-v1/'))).toBe(false);
+  });
+
+  it('cancels both deferred cache writes on project switch before source commit', async () => {
+    const app = state();
+    let commitOld!: () => void;
+    const barrier = new Promise<void>((resolve) => { commitOld = resolve; });
+    const old = new LoopbackPort();
+    const build = beginEngineeringBuild(app, sourceFiles(), {
+      createWorker: portFactory(old),
+      beforeCacheWrite: barrier,
+    });
+    await expect.poll(() => app.engineering.cacheStatus).toBe('saving');
+    await expect.poll(() => old.commands.includes('encode-geometry-cache')).toBe(true);
+    expect(app.engineering.status).toBe('ready');
+    expect(writeCacheFile).not.toHaveBeenCalled();
+
+    app.activateProject(8, 'b'.repeat(64));
+    expect(app.sourceGeometry.cachePending).toBe(false);
+    await build;
+    await beginEngineeringBuild(app, sourceFiles('断路器'), { createWorker: portFactory(new LoopbackPort()) });
+    commitOld();
+    await expect.poll(() => app.sourceGeometry.cachePending).toBe(false);
+    expect(app.engineering.cacheStatus).toBe('saved');
+    expect(app.engineering.snapshot?.scope).toBe('b'.repeat(64));
+    expect(vi.mocked(writeCacheFile).mock.calls.map(([projectId]) => projectId)).toEqual([8, 8, 8, 8]);
   });
 
   it('cancels a cache request on project switch without saving a late old-domain result',async()=>{

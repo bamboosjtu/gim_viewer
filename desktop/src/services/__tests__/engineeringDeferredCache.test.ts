@@ -2,8 +2,8 @@
 import { afterEach,expect,it,vi } from 'vitest';
 import { createEngineeringWorkerHandler } from '../engineeringWorkerHandler.js';
 import { decodeEngineeringWorkerResult } from '../../infrastructure/workers/engineeringWorkerTransport.js';
-import { createNavigationCacheProjection, decodeEngineeringNavigation, encodeEngineeringNavigation } from '../engineeringNavigationCache.js';
-import { decodeEngineeringSources } from '../engineeringCacheCodec.js';
+import { createNavigationCacheProjection, decodeEngineeringNavigation, encodeEngineeringNavigation } from '../../infrastructure/cache/engineeringNavigationCache.js';
+import { decodeEngineeringSources } from '../../infrastructure/cache/engineeringCacheCodec.js';
 
 async function fixture(){
   const handle=createEngineeringWorkerHandler(),identity={sourceSha256:'a'.repeat(64),parserVersion:'test',entries:['project.cbm','main.dev']};

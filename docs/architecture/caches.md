@@ -33,10 +33,10 @@ SQLite 共享 `gim_project`；变电表使用 `substation_*`，线路表使用 `
 
 | 变电 Spatial | `substation-spatial-semantic-v1` | [Spatial codec](../../desktop/src/services/substationSpatialCodec.ts)、[缓存 I/O](../../desktop/src/features/substation/runtime/substationSpatialSemanticCache.ts) | 精确大小写身份、宿主链、原始 IFC Name；缺失/损坏重建 |
 | IFC Spatial parser | `gim-substation-parser-v1` | [Spatial codec](../../desktop/src/services/substationSpatialCodec.ts) | 独立于变电语义域 |
-| 来源物理目录 | `source-geometry-v1` | [独立物理遍历](../../packages/gim-sdk/src/geometry/physicalOccurrences.ts)、[物理目录缓存](../../desktop/src/services/sourceGeometryCache.ts) | 源 SHA、契约与载荷长度、实际 entry 路径及有效矩阵；字符串表复用身份/上下文/路径，按实际 UTF-8 字节判断 32 MiB 可选缓存上限；独立于分类/实体/导航，命中后不读完整语义图 |
-| 工程来源 | `engineering-source-v1` + 识别字段内容指纹 | [来源契约](../../packages/gim-sdk/src/source/buildSources.ts)、[编码](../../desktop/src/services/engineeringCacheCodec.ts)、[来源表](../../desktop/src/services/engineeringSourceCodec.ts) | 源 SHA、条目清单、来源/IFC parser 契约、完整性；识别字段清单变化仅经头契约失效，磁盘目录名保持稳定；保留实际 FAM 归属、属性对象/Pset/实例类型范围；独立原子文件 |
-| 工程实体 | `engineering-entity-v1` + `recognition-evidence-policy-v1` + 内部策略内容指纹 + 模型/部件词汇与来源兼容映射内容指纹 + 识别字段内容指纹 + `engineering-catalog-v1` | [实体编码](../../desktop/src/services/engineeringCacheCodec.ts)、[识别版本](../../packages/gim-sdk/src/semantic/recognition/objectEvidenceDecision.ts)、[目录契约](../../packages/gim-sdk/src/semantic/catalog/catalog.json) | 绑定来源内容摘要、scope/sourceRevision、实体 schema、复合识别契约与词典内容指纹；单独修改识别词汇或字段清单只重建实体、导航 |
-| 工程导航 | `engineering-navigation-v1` + `engineering-composition-v1` + `engineering-source-tree-v1` + `engineering-inventory-v1` + 清册展示策略内容 + 目录版本 | [三视图投影](../../packages/gim-sdk/src/projection/navigation.ts)、[组成](../../packages/gim-sdk/src/projection/composition.ts)、[来源树](../../packages/gim-sdk/src/projection/sourceProjection.ts)、[清册](../../packages/gim-sdk/src/projection/inventoryTemplate.ts)、[导航缓存](../../desktop/src/services/engineeringNavigationCache.ts) | 绑定来源摘要、实体快照指纹和空间投影策略版本；实体叶子与来源到整体行的映射分别校验，待归诊断随元数据保存；校验节点可达性、完整投影标记与覆盖率；展示策略变化只重建导航，部分范围不写导航缓存 |
+| 来源物理目录 | `source-geometry-v1` | [独立物理遍历](../../packages/gim-sdk/src/geometry/physicalOccurrences.ts)、[物理目录缓存](../../desktop/src/infrastructure/cache/sourceGeometryCache.ts) | 源 SHA、契约与载荷长度、实际 entry 路径及有效矩阵；字符串表复用身份/上下文/路径，按实际 UTF-8 字节判断 32 MiB 可选缓存上限；独立于分类/实体/导航，命中后不读完整语义图 |
+| 工程来源 | `engineering-source-v1` + 识别字段内容指纹 | [来源契约](../../packages/gim-sdk/src/source/buildSources.ts)、[编码](../../desktop/src/infrastructure/cache/engineeringCacheCodec.ts)、[来源表](../../desktop/src/infrastructure/cache/engineeringSourceCodec.ts) | 源 SHA、条目清单、来源/IFC parser 契约、完整性；识别字段清单变化仅经头契约失效，磁盘目录名保持稳定；保留实际 FAM 归属、属性对象/Pset/实例类型范围；独立原子文件 |
+| 工程实体 | `engineering-entity-v1` + `recognition-evidence-policy-v1` + 内部策略内容指纹 + 模型/部件词汇与来源兼容映射内容指纹 + 识别字段内容指纹 + `engineering-catalog-v1` | [实体编码](../../desktop/src/infrastructure/cache/engineeringCacheCodec.ts)、[识别版本](../../packages/gim-sdk/src/semantic/recognition/objectEvidenceDecision.ts)、[目录契约](../../packages/gim-sdk/src/semantic/catalog/catalog.json) | 绑定来源内容摘要、scope/sourceRevision、实体 schema、复合识别契约与词典内容指纹；单独修改识别词汇或字段清单只重建实体、导航 |
+| 工程导航 | `engineering-navigation-v1` + `engineering-composition-v1` + `engineering-source-tree-v1` + `engineering-inventory-v1` + 清册展示策略内容 + 目录版本 | [三视图投影](../../packages/gim-sdk/src/projection/navigation.ts)、[组成](../../packages/gim-sdk/src/projection/composition.ts)、[来源树](../../packages/gim-sdk/src/projection/sourceProjection.ts)、[清册](../../packages/gim-sdk/src/projection/inventoryTemplate.ts)、[导航缓存](../../desktop/src/infrastructure/cache/engineeringNavigationCache.ts) | 绑定来源摘要、实体快照指纹和空间投影策略版本；实体叶子与来源到整体行的映射分别校验，待归诊断随元数据保存；校验节点可达性、完整投影标记与覆盖率；展示策略变化只重建导航，部分范围不写导航缓存 |
 | IFC 浏览 LOD | `bim-lod-v1` 组合 | [features](../../desktop/src/config/features.ts)、[LOD 缓存](../../desktop/bridge/ifcLodCache.ts) | 源 SHA、条目、LOD 策略、单次解析、依赖版本；分远景/近景/属性独立失效 |
 | IFC 区域模板 | `near-templates-v1`，附加于浏览 LOD 键 | [features](../../desktop/src/config/features.ts) | 模板几何与逐对象放置；不重建有效远景 |
 | Android 线路语义 | `mobile-powerline-v1` | [移动存储](../../app/src-tauri/src/storage.rs)、[领域投影](../../packages/powerline-core/src/domain.ts) | 私有源 SHA/大小、对象与属性范围、FAM 分类 |
@@ -69,8 +69,8 @@ Android 私有源包的 SHA 证明仅在文件长度、修改/创建时间及平
 
 - Worker 的 `encode-cache` 绑定 `buildId`，并要求请求域等于当前 `plan[0]`；
 - 编码成功才 `plan.shift()`，失败清空 plan；
-- 每域写入后立即释放传输用 `encoded.bytes`，再编码下一域，避免三个传输缓冲同时驻留；会话为按需来源恢复保留一份有效来源压缩体（空闲时由客户端持有），不保留实体或导航压缩副本；
-- 每次 `await` 后检查当前会话/构建身份；旧构建结果不写。
+- 每域写入结束后在统一清理路径释放独占传输缓冲，成功、失败及取消都释放，再编码下一域；会话为按需来源恢复保留一份有效来源压缩体（空闲时由客户端持有），不保留实体或导航压缩副本；
+- 缓存存储在等待来源提交、等候同一文件写入及收到编码结果后检查会话与构建身份。已进入原生端的写入按文件顺序交接，迟到完成只结束旧请求。原生端在原子替换前复核源 SHA，失败清理本次临时文件。
 - 最终导航通过组成增量返回 Worker；若主线程复制或修改了应保持不变的来源树、清册或搜索结构，投影校验失败时跳过导航域，标记 `partial` / `navigation-projection-unavailable`。保留已发布视图与已写来源、实体域；不把未完成的 Worker base 当成完整导航回退写入。实际编码或写盘失败仍标 `error`。
 
 Engineering 输入载体限制为每批 8 MiB / 256 文件，批次数不是会话总内存上限。载体只读取一次，按请求解码条目；同批尚有未消费或失败条目时，已读取的 ArrayBuffer 仍可能驻留。物理抽取后仅保留识别所需 FAM 载体，物化后清空批次和逐文件输入，抽取失败则立即清空；取消由所属 Worker 终止释放。该边界不证明大站峰值已受控，仍需原生进程树与 Worker 堆的本地采样。
@@ -118,7 +118,7 @@ Engineering 输入载体限制为每批 8 MiB / 256 文件，批次数不是会�
 
 缓存状态至少区分：`none`、`miss`、`hit`、`partial`、`saving`、`saved`、`error`。诊断需包含域版本、源 SHA、条目/节点计数和失败原因，不能用一个布尔值代表全部恢复。
 
-相关实现：[projectCacheService](../../desktop/src/services/projectCacheService.ts)、[engineeringCacheCodec](../../desktop/src/services/engineeringCacheCodec.ts)、[substationSpatialSemanticCache](../../desktop/src/features/substation/runtime/substationSpatialSemanticCache.ts)、[devSpatialCatalog](../../desktop/src/services/devSpatialCatalog.ts)。
+相关实现：[projectCacheService](../../desktop/src/services/projectCacheService.ts)、[engineeringCacheCodec](../../desktop/src/infrastructure/cache/engineeringCacheCodec.ts)、[substationSpatialSemanticCache](../../desktop/src/features/substation/runtime/substationSpatialSemanticCache.ts)、[devSpatialCatalog](../../desktop/src/services/devSpatialCatalog.ts)。
 
 工程组成投影只持久化路径、归属引用与推断状态，不包含 `evidence` 投影依据数组。导航 JSON 位于工程导航派生文件，SQLite 提供工程身份授权，没有独立的投影依据列；原始来源证据与实体识别字段保持各自契约。
 

@@ -4,11 +4,11 @@ import {ENGINEERING_RECOGNITION_VERSION} from '@gim/gim-sdk/source-adapter';
 import {projectEngineeringNavigation} from '@gim/gim-sdk/projection';
 import {encodeEngineeringNavigation} from '../engineeringNavigationCache.js';
 import { extractEngineeringSourceGraph } from '@gim/gim-sdk/source';
-import {buildTestEngineeringSources} from '../../../../packages/gim-sdk/src/source/__tests__/fixtures.js';
+import {buildTestEngineeringSources} from '../../../../../packages/gim-sdk/src/source/__tests__/fixtures.js';
 import { decodeEngineeringArtifact,encodeEngineeringArtifact,decodeEngineeringEntities, decodeEngineeringSources, encodeEngineeringEntities, encodeEngineeringSources, engineeringCacheEntry, engineeringSourceCacheMatchesFiles } from '../engineeringCacheCodec.js';
 import {packEngineeringSource} from '../engineeringSourceCodec.js';
-import { markCacheFailure } from '../engineeringWorkerHandler.js';
-import type { EngineeringBuildResult } from '../../infrastructure/workers/engineeringWorkerProtocol.js';
+import { markCacheFailure } from '../../../services/engineeringWorkerHandler.js';
+import type { EngineeringBuildResult } from '../../workers/engineeringWorkerProtocol.js';
 import {INVENTORY_TEMPLATE} from '@gim/gim-sdk/projection';
 
 const id = { sourceSha256: 'a'.repeat(64), parserVersion: 'parser-contract', entries: ['project.cbm', 'unit.dev', 'terminal.dev'] };

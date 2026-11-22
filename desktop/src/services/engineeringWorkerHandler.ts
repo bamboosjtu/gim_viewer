@@ -15,13 +15,13 @@ import {
   encodeEngineeringEntities,
   encodeEngineeringSources,
   engineeringCacheSizes,
+  type EngineeringCacheDomain,
   type EngineeringCacheIdentity,
-} from './engineeringCacheCodec.js';
+  type EngineeringCacheResult,
+} from '../infrastructure/cache/engineeringCacheCodec.js';
 import {
   ENGINEERING_SOURCE_BATCH_FILES,
   type EngineeringBuildResult,
-  type EngineeringCacheDomain,
-  type EngineeringCacheResult,
   type EngineeringSourceInput,
   type EngineeringWorkerCommand,
   type EngineeringWorkerReply,
@@ -31,7 +31,7 @@ import {
   applyNavigationCacheProjection,
   decodeEngineeringNavigation,
   encodeEngineeringNavigation,
-} from './engineeringNavigationCache.js';
+} from '../infrastructure/cache/engineeringNavigationCache.js';
 import { extractPhysicalOccurrences } from '../gim/engineering/geometry.js';
 import { SourceDocuments } from '../gim/engineering/sourceDocuments.js';
 import { createEntryIndex, type EntryIndex } from '../gim/entryResolver.js';
@@ -41,7 +41,7 @@ import {
 } from '../infrastructure/workers/engineeringWorkerTransport.js';
 import type { EvidenceStatus, EvidenceInventory } from '../engineering/evidence.js';
 import type { SourceGeometryOccurrenceCatalog } from '../gim/engineering/geometryOccurrences.js';
-import { encodeSourceGeometryCache } from './sourceGeometryCache.js';
+import { encodeSourceGeometryCache } from '../infrastructure/cache/sourceGeometryCache.js';
 
 export function markCacheFailure(
   result: Pick<EngineeringBuildResult, 'cacheError' | 'cacheDisabled'>,

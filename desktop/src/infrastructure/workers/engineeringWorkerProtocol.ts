@@ -7,9 +7,13 @@ import type {
 } from '../../gim/ifcSpatialParser.js';
 import type { EngineeringNavigationData } from '../../gim/engineering/navigation.js';
 import type { SourceGeometryOccurrenceCatalog } from '../../gim/engineering/geometryOccurrences.js';
-import type { EngineeringCacheIdentity } from '../../services/engineeringCacheCodec.js';
+import type {
+  EngineeringCacheDomain,
+  EngineeringCacheIdentity,
+  EngineeringCacheResult,
+} from '../cache/engineeringCacheCodec.js';
 import type { EngineeringWorkerPayload } from './engineeringWorkerTransport.js';
-import type { EngineeringNavigationCacheProjection } from '../../services/engineeringNavigationCache.js';
+import type { EngineeringNavigationCacheProjection } from '../cache/engineeringNavigationCache.js';
 import type {
   EvidenceInventory,
   EvidencePage,
@@ -41,16 +45,6 @@ export interface EngineeringSourceInput {
   files: Array<{ path: string; blob: Blob }>;
   errors: Array<{ path: string; message: string }>;
 }
-export type EngineeringCacheDomain = 'sources' | 'entities' | 'navigation';
-export interface EngineeringCacheResult {
-  buildId: number;
-  domain: EngineeringCacheDomain;
-  bytes?: Uint8Array;
-  error?: string;
-  disabled?: string;
-  metrics: { encodeMs: number; plainBytes: number; encodedBytes: number };
-}
-
 export interface EngineeringBuildResult {
   evidenceRevision?: number;
   stageErrors?: Record<string, string>;

@@ -29,6 +29,7 @@
 | `desktop/src/features/powerline/` | 线路冷暖打开、解析 Worker 的会话归属、地图与导航投影、视图句柄释放 | 共享线路 core、宿主来源/缓存端口、注入的 UI 端口 | Viewer、直接操作 DOM |
 | `desktop/src/features/equipment/` | 独立设备来源准备、导航、节点选择与会话发布 | gim 来源能力、共享 DEV 启动、注入的展示端口 | 其他 Feature 的内部模块、直接操作 DOM |
 | `desktop/src/infrastructure/workers/` | 工程 Worker 入口、协议、传输与请求释放；共享请求队列供变电 Spatial 与线路 Worker 使用 | Worker 安全的编解码、工程计算处理器和测量端口 | Feature、应用组合或渲染 |
+| `desktop/src/infrastructure/cache/` | 工程来源、实体、导航与物理目录的 v1 编解码及会话持久化 | 领域投影契约、原生缓存端口 | Worker 客户端、Feature、应用组合或渲染 |
 | `desktop/src/services/` | 跨域缓存、Worker、后台任务、选择、生命周期与未迁移能力的端口 | gim、viewer、bridge、注入的展示端口 | 把领域规则塞回 UI |
 | `desktop/src/config/` | 功能与调试开关 | 无 | 业务状态 |
 | `desktop/src/measurement/` | 宿主与 Worker 探针、产品证据、Trace/Profile/GPU 采样适配 | measurement-core、只读运行时快照 | 把测量状态变成产品业务状态 |
@@ -108,7 +109,7 @@ desktop/src/
 │   ├── powerline/       # application / runtime / presentation
 │   └── equipment/       # application / runtime
 ├── viewer/              # scene / geometry / selection / rendering
-├── infrastructure/      # workers
+├── infrastructure/      # workers / cache
 ├── ui/
 └── measurement/
 ```
@@ -119,7 +120,7 @@ desktop/src/
 - 每次只迁一个纵向工作流，先固定其输入、输出、会话守卫和资源释放器，再移动文件。
 - `packages/powerline-core/` 是独立可复用线路能力包，不并入 `features/powerline`；桌面 feature 只保留应用编排、宿主状态和展示接线。
 - `services/` 中的跨域入口先保留转发，迁移完成后删除；测试跟随被测模块移动，不复制到新目录。
-- 工程 Worker 入口、通信契约和共享请求队列位于 `infrastructure/workers/`。共享缓存与原生 DTO 归 `infrastructure/` 或现有 `packages/`，不因目录调整复制第二份实现。
+- 工程 Worker 入口、通信契约和共享请求队列位于 `infrastructure/workers/`。工程派生缓存的共享编解码和读写归 `infrastructure/cache/`，原生传输仍由 bridge 提供。
 
 ## 边界检查
 

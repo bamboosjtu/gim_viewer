@@ -10,11 +10,13 @@ import type {
   IfcSpatialNode,
   SpatialModelSummary,
 } from '../../gim/ifcSpatialParser.js';
-import type { EngineeringCacheIdentity } from '../../services/engineeringCacheCodec.js';
+import type {
+  EngineeringCacheDomain,
+  EngineeringCacheIdentity,
+  EngineeringCacheResult,
+} from '../cache/engineeringCacheCodec.js';
 import type {
   EngineeringBuildResult,
-  EngineeringCacheDomain,
-  EngineeringCacheResult,
   EngineeringEvidenceCheckpoint,
   EngineeringExtractSummary,
   EngineeringSourceBatch,
@@ -29,7 +31,7 @@ import {
   type TransportGraphCache,
   type EngineeringWorkerPayload,
 } from './engineeringWorkerTransport.js';
-import type { EngineeringNavigationCacheProjection } from '../../services/engineeringNavigationCache.js';
+import type { EngineeringNavigationCacheProjection } from '../cache/engineeringNavigationCache.js';
 import type {
   EvidenceInventory,
   EvidencePage,

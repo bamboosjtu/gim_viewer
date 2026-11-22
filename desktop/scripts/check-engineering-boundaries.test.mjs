@@ -190,6 +190,24 @@ test('checker keeps Worker infrastructure between host orchestration and worker-
   assert.match(rejected.stderr, /forbidden import .*engineeringService\.js/);
 });
 
+test('checker allows the cache store to use its native port and keeps codecs usable in Workers', () => {
+  const { files, run } = fixture();
+  files('desktop/src/infrastructure/cache/engineeringCacheStore.ts',
+    "import { writeCacheFile } from '@desktop/database.js';");
+  files('desktop/src/infrastructure/cache/engineeringCacheCodec.ts',
+    "import { SPATIAL_PROJECTION_POLICY } from '../../services/projections/compositionSpatial.js';");
+  assert.equal(run().status, 0);
+  files('desktop/src/infrastructure/cache/otherCodec.ts',
+    "import '@desktop/database.js'; import '../workers/engineeringWorkerClient.js';");
+  files('desktop/src/gim/source.ts',
+    "import '../infrastructure/cache/engineeringCacheStore.js';");
+  const rejected = run();
+  assert.equal(rejected.status, 1);
+  assert.match(rejected.stderr, /forbidden import @desktop\/database\.js/);
+  assert.match(rejected.stderr, /Cache infrastructure cannot depend on feature, Worker or rendering runtimes/);
+  assert.match(rejected.stderr, /Engineering cache belongs to host infrastructure/);
+});
+
 test('checker rejects eager renderer dependencies behind an opening helper',()=>{
   const {files,run}=fixture();
   files('desktop/src/services/openGimService.ts',"export {render} from './openHelper.js';");

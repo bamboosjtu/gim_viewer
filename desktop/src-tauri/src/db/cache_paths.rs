@@ -1,15 +1,15 @@
 //! Cache path containment, reparse-point guards and staging directory ownership.
 
+use super::now_ms;
+use super::validation_profile::ValidationSpan;
 use gim_native_core::{NativeError, NativeErrorCode};
 use std::collections::HashSet;
 use std::fs as stdfs;
-use std::path::{Component, Path, PathBuf};
 use std::io::Write;
-use std::time::Instant;
 #[cfg(windows)]
 use std::os::windows::fs::MetadataExt;
-use super::{now_ms};
-use super::validation_profile::{ValidationSpan};
+use std::path::{Component, Path, PathBuf};
+use std::time::Instant;
 
 pub(super) fn readable_source_of_size(path: &std::path::Path, size: i64) -> bool {
     let _timing = ValidationSpan::new("metadata_open");
@@ -21,11 +21,17 @@ pub(super) fn readable_source_of_size(path: &std::path::Path, size: i64) -> bool
         // Do not follow a final-file reparse point swapped in after the path check.
         options.custom_flags(0x00200000); // FILE_FLAG_OPEN_REPARSE_POINT
     }
-    options.open(path).and_then(|f| f.metadata()).map(|m| {
-        #[cfg(windows)]
-        if m.file_attributes() & 0x0400 != 0 { return false; }
-        m.is_file() && size >= 0 && m.len() == size as u64
-    }).unwrap_or(false)
+    options
+        .open(path)
+        .and_then(|f| f.metadata())
+        .map(|m| {
+            #[cfg(windows)]
+            if m.file_attributes() & 0x0400 != 0 {
+                return false;
+            }
+            m.is_file() && size >= 0 && m.len() == size as u64
+        })
+        .unwrap_or(false)
 }
 
 /// 校验 entry_path：只允许 Normal 组件，拒绝 ParentDir / RootDir / Prefix。
@@ -40,14 +46,32 @@ pub(super) fn validate_entry_path(entry_path: &str) -> Result<PathBuf, NativeErr
     for comp in path.components() {
         match comp {
             Component::Normal(s) => components.push(s),
-            Component::ParentDir => return Err(NativeError::new(NativeErrorCode::InvalidPath,"entry_path 包含 .. 路径穿越".to_string())),
-            Component::RootDir => return Err(NativeError::new(NativeErrorCode::InvalidPath,"entry_path 包含根目录".to_string())),
-            Component::Prefix(_) => return Err(NativeError::new(NativeErrorCode::InvalidPath,"entry_path 包含盘符前缀".to_string())),
+            Component::ParentDir => {
+                return Err(NativeError::new(
+                    NativeErrorCode::InvalidPath,
+                    "entry_path 包含 .. 路径穿越".to_string(),
+                ))
+            }
+            Component::RootDir => {
+                return Err(NativeError::new(
+                    NativeErrorCode::InvalidPath,
+                    "entry_path 包含根目录".to_string(),
+                ))
+            }
+            Component::Prefix(_) => {
+                return Err(NativeError::new(
+                    NativeErrorCode::InvalidPath,
+                    "entry_path 包含盘符前缀".to_string(),
+                ))
+            }
             Component::CurDir => { /* 跳过 . 当前目录 */ }
         }
     }
     if components.is_empty() {
-        return Err(NativeError::new(NativeErrorCode::InvalidPath,"entry_path 无效：无有效路径组件".to_string()));
+        return Err(NativeError::new(
+            NativeErrorCode::InvalidPath,
+            "entry_path 无效：无有效路径组件".to_string(),
+        ));
     }
     let mut result = PathBuf::new();
     for c in components {
@@ -72,18 +96,17 @@ pub(super) fn reject_link(path: &Path, label: &str) -> Result<(), NativeError> {
     #[cfg(not(windows))]
     let is_reparse = false;
     if is_link || is_reparse {
-        return Err(format!(
-            "缓存{}包含符号链接或 junction: {}",
-            label,
-            path.display()
-        ).into());
+        return Err(format!("缓存{}包含符号链接或 junction: {}", label, path.display()).into());
     }
     Ok(())
 }
 
 pub(super) fn ensure_cache_project_id(project_id: i64) -> Result<(), NativeError> {
     if project_id <= 0 {
-        return Err(NativeError::new(NativeErrorCode::InvalidInput,"project_id 必须为正数".to_string()));
+        return Err(NativeError::new(
+            NativeErrorCode::InvalidInput,
+            "project_id 必须为正数".to_string(),
+        ));
     }
     Ok(())
 }
@@ -112,11 +135,7 @@ pub(super) fn ensure_cache_parent(
         }
         reject_link(&current, label)?;
         if !current.is_dir() {
-            return Err(format!(
-                "缓存{}路径组件不是目录: {}",
-                label,
-                current.display()
-            ).into());
+            return Err(format!("缓存{}路径组件不是目录: {}", label, current.display()).into());
         }
     }
     let canonical_root = root
@@ -133,17 +152,51 @@ pub(super) fn ensure_cache_parent(
 
 /// 原子替换缓存文件，避免进程中断留下半写文件被后续校验误认为可用。
 pub(crate) fn atomic_write(path: &Path, bytes: &[u8], label: &str) -> Result<(), NativeError> {
-    atomic_write_with_durability(path, bytes, label, true)
+    prepare_cache_write(path, bytes, label, true)?.commit(label)
 }
 
 /// Rebuildable derived artifacts retain atomic replacement but do not force
 /// one disk flush per file. A power loss can discard an artifact; readers
 /// validate its header/content and rebuild that domain on the next open.
-pub(crate) fn atomic_write_derived(path: &Path, bytes: &[u8], label: &str) -> Result<(), NativeError> {
-    atomic_write_with_durability(path, bytes, label, false)
+pub(crate) fn atomic_write_derived(
+    path: &Path,
+    bytes: &[u8],
+    label: &str,
+) -> Result<(), NativeError> {
+    prepare_cache_write(path, bytes, label, false)?.commit(label)
 }
 
-fn atomic_write_with_durability(path: &Path, bytes: &[u8], label: &str, durable: bool) -> Result<(), NativeError> {
+pub(super) struct PreparedCacheWrite<'a> {
+    destination: &'a Path,
+    temp: PathBuf,
+    committed: bool,
+}
+
+impl PreparedCacheWrite<'_> {
+    pub(super) fn commit(mut self, label: &str) -> Result<(), NativeError> {
+        reject_link(self.destination, label)?;
+        // Rename atomically replaces a regular file, including on Windows.
+        stdfs::rename(&self.temp, self.destination)
+            .map_err(|e| format!("替换缓存{}文件失败: {}", label, e))?;
+        self.committed = true;
+        Ok(())
+    }
+}
+
+impl Drop for PreparedCacheWrite<'_> {
+    fn drop(&mut self) {
+        if !self.committed {
+            let _ = stdfs::remove_file(&self.temp);
+        }
+    }
+}
+
+pub(super) fn prepare_cache_write<'a>(
+    path: &'a Path,
+    bytes: &[u8],
+    label: &str,
+    durable: bool,
+) -> Result<PreparedCacheWrite<'a>, NativeError> {
     reject_link(path, label)?;
     let parent = path
         .parent()
@@ -157,12 +210,19 @@ fn atomic_write_with_durability(path: &Path, bytes: &[u8], label: &str, durable:
         stamp
     ));
     reject_link(&temp, label)?;
+    let prepared;
     {
         let mut file = stdfs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&temp)
             .map_err(|e| format!("创建缓存{}临时文件失败: {}", label, e))?;
+        // The file handle drops before cleanup on early return, also on Windows.
+        prepared = PreparedCacheWrite {
+            destination: path,
+            temp,
+            committed: false,
+        };
         file.write_all(bytes)
             .map_err(|e| format!("写入缓存{}临时文件失败: {}", label, e))?;
         if durable {
@@ -170,15 +230,7 @@ fn atomic_write_with_durability(path: &Path, bytes: &[u8], label: &str, durable:
                 .map_err(|e| format!("同步缓存{}临时文件失败: {}", label, e))?;
         }
     }
-    reject_link(path, label)?;
-    // std::fs::rename replaces regular files (MoveFileExW with
-    // MOVEFILE_REPLACE_EXISTING on Windows). Keep the old file intact until
-    // replacement succeeds; deleting first would break per-template atomicity.
-    if let Err(e) = stdfs::rename(&temp, path) {
-        let _ = stdfs::remove_file(&temp);
-        return Err(format!("替换缓存{}文件失败: {}", label, e).into());
-    }
-    Ok(())
+    Ok(prepared)
 }
 
 /// 为一次原生 GIM 解压创建独立 staging 目录。
@@ -202,7 +254,9 @@ pub(crate) fn create_cache_staging_dir(
     if !base.is_dir() {
         return Err(format!("extracted 路径不是目录: {}", base.display()).into());
     }
-    let base = base.canonicalize().map_err(|e| format!("规范化 extracted 目录失败: {}", e))?;
+    let base = base
+        .canonicalize()
+        .map_err(|e| format!("规范化 extracted 目录失败: {}", e))?;
 
     let final_root = base.join(project_id.to_string());
     // 纳入路径安全检查；旧目录即使存在也只允许是普通目录，提交时会
@@ -287,7 +341,9 @@ impl CacheStagingWriter {
                 }
                 reject_link(&current, " staging")?;
                 if !current.is_dir() {
-                    return Err(format!("缓存 staging 路径组件不是目录: {}", current.display()).into());
+                    return Err(
+                        format!("缓存 staging 路径组件不是目录: {}", current.display()).into(),
+                    );
                 }
                 self.checked_dirs.insert(current.clone());
             }
@@ -332,8 +388,12 @@ pub(crate) fn commit_cache_staging(
         .map_err(|e| format!("获取应用数据目录失败: {}", e))?
         .join("extracted");
     reject_link(&base, " extracted")?;
-    let base = base.canonicalize().map_err(|e| format!("规范化 extracted 目录失败: {}", e))?;
-    let staging_root = staging_root.canonicalize().map_err(|e| format!("规范化 staging 目录失败: {}", e))?;
+    let base = base
+        .canonicalize()
+        .map_err(|e| format!("规范化 extracted 目录失败: {}", e))?;
+    let staging_root = staging_root
+        .canonicalize()
+        .map_err(|e| format!("规范化 staging 目录失败: {}", e))?;
     if staging_root.parent() != Some(base.as_path()) {
         return Err("staging 目录不属于当前 extracted 根目录".into());
     }
@@ -351,8 +411,7 @@ pub(crate) fn commit_cache_staging(
     ));
     let had_previous = final_root.exists();
     if had_previous {
-        stdfs::rename(&final_root, &backup)
-            .map_err(|e| format!("移动旧缓存目录失败: {}", e))?;
+        stdfs::rename(&final_root, &backup).map_err(|e| format!("移动旧缓存目录失败: {}", e))?;
     }
     if let Err(error) = stdfs::rename(&staging_root, &final_root) {
         if had_previous {
@@ -465,19 +524,32 @@ pub(super) struct CacheValidationContext {
 fn normalized_cache_path(path: &Path) -> String {
     let mut s = path.to_string_lossy().replace('\\', "/");
     #[cfg(windows)]
-    { s = s.to_ascii_lowercase(); }
-    if let Some(rest) = s.strip_prefix("//?/unc/") { s = format!("//{}", rest); }
-    else if let Some(rest) = s.strip_prefix("//?/") { s = rest.to_string(); }
-    while s.ends_with('/') { s.pop(); }
+    {
+        s = s.to_ascii_lowercase();
+    }
+    if let Some(rest) = s.strip_prefix("//?/unc/") {
+        s = format!("//{}", rest);
+    } else if let Some(rest) = s.strip_prefix("//?/") {
+        s = rest.to_string();
+    }
+    while s.ends_with('/') {
+        s.pop();
+    }
     s
 }
 
 impl CacheValidationContext {
-    pub(super) fn for_project(app: &tauri::AppHandle, project_id: i64) -> Result<Self, NativeError> {
+    pub(super) fn for_project(
+        app: &tauri::AppHandle,
+        project_id: i64,
+    ) -> Result<Self, NativeError> {
         let _timing = ValidationSpan::new("cache_root_resolution");
         ensure_cache_project_id(project_id)?;
         let base = crate::application_data_dir(&app).map_err(|e| e.to_string())?;
-        Self::new(project_id, &base.join("extracted").join(project_id.to_string()))
+        Self::new(
+            project_id,
+            &base.join("extracted").join(project_id.to_string()),
+        )
     }
 
     pub(super) fn new(project_id: i64, root: &Path) -> Result<Self, NativeError> {
@@ -487,9 +559,13 @@ impl CacheValidationContext {
         #[cfg(windows)]
         let pin = |path: &Path| -> Result<stdfs::File, NativeError> {
             use std::os::windows::fs::OpenOptionsExt;
-            stdfs::OpenOptions::new().read(true).share_mode(3)
+            stdfs::OpenOptions::new()
+                .read(true)
+                .share_mode(3)
                 .custom_flags(0x02000000 | 0x00200000) // BACKUP_SEMANTICS | OPEN_REPARSE_POINT
-                .open(path).map_err(|e| format!("固定可信缓存根失败: {}: {}", path.display(), e)).map_err(NativeError::from)
+                .open(path)
+                .map_err(|e| format!("固定可信缓存根失败: {}: {}", path.display(), e))
+                .map_err(NativeError::from)
         };
         #[cfg(windows)]
         handles.push(pin(root)?);
@@ -498,7 +574,9 @@ impl CacheValidationContext {
             root.canonicalize().map_err(|e| e.to_string())?
         };
         Self::check_component(&canonical_root, "root_reparse_checks")?;
-        if !canonical_root.is_dir() { return Err("缓存根不是目录".into()); }
+        if !canonical_root.is_dir() {
+            return Err("缓存根不是目录".into());
+        }
         #[cfg(windows)]
         handles.push(pin(&canonical_root)?);
         #[cfg(unix)]
@@ -507,43 +585,73 @@ impl CacheValidationContext {
             let m = stdfs::metadata(root).map_err(|e| e.to_string())?;
             (m.dev(), m.ino())
         };
-        Ok(Self { project_id, lexical_root: root.to_path_buf(), canonical_root,
-            _root_handles: handles, #[cfg(unix)] root_identity })
+        Ok(Self {
+            project_id,
+            lexical_root: root.to_path_buf(),
+            canonical_root,
+            _root_handles: handles,
+            #[cfg(unix)]
+            root_identity,
+        })
     }
 
     pub(super) fn check_component(path: &Path, phase: &'static str) -> Result<(), NativeError> {
         let _phase = ValidationSpan::new(phase);
         let _timing = ValidationSpan::new("symlink_metadata");
-        let meta = stdfs::symlink_metadata(path).map_err(|e| format!("缓存路径不可检查: {}: {}", path.display(), e))?;
+        let meta = stdfs::symlink_metadata(path)
+            .map_err(|e| format!("缓存路径不可检查: {}: {}", path.display(), e))?;
         #[cfg(windows)]
         let reparse = meta.file_attributes() & 0x0400 != 0;
         #[cfg(not(windows))]
         let reparse = false;
-        if meta.file_type().is_symlink() || reparse { return Err(format!("缓存包含符号链接或 reparse point: {}", path.display()).into()); }
+        if meta.file_type().is_symlink() || reparse {
+            return Err(format!("缓存包含符号链接或 reparse point: {}", path.display()).into());
+        }
         Ok(())
     }
 
-    pub(super) fn contains(&self, project_id: i64, entry: &str, candidate: &Path) -> Result<bool, NativeError> {
+    pub(super) fn contains(
+        &self,
+        project_id: i64,
+        entry: &str,
+        candidate: &Path,
+    ) -> Result<bool, NativeError> {
         let _timing = ValidationSpan::new("path_containment");
-        if project_id != self.project_id { return Ok(false); }
+        if project_id != self.project_id {
+            return Ok(false);
+        }
         let relative = validate_entry_path(entry)?;
         let candidate_name = normalized_cache_path(candidate);
         if candidate_name != normalized_cache_path(&self.lexical_root.join(&relative))
-            && candidate_name != normalized_cache_path(&self.canonical_root.join(&relative)) { return Ok(false); }
+            && candidate_name != normalized_cache_path(&self.canonical_root.join(&relative))
+        {
+            return Ok(false);
+        }
         Self::check_component(&self.lexical_root, "root_reparse_checks")?;
         Self::check_component(&self.canonical_root, "root_reparse_checks")?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;
             let m = stdfs::metadata(&self.lexical_root).map_err(|e| e.to_string())?;
-            if (m.dev(), m.ino()) != self.root_identity { return Err("缓存根在验证中发生变化".into()); }
+            if (m.dev(), m.ino()) != self.root_identity {
+                return Err("缓存根在验证中发生变化".into());
+            }
         }
         let mut current = self.canonical_root.clone();
         let parts: Vec<_> = relative.components().collect();
         for (index, part) in parts.iter().enumerate() {
-            let Component::Normal(name) = part else { return Ok(false); };
+            let Component::Normal(name) = part else {
+                return Ok(false);
+            };
             current.push(name);
-            Self::check_component(&current, if index + 1 == parts.len() { "file_reparse_checks" } else { "directory_reparse_checks" })?;
+            Self::check_component(
+                &current,
+                if index + 1 == parts.len() {
+                    "file_reparse_checks"
+                } else {
+                    "directory_reparse_checks"
+                },
+            )?;
         }
         Ok(true)
     }
@@ -580,8 +688,8 @@ pub(super) fn is_expected_cache_path_in_root(
         s
     };
     let canonical_root = {
-        let _resolve=ValidationSpan::new("root_canonicalize");
-        root.canonicalize().unwrap_or_else(|_|root.to_path_buf())
+        let _resolve = ValidationSpan::new("root_canonicalize");
+        root.canonicalize().unwrap_or_else(|_| root.to_path_buf())
     };
     let expected = canonical_root.join(&relative);
     let lexical_expected = root.join(relative);
@@ -636,7 +744,8 @@ pub(crate) fn cache_project_root_for_batch(
         return Err(format!("缓存根路径不是目录: {}", root.display()).into());
     }
     root.canonicalize()
-        .map_err(|e| format!("规范化缓存根目录失败: {}", e)).map_err(NativeError::from)
+        .map_err(|e| format!("规范化缓存根目录失败: {}", e))
+        .map_err(NativeError::from)
 }
 
 /// 在已经 canonicalize 的缓存根目录下解析一条 entry。
@@ -664,7 +773,11 @@ impl BatchCachePathResolver {
     pub(crate) fn resolve(&mut self, entry_path: &str) -> Result<PathBuf, NativeError> {
         let relative = validate_entry_path(entry_path)?;
         let mut current = self.root.clone();
-        for component in relative.parent().unwrap_or_else(|| Path::new("")).components() {
+        for component in relative
+            .parent()
+            .unwrap_or_else(|| Path::new(""))
+            .components()
+        {
             let Component::Normal(part) = component else {
                 return Err("缓存 entry_path 父目录组件无效".to_string().into());
             };

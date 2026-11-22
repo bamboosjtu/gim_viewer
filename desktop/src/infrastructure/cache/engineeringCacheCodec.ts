@@ -1,21 +1,21 @@
-import { engineeringSourceRecords } from '../gim/engineering/sourceGraph.js';
+import { engineeringSourceRecords } from '../../gim/engineering/sourceGraph.js';
 import {
   ENGINEERING_SOURCE_SCHEMA,
   ENGINEERING_SOURCE_VERSION,
   type EngineeringSources,
-} from '../gim/engineering/buildSources.js';
+} from '../../gim/engineering/buildSources.js';
 import { ENGINEERING_RECOGNITION_VERSION as ENGINEERING_RULES_VERSION } from '@gim/gim-sdk/source-adapter';
-import { assertEngineeringPartition } from '../engineering/validate.js';
-import type { EngineeringSnapshot } from '../engineering/types.js';
-import { ENGINEERING_NAVIGATION_VERSION } from '../gim/engineering/navigation.js';
-import { SPATIAL_PROJECTION_POLICY } from './projections/compositionSpatial.js';
-import { ENGINEERING_COMPOSITION_VERSION } from '../engineering/composition.js';
+import { assertEngineeringPartition } from '../../engineering/validate.js';
+import type { EngineeringSnapshot } from '../../engineering/types.js';
+import { ENGINEERING_NAVIGATION_VERSION } from '../../gim/engineering/navigation.js';
+import { SPATIAL_PROJECTION_POLICY } from '../../services/projections/compositionSpatial.js';
+import { ENGINEERING_COMPOSITION_VERSION } from '../../engineering/composition.js';
 import {
   INVENTORY_TEMPLATE_VERSION,
   INVENTORY_TEMPLATE,
-} from '../engineering/inventoryTemplate.js';
-import { SOURCE_TREE_TEMPLATE_VERSION } from '../gim/engineering/sourceProjection.js';
-import { ENGINEERING_CATALOG_VERSION } from '../engineering/catalogLabels.js';
+} from '../../engineering/inventoryTemplate.js';
+import { SOURCE_TREE_TEMPLATE_VERSION } from '../../gim/engineering/sourceProjection.js';
+import { ENGINEERING_CATALOG_VERSION } from '../../engineering/catalogLabels.js';
 import { packEngineeringSource, unpackEngineeringSourceAsync } from './engineeringSourceCodec.js';
 import {
   engineeringTableChunks,
@@ -40,7 +40,15 @@ export interface EngineeringSourceArtifact {
   sources: EngineeringSources;
   digest: string;
 }
-type Kind = 'sources' | 'entities' | 'navigation';
+export type EngineeringCacheDomain = 'sources' | 'entities' | 'navigation';
+export interface EngineeringCacheResult {
+  buildId: number;
+  domain: EngineeringCacheDomain;
+  bytes?: Uint8Array;
+  error?: string;
+  disabled?: string;
+  metrics: { encodeMs: number; plainBytes: number; encodedBytes: number };
+}
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true });
 const record = (v: unknown): v is Record<string, unknown> =>
@@ -55,7 +63,7 @@ const sha = async (bytes: Uint8Array) =>
     .map((v) => v.toString(16).padStart(2, '0'))
     .join('');
 const navigationPolicyContent = JSON.stringify(INVENTORY_TEMPLATE);
-const contract = (kind: Kind) =>
+const contract = (kind: EngineeringCacheDomain) =>
   kind === 'sources'
     ? ENGINEERING_SOURCE_VERSION
     : kind === 'entities'
@@ -68,7 +76,10 @@ const manifestDigest = (id: EngineeringCacheIdentity) =>
  * fingerprint rides in the header contract below, mirroring the substation
  * spatial codec (fixed cache entry, fingerprinted parser domain version).
  * This also keeps the path valid on platforms that forbid ':' and '|'. */
-export function engineeringCacheEntry(id: EngineeringCacheIdentity, kind: Kind): string {
+export function engineeringCacheEntry(
+  id: EngineeringCacheIdentity,
+  kind: EngineeringCacheDomain,
+): string {
   requireValid(/^[a-f\d]{64}$/i.test(id.sourceSha256), 'source identity');
   return `__derived__/${kind === 'sources' ? ENGINEERING_SOURCE_SCHEMA : kind === 'entities' ? ENGINEERING_ENTITY_SCHEMA : ENGINEERING_NAVIGATION_VERSION}/${id.sourceSha256.toLowerCase()}.bin`;
 }
@@ -126,7 +137,7 @@ async function expandInto(bytes: Uint8Array, target: Uint8Array, offset: number)
 }
 
 async function encode(
-  kind: Kind,
+  kind: EngineeringCacheDomain,
   payload: unknown,
   id: EngineeringCacheIdentity,
   sourceDigest?: string,
@@ -208,7 +219,7 @@ async function encode(
 }
 
 async function decode(
-  kind: Kind,
+  kind: EngineeringCacheDomain,
   bytes: Uint8Array,
   id: EngineeringCacheIdentity,
   sourceDigest?: string,
