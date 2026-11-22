@@ -1,3 +1,9 @@
+import { deviceTemplateCacheKey } from '../infrastructure/cache/devLodIdentity.js';
+import type { CachedTemplate } from './devLodTypes.js';
+import {
+  diagnosticFromSerialization,
+  type GeometryDiagnostic,
+} from '../gim/geometry/geometryDiagnostics.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { CbmNode } from '../gim/types.js';
 import { buildSubstationAliasIndex } from '../gim/substationEvidence.js';
@@ -129,10 +135,11 @@ export async function readNodeDevGlb(
   node: CbmNode,
   state: AppState,
   session: ProjectLoadSession,
-): Promise<{ path: string; bytes: Uint8Array } | undefined> {
+): Promise<{ path: string; bytes: Uint8Array; diagnostic: GeometryDiagnostic } | undefined> {
   const current = () => state.isCurrentSession(session);
   const projectId = session.projectId;
-  if (projectId == null || !current()) return;
+  const sourceIdentity = session.sourceSha256;
+  if (projectId == null || !sourceIdentity || !current()) return;
   const { createEntryResolver, getFileEntryResolver } = await import('../gim/entryResolver.js');
   if (!current()) return;
   const path = (
@@ -142,10 +149,28 @@ export async function readNodeDevGlb(
   )(node.devPath, node.path);
   if (!path) return;
   try {
-    const { readGlbFile } = await import('../infrastructure/native/projectFiles.js');
+    const { readDevArtifactResult } = await import('@desktop/devLodCache.js');
     if (!current()) return;
-    const bytes = await readGlbFile(projectId, path, current);
-    if (current() && bytes?.byteLength) return { path, bytes };
+    const artifact = await readDevArtifactResult<CachedTemplate>(
+      'templates',
+      deviceTemplateCacheKey(sourceIdentity, path, 0),
+      session,
+    );
+    if (!current() || artifact.status !== 'hit') return;
+    const result = artifact.value?.result;
+    if (
+      result &&
+      (result.status === 'complete' || result.status === 'partial') &&
+      result.diagnostics?.status === result.status &&
+      result.bytes instanceof Uint8Array &&
+      result.bytes.byteLength > 0
+    ) {
+      return {
+        path,
+        bytes: result.bytes,
+        diagnostic: diagnosticFromSerialization(path, result.diagnostics, 'warm'),
+      };
+    }
   } catch {
     // The raw geometry path remains available after a cache read failure.
   }

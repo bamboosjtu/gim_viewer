@@ -28,6 +28,7 @@ export default defineConfig({
       // 强制 vitest 走 ESM 源码入口，与 vite dev/build 行为一致。
       'three-bvh-csg': '/node_modules/three-bvh-csg/src/index.js',
       '@desktop': resolve(__dirname, 'bridge'),
+      '@tests/sdk-source-fixtures': resolve(__dirname, '../packages/gim-sdk/tests/sourceFixtures.ts'),
     },
   },
   test: {

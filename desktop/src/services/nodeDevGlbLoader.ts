@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { CbmNode } from '../gim/types.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
+import { setGeometryDiagnostic } from '../gim/geometry/geometryDiagnostics.js';
 import { debugLog } from '../utils/logger.js';
 import { ensureGeometryLayer } from './modGeometryScene.js';
 import { readNodeDevGlb } from './nodeGeometrySources.js';
@@ -33,7 +34,7 @@ export async function tryLoadDevGlbForNode(
 
   const source = await readNodeDevGlb(geometryNode, state, session);
   if (!source || !state.isCurrentSession(session)) return false;
-  const { path: devPath, bytes: glbBytes } = source;
+  const { path: devPath, bytes: glbBytes, diagnostic } = source;
 
   // 检查是否已加载
   const instanceKey = `dev:${devPath}#${geometryNode.path}`;
@@ -86,6 +87,7 @@ export async function tryLoadDevGlbForNode(
     sharedGroup.userData.rootOccurrence = geometryNode.path;
     modRoot.add(sharedGroup);
     state.loadedXmlModGroups.set(instanceKey, sharedGroup);
+    setGeometryDiagnostic(state, diagnostic);
     debugLog(
       DEBUG_IFC_LOAD,
       `[xml-mod] DEV GLB template placement 命中: ${devPath} (instance: ${instanceKey})`,
@@ -126,6 +128,7 @@ export async function tryLoadDevGlbForNode(
   }
   modRoot.add(group);
   state.loadedXmlModGroups.set(instanceKey, group);
+  setGeometryDiagnostic(state, diagnostic);
 
   debugLog(DEBUG_IFC_LOAD, `[xml-mod] DEV GLB 命中: ${devPath} (instance: ${instanceKey})`);
 

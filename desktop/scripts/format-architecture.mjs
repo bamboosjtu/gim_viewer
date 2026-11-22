@@ -133,6 +133,10 @@ export const architectureModules = [
   'src/infrastructure/native/gimExtract.ts',
   'src/infrastructure/native/invokeTimed.ts',
   'src/infrastructure/native/projectFileEnvelope.ts',
+  'src/infrastructure/native/boundedFileBatch.ts',
+  'src/infrastructure/cache/devLodIdentity.ts',
+  'src/shared/diagnosticSummary.ts',
+  'scripts/check-coverage.mjs',
   'src/infrastructure/native/projectFiles.ts',
   'src/shared/ownedBytes.ts',
   'src/features/substation/runtime/connectionOwnershipService.ts',
@@ -383,6 +387,7 @@ export function unadoptedProductionSources(paths) {
         !/\.(?:test|spec)\.[cm]?[jt]s$/.test(path) &&
         !/\/(?:__tests__|tests|__fixtures__|dist|node_modules)\//.test(path) &&
         !path.startsWith('contracts/generated/') &&
+        path !== 'packages/powerline-core/src/generated/nativeContracts.ts' &&
         !adoptedPaths.has(path),
     )
     .sort();

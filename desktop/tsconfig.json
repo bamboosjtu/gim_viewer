@@ -9,7 +9,8 @@
     "customConditions": ["gim-source"],
     "baseUrl": ".",
     "paths": {
-      "@desktop/*": ["bridge/*"]
+      "@desktop/*": ["bridge/*"],
+      "@tests/sdk-source-fixtures": ["../packages/gim-sdk/tests/sourceFixtures.ts"]
     },
     "allowImportingTsExtensions": true,
     "allowJs": true,

@@ -29,10 +29,6 @@ import { type DevSourceBounds } from './devSpatialCatalog.js';
 import { DevTemplateCacheReader } from './devTemplateCacheReader.js';
 import { parseDevGlbAsset } from './glbCacheService.js';
 
-const hash = async (bytes: Uint8Array) =>
-  [...new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array(bytes)))]
-    .map((v) => v.toString(16).padStart(2, '0'))
-    .join('');
 export interface TemplateLifecycle {
   kind?: 'queue' | 'occupancy';
   key: string;
@@ -495,7 +491,7 @@ export class DevLodTemplateStore {
           this.options.recordCacheDecision(dev, lod, 'compiled', cacheStatus);
           artifact = {
             result,
-            sha: result.bytes ? (result.sha256 ?? (await hash(result.bytes))) : '',
+            sha: result.bytes ? (result.sha256 ?? '') : '',
           };
           if (lod === 1) {
             demand += 1;

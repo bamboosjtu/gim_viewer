@@ -28,9 +28,7 @@ SQLite 共享 `gim_project`；变电表使用 `substation_*`，线路表使用 `
 |---|---|---|---|
 | 线路语义 | `gim-line-parser-v1` | [db.rs](../../desktop/src-tauri/src/db.rs) | 源 SHA、完整事务、graph/属性 |
 | 变电语义 | `gim-substation-parser-v1` | [db.rs](../../desktop/src-tauri/src/db.rs) | 原始属性、CBM/DEV/IFC 引用、索引 receipt |
-| DEV 几何 | `geometry-cache-v1-source-bound-stl` | [db.rs](../../desktop/src-tauri/src/db.rs)、[DEV 目录](../../desktop/src/services/devSpatialCatalog.ts) | occurrence 引用、manifest、GLB 完整性、STL 共享矩阵、有限坐标和数值精度；不在首次/缓存加载时额外复核源字节 |
-| DEV LOD 派生 | 几何版本组合 `dev-spatial-catalog-v1`；有源 SHA 的浏览器上下文使用 IndexedDB `gim-dev-lod-v1` | [DEV 目录](../../desktop/src/services/devSpatialCatalog.ts)、[LOD 缓存](../../desktop/bridge/devLodCache.ts) | 源 SHA、DEV 路径、几何版本与 LOD；L0 持久化、仅热点 L1 选择性持久化、L2 默认内存；模板/目录逐条原子提交 |
-
+| DEV LOD 派生 | `geometry-cache-v1-source-bound-stl` 与 `dev-spatial-catalog-v1`；浏览器使用 IndexedDB `gim-dev-lod-v1` | [DEV 目录](../../desktop/src/services/devSpatialCatalog.ts)、[LOD 缓存](../../desktop/bridge/devLodCache.ts) | 源 SHA、DEV 路径、几何版本与 LOD。L0 持久化、仅热点 L1 选择性持久化、L2 默认内存。模板和目录逐条原子提交并按需检查，节点点击复用同一 L0 键。 |
 | 变电 Spatial | `substation-spatial-semantic-v1` | [Spatial codec](../../desktop/src/infrastructure/cache/substationSpatialCodec.ts)、[缓存 I/O](../../desktop/src/features/substation/runtime/substationSpatialSemanticCache.ts) | 精确大小写身份、宿主链、原始 IFC Name；缺失/损坏重建 |
 | IFC Spatial parser | `gim-substation-parser-v1` | [Spatial codec](../../desktop/src/infrastructure/cache/substationSpatialCodec.ts) | 独立于变电语义域 |
 | 来源物理目录 | `source-geometry-v1` | [独立物理遍历](../../packages/gim-sdk/src/geometry/physicalOccurrences.ts)、[物理目录缓存](../../desktop/src/infrastructure/cache/sourceGeometryCache.ts) | 源 SHA、契约与载荷长度、实际 entry 路径及有效矩阵；字符串表复用身份/上下文/路径，按实际 UTF-8 字节判断 32 MiB 可选缓存上限；独立于分类/实体/导航，命中后不读完整语义图 |
@@ -59,7 +57,7 @@ SQLite 共享 `gim_project`；变电表使用 `substation_*`，线路表使用 `
 
 桌面和 Android 打开数据库时先读取 user_version：只有空的新库可以初始化为 v1，不匹配版本或已有的无版本开发库明确拒绝，不覆写版本号、不迁移。开发者删除旧开发库/缓存后重建。
 
-Android 私有源包的 SHA 证明仅在文件长度、修改/创建时间及平台文件身份未变时复用；时间信息不可用或身份改变时重新验证，失败不返回缓存文本。单次属性查看不重复 hash 身份未变的整包。证明有容量上限并在删除工程时释放，不把 SQLite 内容当成源事实。
+Android 导入时登记源 SHA。浏览私有工程时核对登记身份、文件大小、magic 和本进程已观测的文件状态；状态变化拒绝继续使用当前缓存。文件状态有容量上限，删除工程时释放。显式重建来源缓存时继续验证源身份。
 
 ### 先发布、后写缓存
 

@@ -55,10 +55,6 @@ pub enum PropertyWriteMode {
     Preserve,
 }
 
-pub type GeometryCacheManifestStatus = String;
-pub const GEOMETRY_CACHE_MANIFEST_STATUS_VALUES: &[&str] = &["glb", "partial", "empty", "unsupported", "source-invalid"];
-fn deserialize_geometrycachemanifeststatus<'de,D:serde::Deserializer<'de>>(deserializer:D)->Result<String,D::Error>{let value=String::deserialize(deserializer)?;if GEOMETRY_CACHE_MANIFEST_STATUS_VALUES.contains(&value.as_str()){Ok(value)}else{Err(serde::de::Error::custom("unsupported GeometryCacheManifestStatus"))}}
-
 pub type MobileBaseLayer = String;
 pub const MOBILE_BASE_LAYER_VALUES: &[&str] = &["imagery", "vector", "terrain", "osm", "canvas"];
 fn deserialize_mobilebaselayer<'de,D:serde::Deserializer<'de>>(deserializer:D)->Result<String,D::Error>{let value=String::deserialize(deserializer)?;if MOBILE_BASE_LAYER_VALUES.contains(&value.as_str()){Ok(value)}else{Err(serde::de::Error::custom("unsupported MobileBaseLayer"))}}
@@ -68,7 +64,7 @@ pub const LINE_PARSER_VERSION: &str = "gim-line-parser-v1";
 pub const SUBSTATION_PARSER_VERSION: &str = "gim-substation-parser-v1";
 pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v1-source-bound-stl";
 pub const MOBILE_PARSER_VERSION: &str = "mobile-powerline-v1";
-pub const DESKTOP_COMMAND_NAMES: &[&str] = &["save_engineering_tree_json", "read_file_bytes", "read_file_head", "get_file_info", "get_process_memory", "authorize_gim_file_path_for_dev", "benchmark_authorize_sample", "pick_gim_file_path", "pick_ifc_file_paths", "extract_gim_archive", "read_extraction_manifest", "read_substation_parse_copy", "inspect_substation_early_eligibility", "start_substation_extraction", "substation_extraction_status", "read_substation_extraction_source", "cancel_substation_extraction", "upsert_gim_project", "save_gim_index", "save_substation_semantic_rest", "write_cache_file_binary", "read_cached_ifc", "read_cached_entry", "batch_read_cached_files", "read_line_semantic_pack", "read_line_semantic_pack_all", "write_glb_file_binary", "read_glb_file", "read_device_lod_artifacts", "write_device_lod_artifact", "delete_device_lod_artifact", "batch_read_glb_files", "read_geometry_cache_manifest", "write_geometry_cache_version", "write_geometry_cache_manifest", "invalidate_glb_cache_entry", "get_gim_index", "get_gim_fam_properties", "validate_gim_cache", "get_db_path", "get_latest_project_cache_diagnostic", "get_line_gim_graph", "save_line_graph_begin", "save_line_attrs_chunk", "save_line_project_finish", "get_line_attributes", "list_cached_projects", "get_app_settings", "set_app_setting", "authorize_cached_gim_project", "touch_gim_project_opened", "delete_project_cache", "get_project_diagnostic", "save_geometry_refs"];
+pub const DESKTOP_COMMAND_NAMES: &[&str] = &["save_engineering_tree_json", "read_file_bytes", "read_file_head", "get_file_info", "get_process_memory", "authorize_gim_file_path_for_dev", "benchmark_authorize_sample", "pick_gim_file_path", "pick_ifc_file_paths", "extract_gim_archive", "read_extraction_manifest", "read_substation_parse_copy", "inspect_substation_early_eligibility", "start_substation_extraction", "substation_extraction_status", "read_substation_extraction_source", "cancel_substation_extraction", "upsert_gim_project", "save_gim_index", "save_substation_semantic_rest", "write_cache_file_binary", "read_cached_ifc", "read_cached_entry", "batch_read_cached_files", "read_line_semantic_pack", "read_line_semantic_pack_all", "read_device_lod_artifacts", "write_device_lod_artifact", "delete_device_lod_artifact", "get_gim_index", "get_gim_fam_properties", "validate_gim_cache", "get_db_path", "get_latest_project_cache_diagnostic", "get_line_gim_graph", "save_line_graph_begin", "save_line_attrs_chunk", "save_line_project_finish", "get_line_attributes", "list_cached_projects", "get_app_settings", "set_app_setting", "authorize_cached_gim_project", "touch_gim_project_opened", "delete_project_cache", "get_project_diagnostic", "save_geometry_refs"];
 pub const MOBILE_COMMAND_NAMES: &[&str] = &["list_projects", "prepare_project", "cancel_import", "discard_import", "get_project_cache", "read_text_entries", "commit_project", "read_source", "read_project_header", "delete_project", "preview_cache", "get_settings", "save_settings"];
 pub const IMPORT_PLUGIN_COMMAND_NAMES: &[&str] = &["pick", "cancel", "check_location_permissions", "request_location_permissions", "get_position", "get_window_state", "set_immersive"];
 
@@ -525,24 +521,6 @@ pub struct LineAttributeResult {
     pub dev_properties: Vec<LineDevPropertyRecord>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct GeometryCacheManifestEntry {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub diagnostic: Option<String>,
-    pub entry_path: String,
-    #[serde(deserialize_with = "deserialize_geometrycachemanifeststatus")]
-    pub status: GeometryCacheManifestStatus,
-    pub size: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct GeometryCacheManifest {
-    pub source_sha256: String,
-    pub entries: Vec<GeometryCacheManifestEntry>,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct DeviceLodWriteTiming {
@@ -583,13 +561,8 @@ pub struct GimCacheValidation {
     pub missing_line_dev_sources: Vec<String>,
     pub line_semantic_pack_status: String,
     pub line_semantic_pack_error: Option<String>,
-    pub geometry_cache_version_match: bool,
-    pub current_geometry_cache_version: String,
-    pub geometry_cache_version_file_match: bool,
-    pub geometry_cache_manifest_valid: bool,
     pub substation_semantic_cache_valid: bool,
     pub substation_properties_complete: bool,
-    pub geometry_cache_valid: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -631,12 +604,7 @@ pub struct ProjectCacheDiagnostic {
     pub cache_miss_reason: Option<String>,
     pub line_semantic_pack_status: String,
     pub line_semantic_pack_error: Option<String>,
-    pub geometry_cache_version_match: bool,
-    pub current_geometry_cache_version: String,
-    pub geometry_cache_version_file_match: bool,
-    pub geometry_cache_manifest_valid: bool,
     pub substation_semantic_cache_valid: bool,
-    pub geometry_cache_valid: bool,
     pub valid: bool,
     pub ifc_cache_files: Vec<IfcCacheFileDiagnostic>,
     pub project_type: Option<String>,
@@ -991,8 +959,6 @@ pub fn roundtrip_native_model(name:&str,value:serde_json::Value)->Result<serde_j
     "LineFileStatRecord" => serde_json::from_value::<LineFileStatRecord>(value).and_then(serde_json::to_value),
     "LineGraphResult" => serde_json::from_value::<LineGraphResult>(value).and_then(serde_json::to_value),
     "LineAttributeResult" => serde_json::from_value::<LineAttributeResult>(value).and_then(serde_json::to_value),
-    "GeometryCacheManifestEntry" => serde_json::from_value::<GeometryCacheManifestEntry>(value).and_then(serde_json::to_value),
-    "GeometryCacheManifest" => serde_json::from_value::<GeometryCacheManifest>(value).and_then(serde_json::to_value),
     "DeviceLodWriteTiming" => serde_json::from_value::<DeviceLodWriteTiming>(value).and_then(serde_json::to_value),
     "GimCacheValidation" => serde_json::from_value::<GimCacheValidation>(value).and_then(serde_json::to_value),
     "IfcCacheFileDiagnostic" => serde_json::from_value::<IfcCacheFileDiagnostic>(value).and_then(serde_json::to_value),

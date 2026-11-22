@@ -1,6 +1,6 @@
 // @vitest-environment node
 import {expect,it} from 'vitest';
-import {prepareLineMapGeometry} from '../lineMapGeometry.js';
+import {pointToSegmentDist, prepareLineMapGeometry, wireLayerKey} from '../lineMapGeometry.js';
 import type {LineMapData} from '../../../../gim/lineMapData.js';
 
 it('shares endpoint projections and preserves jumper/split/catenary semantics without a DOM',()=>{
@@ -15,4 +15,22 @@ it('shares endpoint projections and preserves jumper/split/catenary semantics wi
   expect(prepared.runtimeWires[1].useCatenary).toBe(true);
   expect(prepared.invMercY(prepared.mercY(30))).toBeCloseTo(30,10);
   expect(prepareLineMapGeometry(data,false).runtimeWires.every(row=>!row.useCatenary)).toBe(true);
+});
+
+it.each([
+  [5, 3, 0, 0, 10, 0, 3],
+  [-4, 3, 0, 0, 10, 0, 5],
+  [14, 3, 0, 0, 10, 0, 5],
+  [3, 4, 0, 0, 0, 0, 5],
+])('uses the finite segment and handles coincident endpoints', (px, py, x1, y1, x2, y2, distance) => {
+  expect(pointToSegmentDist(px, py, x1, y1, x2, y2)).toBe(distance);
+});
+
+it.each([
+  ['CONDUCTOR', 'conductor'],
+  ['GROUNDWIRE', 'groundwire'],
+  ['OPGW', 'opgw'],
+  ['UNMAPPED', 'unknownWire'],
+])('keeps source wire type %s in the proper display layer', (type, layer) => {
+  expect(wireLayerKey(type)).toBe(layer);
 });

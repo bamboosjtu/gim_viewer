@@ -262,6 +262,19 @@ test('checker rejects eager renderer dependencies behind an opening helper',()=>
   assert.match(rejected.stderr,/openProject\.ts: eager renderer dependency three/);
 });
 
+test('checker keeps host transport and SDK parser dependencies explicit', () => {
+  const {files,run} = fixture();
+  files('desktop/bridge/unregistered.ts', "export { getViewerRuntime } from '../src/viewer/viewerRuntime.js';");
+  files('desktop/src/shared/escape.ts', "export { loadAllIfcFiles } from '../features/substation/runtime/substationIfcRuntime.js';");
+  files('packages/gim-sdk/src/parser/new.ts', "export { buildPowerlineProject } from '@gim/powerline-core/domain.js';");
+  const result = run();
+  assert.equal(result.status, 1);
+  const diagnostics = result.stdout + result.stderr;
+  assert.match(diagnostics, /only registered host transport ports/);
+  assert.match(diagnostics, /shared values cannot import application runtimes/);
+  assert.match(diagnostics, /SDK parser consumes format primitives only/);
+});
+
 test('checker reports whitelisted viewer bridge imports that no source uses',()=>{
   const {files,run}=fixture();
   const live=readFileSync(resolve('scripts/check-engineering-boundaries.mjs'),'utf8');

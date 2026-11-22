@@ -332,17 +332,6 @@
         }
       ]
     },
-    "GeometryCacheManifest": {
-      "source_sha256": "fixture",
-      "entries": [
-        {
-          "diagnostic": "fixture",
-          "entry_path": "fixture",
-          "status": "glb",
-          "size": 1
-        }
-      ]
-    },
     "SubstationSemanticRestPayload": {
       "properties_mode": "replace",
       "project_id": 1,

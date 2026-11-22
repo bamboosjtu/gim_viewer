@@ -1,42 +1,25 @@
 //! Read-only project/cache diagnostics for the frontend.
 
-pub use gim_native_core::{IfcCacheFileDiagnostic, ProjectCacheDiagnostic};
-use gim_native_core::NativeError;
-use tauri::Manager;
-use rusqlite::params;
-use std::fs as stdfs;
-use super::cache_paths::{is_expected_cache_path};
+use super::cache_paths::is_expected_cache_path;
 use super::cache_validation::{
-    LineAttrDiagnostic,
-    compute_line_attr_diagnostic,
-    inspect_line_semantic_pack,
-};
-use super::geometry_cache::{
-    check_geometry_cache_manifest,
-    check_geometry_cache_manifest_structure,
-    check_geometry_cache_version_file,
-};
-use super::{
-    DbState,
-    GEOMETRY_CACHE_VERSION,
-    LINE_PARSER_VERSION,
-    PARSER_VERSION,
-    SUBSTATION_PARSER_VERSION,
-    cache_miss_reason,
-    count_rows,
-    db_path,
-    parser_domain_version_matches,
+    compute_line_attr_diagnostic, inspect_line_semantic_pack, LineAttrDiagnostic,
 };
 use super::substation_index::{missing_substation_sources, substation_index_receipt_matches};
+use super::{
+    cache_miss_reason, count_rows, db_path, parser_domain_version_matches, DbState,
+    LINE_PARSER_VERSION, PARSER_VERSION, SUBSTATION_PARSER_VERSION,
+};
+use gim_native_core::NativeError;
+pub use gim_native_core::{IfcCacheFileDiagnostic, ProjectCacheDiagnostic};
+use rusqlite::params;
+use std::fs as stdfs;
+use tauri::Manager;
 
 // ==================== 诊断 command ====================
 
 /// 单个 IFC 缓存文件诊断
 
-
-
 /// 项目缓存完整诊断
-
 
 /// 返回当前 SQLite 文件路径
 #[tauri::command]
@@ -44,7 +27,8 @@ pub async fn get_db_path(app_handle: tauri::AppHandle) -> Result<String, NativeE
     crate::native_command::blocking("get_db_path", move || {
         let path = db_path(&app_handle)?;
         Ok(path.to_string_lossy().to_string())
-    }).await
+    })
+    .await
 }
 
 /// 获取指定项目的缓存诊断（内部函数，被 get_latest_project_cache_diagnostic 调用）
@@ -84,10 +68,8 @@ pub fn get_project_cache_diagnostic(
     let is_line = project_type.as_deref() == Some("transmission_line");
     let stored_line_parser_version = project.7.clone();
     let stored_substation_parser_version = project.8.clone();
-    let line_parser_version_match = parser_domain_version_matches(
-        stored_line_parser_version.as_deref(),
-        LINE_PARSER_VERSION,
-    );
+    let line_parser_version_match =
+        parser_domain_version_matches(stored_line_parser_version.as_deref(), LINE_PARSER_VERSION);
     let substation_parser_version_match = parser_domain_version_matches(
         stored_substation_parser_version.as_deref(),
         SUBSTATION_PARSER_VERSION,
@@ -97,18 +79,6 @@ pub fn get_project_cache_diagnostic(
     } else {
         substation_parser_version_match
     };
-
-    // 与 validate_gim_cache 使用同一套几何域判定。诊断 JSON 必须能解释
-    // 为什么打开流程没有命中，不能只显示共享 parser_version。
-    let geometry_cache_version_file_match =
-        check_geometry_cache_version_file(app_handle, project.0);
-    let geometry_cache_manifest_valid = check_geometry_cache_manifest_structure(
-        app_handle,
-        project.0,
-        &project.5,
-    );
-    let geometry_cache_version_match = geometry_cache_version_file_match
-        && check_geometry_cache_manifest(app_handle, project.0, &project.5);
 
     // 线路 semantic pack 是独立于 SQLite graph/attribute 的 source cache。
     // missing 允许旧缓存走 SQLite fallback；invalid 则必须整体重建。
@@ -166,8 +136,9 @@ pub fn get_project_cache_diagnostic(
         let (exists, file_size) = match &local_cache_path {
             Some(p) if !p.is_empty() => {
                 let path = std::path::Path::new(p);
-                let expected_path = is_expected_cache_path(app_handle, project.0, &entry_path, path)
-                    .unwrap_or(false);
+                let expected_path =
+                    is_expected_cache_path(app_handle, project.0, &entry_path, path)
+                        .unwrap_or(false);
                 if !expected_path {
                     missing_cache_paths.push(format!("{} (缓存路径不匹配)", entry_path));
                     (false, None)
@@ -212,7 +183,9 @@ pub fn get_project_cache_diagnostic(
     } else {
         LineAttrDiagnostic::default()
     };
-    if !is_line { missing_cache_paths.extend(missing_substation_sources(&conn,app_handle,project_id)?); }
+    if !is_line {
+        missing_cache_paths.extend(missing_substation_sources(&conn, app_handle, project_id)?);
+    }
     let semantic_cache_valid = if is_line {
         parser_version_match
             && line_cbm_node_count > 0
@@ -224,7 +197,7 @@ pub fn get_project_cache_diagnostic(
             && cached_ifc_count == ifc_entry_count
             && missing_cache_paths.is_empty()
             && parser_version_match
-            && substation_index_receipt_matches(&conn,project_id)
+            && substation_index_receipt_matches(&conn, project_id)
     };
     let valid = semantic_cache_valid;
     let substation_semantic_cache_valid = !is_line && semantic_cache_valid;
@@ -233,32 +206,48 @@ pub fn get_project_cache_diagnostic(
     if !parser_version_match {
         let domain = if is_line { "LINE" } else { "SUBSTATION" };
         let stored = if is_line {
-            stored_line_parser_version.as_deref().or(project.6.as_deref())
+            stored_line_parser_version
+                .as_deref()
+                .or(project.6.as_deref())
         } else {
-            stored_substation_parser_version.as_deref().or(project.6.as_deref())
+            stored_substation_parser_version
+                .as_deref()
+                .or(project.6.as_deref())
         }
         .unwrap_or("(未设置)");
-        let current = if is_line { LINE_PARSER_VERSION } else { SUBSTATION_PARSER_VERSION };
-        miss_reasons.push(format!("{}_PARSER_VERSION_MISMATCH:{} -> {}", domain, stored, current));
+        let current = if is_line {
+            LINE_PARSER_VERSION
+        } else {
+            SUBSTATION_PARSER_VERSION
+        };
+        miss_reasons.push(format!(
+            "{}_PARSER_VERSION_MISMATCH:{} -> {}",
+            domain, stored, current
+        ));
     }
     if is_line {
-        if line_cbm_node_count == 0 { miss_reasons.push("LINE_GRAPH_EMPTY".to_string()); }
-        if line_attr_diag.fam_source_count == 0 { miss_reasons.push("LINE_FAM_SOURCE_EMPTY".to_string()); }
+        if line_cbm_node_count == 0 {
+            miss_reasons.push("LINE_GRAPH_EMPTY".to_string());
+        }
+        if line_attr_diag.fam_source_count == 0 {
+            miss_reasons.push("LINE_FAM_SOURCE_EMPTY".to_string());
+        }
         if line_semantic_pack_status == "invalid" {
-            miss_reasons.push(line_semantic_pack_error.clone().unwrap_or_else(|| "LINE_SEMANTIC_PACK_INVALID".to_string()));
+            miss_reasons.push(
+                line_semantic_pack_error
+                    .clone()
+                    .unwrap_or_else(|| "LINE_SEMANTIC_PACK_INVALID".to_string()),
+            );
         }
     } else {
-        if !has_index { miss_reasons.push("SUBSTATION_INDEX_EMPTY".to_string()); }
-        if cbm_nodes_count == 0 { miss_reasons.push("CBM_NODE_EMPTY".to_string()); }
+        if !has_index {
+            miss_reasons.push("SUBSTATION_INDEX_EMPTY".to_string());
+        }
+        if cbm_nodes_count == 0 {
+            miss_reasons.push("CBM_NODE_EMPTY".to_string());
+        }
         if !missing_cache_paths.is_empty() {
             miss_reasons.push(format!("IFC_CACHE_MISSING:{}", missing_cache_paths.len()));
-        }
-        if !geometry_cache_version_file_match {
-            miss_reasons.push("GEOMETRY_CACHE_VERSION_MISMATCH".to_string());
-        } else if !geometry_cache_manifest_valid {
-            miss_reasons.push("GEOMETRY_MANIFEST_INVALID".to_string());
-        } else if !geometry_cache_version_match {
-            miss_reasons.push("GEOMETRY_CACHE_ENTRY_INVALID".to_string());
         }
     }
 
@@ -290,12 +279,7 @@ pub fn get_project_cache_diagnostic(
         cache_miss_reason: cache_miss_reason(miss_reasons),
         line_semantic_pack_status,
         line_semantic_pack_error,
-        geometry_cache_version_match,
-        current_geometry_cache_version: GEOMETRY_CACHE_VERSION.to_string(),
-        geometry_cache_version_file_match,
-        geometry_cache_manifest_valid,
         substation_semantic_cache_valid,
-        geometry_cache_valid: geometry_cache_version_match,
         valid,
         ifc_cache_files,
         // v4: 线路工程图缓存诊断
@@ -344,7 +328,8 @@ pub async fn get_latest_project_cache_diagnostic(
             }
             None => Ok(None),
         }
-    }).await
+    })
+    .await
 }
 
 /// 获取指定项目的缓存诊断（供缓存管理 UI 使用）
@@ -358,5 +343,6 @@ pub async fn get_project_diagnostic(
     crate::native_command::blocking("get_project_diagnostic", move || {
         let state = app_handle.state::<DbState>();
         get_project_cache_diagnostic(&app_handle, state, project_id)
-    }).await
+    })
+    .await
 }

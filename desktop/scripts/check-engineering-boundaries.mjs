@@ -22,6 +22,72 @@ function* files(dir) {
   }
 }
 const failures = appStateFieldErrors(readFileSync(resolve(root, 'app/state.ts'), 'utf8'));
+const bridgeRoot = resolve(root, '..', 'bridge');
+const bridgeHostPorts = new Map([
+  ['database.ts', new Set(['infrastructure/native/invokeTimed.ts'])],
+  [
+    'devLodCache.ts',
+    new Set([
+      'infrastructure/native/invokeTimed.ts',
+      'infrastructure/native/projectFileEnvelope.ts',
+      'utils/backgroundErrors.ts',
+    ]),
+  ],
+  ['fileDialog.ts', new Set(['infrastructure/native/invokeTimed.ts'])],
+  ['ifcLodCache.ts', new Set(['utils/backgroundErrors.ts'])],
+  ['substationParseCopy.ts', new Set(['infrastructure/native/invokeTimed.ts'])],
+]);
+const hostSharedValues = new Map([
+  ['shared/displayName.ts', new Set(['gim/modelIdentity.js', 'gim/gimValueSemantics.js'])],
+  ['shared/gimParsing.ts', new Set(['gim/fileLookup.js', 'gim/gimValueSemantics.js'])],
+]);
+const benchmarkHostPorts = new Map([
+  [
+    'measurement/benchmarkHost.ts',
+    new Set([
+      '@desktop/contracts.js',
+      '@desktop/database.js',
+      '@tauri-apps/api/core',
+      'app/composition/projectActions.js',
+    ]),
+  ],
+  ['measurement/modelEvidence.ts', new Set(['@desktop/database.js'])],
+]);
+const sdkParserPrimitives = new Set(
+  [
+    'entityName.js',
+    'famRecords.js',
+    'geometry/ir.js',
+    'geometry/lineModParser.js',
+    'kvParser.js',
+    'parserLimits.js',
+    'sourceDocument.js',
+  ].map((name) => '@gim/powerline-core/' + name),
+);
+function dependencySpecifier(node) {
+  if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) return node.moduleSpecifier;
+  if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword)
+    return node.arguments[0];
+}
+for (const path of files(bridgeRoot)) {
+  const local = relative(bridgeRoot, path).replaceAll('\\', '/');
+  const ast = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true);
+  function visitBridge(node) {
+    const dependency = dependencySpecifier(node);
+    if (dependency && ts.isStringLiteral(dependency) && dependency.text.startsWith('.')) {
+      const file = resolve(dirname(path), dependency.text.replace(/\.js$/, '.ts'));
+      if (file.startsWith(root + sep)) {
+        const target = relative(root, file).replaceAll('\\', '/');
+        if (!bridgeHostPorts.get(local)?.has(target))
+          failures.push(
+            `bridge/${local}: only registered host transport ports are allowed (${target})`,
+          );
+      }
+    }
+    ts.forEachChild(node, visitBridge);
+  }
+  visitBridge(ast);
+}
 const sharedDependencies = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
 ).dependencies;
@@ -143,12 +209,30 @@ const adapterSemanticPorts = new Map([
   ['semantic/recognition/neutralAssemblyResolver', new Set(['completeNeutralAssemblies'])],
 ]);
 for (const [layer, sourceRoot] of [
-  ...['engineering', 'gim', 'viewer', 'ui', 'services', 'features', 'app', 'infrastructure'].map(
-    (layer) => [layer, root],
-  ),
-  ...['engineering', 'semantic', 'source', 'geometry', 'projection', 'adapters', 'shared'].map(
-    (layer) => [layer, sdkRoot],
-  ),
+  ...[
+    'engineering',
+    'gim',
+    'viewer',
+    'ui',
+    'services',
+    'features',
+    'app',
+    'infrastructure',
+    'shared',
+    'utils',
+    'config',
+    'measurement',
+  ].map((layer) => [layer, root]),
+  ...[
+    'engineering',
+    'semantic',
+    'source',
+    'geometry',
+    'projection',
+    'adapters',
+    'shared',
+    'parser',
+  ].map((layer) => [layer, sdkRoot]),
 ])
   for (const path of files(resolve(sourceRoot, layer))) {
     const ast = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true);
@@ -232,12 +316,7 @@ for (const [layer, sourceRoot] of [
             `${localPath}: full archive index bypasses reuse; use getFileEntryResolver(files) instead of createEntryResolver(files.keys())`,
           );
       }
-      const specifier =
-        ts.isImportDeclaration(node) || ts.isExportDeclaration(node)
-          ? node.moduleSpecifier
-          : ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword
-            ? node.arguments[0]
-            : undefined;
+      const specifier = dependencySpecifier(node);
       if (specifier && ts.isStringLiteral(specifier)) {
         const name = specifier.text;
         if (
@@ -269,6 +348,38 @@ for (const [layer, sourceRoot] of [
           ? relative(sourceRoot, resolve(dirname(path), name)).replaceAll('\\', '/')
           : name;
         const target = targetPath.split('/')[0];
+        const typeOnly = ts.isImportDeclaration(node)
+          ? node.importClause?.isTypeOnly
+          : ts.isExportDeclaration(node) && node.isTypeOnly;
+        if (
+          sourceRoot === sdkRoot &&
+          layer === 'parser' &&
+          ((name.startsWith('@gim/powerline-core/') && !sdkParserPrimitives.has(name)) ||
+            (resolved && target !== 'parser' && target !== 'shared'))
+        )
+          failures.push(`${localPath}: SDK parser consumes format primitives only (${name})`);
+        if (sourceRoot === root && !typeOnly) {
+          if (
+            layer === 'shared' &&
+            /^(?:app|features|gim|viewer|services|ui|infrastructure|measurement)$/.test(target) &&
+            !hostSharedValues.get(localPath)?.has(targetPath)
+          )
+            failures.push(
+              `${localPath}: shared values cannot import application runtimes (${name})`,
+            );
+          if (
+            layer === 'utils' &&
+            target === 'measurement' &&
+            !(localPath === 'utils/perfTimings.ts' && targetPath === 'measurement/runtime.js')
+          )
+            failures.push(
+              `${localPath}: only product timings may use the measurement adapter (${name})`,
+            );
+          if (layer === 'config' && resolved && target !== 'config')
+            failures.push(`${localPath}: configuration does not import host state (${name})`);
+          if (layer === 'measurement' && (target === 'features' || target === 'ui'))
+            failures.push(`${localPath}: measurement uses host observation ports (${name})`);
+        }
         if (
           localPath.startsWith('app/session/') &&
           (target === 'features' ||
@@ -515,6 +626,10 @@ for (const [layer, sourceRoot] of [
         if (
           banned.test(targetPath) &&
           !exception &&
+          !(
+            layer === 'measurement' &&
+            (typeOnly || benchmarkHostPorts.get(localPath)?.has(targetPath))
+          ) &&
           infrastructurePorts.get(localPath) !== targetPath &&
           !(
             native &&

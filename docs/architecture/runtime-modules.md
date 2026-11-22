@@ -117,7 +117,7 @@ Viewer 的初始化只加载 `selectionNavigation`。节点选择在用户操作
 | `db/cache_protocol.rs` | 二进制 IPC envelope、批量结果编码与传输配额 |
 | `db/cache_transport.rs` | 受权的源缓存读写命令 |
 | `db/semantic_pack.rs` | 线路/变电来源包、索引和有界读取 |
-| `db/geometry_cache.rs` | DEV GLB/LOD 文件、manifest 和发布标记 |
+| `db/geometry_cache.rs` | 源身份绑定的 DEV LOD 模板和空间目录条目，有界读写与原子替换 |
 | `db/cache_validation.rs` | 分域缓存有效性及来源/属性完整性检查 |
 | `db/diagnostics.rs` | 只读缓存诊断 |
 | `db/project_cache.rs` | 设置、最近工程、打开受权和缓存删除 |

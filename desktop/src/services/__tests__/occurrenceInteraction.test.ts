@@ -12,7 +12,13 @@ import { nestedPartFixture } from './nestedPartIndexFixture.js';
 import {createDeviceRuntimeMock} from './helpers/deviceRuntime.js';
 
 const mock = vi.hoisted(() => ({ ctx: null as any, frame: vi.fn(), bytes: null as Uint8Array | null }));
-vi.mock('../../infrastructure/native/projectFiles.js', () => ({ readGlbFile: async () => mock.bytes }));
+vi.mock('@desktop/devLodCache.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@desktop/devLodCache.js')>()),
+  readDevArtifactResult: async () => mock.bytes ? {
+    status: 'hit',
+    value: { result: { bytes: mock.bytes, status: 'complete', diagnostics: { status: 'complete' } } },
+  } : { status: 'miss' },
+}));
 vi.mock('../viewerUIBinding.js', () => ({ getViewerRuntimeWithUI: async () => ({ ctx: mock.ctx }) }));
 vi.mock('../../viewer/camera.js', () => ({ frameBox: (...args: any[]) => mock.frame(...args) }));
 const identity = new THREE.Matrix4().toArray();
@@ -58,7 +64,7 @@ it('scoped runtime selection visits only its current occurrence subtree and pres
 
 it.each(['raw','glb'] as const)('nested PARTINDEX uses the real root and parent subtree after %s loading', async (mode) => {
   const {files,tree,root,b}=await nestedPartFixture(2);
-  const state=new AppState(); state.currentFiles=files; state.currentCbmTree=tree; state.activateProject(1);
+  const state=new AppState(); state.currentFiles=files; state.currentCbmTree=tree; state.activateProject(1, 'a'.repeat(64));
   if (mode==='glb') mock.bytes=(await serializeDevToGlbDetailed(root.devPath,files)).bytes!;
   await loadModStlForNode(state,b);
   const scope=deviceOccurrenceScope(tree,b);
@@ -79,7 +85,7 @@ it.each(['raw','glb'] as const)('nested PARTINDEX uses the real root and parent 
 
 it('a GLB becoming available after raw loading does not duplicate the same occurrence on repeat click', async () => {
   const files = fixture(), tree = (await buildCbmTree(files))!;
-  const state = new AppState(); state.currentFiles=files; state.currentCbmTree=tree; state.activateProject(1);
+  const state = new AppState(); state.currentFiles=files; state.currentCbmTree=tree; state.activateProject(1, 'a'.repeat(64));
   await loadModStlForNode(state,tree.children[0]);
   expect(state.loadedXmlModGroups.size).toBe(3);
   mock.bytes = (await serializeDevToGlbDetailed('root.dev',files)).bytes!;

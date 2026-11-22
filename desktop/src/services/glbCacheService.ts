@@ -15,7 +15,7 @@
  * - 数学等价性：两次 applyPlacementTransformToSceneUnits（各 ×0.001）
  *   等价于一次完整应用（CBM × DEV × PHM，×0.001）
  *
- * 缓存路径：app_data_dir/glbcache/{project_id}/{devPath}.glb
+ * 缓存以源身份、DEV 路径和表示级别为键，见 device-lod 模板存储。
  * 版本化：通过 GEOMETRY_CACHE_VERSION 失效
  *
  * 关联文档：docs/architecture/dev-geometry.md、docs/software-spec.md

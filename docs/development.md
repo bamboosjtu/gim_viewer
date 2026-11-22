@@ -70,7 +70,7 @@ npm run tauri:dev     # Tauri 开发窗口
 | `npm test` | 快速单元测试（不启动 Cargo、不读工程样本） |
 | `npm run test:module -- engineering gim/engineering` | 按模块及源码依赖运行相关测试，包含其他模块中的消费者；也可传具体源文件或 `../packages/powerline-core/src` |
 | `npm run test:sqlite` | 真实 SQLite 往返（构建一次 Rust harness） |
-| `npm run test:engineering:worker` | 真实 Worker/Blob/缓存/取消（headless Edge，`desktop/tests/engineering/worker-check.html`，无样本） |
+| `npm run test:engineering:worker` | 本地无样本夹具，使用 headless Edge 检查真实 Worker、Blob、缓存和取消（`desktop/tests/engineering/worker-check.html`） |
 | `npm run local-tests:check` | 检查跟踪的 `local-tests/mini-samples.example.json` |
 | `npm run test:local -- --build <原生构建清单>` | 打开开发者登记的一变、一线、一设备；skip 不计通过 |
 | `npm run test:coverage` | 领域、来源及打开/Viewer/线路热点逐文件覆盖率下限，权威门槛见验证文档 |

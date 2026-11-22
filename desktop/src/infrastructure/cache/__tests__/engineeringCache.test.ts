@@ -4,7 +4,7 @@ import {ENGINEERING_RECOGNITION_VERSION} from '@gim/gim-sdk/source-adapter';
 import {projectEngineeringNavigation} from '@gim/gim-sdk/projection';
 import {encodeEngineeringNavigation} from '../engineeringNavigationCache.js';
 import { extractEngineeringSourceGraph } from '@gim/gim-sdk/source';
-import {buildTestEngineeringSources} from '../../../../../packages/gim-sdk/src/source/__tests__/fixtures.js';
+import {buildTestEngineeringSources} from '@tests/sdk-source-fixtures';
 import { decodeEngineeringArtifact,encodeEngineeringArtifact,decodeEngineeringEntities, decodeEngineeringSources, encodeEngineeringEntities, encodeEngineeringSources, engineeringCacheEntry, engineeringSourceCacheMatchesFiles } from '../engineeringCacheCodec.js';
 import {packEngineeringSource} from '../engineeringSourceCodec.js';
 import { markCacheFailure } from '../../../services/engineeringWorkerHandler.js';

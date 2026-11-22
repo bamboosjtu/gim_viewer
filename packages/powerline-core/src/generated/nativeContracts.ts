@@ -28,9 +28,6 @@ export type NativeErrorCode = typeof NATIVE_ERROR_CODES[number];
 export const PROPERTY_WRITE_MODE_VALUES = ["replace","preserve"] as const;
 export type PropertyWriteMode = typeof PROPERTY_WRITE_MODE_VALUES[number];
 
-export const GEOMETRY_CACHE_MANIFEST_STATUS_VALUES = ["glb","partial","empty","unsupported","source-invalid"] as const;
-export type GeometryCacheManifestStatus = typeof GEOMETRY_CACHE_MANIFEST_STATUS_VALUES[number];
-
 export const MOBILE_BASE_LAYER_VALUES = ["imagery","vector","terrain","osm","canvas"] as const;
 export type MobileBaseLayer = typeof MOBILE_BASE_LAYER_VALUES[number];
 export const DATABASE_SCHEMA_VERSION = 1 as const;
@@ -66,16 +63,9 @@ export const DESKTOP_COMMANDS = {
   "batch_read_cached_files": "batch_read_cached_files",
   "read_line_semantic_pack": "read_line_semantic_pack",
   "read_line_semantic_pack_all": "read_line_semantic_pack_all",
-  "write_glb_file_binary": "write_glb_file_binary",
-  "read_glb_file": "read_glb_file",
   "read_device_lod_artifacts": "read_device_lod_artifacts",
   "write_device_lod_artifact": "write_device_lod_artifact",
   "delete_device_lod_artifact": "delete_device_lod_artifact",
-  "batch_read_glb_files": "batch_read_glb_files",
-  "read_geometry_cache_manifest": "read_geometry_cache_manifest",
-  "write_geometry_cache_version": "write_geometry_cache_version",
-  "write_geometry_cache_manifest": "write_geometry_cache_manifest",
-  "invalidate_glb_cache_entry": "invalidate_glb_cache_entry",
   "get_gim_index": "get_gim_index",
   "get_gim_fam_properties": "get_gim_fam_properties",
   "validate_gim_cache": "validate_gim_cache",
@@ -483,18 +473,6 @@ export interface LineAttributeResult {
   dev_properties: Array<LineDevPropertyRecord>;
 }
 
-export interface GeometryCacheManifestEntry {
-  diagnostic?: string;
-  entry_path: string;
-  status: GeometryCacheManifestStatus;
-  size: number;
-}
-
-export interface GeometryCacheManifest {
-  source_sha256: string;
-  entries: Array<GeometryCacheManifestEntry>;
-}
-
 export interface DeviceLodWriteTiming {
   resolveMs: number;
   writeMs: number;
@@ -531,13 +509,8 @@ export interface GimCacheValidation {
   missing_line_dev_sources: Array<string>;
   line_semantic_pack_status: string;
   line_semantic_pack_error: string | null;
-  geometry_cache_version_match: boolean;
-  current_geometry_cache_version: string;
-  geometry_cache_version_file_match: boolean;
-  geometry_cache_manifest_valid: boolean;
   substation_semantic_cache_valid: boolean;
   substation_properties_complete: boolean;
-  geometry_cache_valid: boolean;
 }
 
 export interface IfcCacheFileDiagnostic {
@@ -575,12 +548,7 @@ export interface ProjectCacheDiagnostic {
   cache_miss_reason: string | null;
   line_semantic_pack_status: string;
   line_semantic_pack_error: string | null;
-  geometry_cache_version_match: boolean;
-  current_geometry_cache_version: string;
-  geometry_cache_version_file_match: boolean;
-  geometry_cache_manifest_valid: boolean;
   substation_semantic_cache_valid: boolean;
-  geometry_cache_valid: boolean;
   valid: boolean;
   ifc_cache_files: Array<IfcCacheFileDiagnostic>;
   project_type: string | null;

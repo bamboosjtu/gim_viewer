@@ -1,17 +1,16 @@
 //! Settings, recent projects, source authorization and cache deletion.
 
-pub use gim_native_core::{CachedProjectSummary};
+use super::cache_paths::remove_cache_dir_if_safe;
+use super::projects::ensure_project_exists;
+use super::{now_ms, DbState};
+pub use gim_native_core::CachedProjectSummary;
 use gim_native_core::NativeError;
-use tauri::Manager;
 use rusqlite::params;
 use std::collections::HashMap;
 use std::path::Path;
-use super::cache_paths::{remove_cache_dir_if_safe};
-use super::projects::{ensure_project_exists};
-use super::{DbState, now_ms};
+use tauri::Manager;
 
 /// 缓存项目摘要（用于缓存管理 UI 列表）
-
 
 /// 读取全部应用设置。密钥只保存在本地 SQLite，不进入构建产物。
 #[tauri::command]
@@ -38,7 +37,8 @@ pub async fn get_app_settings(
             settings.insert(key, value);
         }
         Ok(settings)
-    }).await
+    })
+    .await
 }
 
 /// 写入单个应用设置；空值表示清除该项。
@@ -74,7 +74,8 @@ pub async fn set_app_setting(
 /// 列出所有缓存的项目（只读，按最近打开排序）
 #[tauri::command]
 pub async fn list_cached_projects(
-    app_handle: tauri::AppHandle,) -> Result<Vec<CachedProjectSummary>, NativeError> {
+    app_handle: tauri::AppHandle,
+) -> Result<Vec<CachedProjectSummary>, NativeError> {
     crate::native_command::blocking("list_cached_projects", move || {
         let state = app_handle.state::<DbState>();
         let conn = state
@@ -112,7 +113,9 @@ pub async fn list_cached_projects(
 /// 更新最近打开时间；只在成功打开后调用，不参与打开关键路径。
 #[tauri::command]
 pub async fn touch_gim_project_opened(
-    app_handle: tauri::AppHandle, project_id: i64) -> Result<(), NativeError> {
+    app_handle: tauri::AppHandle,
+    project_id: i64,
+) -> Result<(), NativeError> {
     crate::native_command::blocking("touch_gim_project_opened", move || {
         let state = app_handle.state::<DbState>();
         let conn = state
@@ -125,7 +128,8 @@ pub async fn touch_gim_project_opened(
         )
         .map_err(|e| format!("更新最近打开时间失败: {}", e))?;
         Ok(())
-    }).await
+    })
+    .await
 }
 
 /// 授权打开最近工程：路径只能来自数据库中的 gim_project 记录，
@@ -152,7 +156,8 @@ pub async fn authorize_cached_gim_project(
             .map_err(|e| format!("读取最近工程失败: {}", e))?;
         drop(conn);
         crate::authorize_selected_path(&access, Path::new(&path), Some("gim"))
-    }).await
+    })
+    .await
 }
 
 /// 删除指定项目的全部缓存（DB 记录 + 磁盘文件）
@@ -198,7 +203,9 @@ pub async fn delete_project_cache(
             match remove_cache_dir_if_safe(&ifc_dir, " IFC") {
                 Ok(true) => disk_messages.push("IFC 磁盘缓存已删除".to_string()),
                 Ok(false) => {}
-                Err(e) => disk_messages.push(format!("IFC 磁盘缓存删除失败（需后续手动清理）: {}", e)),
+                Err(e) => {
+                    disk_messages.push(format!("IFC 磁盘缓存删除失败（需后续手动清理）: {}", e))
+                }
             }
         }
 
@@ -206,20 +213,10 @@ pub async fn delete_project_cache(
         if device_lod_dir.exists() {
             match remove_cache_dir_if_safe(&device_lod_dir, "设备派生缓存") {
                 Ok(true) => disk_messages.push("设备 LOD/空间目录缓存已删除".to_string()),
-                Ok(false) => {},
+                Ok(false) => {}
                 Err(e) => disk_messages.push(format!("设备派生缓存删除失败: {}", e)),
             }
         }
-        // GLB 几何缓存目录: app_data_dir/glbcache/{project_id}/
-        let glb_dir = app_dir.join("glbcache").join(project_id.to_string());
-        if glb_dir.exists() {
-            match remove_cache_dir_if_safe(&glb_dir, " GLB") {
-                Ok(true) => disk_messages.push("GLB 磁盘缓存已删除".to_string()),
-                Ok(false) => {}
-                Err(e) => disk_messages.push(format!("GLB 磁盘缓存删除失败: {}", e)),
-            }
-        }
-
         let summary = if disk_messages.is_empty() {
             format!(
                 "项目 {} 缓存已清除（数据库记录 + 磁盘文件均无残留）",
@@ -233,5 +230,6 @@ pub async fn delete_project_cache(
             )
         };
         Ok(summary)
-    }).await
+    })
+    .await
 }

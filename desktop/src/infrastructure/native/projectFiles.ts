@@ -1,5 +1,4 @@
 import { DESKTOP_COMMANDS, GimError, nativeError, hasErrorCode } from '@desktop/contracts.js';
-import type { GeometryCacheManifest, GeometryCacheManifestEntry } from '@desktop/contracts.js';
 import { invokeTimed, requireNativeOwner, type NativeOwner } from './invokeTimed.js';
 import {
   packBinaryCacheWrite,
@@ -14,9 +13,11 @@ import { StaleSessionError } from '../../shared/sessionScope.js';
 
 const utf8Encoder = new TextEncoder();
 
-async function writeBinary(
-  command:
-    typeof DESKTOP_COMMANDS.write_cache_file_binary | typeof DESKTOP_COMMANDS.write_glb_file_binary,
+/**
+ * 在 Tauri 环境下写入缓存文件到 app_data_dir/extracted/{projectId}/{entryPath}。
+ * 返回本地缓存路径 local_cache_path。
+ */
+export async function writeCacheFile(
   projectId: number,
   entryPath: string,
   bytes: Uint8Array,
@@ -26,31 +27,12 @@ async function writeBinary(
   requireNativeOwner(isCurrent);
   const packet = packBinaryCacheWrite(projectId, entryPath, bytes, sourceGimSha256 ?? undefined);
   try {
-    return await invokeTimed<string>(command, packet, { isCurrent });
+    return await invokeTimed<string>(DESKTOP_COMMANDS.write_cache_file_binary, packet, {
+      isCurrent,
+    });
   } finally {
     releaseOwnedBytes(packet);
   }
-}
-
-/**
- * 在 Tauri 环境下写入缓存文件到 app_data_dir/extracted/{projectId}/{entryPath}。
- * 返回本地缓存路径 local_cache_path。
- */
-export function writeCacheFile(
-  projectId: number,
-  entryPath: string,
-  bytes: Uint8Array,
-  sourceGimSha256?: string | null,
-  isCurrent?: NativeOwner,
-): Promise<string> {
-  return writeBinary(
-    DESKTOP_COMMANDS.write_cache_file_binary,
-    projectId,
-    entryPath,
-    bytes,
-    sourceGimSha256,
-    isCurrent,
-  );
 }
 
 /**
@@ -217,126 +199,6 @@ export async function readLineSemanticPackAll(
     const normalized = normalizeLineSemanticPackError(error);
     throw normalized;
   }
-}
-
-export function writeGlbFile(
-  projectId: number,
-  entryPath: string,
-  bytes: Uint8Array,
-  sourceGimSha256?: string | null,
-  isCurrent?: NativeOwner,
-): Promise<string> {
-  return writeBinary(
-    DESKTOP_COMMANDS.write_glb_file_binary,
-    projectId,
-    entryPath,
-    bytes,
-    sourceGimSha256,
-    isCurrent,
-  );
-}
-
-/**
- * 在 Tauri 环境下读取 GLB 缓存文件。
- *
- * Rust 侧返回 `tauri::ipc::Response`（原始二进制），JS 侧 `invoke` 返回 `ArrayBuffer`，
- * 避免 `Vec<u8>` 经 JSON 序列化为数字数组带来的 3x 体积膨胀和解析开销。
- */
-export async function readGlbFile(
-  projectId: number,
-  entryPath: string,
-  isCurrent?: NativeOwner,
-): Promise<Uint8Array> {
-  const buffer = await invokeTimed<ArrayBuffer>(
-    DESKTOP_COMMANDS.read_glb_file,
-    {
-      projectId,
-      entryPath,
-    },
-    { isCurrent },
-  );
-  return new Uint8Array(buffer);
-}
-
-/**
- * 批量读取 DEV GLB 缓存。Rust 返回 GIMR v1 二进制 envelope，避免旧的
- * JSON 数字数组响应；调用方负责按文件数/预计字节数切分批次。
- */
-export async function batchReadGlbFiles(
-  projectId: number,
-  entryPaths: string[],
-): Promise<Map<string, Uint8Array | null>> {
-  const perfSession = perfCurrentSession();
-  const pathBytes = entryPaths.reduce((sum, path) => sum + utf8Encoder.encode(path).byteLength, 0);
-  const requestBytes = pathBytes + entryPaths.length * 6 + String(projectId).length + 32;
-  const payload = await invokeTimed<ArrayBuffer>(
-    DESKTOP_COMMANDS.batch_read_glb_files,
-    {
-      projectId,
-      entryPaths,
-    },
-    { requestBytes },
-  );
-  const parsed = parseBatchCachePayload(payload);
-  if (parsed.profile) perfRecordBatchRead(parsed.profile, perfSession.id);
-  const map = new Map<string, Uint8Array | null>();
-  for (const item of parsed.items) map.set(item.entry_path, item.bytes);
-  return map;
-}
-
-/**
- * 方案 C：写入 GLB 几何缓存版本标记文件。
- *
- * 在 DEV LOD 模板编译完成 MOD/STL → .glb 序列化后调用一次，把当前 GEOMETRY_CACHE_VERSION 写入
- * glbcache/{projectId}/_version.txt。
- * 下次 validateGimCache 时读取此文件并比较；版本不匹配只使 geometry
- * domain 失效，不影响 CBM/IFC 语义缓存。
- */
-export async function writeGeometryCacheVersion(
-  projectId: number,
-  sourceSha256?: string | null,
-): Promise<string> {
-  return invokeTimed<string>(DESKTOP_COMMANDS.write_geometry_cache_version, {
-    projectId,
-    sourceSha256: sourceSha256 ?? null,
-  });
-}
-
-/** 读取 DEV 粒度 GLB manifest（仅读取描述，不传输 GLB 内容）。 */
-export async function readGeometryCacheManifest(projectId: number): Promise<GeometryCacheManifest> {
-  return invokeTimed<GeometryCacheManifest>(DESKTOP_COMMANDS.read_geometry_cache_manifest, {
-    projectId,
-  });
-}
-
-export async function writeGeometryCacheManifest(
-  projectId: number,
-  sourceSha256: string,
-  entries: GeometryCacheManifestEntry[],
-): Promise<string> {
-  return invokeTimed<string>(DESKTOP_COMMANDS.write_geometry_cache_manifest, {
-    projectId,
-    sourceSha256,
-    entries,
-  });
-}
-
-/**
- * 删除单个 DEV GLB，并从 manifest 移除同一 DEV 条目。
- *
- * 用于 warm fast path parse failure 的定向恢复；不会影响其它 DEV、IFC
- * 或语义索引缓存。Rust 侧会再次校验 project source SHA。
- */
-export async function invalidateGlbCacheEntry(
-  projectId: number,
-  entryPath: string,
-  sourceSha256?: string | null,
-): Promise<void> {
-  return invokeTimed<void>(DESKTOP_COMMANDS.invalidate_glb_cache_entry, {
-    projectId,
-    entryPath,
-    sourceSha256: sourceSha256 ?? null,
-  });
 }
 
 /** 授权打开 DB 中已有的最近工程，路径不接受页面输入。 */

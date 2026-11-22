@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppState } from '../../app/state.js';
 import { extractEngineeringSourceGraph } from '@gim/gim-sdk/source';
-import {buildTestEngineeringSources} from '../../../../packages/gim-sdk/src/source/__tests__/fixtures.js';
+import {buildTestEngineeringSources} from '@tests/sdk-source-fixtures';
 import type { CbmNode } from '../../gim/types.js';
 import { projectEngineeringNavigation } from '@gim/gim-sdk/projection';
 

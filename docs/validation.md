@@ -284,7 +284,7 @@ cargo test --manifest-path app/src-tauri/Cargo.toml six_native_imports -- --igno
 | 范围 | 行/语句 | 函数 | 分支 |
 |---|---|---|---|
 | `packages/gim-sdk/src/semantic/` | 95% | 95% | 90% |
-| `packages/gim-sdk/src/{source,geometry,engineering,projection,adapters,shared}/` | 90% | 90% | 80% |
+| `packages/gim-sdk/src/{source,projection,adapters,shared}/` | 90% | 90% | 80% |
 | `gim/`（桌面按归属检查） | 90% | 90% | 80% |
 | `app/session/{openProject,projectSourceAcquisition}.ts` | 70% | 80% | 50% |
 | `features/substation/application/{substationRuntime,substationOpenStages,substationColdPersistence,substationColdSource}.ts`（合并计算） | 70% | 45% | 70% |
@@ -292,11 +292,11 @@ cargo test --manifest-path app/src-tauri/Cargo.toml six_native_imports -- --igno
 | `ui/lineProjectView.ts` | 70% | 60% | 65% |
 | `ui/{lineMapView,lineMapPainter,lineMapPointer,lineMapRenderer}.ts`（合并计算） | 65% | 65% | 60% |
 
-`test:coverage` 先用 Vitest 的阈值匹配器检查变电应用层四个模块是否受同一门禁约束，并用低覆盖夹具验证门禁会失败。随后采集 SDK 自有用例和桌面消费者，合并同一源码的 Istanbul 覆盖数据后对 SDK 的领域/来源实施原门槛。桌面热点门槛由 Vitest 配置执行。SDK 与桌面报告分别在 output/coverage/sdk 和 desktop，合并摘要在 output/coverage/coverage-summary.json。两个采集范围必须非空，防止跨目录匹配失效被当成通过。SDK 用例在同一命令中只执行一次。桌面 npm test 是工作区全量入口，包含 SDK 用例，SDK npm test 也可单独运行。
+`test:coverage` 先用 Vitest 的阈值匹配器检查变电应用层四个模块是否受同一门禁约束，并用低覆盖夹具验证门禁会失败。随后采集 SDK 自有用例和桌面消费者，合并同一源码的 Istanbul 覆盖数据后检查上表五个 SDK 目录。SDK `geometry/` 和 `engineering/` 在合并报告中提供观察值，单独执行 SDK Vitest 覆盖率时使用包内配置的阈值。桌面热点门槛由 Vitest 配置执行。SDK 与桌面报告分别在 `output/coverage/sdk` 和 `output/coverage/desktop`，合并摘要在 `output/coverage/coverage-summary.json`。两个采集范围必须非空，SDK 用例在同一命令中只执行一次。
 
 `output/coverage/summary.json` 的 `largestModules` 按可执行行数列出前 20 个模块的行、函数与分支覆盖，供评审比较。现有覆盖率下限仍独立执行。
 
-热点门禁覆盖打开/取消/失败、变电冷开与暖恢复、后台发布、Viewer 重试、线路导航/地图/检查器联动及资源释放。其余层只报告覆盖率，不自动调整阈值；这些无工程样本的单元证据不代表真实工程或原生性能通过。`npm run test:presentation-boundaries` 验证展示边界检查器，`check:engineering-boundaries` 在本地与 CI 检查实际源码，包括零通用 UI loader、包导出与 Viewer 源语义限制。schema 回归验证拒绝不匹配库且不改原表；属性补写回归覆盖显式空/保留、无效属性、混合源及来源读取失败；源详情回归计数证明身份未变的连续读取只计算一次 SHA。
+热点门禁覆盖打开/取消/失败、变电冷开与暖恢复、后台发布、Viewer 重试、线路导航/地图/检查器联动及资源释放。其余层报告覆盖率。`npm run test:presentation-boundaries` 验证边界检查器，`check:engineering-boundaries` 在本地与 CI 检查实际源码。schema 回归验证拒绝不匹配库且保留原表，属性补写回归覆盖显式空、保留、无效属性、混合源及来源读取失败。Android 源详情回归验证有界读取和已观测文件状态变化时的拒绝。
 
 ### Python 纯逻辑测试
 

@@ -1,3 +1,8 @@
+import {
+  buildBatchByteLookup,
+  chunkCandidates,
+  lookupBatchBytes,
+} from '../infrastructure/native/boundedFileBatch.js';
 import { GIM_LIMITS } from '../shared/gimLimits.js';
 /**
  * Native manifest-only 解压后的变电小文件物化。
@@ -63,37 +68,6 @@ function toFile(bytes: Uint8Array, path: string, original: File): File {
     type: original.type || 'application/octet-stream',
     lastModified: original.lastModified || 0,
   });
-}
-
-function chunkCandidates(
-  candidates: Candidate[],
-  maxFiles: number,
-  maxBytes: number,
-): Candidate[][] {
-  const chunks: Candidate[][] = [];
-  let current: Candidate[] = [];
-  let currentBytes = 0;
-  for (const candidate of candidates) {
-    const size = Math.max(0, candidate.file.size || 0);
-    if (current.length > 0 && (current.length >= maxFiles || currentBytes + size > maxBytes)) {
-      chunks.push(current);
-      current = [];
-      currentBytes = 0;
-    }
-    current.push(candidate);
-    currentBytes += size;
-  }
-  if (current.length > 0) chunks.push(current);
-  return chunks;
-}
-
-function findBytes(
-  bytesMap: Map<string, Uint8Array | null>,
-  normalized: Map<string, Uint8Array | null>,
-  path: string,
-): Uint8Array | null | undefined {
-  if (bytesMap.has(path)) return bytesMap.get(path);
-  return normalized.get(path.replace(/\\/g, '/').toLowerCase());
 }
 
 /**
@@ -213,13 +187,9 @@ export async function hydrateNativeSmallFiles(
         cancelled: true,
       };
     }
-    const normalized = new Map<string, Uint8Array | null>();
-    for (const [path, value] of result) {
-      const key = path.replace(/\\/g, '/').toLowerCase();
-      if (!normalized.has(key)) normalized.set(key, value);
-    }
+    const normalized = buildBatchByteLookup(result);
     for (const candidate of chunk) {
-      const value = findBytes(result, normalized, candidate.path);
+      const value = lookupBatchBytes(result, normalized, candidate.path);
       // null 是明确的 batch miss；保留原始 File，让业务层按需重试或记录
       // 缺失，而不是把 miss 错误地变成空文件。
       if (value == null) {

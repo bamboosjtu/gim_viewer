@@ -41,7 +41,7 @@ beforeEach(() => {
 
 async function engineeringFixture(state: AppState, index: Awaited<ReturnType<typeof spatialFixture>>) {
   const { extractEngineeringSourceGraph } = await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('@gim/gim-sdk/source'); });
-  const { buildTestEngineeringSources } = await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../../../packages/gim-sdk/src/source/__tests__/fixtures.js'); });
+  const { buildTestEngineeringSources } = await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('@tests/sdk-source-fixtures'); });
   const { projectEngineeringNavigation } = await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('@gim/gim-sdk/projection'); });
   const raw: Record<string,string> = { 'project.cbm':'OBJECTMODELPOINTER=B.dev', 'B.dev':'SYMBOLNAME=B', 'CBM/model.ifc':'' };
   const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async path=>raw[path]});
@@ -317,7 +317,7 @@ it('a source IFC selection keeps its row and inspector after an earlier FAM requ
   state.currentFiles!.set('CBM/slow.fam',{text:() => {started.resolve();return fam.promise;}} as File);
   const index=await spatialFixture(state),object=index.objects[0];
   const { extractEngineeringSourceGraph } = await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('@gim/gim-sdk/source'); });
-  const { buildTestEngineeringSources } = await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../../../packages/gim-sdk/src/source/__tests__/fixtures.js'); });
+  const { buildTestEngineeringSources } = await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('@tests/sdk-source-fixtures'); });
   const raw: Record<string,string> = { 'project.cbm':'SUBSYSTEM0=unit.cbm', 'unit.cbm':'OBJECTMODELPOINTER=A.dev', 'A.dev':'SYMBOLNAME=设备 A', 'CBM/model.ifc':'' };
   const graph = await extractEngineeringSourceGraph({ paths:Object.keys(raw), readText:async path=>raw[path] });
   const built = buildTestEngineeringSources('package',graph,index.objects,index.models,index.nodes); state.engineering.sources=built.sources;state.engineering.snapshot=built.snapshot;

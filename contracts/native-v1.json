@@ -1143,34 +1143,6 @@
         }
       }
     },
-    "GeometryCacheManifestEntry": {
-      "diagnostic": {
-        "type": "string",
-        "nullable": false,
-        "inputOptional": true,
-        "optional": true,
-        "default": true
-      },
-      "entry_path": {
-        "type": "string"
-      },
-      "status": {
-        "type": "GeometryCacheManifestStatus"
-      },
-      "size": {
-        "type": "u64"
-      }
-    },
-    "GeometryCacheManifest": {
-      "source_sha256": {
-        "type": "string"
-      },
-      "entries": {
-        "type": {
-          "array": "GeometryCacheManifestEntry"
-        }
-      }
-    },
     "DeviceLodWriteTiming": {
       "resolve_ms": {
         "type": "f64"
@@ -1301,25 +1273,10 @@
         "optional": false,
         "skipNone": false
       },
-      "geometry_cache_version_match": {
-        "type": "bool"
-      },
-      "current_geometry_cache_version": {
-        "type": "string"
-      },
-      "geometry_cache_version_file_match": {
-        "type": "bool"
-      },
-      "geometry_cache_manifest_valid": {
-        "type": "bool"
-      },
       "substation_semantic_cache_valid": {
         "type": "bool"
       },
       "substation_properties_complete": {
-        "type": "bool"
-      },
-      "geometry_cache_valid": {
         "type": "bool"
       }
     },
@@ -1449,22 +1406,7 @@
         "optional": false,
         "skipNone": false
       },
-      "geometry_cache_version_match": {
-        "type": "bool"
-      },
-      "current_geometry_cache_version": {
-        "type": "string"
-      },
-      "geometry_cache_version_file_match": {
-        "type": "bool"
-      },
-      "geometry_cache_manifest_valid": {
-        "type": "bool"
-      },
       "substation_semantic_cache_valid": {
-        "type": "bool"
-      },
-      "geometry_cache_valid": {
         "type": "bool"
       },
       "valid": {
@@ -2134,16 +2076,6 @@
         "preserve"
       ]
     },
-    "GeometryCacheManifestStatus": {
-      "rust": "string",
-      "values": [
-        "glb",
-        "partial",
-        "empty",
-        "unsupported",
-        "source-invalid"
-      ]
-    },
     "MobileBaseLayer": {
       "rust": "string",
       "values": [
@@ -2210,16 +2142,9 @@
         "batch_read_cached_files",
         "read_line_semantic_pack",
         "read_line_semantic_pack_all",
-        "write_glb_file_binary",
-        "read_glb_file",
         "read_device_lod_artifacts",
         "write_device_lod_artifact",
         "delete_device_lod_artifact",
-        "batch_read_glb_files",
-        "read_geometry_cache_manifest",
-        "write_geometry_cache_version",
-        "write_geometry_cache_manifest",
-        "invalidate_glb_cache_entry",
         "get_gim_index",
         "get_gim_fam_properties",
         "validate_gim_cache",

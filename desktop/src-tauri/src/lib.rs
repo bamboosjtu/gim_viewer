@@ -1,19 +1,19 @@
 pub use gim_native_core::{FileInfo, ProcessMemorySnapshot};
 use gim_native_core::{NativeError, NativeErrorCode};
-mod db;
-mod native_command;
+mod benchmark;
 #[cfg(test)]
 mod command_registry_tests;
-#[cfg(test)]
-mod native_io_tests;
-mod benchmark;
-mod tree_export;
+mod db;
 mod gim_extract;
 mod gim_extract_command;
+mod native_command;
+#[cfg(test)]
+mod native_io_tests;
 mod seven_zip_cli;
-mod substation_parse_copy;
 mod substation_extraction_job;
 mod substation_extraction_profile;
+mod substation_parse_copy;
+mod tree_export;
 
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
@@ -52,7 +52,7 @@ fn ensure_fixed_webview2_acl() {
         .to_ascii_lowercase()
         .hash(&mut path_hasher);
     // A replacement at the same portable path must not inherit an old marker.
-    if let Ok(metadata)=fs::metadata(runtime_dir.join("msedgewebview2.exe")) {
+    if let Ok(metadata) = fs::metadata(runtime_dir.join("msedgewebview2.exe")) {
         metadata.len().hash(&mut path_hasher);
         metadata.modified().ok().hash(&mut path_hasher);
     }
@@ -66,7 +66,7 @@ fn ensure_fixed_webview2_acl() {
     if marker_path.is_file() {
         return;
     }
-    if let Err(error)=runtime_acl::validate_runtime_tree(&runtime_dir) {
+    if let Err(error) = runtime_acl::validate_runtime_tree(&runtime_dir) {
         eprintln!("[WebView2 ACL] 拒绝递归修改运行时权限: {error}");
         return;
     }
@@ -93,7 +93,9 @@ fn ensure_fixed_webview2_acl() {
         .arg(&runtime_dir)
         .args(["/setintegritylevel", "(OI)(CI)M", "/T", "/C", "/Q"])
         .creation_flags(CREATE_NO_WINDOW)
-        .status().map(|status|status.success()).unwrap_or(false);
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
 
     if all_succeeded {
         let _ = fs::create_dir_all(&marker_dir);
@@ -103,8 +105,6 @@ fn ensure_fixed_webview2_acl() {
 
 #[cfg(not(windows))]
 fn ensure_fixed_webview2_acl() {}
-
-
 
 /// 由后端文件选择器登记的文件路径。
 ///
@@ -127,7 +127,8 @@ fn canonical_identity(path: &Path) -> Result<(PathBuf, String), NativeError> {
             "源文件过大（{} 字节，超过 {} 字节上限）",
             meta.len(),
             MAX_SOURCE_FILE_BYTES
-        ).into());
+        )
+        .into());
     }
     let mut identity = canonical.to_string_lossy().replace('\\', "/");
     #[cfg(windows)]
@@ -180,7 +181,10 @@ pub(crate) fn require_authorized_path(
         .lock()
         .map_err(|e| format!("获取文件授权锁失败: {}", e))?;
     if !paths.contains(&identity) {
-        return Err(NativeError::new(NativeErrorCode::Unauthorized,"文件路径未经原生文件对话框授权"));
+        return Err(NativeError::new(
+            NativeErrorCode::Unauthorized,
+            "文件路径未经原生文件对话框授权",
+        ));
     }
     Ok(canonical)
 }
@@ -207,8 +211,8 @@ mod file_dialog_commands {
                 let _ = (access, path);
                 Err("开发性能采集命令仅在 debug 构建可用".to_string().into())
             }
-
-        }).await
+        })
+        .await
     }
 
     /// 后端 GIM 文件选择器，同时登记 canonical path 授权。
@@ -217,7 +221,7 @@ mod file_dialog_commands {
         app_handle: tauri::AppHandle,
     ) -> Result<Option<String>, NativeError> {
         crate::native_command::blocking("pick_gim_file_path", move || {
-            let access=app_handle.state::<AuthorizedFilePaths>();
+            let access = app_handle.state::<AuthorizedFilePaths>();
             let selected = app_handle
                 .dialog()
                 .file()
@@ -230,7 +234,8 @@ mod file_dialog_commands {
                 .into_path()
                 .map_err(|e| format!("获取 GIM 文件路径失败: {}", e))?;
             Ok(Some(authorize_selected_path(&access, &path, Some("gim"))?))
-        }).await
+        })
+        .await
     }
 
     /// 后端 IFC 多选文件选择器，同时登记 canonical path 授权。
@@ -239,7 +244,7 @@ mod file_dialog_commands {
         app_handle: tauri::AppHandle,
     ) -> Result<Option<Vec<String>>, NativeError> {
         crate::native_command::blocking("pick_ifc_file_paths", move || {
-            let access=app_handle.state::<AuthorizedFilePaths>();
+            let access = app_handle.state::<AuthorizedFilePaths>();
             let selected = app_handle
                 .dialog()
                 .file()
@@ -256,7 +261,8 @@ mod file_dialog_commands {
                 paths.push(authorize_selected_path(&access, &path, Some("ifc"))?);
             }
             Ok(Some(paths))
-        }).await
+        })
+        .await
     }
 }
 
@@ -266,16 +272,16 @@ async fn get_file_info(
     path: String,
 ) -> Result<FileInfo, NativeError> {
     crate::native_command::blocking("get_file_info", move || {
-        let access=app_handle.state::<AuthorizedFilePaths>();
+        let access = app_handle.state::<AuthorizedFilePaths>();
         inspect_authorized_file(&access, &path)
-    }).await
+    })
+    .await
 }
 
 /// 当前 Tauri 后端进程的驻留集大小（RSS）。
 ///
 /// WebView2 子进程与 Rust 后端是不同进程，因此该值只代表后端进程；前端
 /// 性能埋点会把 source 一并记录，不能将它当作 JS heap 或整个进程树 RSS。
-
 
 #[cfg(windows)]
 fn current_process_id() -> u32 {
@@ -342,7 +348,10 @@ mod memory_private_tests {
         assert!(snapshot.rss_bytes.unwrap() > 0);
         assert!(snapshot.private_bytes.unwrap() >= committed.len() as u64);
         assert!(snapshot.root_private_bytes.unwrap() >= committed.len() as u64);
-        assert!(snapshot.process_instances.iter().any(|(pid,_)|*pid==super::current_process_id()));
+        assert!(snapshot
+            .process_instances
+            .iter()
+            .any(|(pid, _)| *pid == super::current_process_id()));
         assert_eq!(snapshot.source, "windows-process-tree-working-set");
     }
 }
@@ -372,11 +381,7 @@ fn current_process_rss_bytes() -> Option<u64> {
     }
     #[link(name = "psapi")]
     extern "system" {
-        fn GetProcessMemoryInfo(
-            process: *mut c_void,
-            counters: *mut c_void,
-            size: u32,
-        ) -> i32;
+        fn GetProcessMemoryInfo(process: *mut c_void, counters: *mut c_void, size: u32) -> i32;
     }
 
     // SAFETY: Win32 returns a pseudo-handle valid for the current process;
@@ -394,7 +399,12 @@ fn current_process_rss_bytes() -> Option<u64> {
             pagefile_usage: 0,
             peak_pagefile_usage: 0,
         };
-        if GetProcessMemoryInfo(GetCurrentProcess(), &mut counters as *mut _ as *mut c_void, counters.cb) != 0 {
+        if GetProcessMemoryInfo(
+            GetCurrentProcess(),
+            &mut counters as *mut _ as *mut c_void,
+            counters.cb,
+        ) != 0
+        {
             Some(counters.working_set_size as u64)
         } else {
             None
@@ -422,33 +432,34 @@ fn current_process_rss_bytes() -> Option<u64> {
 #[tauri::command]
 async fn get_process_memory() -> Result<ProcessMemorySnapshot, NativeError> {
     crate::native_command::blocking("get_process_memory", move || {
-#[cfg(windows)]
-    let pid = current_process_id();
-    #[cfg(not(windows))]
-    let pid = std::process::id();
-    let source = if cfg!(windows) {
-        "tauri-process-working-set".to_string()
-    } else if cfg!(target_os = "linux") {
-        "tauri-process-proc-statm".to_string()
-    } else {
-        "tauri-process-unavailable".to_string()
-    };
-    let tree = process_tree_snapshot(pid);
-    Ok(ProcessMemorySnapshot {
-        pid,
-        rss_bytes: current_process_rss_bytes(),
-        rss_source: source.clone(),
-        source,
-        process_tree_rss_bytes: tree.rss_bytes,
-        process_tree_private_bytes: tree.private_bytes,
-        root_private_bytes: tree.root_private_bytes,
-        process_instances: tree.process_instances,
-        process_count: tree.process_count,
-        process_tree_available: tree.available,
-        process_tree_source: tree.source,
-        process_tree_reason: tree.reason,
+        #[cfg(windows)]
+        let pid = current_process_id();
+        #[cfg(not(windows))]
+        let pid = std::process::id();
+        let source = if cfg!(windows) {
+            "tauri-process-working-set".to_string()
+        } else if cfg!(target_os = "linux") {
+            "tauri-process-proc-statm".to_string()
+        } else {
+            "tauri-process-unavailable".to_string()
+        };
+        let tree = process_tree_snapshot(pid);
+        Ok(ProcessMemorySnapshot {
+            pid,
+            rss_bytes: current_process_rss_bytes(),
+            rss_source: source.clone(),
+            source,
+            process_tree_rss_bytes: tree.rss_bytes,
+            process_tree_private_bytes: tree.private_bytes,
+            root_private_bytes: tree.root_private_bytes,
+            process_instances: tree.process_instances,
+            process_count: tree.process_count,
+            process_tree_available: tree.available,
+            process_tree_source: tree.source,
+            process_tree_reason: tree.reason,
+        })
     })
-    }).await
+    .await
 }
 
 /// 读取任意路径文件的原始字节。路径信任边界见上方 `get_file_info` 注释。
@@ -462,7 +473,8 @@ async fn read_file_bytes(
         let p = require_authorized_path(&access, &path, None)?;
         let bytes = fs::read(p).map_err(|e| e.to_string())?;
         Ok(tauri::ipc::Response::new(bytes))
-    }).await
+    })
+    .await
 }
 
 /// Read a bounded prefix for source inspection without loading the archive.
@@ -483,7 +495,8 @@ async fn read_file_head(
             .read_to_end(&mut bytes)
             .map_err(|e| e.to_string())?;
         Ok(tauri::ipc::Response::new(bytes))
-    }).await
+    })
+    .await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -540,16 +553,9 @@ pub fn run() {
             db::batch_read_cached_files,
             db::read_line_semantic_pack,
             db::read_line_semantic_pack_all,
-            db::write_glb_file_binary,
-            db::read_glb_file,
             db::read_device_lod_artifacts,
             db::write_device_lod_artifact,
             db::delete_device_lod_artifact,
-            db::batch_read_glb_files,
-            db::read_geometry_cache_manifest,
-            db::write_geometry_cache_version,
-            db::write_geometry_cache_manifest,
-            db::invalidate_glb_cache_entry,
             db::get_gim_index,
             db::get_gim_fam_properties,
             db::validate_gim_cache,
@@ -575,22 +581,34 @@ pub fn run() {
 
 #[cfg(test)]
 fn workspace_test_temp() -> std::path::PathBuf {
-    let root=std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tmp/tests/native");
-    std::fs::create_dir_all(&root).expect("workspace test directory must be writable");root
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tmp/tests/native");
+    std::fs::create_dir_all(&root).expect("workspace test directory must be writable");
+    root
 }
 
 /// Acceptance executables embed a workspace-only data root; production keeps Tauri's normal location.
-pub(crate) fn application_data_dir(app:&tauri::AppHandle)->Result<PathBuf, NativeError> {
+pub(crate) fn application_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, NativeError> {
     #[cfg(feature = "benchmark")]
-    { let _=app; benchmark::data_root() }
+    {
+        let _ = app;
+        benchmark::data_root()
+    }
     #[cfg(not(feature = "benchmark"))]
     {
-        if let Some(root)=option_env!("GIM_ACCEPTANCE_DATA_ROOT") {return Ok(PathBuf::from(root));}
-        app.path().app_data_dir().map_err(|error|error.to_string()).map_err(NativeError::from)
+        if let Some(root) = option_env!("GIM_ACCEPTANCE_DATA_ROOT") {
+            return Ok(PathBuf::from(root));
+        }
+        app.path()
+            .app_data_dir()
+            .map_err(|error| error.to_string())
+            .map_err(NativeError::from)
     }
 }
 
-fn inspect_authorized_file(access: &AuthorizedFilePaths, path: &str) -> Result<FileInfo, NativeError> {
+fn inspect_authorized_file(
+    access: &AuthorizedFilePaths,
+    path: &str,
+) -> Result<FileInfo, NativeError> {
     let p = require_authorized_path(access, path, None)?;
     let meta = fs::metadata(&p).map_err(|e| e.to_string())?;
     let name = p
@@ -626,7 +644,6 @@ fn inspect_authorized_file(access: &AuthorizedFilePaths, path: &str) -> Result<F
         modified_ms,
         sha256,
     })
-
 }
-#[cfg(any(windows,test))]
+#[cfg(any(windows, test))]
 mod runtime_acl;

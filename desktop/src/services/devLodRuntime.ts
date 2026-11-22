@@ -1,3 +1,4 @@
+import { deviceTemplateCacheKey } from '../infrastructure/cache/devLodIdentity.js';
 import { logger } from '../utils/logger.js';
 import { setRenderVisibility, requestObjectRender } from '../viewer/demandRendering.js';
 import { createLazyGeometrySourceFiles } from './modGeometrySourceFiles.js';
@@ -480,7 +481,7 @@ export class DevLodRuntime {
     this.applyMemoryPressure();
   }
   private key(dev: string, lod: DeviceLod) {
-    return `${DEV_GEOMETRY_VERSION}|${this.sourceIdentity}|${dev.toLowerCase()}|lod${lod}`;
+    return deviceTemplateCacheKey(this.sourceIdentity, dev, lod);
   }
   /** Persistence tier: L0 is the durable whole-station baseline; L1 is a hot
    * near-view cache written only for selected or repeatedly requested

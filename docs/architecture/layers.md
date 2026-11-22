@@ -8,7 +8,7 @@
 |---|---|---|
 | 桌面 Tauri | `desktop/` | 变电、线路、独立设备；Rust 负责 SQLite、SHA、解压和受权读取 |
 | Android | `app/` | 仅线路；独立 npm、私有 SQLite、SAF 导入 |
-| 共享线路 core | `packages/powerline-core/` | 纯 parser、图、领域投影、HNum 预览；无平台 UI/DB |
+| 共享线路 core | `packages/powerline-core/` | 线路图、领域投影、HNum 预览；同时发布现有共享格式原语和生成的原生 v1 契约 |
 | 共享原生容器 | `crates/gim-native-core/` | 有界解压、路径与资源配额 |
 | Android 导入插件 | `crates/tauri-plugin-gim-import/` | SAF 流式复制与 SHA |
 | 测量核心 | `packages/measurement-core/` | 无 DOM、Tauri、Three 依赖的事件、阶段、Trace 上下文、统计与内存契约 |
@@ -34,9 +34,11 @@
 | `desktop/src/infrastructure/cache/` | 工程来源、实体、导航与物理目录的 v1 编解码及会话持久化 | 领域投影契约、原生缓存端口 | Worker 客户端、Feature、应用组合或渲染 |
 | `desktop/src/infrastructure/native/` | 工程路径授权、源文件与缓存条目读写、原生解压载体、v1 错误映射及会话守卫 | 生成契约、Tauri invoke、宿主路径解析和测量 | UI、Viewer、Worker 客户端、业务 Feature |
 | `desktop/src/services/` | 共享应用运行时、后台业务编排与展示端口 | gim、viewer、bridge、注入的展示端口 | 把领域规则塞回 UI |
+| `desktop/src/shared/` | 宿主共享类型、状态槽与格式化接口 | 类型、共享纯函数、已登记的 GIM 格式化选择器 | Viewer、Feature 或应用运行时值依赖 |
+| `desktop/src/utils/` | 日志、异步、调度与产品计时工具 | 宿主纯工具；产品计时的测量订阅适配 | 通过通用工具引入其他测量运行时 |
 | `desktop/src/config/` | 功能与调试开关 | 无 | 业务状态 |
 | `desktop/src/measurement/` | 宿主与 Worker 探针、产品证据、Trace/Profile/GPU 采样适配 | measurement-core、只读运行时快照 | 把测量状态变成产品业务状态 |
-| `desktop/bridge/` | 生成契约出口、SQLite 索引/设置、文件选择与专用缓存封装 | `@tauri-apps/api` | UI、Viewer |
+| `desktop/bridge/` | 生成契约出口、SQLite 索引/设置、文件选择与专用缓存封装 | `@tauri-apps/api`、逐文件登记的传输端口 | UI、Viewer 及未登记的宿主入口 |
 | `desktop/src-tauri/src/` | SQLite、SHA、解压、文件校验 | Rust crates | 前端状态 |
 
 Benchmark 注册表位于根目录 `benchmarks/l0|l1|l2/`，CLI、Trace/Profile 与无样本协议测试位于 `desktop/scripts/benchmarks/`，本地功能夹具位于 `desktop/tests/`；权威报告在 `tmp/`，`output/` 默认只保存匿名派生视图（非匿名 survey 例外）。这些目录不承担应用运行时业务逻辑。
@@ -45,7 +47,7 @@ Benchmark 注册表位于根目录 `benchmarks/l0|l1|l2/`，CLI、Trace/Profile 
 
 UI 可消费只读的稳定来源 ID 查找、路径格式化、空值判断及几何诊断文案等展示选择器；允许的模块/符号逐项登记在 `check-engineering-boundaries.mjs`。原始文本解析、FAM 来源与连接归属由 SDK 核心、services 和 gim 按各自契约提供。Powerline Feature 负责线路地图及导航投影。新增纯函数不自动获得 UI 导入权限，不能用“纯函数”放宽整个 parser 或 Viewer 模块。
 
-1. `engineering/` 是无格式领域层。它不读取 XML/键值文本、不生成 Mesh、不访问数据库，也不接收 `CbmNode`、F2/F3/F4 标签、展示树深度或包围盒作为分类条件。新增分类规则应先落到这里和[目录](../engineering/catalogs/README.md)。
+1. 新增分类规则放在 [SDK Semantic Core](../../packages/gim-sdk/src/semantic/) 及[实体目录](../engineering/catalogs/README.md)。领域分类使用适配后的证据，桌面 `engineering/` 只保留有生产消费者的包出口转发。SDK Parser 对线路包的值依赖限于登记的格式原语。
 2. `gim/engineering/` 是适配层。它只把来源事实转成 `ObjectEvidence`、`SourceRecord`、`SourceGraph` 和空间上下文；`SourceRecord` 可保留原始字段，但领域层不解析格式。
 3. `services/engineering*` 编排工程计算、快照发布、缓存和表示绑定；Worker 通信与请求释放由 `infrastructure/workers/` 管理。工程类别继续由 SDK 判断。
 4. `viewer/` 只消费 `SourceGeometryOccurrence`、模板和 IFC 对象。几何编译器不接收工程组成分组，也不按实体名称选择 LOD。
@@ -60,6 +62,8 @@ UI 可消费只读的稳定来源 ID 查找、路径格式化、空值判断及�
 自动空间细化放在 `services/projections/`，只接收显式范围与投影证据，输出路径与推断标记；不属于实体归一化。
 
 既有 IFC loader/runtime 仍直接使用 bridge 的缓存/运行时适配器；`ifcBimLoader.ts` 的 `ifcLodCache`、`ifcRegionalRuntime.ts` 的 `ifcLodCache` 是边界检查中的精确例外，不放宽为整个目录通行。
+
+Bridge 使用 `invokeTimed`、二进制 envelope 以及后台错误报告三个宿主传输端口，允许位置由 `check-engineering-boundaries.mjs` 按调用文件登记。同一检查器约束共享展示选择器、产品计时与测量的接点、配置、测量和 SDK Parser。
 
 ## 入口与接线
 

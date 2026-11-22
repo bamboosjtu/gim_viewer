@@ -60,14 +60,7 @@ pub use gim_native_core::LINE_PARSER_VERSION;
 
 pub use gim_native_core::SUBSTATION_PARSER_VERSION;
 
-
-/// GLB 几何缓存版本（方案 C：MOD/STL → glTF 序列化格式版本）
-/// 独立于 PARSER_VERSION，用于在 MOD 解析逻辑变更时单独失效 glb 缓存。
-/// 失效规则：
-/// - 语义 parser domain 版本变 → 仅对应 source/index cache 失效
-/// - GEOMETRY_CACHE_VERSION 变 → 仅 geometry domain 失效，由前端复用
-///   substation source/index、重新构建 DEV GLB；不删除整个项目缓存
-/// 版本文件：{app_data_dir}/glbcache/{project_id}/_version.txt
+/// Source-bound device LOD artifact version.
 pub use gim_native_core::GEOMETRY_CACHE_VERSION;
 
 /// 应用级数据库连接
@@ -126,7 +119,8 @@ fn count_rows(conn: &Connection, table: &str, project_id: i64) -> Result<i64, Na
     let _timing = ValidationSpan::new("sqlite_counts");
     let sql = format!("SELECT COUNT(*) FROM {} WHERE project_id = ?1", table);
     conn.query_row(&sql, params![project_id], |row| row.get(0))
-        .map_err(|e| format!("统计 {} 失败: {}", table, e)).map_err(NativeError::from)
+        .map_err(|e| format!("统计 {} 失败: {}", table, e))
+        .map_err(NativeError::from)
 }
 
 const MAX_LINE_TEXT_BYTES: usize = 4 * 1024 * 1024;

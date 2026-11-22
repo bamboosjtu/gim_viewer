@@ -24,12 +24,7 @@ interface DiagnosticPayload {
   cache_miss_reason?: string | null;
   line_semantic_pack_status?: string;
   line_semantic_pack_error?: string | null;
-  geometry_cache_version_match?: boolean;
-  current_geometry_cache_version?: string;
-  geometry_cache_version_file_match?: boolean;
-  geometry_cache_manifest_valid?: boolean;
   substation_semantic_cache_valid?: boolean;
-  geometry_cache_valid?: boolean;
 
   // 变电工程
   entries_count?: number;
@@ -62,7 +57,8 @@ interface DiagnosticPayload {
  */
 export function summarizeDiagnostic(payload: unknown): string {
   // 支持直接传入 diagnostic 或传入 { diagnostic } 包装
-  const diag = (payload as { diagnostic?: DiagnosticPayload })?.diagnostic ?? (payload as DiagnosticPayload);
+  const diag =
+    (payload as { diagnostic?: DiagnosticPayload })?.diagnostic ?? (payload as DiagnosticPayload);
   if (!diag) {
     return '（无诊断数据）';
   }
@@ -76,18 +72,24 @@ export function summarizeDiagnostic(payload: unknown): string {
   const lines: string[] = [];
   lines.push(`工程类型：${projectType}`);
   lines.push(`缓存状态：valid=${valid}`);
-  lines.push(`parser_version：${storedVersion} / ${currentVersion}${versionMatch ? '' : '（不匹配）'}`);
+  lines.push(
+    `parser_version：${storedVersion} / ${currentVersion}${versionMatch ? '' : '（不匹配）'}`,
+  );
   if (diag.project_type === 'transmission_line') {
-    lines.push(`线路缓存版本：${diag.stored_line_parser_version ?? '(未提供)'} / ${diag.current_line_parser_version ?? '(未知)'}${diag.line_parser_version_match === false ? '（不匹配）' : ''}`);
+    lines.push(
+      `线路缓存版本：${diag.stored_line_parser_version ?? '(未提供)'} / ${diag.current_line_parser_version ?? '(未知)'}${diag.line_parser_version_match === false ? '（不匹配）' : ''}`,
+    );
   } else if (diag.project_type === 'substation' || diag.project_type === 'hybrid') {
-    lines.push(`变电缓存版本：${diag.stored_substation_parser_version ?? '(未提供)'} / ${diag.current_substation_parser_version ?? '(未知)'}${diag.substation_parser_version_match === false ? '（不匹配）' : ''}`);
+    lines.push(
+      `变电缓存版本：${diag.stored_substation_parser_version ?? '(未提供)'} / ${diag.current_substation_parser_version ?? '(未知)'}${diag.substation_parser_version_match === false ? '（不匹配）' : ''}`,
+    );
   }
   if (diag.cache_miss_reason) lines.push(`缓存失效原因：${diag.cache_miss_reason}`);
   if (diag.project_type === 'transmission_line') {
-    lines.push(`线路 semantic pack：${diag.line_semantic_pack_status ?? 'unknown'}${diag.line_semantic_pack_error ? `（${diag.line_semantic_pack_error}）` : ''}`);
+    lines.push(
+      `线路 semantic pack：${diag.line_semantic_pack_status ?? 'unknown'}${diag.line_semantic_pack_error ? `（${diag.line_semantic_pack_error}）` : ''}`,
+    );
   } else if (diag.project_type === 'substation' || diag.project_type === 'hybrid') {
-    lines.push(`变电几何缓存版本：${diag.geometry_cache_version_match ? '匹配' : '不匹配'} / ${diag.current_geometry_cache_version ?? '(未知)'}`);
-    lines.push(`变电语义缓存：${diag.substation_semantic_cache_valid ? '有效' : '无效'}；几何域：${diag.geometry_cache_valid ? '有效' : '不完整'}（版本标记：${diag.geometry_cache_version_file_match ? '匹配' : '不匹配'}，manifest：${diag.geometry_cache_manifest_valid ? '有效' : '无效'}）`);
   }
 
   if (projectType === 'transmission_line') {

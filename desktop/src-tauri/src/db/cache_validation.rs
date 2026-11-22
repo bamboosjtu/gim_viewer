@@ -1,45 +1,28 @@
 //! Domain cache validity and source/attribute completeness checks.
 
-pub use gim_native_core::{GimCacheValidation};
-use gim_native_core::{NativeError, NativeErrorCode};
-use rusqlite::{params, Connection};
-use tauri::Manager;
 use super::cache_paths::{
-    CacheValidationContext,
-    cache_project_root_for_batch,
-    readable_source_of_size,
+    cache_project_root_for_batch, readable_source_of_size, CacheValidationContext,
 };
-use super::geometry_cache::{
-    check_geometry_cache_manifest,
-    check_geometry_cache_manifest_structure,
-    check_geometry_cache_version_file,
-};
-use super::projects::{ensure_project_exists};
-use super::{
-    DbState,
-    GEOMETRY_CACHE_VERSION,
-    LINE_PARSER_VERSION,
-    PARSER_VERSION,
-    SUBSTATION_PARSER_VERSION,
-    cache_miss_reason,
-    count_rows,
-    parser_domain_version_matches,
-};
+use super::projects::ensure_project_exists;
 use super::semantic_pack::{
-    LINE_SEMANTIC_INDEX_FILE,
+    read_line_semantic_pack_files, semantic_error, LINE_SEMANTIC_INDEX_FILE,
     LINE_SEMANTIC_PACK_FILE,
-    read_line_semantic_pack_files,
-    semantic_error,
 };
 use super::substation_index::{
-    missing_substation_sources_with_context,
-    substation_index_receipt_matches,
+    missing_substation_sources_with_context, substation_index_receipt_matches,
     substation_light_source_scan,
 };
 use super::validation_profile::{ValidationProfile, ValidationSpan};
+use super::{
+    cache_miss_reason, count_rows, parser_domain_version_matches, DbState, LINE_PARSER_VERSION,
+    PARSER_VERSION, SUBSTATION_PARSER_VERSION,
+};
+pub use gim_native_core::GimCacheValidation;
+use gim_native_core::{NativeError, NativeErrorCode};
+use rusqlite::{params, Connection};
+use tauri::Manager;
 
 /// 缓存校验结果
-
 
 /// v5: 线路工程 FAM/DEV 属性缓存诊断结果（内部辅助结构，供 validate/diagnostic 共用）
 #[derive(Debug, Clone, Default)]
@@ -189,7 +172,12 @@ pub(super) fn inspect_line_semantic_pack(
 ) -> (String, Option<String>) {
     let root = match cache_project_root_for_batch(app_handle, project_id) {
         Ok(root) => root,
-        Err(error) => return ("invalid".to_string(), Some(semantic_error(NativeErrorCode::PackInvalid, error).to_string())),
+        Err(error) => {
+            return (
+                "invalid".to_string(),
+                Some(semantic_error(NativeErrorCode::PackInvalid, error).to_string()),
+            )
+        }
     };
     let pack_path = root.join(LINE_SEMANTIC_PACK_FILE);
     let index_path = root.join(LINE_SEMANTIC_INDEX_FILE);
@@ -201,13 +189,19 @@ pub(super) fn inspect_line_semantic_pack(
     if !index_exists {
         return (
             "invalid".to_string(),
-            Some(semantic_error(NativeErrorCode::IndexInvalid, "线路语义 pack index 缺失").to_string()),
+            Some(
+                semantic_error(NativeErrorCode::IndexInvalid, "线路语义 pack index 缺失")
+                    .to_string(),
+            ),
         );
     }
     if !pack_exists {
         return (
             "invalid".to_string(),
-            Some(semantic_error(NativeErrorCode::PackInvalid, "线路语义 pack 数据文件缺失").to_string()),
+            Some(
+                semantic_error(NativeErrorCode::PackInvalid, "线路语义 pack 数据文件缺失")
+                    .to_string(),
+            ),
         );
     }
     match read_line_semantic_pack_files(&root, true) {
@@ -234,7 +228,14 @@ pub async fn validate_gim_cache(
     tauri::async_runtime::spawn_blocking(move || {
         let state = app_handle.state::<DbState>();
         validate_gim_cache_blocking(app_handle.clone(), state, project_id, expected_project_type)
-    }).await.map_err(|e| NativeError::new(NativeErrorCode::Internal,format!("缓存后台校验失败: {}", e)))?
+    })
+    .await
+    .map_err(|e| {
+        NativeError::new(
+            NativeErrorCode::Internal,
+            format!("缓存后台校验失败: {}", e),
+        )
+    })?
 }
 
 fn validate_gim_cache_blocking(
@@ -243,13 +244,24 @@ fn validate_gim_cache_blocking(
     project_id: i64,
     expected_project_type: String,
 ) -> Result<GimCacheValidation, NativeError> {
-    let _profile = if expected_project_type == "substation" { Some(ValidationProfile::begin()) } else { None };
+    let _profile = if expected_project_type == "substation" {
+        Some(ValidationProfile::begin())
+    } else {
+        None
+    };
     let _total = ValidationSpan::new("total");
     let lock_timing = ValidationSpan::new("database_lock_wait");
-    let locked = state.0.lock().map_err(|e| format!("获取数据库锁失败: {e}"))?;
-    let revision = locked.query_row("SELECT total_changes()", [], |row| row.get::<_, i64>(0)).map_err(|e|e.to_string())?;
-    let data_version:i64=locked.pragma_query_value(None,"data_version",|r|r.get(0)).map_err(|e|e.to_string())?;
-    let conn=validation_snapshot(&locked)?;
+    let locked = state
+        .0
+        .lock()
+        .map_err(|e| format!("获取数据库锁失败: {e}"))?;
+    let revision = locked
+        .query_row("SELECT total_changes()", [], |row| row.get::<_, i64>(0))
+        .map_err(|e| e.to_string())?;
+    let data_version: i64 = locked
+        .pragma_query_value(None, "data_version", |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    let conn = validation_snapshot(&locked)?;
     drop(locked);
     drop(lock_timing);
     ensure_project_exists(&conn, project_id)?;
@@ -289,7 +301,8 @@ fn validate_gim_cache_blocking(
         return Err(format!(
             "缓存校验需要明确的源工程类型，收到: {}",
             expected_project_type
-        ).into());
+        )
+        .into());
     }
     // 关键边界：校验分支由当前 GIM source magic 决定，不能由旧缓存中的
     // project_type 反向决定。旧字段保留在响应中，只供诊断和迁移观察。
@@ -298,10 +311,8 @@ fn validate_gim_cache_blocking(
         .as_deref()
         .map(|stored| stored == expected_project_type)
         .unwrap_or(true);
-    let line_parser_version_match = parser_domain_version_matches(
-        stored_line_parser_version.as_deref(),
-        LINE_PARSER_VERSION,
-    );
+    let line_parser_version_match =
+        parser_domain_version_matches(stored_line_parser_version.as_deref(), LINE_PARSER_VERSION);
     let substation_parser_version_match = parser_domain_version_matches(
         stored_substation_parser_version.as_deref(),
         SUBSTATION_PARSER_VERSION,
@@ -312,28 +323,6 @@ fn validate_gim_cache_blocking(
         substation_parser_version_match
     };
 
-    // 方案 C：校验 GLB 几何缓存版本。版本不匹配只影响 geometry domain；
-    // 下方 semantic_cache_valid 不依赖该值，前端会复用 source/index 并
-    // 单独重建 DEV GLB。
-    let geometry_cache_version_file_match =
-        check_geometry_cache_version_file(&app_handle, project_id);
-    let geometry_cache_manifest_valid = check_geometry_cache_manifest_structure(
-        &app_handle,
-        project_id,
-        &source_sha256,
-    );
-    let geometry_structure_valid = geometry_cache_version_file_match && geometry_cache_manifest_valid;
-    // Warm open must not stat/open every DEV GLB and every extracted source file
-    // before it can show the first IFC/DEV progress. A structurally valid
-    // manifest plus a matching parser/index receipt is enough to enter the
-    // per-entry fast path; missing/truncated entries are isolated there.
-    let geometry_cache_version_match = if is_line {
-        false
-    } else if geometry_structure_valid {
-        true
-    } else {
-        check_geometry_cache_manifest(&app_handle, project_id, &source_sha256)
-    };
     let substation_receipt_valid = if is_line {
         false
     } else {
@@ -351,7 +340,6 @@ fn validate_gim_cache_blocking(
         .unwrap_or(false)
     };
 
-    // v4: 根据 project_type 分支校验
     // v5: transmission_line 增加 line_fam_source_count > 0 条件
     // substation（或 null/unknown）：保持原有 IFC/cache 校验逻辑
     // v5: 线路工程计算 FAM/DEV 属性诊断字段（非线路工程返回全零/空，不影响结果）
@@ -367,14 +355,12 @@ fn validate_gim_cache_blocking(
         ("missing".to_string(), None)
     };
 
-    let (ifc_entry_count, cached_ifc_count, missing_cache_paths, semantic_cache_valid) = if is_line {
+    let (ifc_entry_count, cached_ifc_count, missing_cache_paths, semantic_cache_valid) = if is_line
+    {
         // 线路工程：不检查 IFC 缓存；要求 FAM 属性源存在。
-        // P1 评审修复：不再依赖 geometry_cache_version_match——glbcache/_version.txt
-        // 仅由变电渐进 GLB 管线写入，线路工程永远没有该文件，旧条件导致线路缓存
-        // 永远失效、每次打开都重新解压。线路缓存的完整性由三阶段入库协议保证：
+        // 线路缓存的完整性由三阶段入库协议保证。
         // parser_version 仅在 save_line_project_finish 提交。
-        let valid =
-            parser_version_match
+        let valid = parser_version_match
                 && line_cbm_node_count > 0
                 && line_attr_diag.fam_source_count > 0
                 // semantic source 整体损坏时不能拿 SQLite 图/属性拼出
@@ -412,12 +398,17 @@ fn validate_gim_cache_blocking(
             match local_cache_path {
                 Some(p) if !p.is_empty() => {
                     let path = std::path::Path::new(&p);
-                    if !context.as_ref().map(|c| c.contains(project_id, &entry_path, path).unwrap_or(false)).unwrap_or(false) {
+                    if !context
+                        .as_ref()
+                        .map(|c| c.contains(project_id, &entry_path, path).unwrap_or(false))
+                        .unwrap_or(false)
+                    {
                         missing_cache_paths.push(format!("{} (缓存路径不匹配)", entry_path));
                     } else if readable_source_of_size(path, expected_size) {
                         cached_ifc_count += 1;
                     } else {
-                        missing_cache_paths.push(format!("{} (缓存不可读或大小不匹配)", entry_path));
+                        missing_cache_paths
+                            .push(format!("{} (缓存不可读或大小不匹配)", entry_path));
                     }
                 }
                 _ => {
@@ -445,7 +436,11 @@ fn validate_gim_cache_blocking(
             substation_receipt_valid,
         );
         if !light_source_scan {
-            missing_cache_paths.extend(missing_substation_sources_with_context(&conn,project_id,context.as_ref())?);
+            missing_cache_paths.extend(missing_substation_sources_with_context(
+                &conn,
+                project_id,
+                context.as_ref(),
+            )?);
         }
         let valid = has_index
             && cbm_nodes_count > 0
@@ -463,19 +458,33 @@ fn validate_gim_cache_blocking(
     };
 
     let valid = semantic_cache_valid && stored_project_type_match;
-    let substation_semantic_cache_valid = !is_line && semantic_cache_valid && stored_project_type_match;
+    let substation_semantic_cache_valid =
+        !is_line && semantic_cache_valid && stored_project_type_match;
 
     let mut miss_reasons = Vec::new();
     if !parser_version_match {
         let domain = if is_line { "line" } else { "substation" };
         let stored = if is_line {
-            stored_line_parser_version.as_deref().or(stored_parser_version.as_deref())
+            stored_line_parser_version
+                .as_deref()
+                .or(stored_parser_version.as_deref())
         } else {
-            stored_substation_parser_version.as_deref().or(stored_parser_version.as_deref())
+            stored_substation_parser_version
+                .as_deref()
+                .or(stored_parser_version.as_deref())
         }
         .unwrap_or("(未设置)");
-        let current = if is_line { LINE_PARSER_VERSION } else { SUBSTATION_PARSER_VERSION };
-        miss_reasons.push(format!("{}_PARSER_VERSION_MISMATCH:{} -> {}", domain.to_ascii_uppercase(), stored, current));
+        let current = if is_line {
+            LINE_PARSER_VERSION
+        } else {
+            SUBSTATION_PARSER_VERSION
+        };
+        miss_reasons.push(format!(
+            "{}_PARSER_VERSION_MISMATCH:{} -> {}",
+            domain.to_ascii_uppercase(),
+            stored,
+            current
+        ));
     }
     if !stored_project_type_match {
         miss_reasons.push(format!(
@@ -485,33 +494,45 @@ fn validate_gim_cache_blocking(
         ));
     }
     if is_line {
-        if line_cbm_node_count == 0 { miss_reasons.push("LINE_GRAPH_EMPTY".to_string()); }
-        if line_attr_diag.fam_source_count == 0 { miss_reasons.push("LINE_FAM_SOURCE_EMPTY".to_string()); }
+        if line_cbm_node_count == 0 {
+            miss_reasons.push("LINE_GRAPH_EMPTY".to_string());
+        }
+        if line_attr_diag.fam_source_count == 0 {
+            miss_reasons.push("LINE_FAM_SOURCE_EMPTY".to_string());
+        }
         if line_semantic_pack_status == "invalid" {
-            miss_reasons.push(line_semantic_pack_error.clone().unwrap_or_else(|| "LINE_SEMANTIC_PACK_INVALID".to_string()));
+            miss_reasons.push(
+                line_semantic_pack_error
+                    .clone()
+                    .unwrap_or_else(|| "LINE_SEMANTIC_PACK_INVALID".to_string()),
+            );
         }
     } else {
-        if !has_index { miss_reasons.push("SUBSTATION_INDEX_EMPTY".to_string()); }
-        if !substation_receipt_valid { miss_reasons.push("SUBSTATION_INDEX_RECEIPT_INVALID".to_string()); }
-        if cbm_nodes_count == 0 { miss_reasons.push("CBM_NODE_EMPTY".to_string()); }
+        if !has_index {
+            miss_reasons.push("SUBSTATION_INDEX_EMPTY".to_string());
+        }
+        if !substation_receipt_valid {
+            miss_reasons.push("SUBSTATION_INDEX_RECEIPT_INVALID".to_string());
+        }
+        if cbm_nodes_count == 0 {
+            miss_reasons.push("CBM_NODE_EMPTY".to_string());
+        }
         if !missing_cache_paths.is_empty() {
             miss_reasons.push(format!("IFC_CACHE_MISSING:{}", missing_cache_paths.len()));
-        }
-        if !geometry_cache_version_file_match {
-            miss_reasons.push("GEOMETRY_CACHE_VERSION_MISMATCH".to_string());
-        } else if !geometry_cache_manifest_valid {
-            miss_reasons.push("GEOMETRY_MANIFEST_INVALID".to_string());
-        } else if !geometry_cache_version_match {
-            // Manifest/source structure is usable; only one or more individual
-            // GLB files are missing, truncated, or have an invalid header.
-            // The warm fast path can isolate those DEV entries.
-            miss_reasons.push("GEOMETRY_CACHE_ENTRY_INVALID".to_string());
         }
     }
 
     // The snapshot must not outlive a concurrent publish/delete on the owner connection.
-    let locked = state.0.lock().map_err(|e|e.to_string())?;
-    if locked.query_row("SELECT total_changes()", [], |row| row.get::<_, i64>(0)).map_err(|e|e.to_string())? != revision || locked.pragma_query_value(None,"data_version",|r|r.get::<_,i64>(0)).map_err(|e|e.to_string())? != data_version {
+    let locked = state.0.lock().map_err(|e| e.to_string())?;
+    if locked
+        .query_row("SELECT total_changes()", [], |row| row.get::<_, i64>(0))
+        .map_err(|e| e.to_string())?
+        != revision
+        || locked
+            .pragma_query_value(None, "data_version", |r| r.get::<_, i64>(0))
+            .map_err(|e| e.to_string())?
+            != data_version
+    {
         return Err("缓存校验期间数据库已更新，请重试".to_string().into());
     }
     super::ensure_project_source_sha(&locked, project_id, Some(&source_sha256))?;
@@ -547,26 +568,33 @@ fn validate_gim_cache_blocking(
         missing_line_dev_sources: line_attr_diag.missing_dev_sources,
         line_semantic_pack_status,
         line_semantic_pack_error,
-        geometry_cache_version_match,
-        current_geometry_cache_version: GEOMETRY_CACHE_VERSION.to_string(),
-        geometry_cache_version_file_match,
-        geometry_cache_manifest_valid,
         substation_semantic_cache_valid,
         substation_properties_complete,
-        geometry_cache_valid: geometry_cache_version_match,
     })
 }
 
-pub(super) fn validation_snapshot(locked:&rusqlite::Connection)->Result<rusqlite::Connection, NativeError> {
-    let mut conn = if let Some(path) = locked.path().filter(|path|!path.is_empty()) {
-        let snapshot=rusqlite::Connection::open_with_flags(path,rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|e|e.to_string())?;
-        snapshot.execute_batch("BEGIN").map_err(|e|e.to_string())?;
-        snapshot.query_row("SELECT COUNT(*) FROM sqlite_master",[],|r|r.get::<_,i64>(0)).map_err(|e|e.to_string())?;
+pub(super) fn validation_snapshot(
+    locked: &rusqlite::Connection,
+) -> Result<rusqlite::Connection, NativeError> {
+    let mut conn = if let Some(path) = locked.path().filter(|path| !path.is_empty()) {
+        let snapshot =
+            rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .map_err(|e| e.to_string())?;
+        snapshot.execute_batch("BEGIN").map_err(|e| e.to_string())?;
         snapshot
-    } else {rusqlite::Connection::open_in_memory().map_err(|e|e.to_string())?};
-    if locked.path().map(|path|path.is_empty()).unwrap_or(true) {
-        let backup=rusqlite::backup::Backup::new(locked,&mut conn).map_err(|e|e.to_string())?;
-        backup.run_to_completion(256,std::time::Duration::ZERO,None).map_err(|e|e.to_string())?;
+            .query_row("SELECT COUNT(*) FROM sqlite_master", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .map_err(|e| e.to_string())?;
+        snapshot
+    } else {
+        rusqlite::Connection::open_in_memory().map_err(|e| e.to_string())?
+    };
+    if locked.path().map(|path| path.is_empty()).unwrap_or(true) {
+        let backup = rusqlite::backup::Backup::new(locked, &mut conn).map_err(|e| e.to_string())?;
+        backup
+            .run_to_completion(256, std::time::Duration::ZERO, None)
+            .map_err(|e| e.to_string())?;
     }
     Ok(conn)
 }
