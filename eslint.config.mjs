@@ -4,5 +4,4 @@ const path=pattern=>pattern.startsWith('../')?pattern.slice(3):pattern.startsWit
 export default desktop.map(config=>({...config,
  ...(config.files?{files:config.files.map(path)}:{}),
  ...(config.ignores?{ignores:config.ignores.map(pattern=>['node_modules/**','dist/**'].includes(pattern)?'**/'+pattern:path(pattern))}:{}),
- ...(config.languageOptions?.parserOptions?.project?{languageOptions:{...config.languageOptions,parserOptions:{...config.languageOptions.parserOptions,project:['./tsconfig.json','../packages/gim-sdk/tsconfig.json','../packages/gim-sdk/tsconfig.test.json']}}}:{}),
 }));

@@ -238,42 +238,98 @@ export const architectureModules = [
   '../packages/gim-sdk/src/source/sourceFamilyIndex.ts',
   '../packages/gim-sdk/src/source/sourceReferenceResolver.ts',
   '../packages/gim-sdk/src/source/sourceGraph.ts',
+  'scripts/format-architecture.mjs',
+  'scripts/lint.mjs',
+  'scripts/check-rust.mjs',
 ];
 export const formattedArchitectureModules = [...architectureModules];
+export const scriptTestFiles =
+  '{desktop/scripts,app/scripts,.github/scripts,contracts,packages/gim-sdk,packages/measurement-core,packages/powerline-core}/**/*.{test,spec}.{js,mjs,cjs}';
 
-const sourceRoots = ['desktop/src', 'desktop/bridge', 'packages/gim-sdk/src'];
-const adoptedPaths = new Set(architectureModules.map(path => path.startsWith('../') ? path.slice(3) : `desktop/${path}`));
+export const typescriptSourceRoots = [
+  'desktop/src',
+  'desktop/bridge',
+  'app/src',
+  'packages/gim-sdk/src',
+  'packages/measurement-core/src',
+  'packages/powerline-core/src',
+];
+const sourceRoots = [
+  ...typescriptSourceRoots,
+  'desktop/scripts',
+  'app/scripts',
+  '.github/scripts',
+  'packages/gim-sdk',
+  'packages/measurement-core',
+  'packages/powerline-core',
+  'contracts',
+];
+const adoptedPaths = new Set(
+  architectureModules.map((path) => (path.startsWith('../') ? path.slice(3) : `desktop/${path}`)),
+);
 
 export function unadoptedProductionSources(paths) {
-  return [...new Set(paths)].filter(path => sourceRoots.some(root => path.startsWith(`${root}/`))
-    && path.endsWith('.ts') && !path.endsWith('.test.ts') && !path.includes('/__tests__/')
-    && !adoptedPaths.has(path)).sort();
+  return [...new Set(paths)]
+    .filter(
+      (path) =>
+        sourceRoots.some((root) => path.startsWith(`${root}/`)) &&
+        /\.(?:[cm]?ts|[cm]?js)$/.test(path) &&
+        !/\.(?:test|spec)\.[cm]?[jt]s$/.test(path) &&
+        !/\/(?:__tests__|tests|__fixtures__|dist|node_modules)\//.test(path) &&
+        !path.startsWith('contracts/generated/') &&
+        !adoptedPaths.has(path),
+    )
+    .sort();
+}
+
+export function changedPaths(cwd, requestedBase, roots) {
+  const base = requestedBase || 'HEAD';
+  if (base !== 'HEAD' && !/^[a-f0-9]{40}$/.test(base))
+    throw Error('GIM_FORMAT_BASE must be a Git commit SHA');
+  const git = (...args) =>
+    execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true })
+      .split('\0')
+      .filter(Boolean);
+  // Rename destinations are checked as additions, even if detection varies across clients.
+  return [
+    ...git(
+      'diff',
+      '--name-only',
+      '--diff-filter=AMT',
+      '--no-renames',
+      '--no-ext-diff',
+      '-z',
+      base,
+      '--',
+      ...roots,
+    ),
+    ...git('ls-files', '--others', '--exclude-standard', '-z', '--', ...roots),
+  ];
 }
 
 export function changedProductionSources(cwd, requestedBase) {
-  const base = requestedBase && !/^0+$/.test(requestedBase) ? requestedBase : 'HEAD';
-  if (base !== 'HEAD' && !/^[a-f0-9]{40}$/.test(base)) throw Error('GIM_FORMAT_BASE must be a Git commit SHA');
-  const git = (...args) => execFileSync('git', args, {cwd, encoding:'utf8', windowsHide:true}).split('\0').filter(Boolean);
-  // Rename destinations are checked as additions, even if detection varies across clients.
-  return [
-    ...git('diff', '--name-only', '--diff-filter=AMT', '--no-renames', '--no-ext-diff', '-z', base, '--', ...sourceRoots),
-    ...git('ls-files', '--others', '--exclude-standard', '-z', '--', ...sourceRoots),
-  ];
+  return changedPaths(cwd, requestedBase, sourceRoots);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const mode = process.argv.includes('--write') ? '--write' : '--check';
   if (mode === '--check') {
     const cwd = fileURLToPath(new URL('../..', import.meta.url));
-    const missing = unadoptedProductionSources(changedProductionSources(cwd, process.env.GIM_FORMAT_BASE));
+    const missing = unadoptedProductionSources(
+      changedProductionSources(cwd, process.env.GIM_FORMAT_BASE),
+    );
     if (missing.length) {
-      console.error(`Add new or changed desktop and SDK production sources to architectureModules:\n${missing.join('\n')}`);
+      console.error(
+        `Add new or changed production sources to architectureModules:\n${missing.join('\n')}`,
+      );
       process.exit(1);
     }
   }
-  const child = spawnSync(process.execPath, [
-    'node_modules/prettier/bin/prettier.cjs', mode, ...formattedArchitectureModules,
-  ], { stdio: 'inherit', windowsHide: true, env: process.env });
+  const child = spawnSync(
+    process.execPath,
+    ['node_modules/prettier/bin/prettier.cjs', mode, ...formattedArchitectureModules],
+    { stdio: 'inherit', windowsHide: true, env: process.env },
+  );
   if (child.error) throw child.error;
   process.exitCode = child.status ?? 1;
 }

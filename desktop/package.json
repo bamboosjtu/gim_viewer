@@ -46,6 +46,7 @@
     "test:native-contracts": "node scripts/with-workspace-temp.mjs --test ../contracts/generate-native.test.mjs",
     "format:architecture": "node scripts/with-workspace-temp.mjs scripts/format-architecture.mjs --write",
     "check:format": "node scripts/with-workspace-temp.mjs scripts/format-architecture.mjs --check",
+    "check:rust": "node scripts/with-workspace-temp.mjs scripts/check-rust.mjs",
     "test:format-config": "node scripts/with-workspace-temp.mjs --test scripts/format-architecture.test.mjs",
     "sdk:build": "npm --prefix ../packages/gim-sdk run build",
     "pretest:sdk": "npm run sdk:build",

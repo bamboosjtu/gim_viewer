@@ -5,8 +5,9 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { workspaceTemp } from './test-workspace.mjs';
 import { changedProductionSources, formattedArchitectureModules, unadoptedProductionSources } from './format-architecture.mjs';
+import { changedRustSources } from './check-rust.mjs';
 
-test('changed desktop, bridge and SDK production sources must join the shared list', () => {
+test('changed frontend and project scripts must join the shared list', () => {
   assert.deepEqual(unadoptedProductionSources([
     'packages/gim-sdk/src/new.ts',
     'packages/gim-sdk/src/shared/sourceRecord.ts',
@@ -17,8 +18,18 @@ test('changed desktop, bridge and SDK production sources must join the shared li
     'desktop/bridge/nativeExtension.ts',
     'desktop/bridge/__tests__/helper.ts',
     'desktop/src/adapter.test.ts',
-  ]), ['desktop/bridge/nativeExtension.ts','desktop/src/app/bootstrap.ts',
-    'desktop/src/services/newPresentationPort.ts','packages/gim-sdk/src/new.ts']);
+    'app/src/native/new.ts',
+    'app/src/native/__tests__/fixtures.ts',
+    'packages/measurement-core/src/new.mjs',
+    'packages/powerline-core/src/new.mts',
+    'desktop/scripts/new-check.mjs',
+    'desktop/scripts/new-check.test.mjs',
+    '.github/scripts/new-check.mjs',
+    'contracts/generated/native.ts',
+  ]), ['.github/scripts/new-check.mjs', 'app/src/native/new.ts',
+    'desktop/bridge/nativeExtension.ts', 'desktop/scripts/new-check.mjs', 'desktop/src/app/bootstrap.ts',
+    'desktop/src/services/newPresentationPort.ts', 'packages/gim-sdk/src/new.ts',
+    'packages/measurement-core/src/new.mjs', 'packages/powerline-core/src/new.mts']);
 });
 
 function gitFixture(autocrlf = 'true') {
@@ -48,15 +59,21 @@ test('incremental scope finds committed, renamed and untracked files against the
   git('mv','desktop/src/old.ts','desktop/src/新文件.ts');
   git('rm','-q','packages/gim-sdk/src/retired.ts');
   writeFileSync(join(folder,'desktop/bridge/entry.ts'),'export {};\r\n');
+  mkdirSync(join(folder,'app/src'),{recursive:true});
+  writeFileSync(join(folder,'app/src/new.ts'),'export {};\r\n');
+  mkdirSync(join(folder,'crates/example/src'),{recursive:true});
+  writeFileSync(join(folder,'crates/example/src/lib.rs'),'pub struct New;\n');
   git('add','--','.');
   commit('changed');
   mkdirSync(join(folder,'packages/gim-sdk/src'),{recursive:true});
   writeFileSync(join(folder,'packages/gim-sdk/src/untracked.ts'),'export {};\r\n');
   assert.deepEqual(unadoptedProductionSources(changedProductionSources(folder,base)),[
-    'desktop/bridge/entry.ts','desktop/src/新文件.ts','packages/gim-sdk/src/untracked.ts',
+    'app/src/new.ts','desktop/bridge/entry.ts','desktop/src/新文件.ts','packages/gim-sdk/src/untracked.ts',
   ]);
   assert.deepEqual(changedProductionSources(folder),['packages/gim-sdk/src/untracked.ts']);
   assert.throws(()=>changedProductionSources(folder,'--staged'),/Git commit SHA/);
+  assert.deepEqual(changedRustSources(folder,base), ['crates/example/src/lib.rs']);
+  assert.deepEqual(changedRustSources(folder), []);
 });
 
 test('Git and Prettier agree on CRLF, with explicit build-tool exceptions', async () => {
@@ -105,7 +122,20 @@ test('adopted modules enforce type-checked rules and route logs through the shar
   for (const pattern of architectureModules) {
     const path = pattern.startsWith('../') ? pattern.slice(3) : 'desktop/' + pattern;
     const config = await eslint.calculateConfigForFile(path);
+    assert.equal(config.rules['@typescript-eslint/no-floating-promises'][0], 2, path);
+    if (/\.[cm]?js$/.test(path)) {
+      assert.equal(config.rules['no-unreachable'][0], 2, path);
+      continue;
+    }
     assert.equal(config.rules['@typescript-eslint/no-unsafe-assignment'][0], 2, path);
     if (path !== 'desktop/src/utils/logger.ts') assert.equal(config.rules['no-console'][0], 2, path);
+  }
+  for (const path of ['app/src/native/__tests__/importSession.test.ts',
+    'packages/powerline-core/src/__tests__/preview.test.ts',
+    'packages/measurement-core/src/__tests__/measurementContracts.test.ts',
+    'desktop/scripts/format-architecture.test.mjs']) {
+    const config = await eslint.calculateConfigForFile(path);
+    assert.equal(config.rules['@typescript-eslint/no-floating-promises'][0], 2, path);
+    assert.equal(config.rules['@typescript-eslint/no-unsafe-assignment'], undefined, path);
   }
 });

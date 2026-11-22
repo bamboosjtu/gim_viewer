@@ -1,30 +1,21 @@
 //! Raw binary IPC envelopes and authorized cached-source reads.
 
+use super::cache_paths::{
+    atomic_write, cache_file_path, cache_project_root_for_batch, BatchCachePathResolver,
+};
+use super::cache_protocol::{
+    decode_binary_cache_write_request, encode_batch_cache_response, BatchCacheFileResult,
+};
+use super::projects::{ensure_project_exists, ensure_project_source_sha};
+use super::semantic_pack::{
+    read_line_semantic_pack_entry, read_substation_pack_bytes, read_substation_pack_entry,
+    substation_pack_index, substation_pack_len,
+};
+use super::DbState;
 use gim_native_core::NativeError;
 use std::fs as stdfs;
 use std::time::Instant;
 use tauri::Manager;
-use super::cache_paths::{
-    BatchCachePathResolver,
-    atomic_write,
-    cache_file_path,
-    cache_project_root_for_batch,
-};
-use super::cache_protocol::{
-    BatchCacheFileResult,
-
-    decode_binary_cache_write_request,
-    encode_batch_cache_response,
-};
-use super::projects::{ensure_project_exists, ensure_project_source_sha};
-use super::{DbState};
-use super::semantic_pack::{
-    read_line_semantic_pack_entry,
-    read_substation_pack_bytes,
-    read_substation_pack_entry,
-    substation_pack_index,
-    substation_pack_len,
-};
 
 /// Tauri command：以 Raw IPC 写入缓存文件，避免 Vec<u8> JSON 数字数组膨胀。
 #[tauri::command]
@@ -32,8 +23,10 @@ pub async fn write_cache_file_binary(
     app_handle: tauri::AppHandle,
     request: tauri::ipc::Request<'_>,
 ) -> Result<String, NativeError> {
-    let (meta, bytes) = decode_binary_cache_write_request(&request)?;
-    drop(request);
+    let (meta, bytes) = {
+        let ipc_request = request;
+        decode_binary_cache_write_request(&ipc_request)?
+    };
     crate::native_command::blocking("write_cache_file_binary", move || {
         let conn = app_handle.state::<DbState>();
         let guard = conn
@@ -45,16 +38,13 @@ pub async fn write_cache_file_binary(
         // write to the captured source identity while the project row is locked,
         // matching the GLB/Fragments cache write contract.  A stale A→B task must
         // not overwrite the cache directory for the newer source.
-        ensure_project_source_sha(
-            &guard,
-            meta.project_id,
-            meta.source_gim_sha256.as_deref(),
-        )?;
+        ensure_project_source_sha(&guard, meta.project_id, meta.source_gim_sha256.as_deref())?;
         drop(guard);
         let path = cache_file_path(&app_handle, meta.project_id, &meta.entry_path)?;
         atomic_write(&path, &bytes, "")?;
         Ok(path.to_string_lossy().to_string())
-    }).await
+    })
+    .await
 }
 
 /// Tauri command：读取缓存的 IFC 文件（路径由 project_id + entry_path 计算，不接受任意路径）
@@ -76,7 +66,8 @@ pub async fn read_cached_ifc(
         let path = cache_file_path(&app_handle, project_id, &entry_path)?;
         let bytes = stdfs::read(&path).map_err(|e| format!("读取缓存文件失败: {}", e))?;
         Ok(tauri::ipc::Response::new(bytes))
-    }).await
+    })
+    .await
 }
 
 /// Tauri command：读取 extracted/{project_id} 下的任意 GIM 条目。
@@ -106,7 +97,10 @@ pub async fn read_cached_entry(
                 // 个小文件 open。source/几何查看仍沿用原来的单条 API；只有
                 // pack-backed 条目才在这里按 offset 懒读，普通缓存行为不变。
                 let root = cache_project_root_for_batch(&app_handle, project_id)?;
-                if let Some(bytes) = read_line_semantic_pack_entry(&root, &entry_path).ok().flatten() {
+                if let Some(bytes) = read_line_semantic_pack_entry(&root, &entry_path)
+                    .ok()
+                    .flatten()
+                {
                     bytes
                 } else if let Some(bytes) = read_substation_pack_entry(&root, &entry_path) {
                     // 变电原生解压把 CBM/DEV/FAM/PHM/MOD/STL 放进同一个 pack，
@@ -119,7 +113,8 @@ pub async fn read_cached_entry(
             Err(error) => return Err(format!("读取缓存条目失败: {}", error).into()),
         };
         Ok(tauri::ipc::Response::new(bytes))
-    }).await
+    })
+    .await
 }
 
 /// Tauri command：批量读取缓存文件（一次 IPC 替代 N 次 read_cached_ifc）。
@@ -134,7 +129,6 @@ pub async fn batch_read_cached_files(
 ) -> Result<tauri::ipc::Response, NativeError> {
     let total_started = Instant::now();
     crate::native_command::blocking("batch_read_cached_files", move || {
-
         {
             let conn = app_handle.state::<DbState>();
             let guard = conn
@@ -159,13 +153,9 @@ pub async fn batch_read_cached_files(
                                pack_file: &mut Option<stdfs::File>|
          -> Option<Vec<u8>> {
             match (substation_index.as_deref(), substation_pack_len) {
-                (Some(index), Some(pack_len)) => read_substation_pack_bytes(
-                    &batch_root,
-                    index,
-                    pack_len,
-                    pack_file,
-                    entry_path,
-                ),
+                (Some(index), Some(pack_len)) => {
+                    read_substation_pack_bytes(&batch_root, index, pack_len, pack_file, entry_path)
+                }
                 _ => None,
             }
         };
@@ -234,5 +224,6 @@ pub async fn batch_read_cached_files(
             total_started,
         )?;
         Ok(tauri::ipc::Response::new(out))
-    }).await
+    })
+    .await
 }

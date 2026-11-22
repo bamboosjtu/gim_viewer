@@ -1,6 +1,20 @@
 //! DEV GLB/LOD cache validation, manifests and publication markers.
 
-pub use gim_native_core::{GeometryCacheManifestEntry, GeometryCacheManifest, DeviceLodWriteTiming};
+use super::cache_paths::{
+    atomic_write, ensure_cache_parent, ensure_cache_project_id, reject_link, validate_entry_path,
+    BatchCachePathResolver,
+};
+use super::cache_protocol::{
+    decode_binary_cache_write_request, encode_batch_cache_response, BatchCacheFileResult,
+    BinaryCacheWriteMeta,
+};
+use super::projects::{ensure_project_exists, ensure_project_source_sha};
+use super::semantic_pack::normalize_cache_lookup_path;
+use super::validation_profile::ValidationSpan;
+use super::{DbState, GEOMETRY_CACHE_VERSION};
+pub use gim_native_core::{
+    DeviceLodWriteTiming, GeometryCacheManifest, GeometryCacheManifestEntry,
+};
 use gim_native_core::{NativeError, NativeErrorCode};
 use sha2::Digest;
 use std::collections::{HashMap, HashSet};
@@ -8,28 +22,6 @@ use std::fs as stdfs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tauri::Manager;
-use super::cache_paths::{
-    BatchCachePathResolver,
-    atomic_write,
-    ensure_cache_parent,
-    ensure_cache_project_id,
-    reject_link,
-    validate_entry_path,
-};
-use super::cache_protocol::{
-    BatchCacheFileResult,
-    BinaryCacheWriteMeta,
-    decode_binary_cache_write_request,
-    encode_batch_cache_response,
-};
-use super::projects::{ensure_project_exists, ensure_project_source_sha};
-use super::{DbState, GEOMETRY_CACHE_VERSION};
-use super::semantic_pack::{normalize_cache_lookup_path};
-use super::validation_profile::{ValidationSpan};
-
-
-
-
 
 // ===== GLB 几何缓存（方案 C：MOD → glTF 离线预序列化） =====
 
@@ -99,8 +91,10 @@ pub async fn write_glb_file_binary(
     app_handle: tauri::AppHandle,
     request: tauri::ipc::Request<'_>,
 ) -> Result<String, NativeError> {
-    let (meta, bytes) = decode_binary_cache_write_request(&request)?;
-    drop(request);
+    let (meta, bytes) = {
+        let ipc_request = request;
+        decode_binary_cache_write_request(&ipc_request)?
+    };
     crate::native_command::blocking("write_glb_file_binary", move || {
         let conn = app_handle.state::<DbState>();
         let guard = conn
@@ -110,16 +104,13 @@ pub async fn write_glb_file_binary(
         ensure_project_exists(&guard, meta.project_id)?;
         // GLB 编译运行在后台；在命令真正落盘前再次核对源 GIM SHA，避免
         // 旧工程任务在同一 project_id 被源文件更新后覆盖新几何缓存。
-        ensure_project_source_sha(
-            &guard,
-            meta.project_id,
-            meta.source_gim_sha256.as_deref(),
-        )?;
+        ensure_project_source_sha(&guard, meta.project_id, meta.source_gim_sha256.as_deref())?;
         drop(guard);
         let path = glb_cache_file_path(&app_handle, meta.project_id, &meta.entry_path)?;
         atomic_write(&path, &bytes, " GLB")?;
         Ok(path.to_string_lossy().to_string())
-    }).await
+    })
+    .await
 }
 
 /// Tauri command：读取 GLB 缓存文件
@@ -144,19 +135,32 @@ pub async fn read_glb_file(
         let path = glb_cache_file_path(&app_handle, project_id, &entry_path)?;
         let bytes = stdfs::read(&path).map_err(|e| format!("读取 glb 缓存文件失败: {}", e))?;
         Ok(tauri::ipc::Response::new(bytes))
-    }).await
+    })
+    .await
 }
 
 /// Per-template derived domain; publication is independent of whole-project geometry.
-fn validate_device_lod_entry<'a>(entry: &'a str, source_sha: &str) -> Result<(&'a str, String), NativeError> {
+fn validate_device_lod_entry<'a>(
+    entry: &'a str,
+    source_sha: &str,
+) -> Result<(&'a str, String), NativeError> {
     let (store, key) = entry.split_once('/').ok_or("设备缓存键缺少域")?;
     let parts: Vec<&str> = key.split('|').collect();
     let bound_sha = match store {
         "templates" if parts.len() == 4 && parts[0] == GEOMETRY_CACHE_VERSION => parts[1],
-        "catalog" if parts.len() == 4 && parts[0] == "dev-spatial-catalog-v1" && parts[1] == GEOMETRY_CACHE_VERSION => parts[2],
+        "catalog"
+            if parts.len() == 4
+                && parts[0] == "dev-spatial-catalog-v1"
+                && parts[1] == GEOMETRY_CACHE_VERSION =>
+        {
+            parts[2]
+        }
         _ => return Err("设备缓存域或版本无效".into()),
     };
-    if source_sha.len() != 64 || !source_sha.bytes().all(|c| c.is_ascii_hexdigit()) || bound_sha != source_sha {
+    if source_sha.len() != 64
+        || !source_sha.bytes().all(|c| c.is_ascii_hexdigit())
+        || bound_sha != source_sha
+    {
         return Err("设备缓存源身份不匹配".into());
     }
     Ok((store, format!("{:x}", sha2::Sha256::digest(key.as_bytes()))))
@@ -167,27 +171,43 @@ mod device_lod_key_tests {
     use super::*;
     #[test]
     fn source_bound_keys_accept_only_their_domain_version_and_sha() {
-        let sha="a".repeat(64);
-        let template=format!("templates/{}|{}|DEV/x.dev|lod0",GEOMETRY_CACHE_VERSION,sha);
-        let catalog=format!("catalog/dev-spatial-catalog-v1|{}|{}|DEV/x.dev",GEOMETRY_CACHE_VERSION,sha);
-        assert!(validate_device_lod_entry(&template,&sha).is_ok());
-        assert!(validate_device_lod_entry(&catalog,&sha).is_ok());
-        assert!(validate_device_lod_entry(&template,&"b".repeat(64)).is_err());
-        assert!(validate_device_lod_entry(&template.replace("templates/","../"),&sha).is_err());
-        assert!(validate_device_lod_entry(&catalog.replace("dev-spatial-catalog-v1","old"),&sha).is_err());
+        let sha = "a".repeat(64);
+        let template = format!(
+            "templates/{}|{}|DEV/x.dev|lod0",
+            GEOMETRY_CACHE_VERSION, sha
+        );
+        let catalog = format!(
+            "catalog/dev-spatial-catalog-v1|{}|{}|DEV/x.dev",
+            GEOMETRY_CACHE_VERSION, sha
+        );
+        assert!(validate_device_lod_entry(&template, &sha).is_ok());
+        assert!(validate_device_lod_entry(&catalog, &sha).is_ok());
+        assert!(validate_device_lod_entry(&template, &"b".repeat(64)).is_err());
+        assert!(validate_device_lod_entry(&template.replace("templates/", "../"), &sha).is_err());
+        assert!(
+            validate_device_lod_entry(&catalog.replace("dev-spatial-catalog-v1", "old"), &sha)
+                .is_err()
+        );
     }
 }
 
 fn device_lod_artifact_path(
-    app: &tauri::AppHandle, project_id: i64, entry: &str, source_sha: &str,
+    app: &tauri::AppHandle,
+    project_id: i64,
+    entry: &str,
+    source_sha: &str,
 ) -> Result<PathBuf, NativeError> {
     let (store, digest) = validate_device_lod_entry(entry, source_sha)?;
     let conn = app.state::<DbState>();
     let guard = conn.0.lock().map_err(|e| e.to_string())?;
     ensure_project_source_sha(&guard, project_id, Some(source_sha))?;
     drop(guard);
-    let base = crate::application_data_dir(&app).map_err(|e| e.to_string())?.join("device-lod");
-    if !base.exists() { stdfs::create_dir_all(&base).map_err(|e| e.to_string())?; }
+    let base = crate::application_data_dir(&app)
+        .map_err(|e| e.to_string())?
+        .join("device-lod");
+    if !base.exists() {
+        stdfs::create_dir_all(&base).map_err(|e| e.to_string())?;
+    }
     reject_link(&base, "设备派生缓存")?;
     let root = base.canonicalize().map_err(|e| e.to_string())?;
     let relative = PathBuf::from(project_id.to_string()).join(store);
@@ -199,88 +219,176 @@ fn device_lod_artifact_path(
 
 /// Bounded read batch: validate project identity and parent directories once per batch.
 #[tauri::command]
-pub async fn read_device_lod_artifacts(app_handle: tauri::AppHandle, project_id: i64, entry_paths: Vec<String>, source_gim_sha256: String, max_bytes: Option<u64>) -> Result<tauri::ipc::Response, NativeError> {
+pub async fn read_device_lod_artifacts(
+    app_handle: tauri::AppHandle,
+    project_id: i64,
+    entry_paths: Vec<String>,
+    source_gim_sha256: String,
+    max_bytes: Option<u64>,
+) -> Result<tauri::ipc::Response, NativeError> {
     tauri::async_runtime::spawn_blocking(move || {
         use std::io::Read;
-        if entry_paths.is_empty() || entry_paths.len() > 64 { return Err("设备缓存批量条目数无效".into()); }
-        let byte_limit=max_bytes.unwrap_or(512*1024*1024);
-        if byte_limit==0 || byte_limit>512*1024*1024 {return Err("设备缓存批量字节配额无效".into());}
+        if entry_paths.is_empty() || entry_paths.len() > 64 {
+            return Err("设备缓存批量条目数无效".into());
+        }
+        let byte_limit = max_bytes.unwrap_or(512 * 1024 * 1024);
+        if byte_limit == 0 || byte_limit > 512 * 1024 * 1024 {
+            return Err("设备缓存批量字节配额无效".into());
+        }
         ensure_cache_project_id(project_id)?;
         let started = Instant::now();
-        let validated = entry_paths.iter().map(|entry| validate_device_lod_entry(entry,&source_gim_sha256)).collect::<Result<Vec<_>,_>>()?;
+        let validated = entry_paths
+            .iter()
+            .map(|entry| validate_device_lod_entry(entry, &source_gim_sha256))
+            .collect::<Result<Vec<_>, _>>()?;
         {
             let state = app_handle.state::<DbState>();
-            let conn = state.0.lock().map_err(|e|e.to_string())?;
-            ensure_project_source_sha(&conn,project_id,Some(&source_gim_sha256))?;
+            let conn = state.0.lock().map_err(|e| e.to_string())?;
+            ensure_project_source_sha(&conn, project_id, Some(&source_gim_sha256))?;
         }
-        let base = crate::application_data_dir(&app_handle).map_err(|e|e.to_string())?.join("device-lod");
-        if !base.exists() { stdfs::create_dir_all(&base).map_err(|e|e.to_string())?; }
-        reject_link(&base,"设备派生缓存")?;
-        let root = base.canonicalize().map_err(|e|e.to_string())?;
-        let mut resolve_ms = started.elapsed().as_secs_f64()*1000.0;
+        let base = crate::application_data_dir(&app_handle)
+            .map_err(|e| e.to_string())?
+            .join("device-lod");
+        if !base.exists() {
+            stdfs::create_dir_all(&base).map_err(|e| e.to_string())?;
+        }
+        reject_link(&base, "设备派生缓存")?;
+        let root = base.canonicalize().map_err(|e| e.to_string())?;
+        let mut resolve_ms = started.elapsed().as_secs_f64() * 1000.0;
         let mut read_ms = 0.0_f64;
         let mut parents = HashMap::new();
-        let mut results = Vec::new(); let mut total = 0_u64; let mut hits = 0_u32;
-        for (entry,(store,digest)) in entry_paths.iter().zip(validated) {
-            let resolve_started=Instant::now();
+        let mut results = Vec::new();
+        let mut total = 0_u64;
+        let mut hits = 0_u32;
+        for (entry, (store, digest)) in entry_paths.iter().zip(validated) {
+            let resolve_started = Instant::now();
             // Reuse canonicalization, not reparse-point trust: recheck mutable directory components per file.
-            reject_link(&base,"设备派生缓存")?;
-            reject_link(&root.join(project_id.to_string()),"设备派生缓存")?;
-            reject_link(&root.join(project_id.to_string()).join(store),"设备派生缓存")?;
+            reject_link(&base, "设备派生缓存")?;
+            reject_link(&root.join(project_id.to_string()), "设备派生缓存")?;
+            reject_link(
+                &root.join(project_id.to_string()).join(store),
+                "设备派生缓存",
+            )?;
             if !parents.contains_key(store) {
-                let parent = ensure_cache_parent(&root,&PathBuf::from(project_id.to_string()).join(store),"设备派生缓存")?;
-                parents.insert(store,BatchCachePathResolver::new(&parent)?);
+                let parent = ensure_cache_parent(
+                    &root,
+                    &PathBuf::from(project_id.to_string()).join(store),
+                    "设备派生缓存",
+                )?;
+                parents.insert(store, BatchCachePathResolver::new(&parent)?);
             }
-            let path = parents.get_mut(store).unwrap().resolve(&format!("{}.bin",digest))?;
-            resolve_ms+=resolve_started.elapsed().as_secs_f64()*1000.0;
-            let read_started=Instant::now();
+            let path = parents
+                .get_mut(store)
+                .unwrap()
+                .resolve(&format!("{}.bin", digest))?;
+            resolve_ms += resolve_started.elapsed().as_secs_f64() * 1000.0;
+            let read_started = Instant::now();
             let bytes = match stdfs::File::open(path) {
                 Ok(file) => {
-                    let size=file.metadata().map_err(|e|e.to_string())?.len();
-                    if size > 128*1024*1024 || size>byte_limit { return Err("设备缓存单条超过配额".into()); }
-                    if total+size>byte_limit {continue;} // Omitted rows are deferred, never reported as misses.
-                    let mut bytes=Vec::new();file.take(128*1024*1024+1).read_to_end(&mut bytes).map_err(|e|e.to_string())?;
-                    if bytes.len()>128*1024*1024 { return Err("设备缓存单条超过配额".into()); }
-                    total += bytes.len() as u64; if total>byte_limit { return Err("设备缓存批量超过配额".into()); }
-                    hits+=1;Some(bytes)
-                },
-                Err(e) if e.kind()==std::io::ErrorKind::NotFound => None,
+                    let size = file.metadata().map_err(|e| e.to_string())?.len();
+                    if size > 128 * 1024 * 1024 || size > byte_limit {
+                        return Err("设备缓存单条超过配额".into());
+                    }
+                    if total + size > byte_limit {
+                        continue;
+                    } // Omitted rows are deferred, never reported as misses.
+                    let mut bytes = Vec::new();
+                    file.take(128 * 1024 * 1024 + 1)
+                        .read_to_end(&mut bytes)
+                        .map_err(|e| e.to_string())?;
+                    if bytes.len() > 128 * 1024 * 1024 {
+                        return Err("设备缓存单条超过配额".into());
+                    }
+                    total += bytes.len() as u64;
+                    if total > byte_limit {
+                        return Err("设备缓存批量超过配额".into());
+                    }
+                    hits += 1;
+                    Some(bytes)
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
                 Err(e) => return Err(e.to_string().into()),
             };
-            read_ms+=read_started.elapsed().as_secs_f64()*1000.0;
-            results.push(BatchCacheFileResult{entry_path:entry.clone(),bytes});
+            read_ms += read_started.elapsed().as_secs_f64() * 1000.0;
+            results.push(BatchCacheFileResult {
+                entry_path: entry.clone(),
+                bytes,
+            });
         }
-        Ok(tauri::ipc::Response::new(encode_batch_cache_response(results,total,hits,read_ms,resolve_ms,started)?))
-    }).await.map_err(|e| NativeError::new(NativeErrorCode::Internal,format!("设备缓存批量读取失败: {}",e)))?
+        Ok(tauri::ipc::Response::new(encode_batch_cache_response(
+            results, total, hits, read_ms, resolve_ms, started,
+        )?))
+    })
+    .await
+    .map_err(|e| {
+        NativeError::new(
+            NativeErrorCode::Internal,
+            format!("设备缓存批量读取失败: {}", e),
+        )
+    })?
 }
-
-
 
 #[tauri::command]
-pub async fn write_device_lod_artifact(app_handle: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Result<DeviceLodWriteTiming, NativeError> {
-    let (meta, bytes) = decode_binary_cache_write_request(&request)?;
-    drop(request);
-    tauri::async_runtime::spawn_blocking(move || write_device_lod_artifact_blocking(app_handle, meta, bytes))
-        .await.map_err(|e| NativeError::new(NativeErrorCode::Internal,format!("设备缓存后台写入失败: {}", e)))?
+pub async fn write_device_lod_artifact(
+    app_handle: tauri::AppHandle,
+    request: tauri::ipc::Request<'_>,
+) -> Result<DeviceLodWriteTiming, NativeError> {
+    let (meta, bytes) = {
+        let ipc_request = request;
+        decode_binary_cache_write_request(&ipc_request)?
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        write_device_lod_artifact_blocking(app_handle, meta, bytes)
+    })
+    .await
+    .map_err(|e| {
+        NativeError::new(
+            NativeErrorCode::Internal,
+            format!("设备缓存后台写入失败: {}", e),
+        )
+    })?
 }
 
-fn write_device_lod_artifact_blocking(app_handle: tauri::AppHandle, meta: BinaryCacheWriteMeta, bytes: Vec<u8>) -> Result<DeviceLodWriteTiming, NativeError> {
-    if bytes.len() > 128 * 1024 * 1024 { return Err("设备派生缓存超过单条配额".into()); }
-    let source = meta.source_gim_sha256.as_deref().ok_or("设备缓存缺少源 SHA")?;
-    let resolve_started=Instant::now();
+fn write_device_lod_artifact_blocking(
+    app_handle: tauri::AppHandle,
+    meta: BinaryCacheWriteMeta,
+    bytes: Vec<u8>,
+) -> Result<DeviceLodWriteTiming, NativeError> {
+    if bytes.len() > 128 * 1024 * 1024 {
+        return Err("设备派生缓存超过单条配额".into());
+    }
+    let source = meta
+        .source_gim_sha256
+        .as_deref()
+        .ok_or("设备缓存缺少源 SHA")?;
+    let resolve_started = Instant::now();
     let path = device_lod_artifact_path(&app_handle, meta.project_id, &meta.entry_path, source)?;
-    let resolve_ms=resolve_started.elapsed().as_secs_f64()*1000.0;
-    let write_started=Instant::now();
+    let resolve_ms = resolve_started.elapsed().as_secs_f64() * 1000.0;
+    let write_started = Instant::now();
     super::cache_paths::atomic_write_derived(&path, &bytes, "设备派生缓存")?;
-    Ok(DeviceLodWriteTiming{resolve_ms,write_ms:write_started.elapsed().as_secs_f64()*1000.0})
+    Ok(DeviceLodWriteTiming {
+        resolve_ms,
+        write_ms: write_started.elapsed().as_secs_f64() * 1000.0,
+    })
 }
 
 #[tauri::command]
-pub async fn delete_device_lod_artifact(app_handle: tauri::AppHandle, project_id: i64, entry_path: String, source_gim_sha256: String) -> Result<(), NativeError> {
+pub async fn delete_device_lod_artifact(
+    app_handle: tauri::AppHandle,
+    project_id: i64,
+    entry_path: String,
+    source_gim_sha256: String,
+) -> Result<(), NativeError> {
     crate::native_command::blocking("delete_device_lod_artifact", move || {
-        let path = device_lod_artifact_path(&app_handle, project_id, &entry_path, &source_gim_sha256)?;
-        match stdfs::remove_file(path) { Ok(()) => Ok(()), Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()), Err(e) => Err(e.to_string().into()) }
-    }).await
+        let path =
+            device_lod_artifact_path(&app_handle, project_id, &entry_path, &source_gim_sha256)?;
+        match stdfs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e.to_string().into()),
+        }
+    })
+    .await
 }
 
 /// Tauri command：批量读取 DEV GLB 缓存文件。
@@ -297,7 +405,6 @@ pub async fn batch_read_glb_files(
 ) -> Result<tauri::ipc::Response, NativeError> {
     let total_started = Instant::now();
     crate::native_command::blocking("batch_read_glb_files", move || {
-
         {
             let conn = app_handle.state::<DbState>();
             let guard = conn
@@ -343,13 +450,14 @@ pub async fn batch_read_glb_files(
                 total_bytes = total_bytes
                     .checked_add(data.len() as u64)
                     .ok_or_else(|| "批量读取 GLB 总量溢出".to_string())?;
-                let oversized_single = entry_paths.len() == 1
-                    && data.len() as u64 <= MAX_SINGLE_GLB_BYTES;
+                let oversized_single =
+                    entry_paths.len() == 1 && data.len() as u64 <= MAX_SINGLE_GLB_BYTES;
                 if total_bytes > MAX_GLB_BATCH_BYTES && !oversized_single {
                     return Err(format!(
                         "批量读取 GLB 总量超过安全上限（>{} bytes）",
                         MAX_GLB_BATCH_BYTES
-                    ).into());
+                    )
+                    .into());
                 }
             }
             results.push(BatchCacheFileResult {
@@ -366,7 +474,8 @@ pub async fn batch_read_glb_files(
             total_started,
         )?;
         Ok(tauri::ipc::Response::new(out))
-    }).await
+    })
+    .await
 }
 
 /// 方案 C：检查 GLB 几何缓存版本是否匹配。
@@ -380,7 +489,10 @@ pub async fn batch_read_glb_files(
 ///
 /// 注意：false 只表示 geometry domain 不可用；调用方不得据此删除整个
 /// 项目 source/index cache，应进入 DEV geometry rebuild。
-pub(super) fn check_geometry_cache_version_file(app_handle: &tauri::AppHandle, project_id: i64) -> bool {
+pub(super) fn check_geometry_cache_version_file(
+    app_handle: &tauri::AppHandle,
+    project_id: i64,
+) -> bool {
     let base = match crate::application_data_dir(&app_handle) {
         Ok(p) => p,
         Err(_) => return false,
@@ -502,13 +614,30 @@ pub(super) fn validate_geometry_manifest_entry_shape(
         return Err(format!("GLB manifest 条目重复: {}", entry.entry_path).into());
     }
     match entry.status.as_str() {
-        "source-invalid" if entry.size == 0 && entry.diagnostic.as_deref().map(|s| !s.trim().is_empty() && s.len() <= 16384).unwrap_or(false) => Ok(()),
+        "source-invalid"
+            if entry.size == 0
+                && entry
+                    .diagnostic
+                    .as_deref()
+                    .map(|s| !s.trim().is_empty() && s.len() <= 16384)
+                    .unwrap_or(false) =>
+        {
+            Ok(())
+        }
         "empty" if entry.size == 0 => Ok(()),
         "unsupported" if entry.size == 0 => Ok(()),
         "glb" | "partial" if entry.size > 0 => Ok(()),
         "empty" => Err(format!("empty GLB manifest 条目大小必须为 0: {}", entry.entry_path).into()),
-        "unsupported" => Err(format!("unsupported GLB manifest 条目大小必须为 0: {}", entry.entry_path).into()),
-        "glb" | "partial" => Err(format!("{} GLB manifest 条目大小必须大于 0: {}", entry.status, entry.entry_path).into()),
+        "unsupported" => Err(format!(
+            "unsupported GLB manifest 条目大小必须为 0: {}",
+            entry.entry_path
+        )
+        .into()),
+        "glb" | "partial" => Err(format!(
+            "{} GLB manifest 条目大小必须大于 0: {}",
+            entry.status, entry.entry_path
+        )
+        .into()),
         _ => Err(format!("GLB manifest 状态无效: {}", entry.entry_path).into()),
     }
 }
@@ -532,8 +661,10 @@ pub async fn read_geometry_cache_manifest(
         let path = geometry_manifest_path(&app_handle, project_id)?;
         let bytes = stdfs::read(&path).map_err(|e| format!("读取 GLB manifest 失败: {}", e))?;
         serde_json::from_slice::<GeometryCacheManifest>(&bytes)
-            .map_err(|e| format!("解析 GLB manifest 失败: {}", e)).map_err(NativeError::from)
-    }).await
+            .map_err(|e| format!("解析 GLB manifest 失败: {}", e))
+            .map_err(NativeError::from)
+    })
+    .await
 }
 
 pub(super) fn check_geometry_cache_manifest(
@@ -553,7 +684,10 @@ pub(super) fn check_geometry_cache_manifest(
         if validate_geometry_manifest_entry_shape(&entry, &mut seen).is_err() {
             return false;
         }
-        if entry.status == "empty" || entry.status == "unsupported" || entry.status == "source-invalid" {
+        if entry.status == "empty"
+            || entry.status == "unsupported"
+            || entry.status == "source-invalid"
+        {
             // empty/unsupported 都是确定性的合法结果，不存在对应 GLB
             // 文件也不构成 miss。
             continue;
@@ -606,7 +740,10 @@ pub async fn write_geometry_cache_manifest(
             if let Err(error) = validate_geometry_manifest_entry_shape(entry, &mut seen) {
                 return Err(error);
             }
-            if entry.status == "empty" || entry.status == "unsupported" || entry.status == "source-invalid" {
+            if entry.status == "empty"
+                || entry.status == "unsupported"
+                || entry.status == "source-invalid"
+            {
                 // empty/unsupported 为确定性 tombstone：不要求磁盘上存在零
                 // 字节占位文件。
                 continue;
@@ -619,10 +756,9 @@ pub async fn write_geometry_cache_manifest(
             }
             let glb = stdfs::read(&path).map_err(|e| format!("读取 GLB 失败: {}", e))?;
             if !validate_glb_bytes(&glb) {
-                return Err(format!(
-                    "GLB magic/version/length 校验失败: {}",
-                    entry.entry_path
-                ).into());
+                return Err(
+                    format!("GLB magic/version/length 校验失败: {}", entry.entry_path).into(),
+                );
             }
         }
         let path = geometry_manifest_path(&app_handle, project_id).or_else(|_| {
@@ -640,7 +776,8 @@ pub async fn write_geometry_cache_manifest(
         .map_err(|e| format!("序列化 GLB manifest 失败: {}", e))?;
         atomic_write(&path, &bytes, " GLB manifest")?;
         Ok(path.to_string_lossy().to_string())
-    }).await
+    })
+    .await
 }
 
 /// Tauri command：只失效一个 DEV 的 GLB 与 manifest 条目。
@@ -675,21 +812,25 @@ pub async fn invalidate_glb_cache_entry(
         let manifest_path = geometry_manifest_path(&app_handle, project_id).ok();
         if let Some(path) = manifest_path.as_ref() {
             if path.exists() {
-                let bytes = stdfs::read(path).map_err(|e| format!("读取 GLB manifest 失败: {}", e))?;
+                let bytes =
+                    stdfs::read(path).map_err(|e| format!("读取 GLB manifest 失败: {}", e))?;
                 let mut manifest = serde_json::from_slice::<GeometryCacheManifest>(&bytes)
                     .map_err(|e| format!("解析 GLB manifest 失败: {}", e))?;
                 if let Some(expected) = source_sha256.as_deref() {
                     if manifest.source_sha256 != expected {
-                        return Err(NativeError::new(NativeErrorCode::SourceChanged,"GLB manifest source SHA 与当前工程不一致"));
+                        return Err(NativeError::new(
+                            NativeErrorCode::SourceChanged,
+                            "GLB manifest source SHA 与当前工程不一致",
+                        ));
                     }
                 }
                 let mut seen = HashSet::new();
                 for entry in &manifest.entries {
                     validate_geometry_manifest_entry_shape(entry, &mut seen)?;
                 }
-                manifest.entries.retain(|entry| {
-                    normalize_cache_lookup_path(&entry.entry_path) != normalized
-                });
+                manifest
+                    .entries
+                    .retain(|entry| normalize_cache_lookup_path(&entry.entry_path) != normalized);
                 let updated = serde_json::to_vec(&manifest)
                     .map_err(|e| format!("序列化 GLB manifest 失败: {}", e))?;
                 atomic_write(path, &updated, " GLB manifest")?;
@@ -703,7 +844,8 @@ pub async fn invalidate_glb_cache_entry(
             Err(error) => return Err(format!("删除 DEV GLB 缓存失败: {}", error).into()),
         }
         Ok(())
-    }).await
+    })
+    .await
 }
 
 /// Tauri command：写入 GLB 几何缓存版本标记文件。
@@ -743,5 +885,6 @@ pub async fn write_geometry_cache_version(
         reject_link(&marker, "版本标记")?;
         atomic_write(&marker, GEOMETRY_CACHE_VERSION.as_bytes(), "版本标记")?;
         Ok(marker.to_string_lossy().to_string())
-    }).await
+    })
+    .await
 }

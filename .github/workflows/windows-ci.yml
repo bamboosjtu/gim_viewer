@@ -4,7 +4,7 @@ on:
   push:
     paths:
       - 'desktop/**'
-      - 'app/src-tauri/**'
+      - 'app/**'
       - 'tools/gim_element/**'
       - 'packages/**'
       - 'crates/**'
@@ -13,12 +13,13 @@ on:
       - '.gitattributes'
       - '.editorconfig'
       - 'eslint.config.mjs'
+      - '.github/scripts/**'
       - '.github/workflows/windows-ci.yml'
 
   pull_request:
     paths:
       - 'desktop/**'
-      - 'app/src-tauri/**'
+      - 'app/**'
       - 'tools/gim_element/**'
       - 'packages/**'
       - 'crates/**'
@@ -27,6 +28,7 @@ on:
       - '.gitattributes'
       - '.editorconfig'
       - 'eslint.config.mjs'
+      - '.github/scripts/**'
       - '.github/workflows/windows-ci.yml'
   workflow_dispatch:
 
@@ -71,6 +73,7 @@ jobs:
           cache-dependency-path: |
             desktop/package-lock.json
             packages/gim-sdk/package-lock.json
+            app/package-lock.json
 
       - name: Prepare workspace temporary directory
         run: |
@@ -84,6 +87,28 @@ jobs:
 
       - name: Install SDK dependencies
         run: npm ci --prefix ../packages/gim-sdk
+
+      - name: Install Android frontend dependencies for typed lint
+        run: npm ci --prefix ../app
+
+      - name: Resolve incremental gate base
+        working-directory: .
+        env:
+          EVENT_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          $base = $env:EVENT_BASE
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+            $base = git rev-parse --verify 'HEAD^'
+          } elseif (!$base -or $base -match '^0+$') {
+            $base = git merge-base HEAD "refs/remotes/origin/$env:DEFAULT_BRANCH"
+          }
+          if ($LASTEXITCODE -or $base -notmatch '^[0-9a-f]{40}$') {
+            throw 'Could not resolve the baseline for the format and Rust gates'
+          }
+          git cat-file -e "$base^{commit}"
+          if ($LASTEXITCODE -ne 0) { throw "Baseline commit $base is unavailable" }
+          "GIM_FORMAT_BASE=$base" >> $env:GITHUB_ENV
 
       - name: Build and consume the standalone SDK
         run: |
@@ -134,6 +159,7 @@ jobs:
         uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: stable
+          components: rustfmt, clippy
 
       - name: Cache Cargo dependency downloads
         uses: actions/cache@v6
@@ -142,6 +168,9 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
           key: ${{ runner.os }}-${{ runner.arch }}-cargo-downloads-${{ hashFiles('desktop/src-tauri/Cargo.lock', 'app/src-tauri/Cargo.lock', 'crates/gim-native-core/Cargo.lock') }}
+
+      - name: Check changed Rust formatting and Clippy
+        run: npm run check:rust
 
       - uses: actions/setup-python@v7
         with:

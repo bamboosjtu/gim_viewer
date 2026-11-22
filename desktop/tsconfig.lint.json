@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": ["node"] },
+  "include": [
+    "scripts",
+    "../app/scripts",
+    "../.github/scripts",
+    "../contracts",
+    "../packages/gim-sdk/scripts",
+    "../packages/gim-sdk/*.mjs",
+    "../packages/gim-sdk/*.js",
+    "../packages/gim-sdk/*.cjs",
+    "../packages/measurement-core",
+    "../packages/powerline-core"
+  ],
+  "exclude": ["../contracts/generated"]
+}

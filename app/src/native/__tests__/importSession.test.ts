@@ -37,7 +37,7 @@ it('keeps cancellation pending through a late prepare reply and its cleanup befo
   const cancelled = vi.fn();
   const cleanup = old.rollback();
   expect(old.rollback()).toBe(cleanup);
-  void cleanup.then(cancelled);
+  const observedCleanup = cleanup.then(cancelled);
   await Promise.resolve();
   expect(cancelled).not.toHaveBeenCalled();
   expect(bridge.deleteProject).not.toHaveBeenCalled();
@@ -47,7 +47,7 @@ it('keeps cancellation pending through a late prepare reply and its cleanup befo
   await vi.waitFor(() => expect(bridge.deleteProject).toHaveBeenCalledWith(meta.id));
   expect(cancelled).not.toHaveBeenCalled();
   deleteReply.resolve();
-  await cleanup;
+  await observedCleanup;
 
   bridge.prepareNative.mockResolvedValueOnce({ meta, duplicate: false, cache: null });
   const retry = new NativeImportSession();
