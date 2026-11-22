@@ -18,7 +18,7 @@ describe('属性检查器纯 DOM 交互', () => {
   });
 
   it('FAM duplicate source rows and conflicts remain visible cold and warm', async () => {
-    const drawer = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../propsDrawer.js'); });
+    const drawer = await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../propsDrawer.js'); });
     const state = new AppState();
     const text = '[设计参数]\n材质=Material=铝\n材质=Material=铝\n材质=Material=铜';
     const parsed = parseFamSectionsWithDiagnostics(text,'CBM/raw.fam');
@@ -40,8 +40,8 @@ describe('属性检查器纯 DOM 交互', () => {
 
   it('无 Viewer 时也能切换页签并分发来源引用事件', async () => {
     // dom.ts 在模块加载时读取元素，因此必须在动态 import 前创建 DOM。
-    const drawer = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../propsDrawer.js'); });
-    const dictionary = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../propertyDictionary.js'); });
+    const drawer = await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../propsDrawer.js'); });
+    const dictionary = await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../propertyDictionary.js'); });
     const handler = vi.fn(() => true);
     dictionary.registerPropertyReferenceHandler(handler);
     drawer.setupPropsDrawerInteractions();
@@ -66,7 +66,7 @@ describe('属性检查器纯 DOM 交互', () => {
   });
 
   it('运行时 IFC modelId 通过 IfcEntry 反查真实来源路径', async () => {
-    const drawer = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../propsDrawer.js'); });
+    const drawer = await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../propsDrawer.js'); });
     const state = new AppState();
     state.currentIfcEntries = [{
       name: 'foo',
@@ -97,7 +97,7 @@ describe('属性检查器纯 DOM 交互', () => {
   });
 
   it('未知运行时 IFC modelId 不伪造来源路径', async () => {
-    const drawer = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../propsDrawer.js'); });
+    const drawer = await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../propsDrawer.js'); });
     const state = new AppState();
     const node: CbmNode = {
       path: 'CBM/device.cbm',
@@ -121,7 +121,7 @@ describe('属性检查器纯 DOM 交互', () => {
   });
 
   it('在 DEV 属性中显示 geometry pipeline 的降级状态', async () => {
-    const drawer = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../propsDrawer.js'); });
+    const drawer = await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../propsDrawer.js'); });
     const state = new AppState();
     state.geometryDiagnosticsByDevPath.set('dev/vendor-device.dev', {
       devPath: 'DEV/vendor-device.dev',
@@ -155,8 +155,8 @@ describe('属性检查器纯 DOM 交互', () => {
   });
 
   it('source-invalid has a short explanation, collapsed escaped evidence and full diagnostic copy',async()=>{
-    const drawer=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../propsDrawer.js'); });
-    const {geometryDiagnosticSummary}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/geometry/geometryDiagnostics.js'); });
+    const drawer=await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../propsDrawer.js'); });
+    const {geometryDiagnosticSummary}=await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/geometry/geometryDiagnostics.js'); });
     const state=new AppState(),raw=('MOD/bad.mod Entity 2 matrix 1e14 <source>\n').repeat(40);
     const diagnostic={devPath:'DEV/bad.dev',status:'failed' as const,source:'warm' as const,reason:'source-invalid' as const,unsupportedPrimitiveTypeCounts:{},detail:raw};
     state.geometryDiagnosticsByDevPath.set('dev/bad.dev',diagnostic);
@@ -181,7 +181,7 @@ describe('属性检查器纯 DOM 交互', () => {
   });
 
   it('CBM 裸 IFC 文件名来源反查为包内真实路径', async () => {
-    const drawer = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../propsDrawer.js'); });
+    const drawer = await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../propsDrawer.js'); });
     const state = new AppState();
     state.currentIfcEntries = [{
       name: 'foo',
@@ -211,7 +211,7 @@ describe('属性检查器纯 DOM 交互', () => {
   });
 
   it('重复 basename 的 CBM 来源不静默指向任一 IFC', async () => {
-    const drawer = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../propsDrawer.js'); });
+    const drawer = await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../propsDrawer.js'); });
     const state = new AppState();
     state.currentIfcEntries = [
       { name: 'foo', path: 'DEV/A/foo.ifc', modelId: 'ifc_aaaaaaaaaaaaaaaa' },
@@ -238,7 +238,7 @@ describe('属性检查器纯 DOM 交互', () => {
     expect(document.querySelector('[data-reference-kind="ifc"]')).toBeNull();
   });
   it('精化运行中允许取消，迟到成功不覆盖返回浏览状态', async () => {
-    const drawer = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../propsDrawer.js'); });
+    const drawer = await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../propsDrawer.js'); });
     const state = new AppState();
     const node: CbmNode = { path:'CBM/device.cbm', name:'设备', entityName:'F4System', children:[], famPath:'', devPath:'a.dev',
       ifcFile:'', ifcGuid:'', classifyName:'', transformMatrix:'', systemNames:[], devSymbolName:'', devType:'', devExpanded:false };

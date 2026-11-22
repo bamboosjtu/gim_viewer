@@ -54,9 +54,6 @@ vi.mock('../../runtime/substationIfcRuntime.js', () => ({ loadAllIfcFiles: m.loa
 vi.mock('../../../../services/geometryOnlyRuntime.js', () => ({
   startGeometryOnlyView: m.geometry,
 }));
-vi.mock('../../../equipment/application/openEquipmentProject.js', () => ({
-  openEquipmentProject: m.geometry,
-}));
 vi.mock('../../runtime/substationRuntimeTelemetry.js', () => ({ sampleSubstationMemory: async () => {} }));
 vi.mock('../../runtime/substationSpatialSemanticCache.js', () => ({
   readSubstationSpatialSemanticCache: m.semanticCache,
@@ -165,7 +162,7 @@ it('cold open publishes real CBM sources before IFC and defers optional work', a
 });
 it('direct semantic publication retains its await contract and geometry changes keep the session alive', async () => {
   const { state, context } = fixture();
-  state.geometryLoadToken++;
+  state.advanceGeometryBatch();
   const entries = await onGimExtracted(
     state,
     files(),

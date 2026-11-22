@@ -53,7 +53,7 @@ describe('STD/SLD cold and warm publication', () => {
       onSelect: vi.fn().mockResolvedValue(() => {}),
     });
     const state = new AppState();
-    state.currentProjectId = 42;
+    state.activateProject(42);
     state.currentCbmTree = await buildCbmTree(files);
     const session = state.captureProjectSession();
     const open = (mode: 'cold' | 'warm') =>

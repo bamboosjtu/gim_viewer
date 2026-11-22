@@ -1,6 +1,6 @@
 import {it,expect} from 'vitest';
 import {GimError} from '@desktop/contracts.js';
-import {canFallbackFromNativeExtraction,canRecoverNativeExtractionReceipt} from '../openGimService.js';
+import {canFallbackFromNativeExtraction,canRecoverNativeExtractionReceipt} from '../../app/session/openProject.js';
 
 it('chooses native extraction fallback from codes independently of display language',()=>{
   for(const code of ['RESOURCE_LIMIT','INPUT_CORRUPT','SOURCE_CHANGED','SESSION_SUPERSEDED','CANCELLED','UNAUTHORIZED','PROTOCOL_INVALID','OPERATION_FAILED'] as const){

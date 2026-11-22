@@ -242,6 +242,17 @@ for (const [layer, sourceRoot] of [
           ? relative(sourceRoot, resolve(dirname(path), name)).replaceAll('\\', '/')
           : name;
         const target = targetPath.split('/')[0];
+        if (
+          localPath.startsWith('app/session/') &&
+          (target === 'features' || target === 'ui' || targetPath.startsWith('app/composition/'))
+        )
+          failures.push(
+            `${localPath}: Session uses injected project routing and presentation ports (${name})`,
+          );
+        if (targetPath.startsWith('app/composition/') && layer !== 'app' && layer !== 'measurement')
+          failures.push(
+            `${localPath}: Host composition is only entered by the application (${name})`,
+          );
         const native = localPath.startsWith('infrastructure/native/');
         if (
           targetPath.startsWith('infrastructure/native/') &&
@@ -675,7 +686,11 @@ for (const path of all) {
   };
   scan(ast);
 }
-for (const entry of ['main.ts', 'services/openGimService.ts']) {
+for (const entry of [
+  'main.ts',
+  'app/session/openProject.ts',
+  'app/composition/projectRuntimes.ts',
+]) {
   const pending = [resolve(root, entry)],
     visited = new Set();
   for (const path of pending) {

@@ -1,4 +1,6 @@
 import { extractGimHeader, type GimHeaderInfo } from '../gim/gimExtractor.js';
+export { extractGimFile, getProjectTypeName } from '../gim/gimExtractor.js';
+export { detectGimProjectType } from '../gim/projectType.js';
 
 /** Runtime is selected from the source package, never from a cache row. */
 export type GimRuntimeType = 'transmission_line' | 'substation' | 'equipment';
@@ -48,10 +50,7 @@ export class SourceChangedDuringOpenError extends Error {
   }
 }
 
-export function assertGimSourceMagicStable(
-  inspectedMagic: string,
-  extractedMagic: string,
-): void {
+export function assertGimSourceMagicStable(inspectedMagic: string, extractedMagic: string): void {
   if (inspectedMagic && extractedMagic && inspectedMagic !== extractedMagic) {
     throw new SourceChangedDuringOpenError(inspectedMagic, extractedMagic);
   }
@@ -75,7 +74,8 @@ export function resolveGimRuntimeType(
 
 /** Read the fixed-width magic without requiring an archive signature. */
 export function readGimMagic(bytes: Uint8Array): string {
-  if (bytes.length >= 6 && [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c].every((b, i) => bytes[i] === b)) return '7z';
+  if (bytes.length >= 6 && [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c].every((b, i) => bytes[i] === b))
+    return '7z';
   if (bytes.length >= 4 && [0x50, 0x4b, 0x03, 0x04].every((b, i) => bytes[i] === b)) return 'zip';
   if (bytes.length < 6) return '';
   const prefix = String.fromCharCode(...bytes.slice(0, 7));

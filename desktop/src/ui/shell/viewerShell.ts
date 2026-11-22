@@ -3,7 +3,6 @@ import { reportBackgroundError } from '../../utils/backgroundErrors.js';
 import type { AppState } from '../../app/state.js';
 import { btnCacheManager, btnLoadGim, btnLoadLocal, gimFileInput } from '../dom.js';
 import { isTauri } from '../../services/platformService.js';
-import { hideLoading, showLoading } from '../../services/gimOpenCore.js';
 import { escapeHtml } from '../../shared/html.js';
 import { setSelectionStatus } from './statusBar.js';
 import {
@@ -48,22 +47,10 @@ function writeSetting(key: string, enabled: boolean): void {
   }
 }
 
-async function openRecentProject(state: AppState, projectId: number): Promise<void> {
-  try {
-    showLoading('正在打开最近工程...');
-    const { openGimProjectFromId } = await import('../../services/openGimService.js');
-    await openGimProjectFromId(state, (text) => showLoading(text), projectId);
-  } catch (error) {
-    logger.error('[ViewerShell] open recent project failed:', error);
-    showLoading(`打开最近工程失败: ${error instanceof Error ? error.message : String(error)}`);
-    setTimeout(hideLoading, 3000);
-  }
-}
-
 function renderRecentList(
   targets: HTMLElement[],
   projects: ProjectCacheSummary[],
-  state: AppState,
+  openRecentProject: (projectId: number) => Promise<void>,
   error = '',
 ): void {
   for (const target of targets) {
@@ -97,14 +84,17 @@ function renderRecentList(
         button.title = project.path;
       }
       button.addEventListener('click', () => {
-        void Promise.resolve(openRecentProject(state, project.id)).catch(reportBackgroundError);
+        void openRecentProject(project.id).catch(reportBackgroundError);
       });
       target.appendChild(button);
     }
   }
 }
 
-export function setupViewerShell(state: AppState): void {
+export function setupViewerShell(
+  state: AppState,
+  openRecentProject: (projectId: number) => Promise<void>,
+): void {
   setupSelectionToolbar(state);
   const moreButton = document.getElementById('btn-more') as HTMLButtonElement | null;
   const menu = document.getElementById('more-menu');
@@ -133,7 +123,7 @@ export function setupViewerShell(state: AppState): void {
     renderRecentList(
       [menuRecent, welcomeRecent].filter((node): node is HTMLElement => !!node),
       recent,
-      state,
+      openRecentProject,
       result.ok ? '' : result.message,
     );
     if (continueButton) {
@@ -242,7 +232,7 @@ export function setupViewerShell(state: AppState): void {
       .then(async (applied) => {
         if (!applied) return;
         const first = recent[0];
-        if (first) await openRecentProject(state, first.id);
+        if (first) await openRecentProject(first.id);
       })
       .catch(reportBackgroundError);
   });
@@ -281,7 +271,7 @@ export function setupViewerShell(state: AppState): void {
       if (!applied || !shouldAutoOpenLastProject() || autoOpenAttempted) return;
       autoOpenAttempted = true;
       const first = recent.find((project) => project.parserVersion);
-      if (first && state.currentProjectType == null) await openRecentProject(state, first.id);
+      if (first && state.currentProjectType == null) await openRecentProject(first.id);
     })
     .catch(reportBackgroundError);
 }

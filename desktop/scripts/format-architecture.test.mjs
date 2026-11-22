@@ -13,7 +13,7 @@ test('changed frontend and project scripts must join the shared list', () => {
     'packages/gim-sdk/src/new.ts',
     'packages/gim-sdk/src/shared/sourceRecord.ts',
     'packages/gim-sdk/src/shared/__tests__/sourceRecord.test.ts',
-    'desktop/src/app/bootstrap.ts',
+    'desktop/src/app/startupProbe.ts',
     'desktop/src/services/newPresentationPort.ts',
     'desktop/src/features/powerline/presentation/linePresentationPort.ts',
     'desktop/bridge/nativeExtension.ts',
@@ -28,7 +28,7 @@ test('changed frontend and project scripts must join the shared list', () => {
     '.github/scripts/new-check.mjs',
     'contracts/generated/native.ts',
   ]), ['.github/scripts/new-check.mjs', 'app/src/native/new.ts',
-    'desktop/bridge/nativeExtension.ts', 'desktop/scripts/new-check.mjs', 'desktop/src/app/bootstrap.ts',
+    'desktop/bridge/nativeExtension.ts', 'desktop/scripts/new-check.mjs', 'desktop/src/app/startupProbe.ts',
     'desktop/src/services/newPresentationPort.ts', 'packages/gim-sdk/src/new.ts',
     'packages/measurement-core/src/new.mjs', 'packages/powerline-core/src/new.mts']);
 });

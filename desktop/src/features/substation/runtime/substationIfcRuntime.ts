@@ -435,7 +435,7 @@ export async function loadAllIfcFiles(
       heavy: false, // Reuses the already running, bounded DEV pool.
       startAfter,
       run: async () => {
-        state.geometryLoadToken++;
+        state.advanceGeometryBatch();
         try {
           await autoLoadModStlPostIfc(state, showMessage, ctx, { session });
         } catch (err) {

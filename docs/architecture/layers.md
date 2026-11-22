@@ -18,7 +18,9 @@
 
 | 目录 | 职责 | 允许依赖 | 不应依赖 |
 |---|---|---|---|
-| `desktop/src/app/` | 启动、`AppState`、工程会话、模块接线 | services、ui 入口 | 具体 parser 内部 |
+| `desktop/src/app/` | 启动、`AppState` 状态聚合 | 会话与组合入口 | 具体 parser 内部 |
+| `desktop/src/app/session/` | 工程身份、打开/切换/关闭、选择与释放 | 服务端口、Viewer 清理、共享会话契约 | 跨 Feature 分派与 DOM |
+| `desktop/src/app/composition/` | Feature 分派、最近工程与 UI/服务端口接线 | Feature 入口、UI、工程会话 | 格式解析和几何计算 |
 | `packages/gim-sdk/` | 五组纯核心；来源、语义、物理目录、表示绑定与投影 | 包内纯模块、powerline-core | desktop/app 宿主、DOM、Tauri、Three/Viewer、DB |
 | `desktop/src/engineering/` | 现有消费者的 SDK 出口转发 | 声明的 SDK exports | 核心算法和配置副本 |
 | `desktop/src/gim/engineering/` | 现有来源消费者的 SDK 转发入口；来源适配实现与测试归 SDK | SDK exports | 规则副本、Viewer、UI、DB |
@@ -48,7 +50,7 @@ UI 可消费只读的稳定来源 ID 查找、路径格式化、空值判断及�
 3. `services/engineering*` 编排工程计算、快照发布、缓存和表示绑定；Worker 通信与请求释放由 `infrastructure/workers/` 管理。工程类别继续由 SDK 判断。
 4. `viewer/` 只消费 `SourceGeometryOccurrence`、模板和 IFC 对象。几何编译器不接收工程组成分组，也不按实体名称选择 LOD。
 5. `ui/` 不直接访问数据库或原生 IPC；最近工程、缓存管理和工程打开均通过 `services/projectCacheService`、`services/gimOpenCore` 等入口。`engineeringTreeView` 只渲染投影结果并回调选择服务。
-6. 重依赖按需动态 import：入口和 `openGimService` 不静态引入 Three.js、web-ifc、MapLibre；IFC、几何、地图和工程实体 Worker 各自分包。Vite 生产构建从 HTML 入口检查生成块的静态依赖闭包，发现 Three.js、web-ifc 或 MapLibre 即失败。
+6. 重依赖按需动态 import：入口和 `openProject` 不静态引入 Three.js、web-ifc、MapLibre；IFC、几何、地图和工程实体 Worker 各自分包。Vite 生产构建从 HTML 入口检查生成块的静态依赖闭包，发现 Three.js、web-ifc 或 MapLibre 即失败。
 7. 读取语义和提交状态必须由会话/请求守卫控制；UI 不能直接改写缓存版本、解析器结果或场景所有权。
 
 ### 已知边界例外
@@ -67,7 +69,7 @@ UI 可消费只读的稳定来源 ID 查找、路径格式化、空值判断及�
 bootstrap
   ├─ viewerShell（空态、最近工程、菜单、属性抽屉）
   ├─ selectionToolbar（自动定位、清除选择）
-  ├─ openGimService（文件入口、解压、类型分派）
+  ├─ app/session/openProject + app/composition/projectRuntimes（文件打开与 Feature 分派）
   │    ├─ features/substation（语义、IFC、DEV、Spatial）
   │    │    └─ engineeringService（来源/实体/导航 Worker）
   │    ├─ features/equipment（设备来源与导航）
@@ -76,7 +78,7 @@ bootstrap
   └─ viewerUIBinding（选择/高亮/相机/属性路由）
 ```
 
-`app/presentationBindings` 是展示端口的组合根。`ProjectPresentation` 管理树渲染、面板清理、展开状态、选择反馈和候选交互；`SourceInspectorPresentation` 接收来源文档/空间上下文与回调，UI 持有分页与 DOM 监听；`ViewerPresentation` 提供属性/模型展示及绑定释放器；加载遮罩与计时由 `LoadingPresentation` 的 UI 实现持有。状态栏端口仅声明状态命令，不从 UI 模块推导接口。services 不直接值导入 ui，不查询或修改 DOM。Viewer 使用 `shared/viewerState`、会话和选择契约，不引用 AppState。CBM/GUID 与 IFC 名称补充属于 services；Viewer 高亮只接收已解析的 runtime model/local ID 集合。几何纯函数按符号白名单导入，不能借此引入 CBM 业务语义。
+`app/composition/presentationBindings` 是展示端口的组合根。`ProjectPresentation` 管理树渲染、面板清理、展开状态、选择反馈和候选交互；`SourceInspectorPresentation` 接收来源文档/空间上下文与回调，UI 持有分页与 DOM 监听；`ViewerPresentation` 提供属性/模型展示及绑定释放器；加载遮罩与计时由 `LoadingPresentation` 的 UI 实现持有。状态栏端口仅声明状态命令，不从 UI 模块推导接口。services 不直接值导入 ui，不查询或修改 DOM。Viewer 使用 `shared/viewerState`、会话和选择契约，不引用 AppState。CBM/GUID 与 IFC 名称补充属于 services；Viewer 高亮只接收已解析的 runtime model/local ID 集合。几何纯函数按符号白名单导入，不能借此引入 CBM 业务语义。
 
 通用 UI 模块 loader 已删除。`SelectionPresentation` 接收选择意图、只读属性模型与有效性回调；`DiagramPresentation` 返回绑定释放器；`LinePresentation` 返回视图句柄并由 SessionScope 持有；`ProjectOpenPresentation` 管理浏览器选择器、按钮与输入框。惰性 UI import 留在 UI 实现，services 不请求 UI 模块或操作 DOM。边界脚本拒绝旧 loader 的直接调用、显式别名和字符串属性访问，传入非字面量键同样会被拒绝。门禁同时检查 DOM 写入及未声明共享包导入。
 
@@ -104,7 +106,7 @@ SDK 的实现及模块测试归 `packages/gim-sdk/src/`，IFC 运行时解析器
 
 ```text
 desktop/src/
-├── app/                 # 启动与会话
+├── app/                 # 启动 / session / composition
 ├── features/
 │   ├── substation/      # application / runtime / presentation
 │   ├── powerline/       # application / runtime / presentation

@@ -35,7 +35,7 @@ it('shares concurrent reads per session and falls back to latest-project scope o
   const state=fixture(),read=deferred<any>();db.project.mockReturnValueOnce(read.promise);
   const first=collectProjectDiagnostic(state),second=collectProjectDiagnostic(state);expect(first).toBe(second);
   await Promise.resolve();expect(db.project).toHaveBeenCalledOnce();read.resolve({projectId:7});await first;
-  state.currentProjectId=null;const latest=await collectProjectDiagnostic(state);
+  state.activateProject(null);const latest=await collectProjectDiagnostic(state);
   expect(db.latest).toHaveBeenCalledOnce();expect(latest?.databaseDiagnosticScope).toBe('latest-project');
 });
 it('keeps the performance snapshot when database diagnostics fail',async()=>{

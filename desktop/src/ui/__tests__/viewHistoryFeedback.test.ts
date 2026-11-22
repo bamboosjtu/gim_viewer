@@ -15,7 +15,7 @@ function fixture() {
     captureProjectSession: () => ({ generation: 1 }), isCurrentSession: vi.fn(() => true),
     viewState: {viewHistory: { back: vi.fn(() => new Promise<boolean>((_, fail) => { reject = fail; })) }},
   };
-  setupViewerShell(state as any);
+  setupViewerShell(state as any, async () => {});
   document.getElementById('menu-previous-view')!.click();
   return { state, fail: async () => { reject(new Error('camera unavailable')); await Promise.resolve(); } };
 }

@@ -58,7 +58,7 @@ it('scoped runtime selection visits only its current occurrence subtree and pres
 
 it.each(['raw','glb'] as const)('nested PARTINDEX uses the real root and parent subtree after %s loading', async (mode) => {
   const {files,tree,root,b}=await nestedPartFixture(2);
-  const state=new AppState(); state.currentFiles=files; state.currentCbmTree=tree; state.currentProjectId=1;
+  const state=new AppState(); state.currentFiles=files; state.currentCbmTree=tree; state.activateProject(1);
   if (mode==='glb') mock.bytes=(await serializeDevToGlbDetailed(root.devPath,files)).bytes!;
   await loadModStlForNode(state,b);
   const scope=deviceOccurrenceScope(tree,b);
@@ -79,7 +79,7 @@ it.each(['raw','glb'] as const)('nested PARTINDEX uses the real root and parent 
 
 it('a GLB becoming available after raw loading does not duplicate the same occurrence on repeat click', async () => {
   const files = fixture(), tree = (await buildCbmTree(files))!;
-  const state = new AppState(); state.currentFiles=files; state.currentCbmTree=tree; state.currentProjectId=1;
+  const state = new AppState(); state.currentFiles=files; state.currentCbmTree=tree; state.activateProject(1);
   await loadModStlForNode(state,tree.children[0]);
   expect(state.loadedXmlModGroups.size).toBe(3);
   mock.bytes = (await serializeDevToGlbDetailed('root.dev',files)).bytes!;

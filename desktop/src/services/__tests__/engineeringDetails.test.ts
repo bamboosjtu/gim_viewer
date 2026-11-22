@@ -18,7 +18,7 @@ async function select(owner:boolean){
   const built=buildTestEngineeringSources('scope',graph,[],[]),state=new AppState();state.activateProject(1,'scope');state.currentProjectType='substation';
   if(!owner){built.snapshot.entities=[];built.snapshot.pending=[];built.snapshot.memberships=built.snapshot.memberships.map(m=>({...m,ownerId:null,disposition:'source_only'}));}
   state.engineering.sources=built.sources;state.engineering.snapshot=built.snapshot;state.engineering.navigation=projectEngineeringNavigation(built.sources,built.snapshot);
-  const {configurePresentation}=await import('../../app/presentationBindings.js');configurePresentation();
+  const {configurePresentation}=await import('../../app/composition/presentationBindings.js');configurePresentation();
   const {selectEngineeringTarget}=await import('../engineeringSelection.js');
   await selectEngineeringTarget(state,{kind:'engineering-source',key:graph.records[0].id});
   return state;

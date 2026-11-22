@@ -104,7 +104,7 @@ export function installBenchmarkHost(state: AppState): void {
           ...config,
           sampleId,
         };
-        const { openGimForBenchmark } = await import('../services/openGimService.js');
+        const { openGimForBenchmark } = await import('../app/composition/projectActions.js');
         if (sequence !== openSequence) return;
         openStarted = performance.now();
         await openGimForBenchmark(state, path);
@@ -198,8 +198,8 @@ export function installBenchmarkHost(state: AppState): void {
       openSequence++;
       opening = false;
       closedResources = captureMeasurementResourceCheck();
-      const { cleanupBeforeOpenNewProject } = await import('../services/projectCleanupService.js');
-      await cleanupBeforeOpenNewProject(state);
+      const { closeProject } = await import('../app/composition/projectActions.js');
+      await closeProject(state);
     },
     async memory() {
       const { getProcessMemory } = await import('@desktop/database.js');

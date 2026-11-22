@@ -1,30 +1,32 @@
 import {afterEach,expect,it,vi} from 'vitest';
-import {AppState} from '../../app/state.js';
+import {AppState} from '../../state.js';
 vi.mock('@desktop/runtime.js', () => ({ isTauri: () => false }));
-vi.mock('../../features/substation/application/substationRuntime.js', () => ({ openSubstationProject: vi.fn(), onGimExtracted: vi.fn(), loadAllIfcFiles: vi.fn() }));
-vi.mock('../../features/powerline/application/openPowerlineProject.js', () => ({ openPowerlineProject: vi.fn() }));
-vi.mock('../gimOpenCore.js', async () => ({ ...await vi.importActual('../gimOpenCore.js'), showLoading: vi.fn(), hideLoading: vi.fn() }));
-vi.mock('../../ui/dom.js', async () => ({ ...await vi.importActual('../../ui/dom.js'),
+vi.mock('../../../features/substation/application/substationRuntime.js', () => ({ openSubstationProject: vi.fn(), onGimExtracted: vi.fn(), loadAllIfcFiles: vi.fn() }));
+vi.mock('../../../features/powerline/application/openPowerlineProject.js', () => ({ openPowerlineProject: vi.fn() }));
+vi.mock('../../../services/gimOpenCore.js', async () => ({ ...await vi.importActual('../../../services/gimOpenCore.js'), showLoading: vi.fn(), hideLoading: vi.fn() }));
+vi.mock('../../../ui/dom.js', async () => ({ ...await vi.importActual('../../../ui/dom.js'),
   gimFileInput: document.createElement('input'), btnLoadGim: document.createElement('button') }));
 afterEach(()=>{vi.clearAllTimers();vi.useRealTimers();vi.restoreAllMocks();});
 it('keeps an active project and its renderer alive while the browser chooser is open or cancelled', async () => {
-  const { openGimWithDialog } = await import('../openGimService.js'), { gimFileInput, btnLoadGim } = await import('../../ui/dom.js');
+  const { openGimWithDialog } = await import('../../composition/projectActions.js'), { gimFileInput, btnLoadGim } = await import('../../../ui/dom.js');
   const app = new AppState(); app.activateProject(7, 'a'.repeat(64));
   const generation = app.projectGeneration, release = vi.fn(); app.deviceLodRuntime = { release } as any;
-  const invalidate = vi.spyOn(app, 'invalidatePendingLoads');
-  vi.spyOn(gimFileInput, 'click').mockImplementation(() => {});
+  const invalidate = vi.spyOn(app.projectSession, 'invalidate');
+  const chooser = vi.spyOn(gimFileInput, 'click').mockImplementation(() => {});
   const request = openGimWithDialog(app, vi.fn());
+  await vi.waitFor(() => expect(chooser).toHaveBeenCalledOnce());
   expect(invalidate).not.toHaveBeenCalled(); expect(release).not.toHaveBeenCalled(); expect(btnLoadGim.disabled).toBe(false);
   gimFileInput.dispatchEvent(new Event('cancel')); await request;
   expect(app.projectGeneration).toBe(generation); expect(release).not.toHaveBeenCalled();
 });
 it('starts cancellation and source reading once after the latest chooser receives a file', async () => {
   vi.useFakeTimers(); vi.spyOn(console, 'error').mockImplementation(() => {});
-  const { openGimWithDialog } = await import('../openGimService.js'), { gimFileInput, btnLoadGim } = await import('../../ui/dom.js');
-  const app = new AppState(), invalidate = vi.spyOn(app, 'invalidatePendingLoads');
-  vi.spyOn(gimFileInput, 'click').mockImplementation(() => {});
+  const { openGimWithDialog } = await import('../../composition/projectActions.js'), { gimFileInput, btnLoadGim } = await import('../../../ui/dom.js');
+  const app = new AppState(), invalidate = vi.spyOn(app.projectSession, 'invalidate');
+  const chooser = vi.spyOn(gimFileInput, 'click').mockImplementation(() => {});
   const first = openGimWithDialog(app, vi.fn()), latest = openGimWithDialog(app, vi.fn());
   await first; expect(invalidate).not.toHaveBeenCalled();
+  await vi.waitFor(() => expect(chooser).toHaveBeenCalledOnce());
   const read = vi.fn(async () => { throw Error('source read failed'); });
   const file = new File(['source'], 'sample.gim'); Object.defineProperty(file, 'arrayBuffer', { value: read });
   Object.defineProperty(gimFileInput, 'files', { configurable: true, value: [file] });

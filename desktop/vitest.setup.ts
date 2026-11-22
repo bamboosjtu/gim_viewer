@@ -76,4 +76,4 @@ beforeEach(()=>{
 });
 afterEach(()=>checkCleanupErrors());
 
-beforeEach(async () => { if(typeof document==='undefined')return; (await import('./src/app/presentationBindings.js')).configurePresentation(); });
+beforeEach(async () => { if(typeof document==='undefined')return; (await import('./src/app/composition/presentationBindings.js')).configurePresentation(); });

@@ -2,7 +2,7 @@ import { afterEach,describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { AppState } from '../../../../app/state.js';
 import type { CbmNode, IfcEntry } from '../../../../gim/types.js';
-import { loadAllIfcFiles } from '../../../../services/openGimService.js';
+import { loadAllIfcFiles } from '../substationIfcRuntime.js';
 import { isSubstationViewerInteractive } from '../substationLoadingState.js';
 import { perfMarkProductMoment, perfProductMomentSnapshot, perfReset, perfSnapshot } from '../../../../utils/perfTimings.js';
 

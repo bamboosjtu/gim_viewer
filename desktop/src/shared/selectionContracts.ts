@@ -1,4 +1,31 @@
 import type { ProjectLoadSession } from './projectSession.js';
+import type { Material, Mesh, Object3D } from 'three';
+
+export interface ModHighlightState {
+  groups: Object3D[];
+  originalMaterials: Map<Mesh, Material | Material[]>;
+}
+
+/** Renderer-facing view of the session's selection owner. */
+export interface ViewerSelectionState {
+  onlySelected: boolean;
+  hoverCleanup: (() => void) | null;
+  selectionDecorationCleanup: (() => void) | null;
+  selectionVisibility: SelectionVisibilityController | null;
+  selectionHighlightRequestId: number | null;
+  highlightedItems: Readonly<Record<string, Iterable<number>>> | null;
+  highlightedModState: ModHighlightState | null;
+  representationSelection:
+    import('./representationSelection.js').RepresentationSelectionScope | null;
+  selectionRequest: SelectionRequest | null;
+  beginSelection(
+    target: SelectionRequest['target'],
+    origin?: SelectionRequest['origin'],
+  ): SelectionRequest;
+  isCurrentSelection(request: SelectionRequest): boolean;
+  canAutoLocate(request: SelectionRequest): boolean;
+  selectionGuard(request: SelectionRequest): SelectionCommitGuard;
+}
 /** Runtime-only user intent; it never invalidates the geometry batch or cache. */
 export interface SelectionRequest {
   origin?: 'tree' | 'viewport' | 'command';

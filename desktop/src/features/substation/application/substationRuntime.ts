@@ -13,7 +13,9 @@ export { loadAllIfcFiles } from '../runtime/substationIfcRuntime.js';
 
 export { onGimExtracted } from './substationColdSource.js';
 
-export async function openSubstationProject(context: GimRuntimeOpenContext): Promise<void> {
+export async function openSubstationProject(
+  context: GimRuntimeOpenContext,
+): Promise<'equipment' | void> {
   const scope = context.state.sessionScope(context.session);
   if (!scope.isCurrent()) return;
   try {
@@ -57,7 +59,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
     if (validation?.valid && (await tryOpenSubstationWarm(context, scope, perfSession, validation)))
       return;
 
-    await openSubstationCold(context, scope, perfSession);
+    return await openSubstationCold(context, scope, perfSession);
   } catch (error) {
     if (!scope.isCurrent()) return;
     throw error;

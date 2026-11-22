@@ -61,7 +61,7 @@ export default defineConfig({
       // Pure-layer gates are enforced by the normal unit suite, without GIM samples.
       thresholds: {
         'src/gim/**': { statements:90, lines:90, functions:90, branches:80 },
-        'src/services/openGimService.ts': {statements:70,lines:70,functions:80,branches:50},
+        'src/app/session/openProject.ts': {statements:70,lines:70,functions:80,branches:50},
         'src/features/substation/application/{substationRuntime,substationOpenStages,substationColdPersistence,substationColdSource}.ts': {statements:70,lines:70,functions:45,branches:70},
         'src/services/viewerUIBinding.ts': {statements:80,lines:80,functions:50,branches:70},
         'src/ui/lineProjectView.ts': {statements:70,lines:70,functions:60,branches:65},

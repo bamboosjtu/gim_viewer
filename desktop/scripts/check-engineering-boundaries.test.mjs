@@ -140,11 +140,24 @@ test('checker rejects a cycle within a runtime family through dynamic dependenci
 
 test('checker prevents shared cleanup from depending on the substation Spatial worker', () => {
   const { files, run } = fixture();
-  files('desktop/src/services/projectCleanupService.ts',
-    "export const load = () => import('../features/substation/runtime/spatial/substationSpatialWorkerClient.js');");
+  files('desktop/src/app/session/projectCleanup.ts',
+    "export const load = () => import('../../features/substation/runtime/spatial/substationSpatialWorkerClient.js');");
   const rejected = run();
   assert.equal(rejected.status, 1);
   assert.match(rejected.stderr, /Spatial workflow and worker belong to the substation feature/);
+  assert.match(rejected.stderr, /Session uses injected project routing and presentation ports/);
+});
+
+test('checker keeps feature entry wiring in host composition', () => {
+  const { files, run } = fixture();
+  files('desktop/src/app/composition/projectRuntimes.ts',
+    "export const open = () => import('../../features/equipment/application/openEquipmentProject.js');");
+  assert.equal(run().status, 0);
+  files('desktop/src/ui/projectView.ts',
+    "export const open = () => import('../app/composition/projectRuntimes.js');");
+  const rejected = run();
+  assert.equal(rejected.status, 1);
+  assert.match(rejected.stderr, /Host composition is only entered by the application/);
 });
 
 test('checker keeps Powerline parsing with its scope and projection construction outside UI', () => {
@@ -219,14 +232,14 @@ test('checker keeps the native port outside domain code and cache codecs usable 
 
 test('checker rejects eager renderer dependencies behind an opening helper',()=>{
   const {files,run}=fixture();
-  files('desktop/src/services/openGimService.ts',"export {render} from './openHelper.js';");
-  files('desktop/src/services/openHelper.ts',"export const render=()=>import('three');");
+  files('desktop/src/app/session/openProject.ts',"export {render} from './openHelper.js';");
+  files('desktop/src/app/session/openHelper.ts',"export const render=()=>import('three');");
   const accepted=run();
   assert.equal(accepted.status,0,accepted.stderr);
-  files('desktop/src/services/openHelper.ts',"import 'three'; export const render=()=>{};");
+  files('desktop/src/app/session/openHelper.ts',"import 'three'; export const render=()=>{};");
   const rejected=run();
   assert.equal(rejected.status,1);
-  assert.match(rejected.stderr,/openGimService\.ts: eager renderer dependency three/);
+  assert.match(rejected.stderr,/openProject\.ts: eager renderer dependency three/);
 });
 
 test('checker reports whitelisted viewer bridge imports that no source uses',()=>{

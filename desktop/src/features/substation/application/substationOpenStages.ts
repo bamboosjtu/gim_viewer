@@ -37,18 +37,12 @@ export async function openSubstationCold(
   context: GimRuntimeOpenContext,
   scope: SessionScope,
   perfSession: PerfSession,
-): Promise<void> {
+): Promise<'equipment' | void> {
   const { state, session, showMessage } = context;
   const extractedSource = await scope.read(async () => context.getExtracted());
   if (extractedSource.status === 'cancelled') return;
 
-  if (extractedSource.projectType === 'equipment') {
-    const { openEquipmentProject } = await scope.read(
-      async () => import('../../equipment/application/openEquipmentProject.js'),
-    );
-    if (scope.isCurrent()) await scope.read(async () => openEquipmentProject(context));
-    return;
-  }
+  if (extractedSource.projectType === 'equipment') return 'equipment';
   let extracted = extractedSource.files;
   if (extractedSource.cacheProjectId != null && !extractedSource.preHydrated) {
     const endHydrate = perfBegin('变电小文件批量物化', undefined, perfSession);

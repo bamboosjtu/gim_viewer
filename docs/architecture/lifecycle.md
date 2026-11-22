@@ -43,6 +43,10 @@
 
 ## 会话与取消
 
+`app/session` 持有工程身份、作用域、选择请求和打开意图。切换开始同步撤销旧会话并暂停接收新任务。Viewer 清理按操作顺序交接，后续清理等待已发出的模型释放，并重新枚举剩余资源。只有当前清理可以清除状态和发出关闭事件。
+
+`app/composition` 调用相应 Feature 和展示端口。最近工程、文件选择及缓存管理通过同一打开入口提交，较早的文件选择或授权结果在新的意图出现后失效。
+
 `ProjectLoadSession` 是由 `AppState.captureProjectSession` 铸造并冻结的 opaque token，固定 generation、projectId、sourceSha256 和几何 token。跨 Worker 与只读比较使用可序列化的 `ProjectSessionIdentity`，它不授予状态提交能力。所有异步任务在以下边界重新校验：
 
 - 写 `AppState`、场景、属性、树或缓存前；

@@ -1,59 +1,23 @@
-import { reportBackgroundError } from '../utils/backgroundErrors.js';
-import { projectPresentation } from './projectPresentationPort.js';
-/**
- * 统一项目切换清理服务。
- *
- * 解决问题：ViewerRuntime 是懒加载单例，AppState.resetGimState() 只清 state
- * 而不清 ctx.fragments / scene 中已加载的模型；线路地图 canvas 也不在 reset 范围内。
- * 这导致线路 ↔ 变电切换时，AppState 与 ViewerRuntime 状态不同步：
- *   - 切到变电后，旧线路 canvas 残留覆盖 IFC viewer
- *   - 切回变电后，旧 fragments 模型仍在 scene 中（可能与新模型重复或冲突）
- *   - hasFittedCamera 未重置，新模型加载后相机不重新 fit，导致中间只有网格
- *
- * 本服务在「打开新 GIM 前」和「清空场景」时统一执行：
- *   1. 销毁线路地图（canvas/tooltip/图层控件/事件监听）
- *   2. dispose ViewerRuntime 中所有 fragments 模型（合并 state.loadedModels 与 ctx.fragments.list）
- *   3. 重置高亮
- *   4. 清空 model-list UI
- *   5. 重置 state（resetGimState 集中 mutator，含 loadedModels/highlightedItems/hasFittedCamera）
- *
- * 关键顺序：必须先 dispose runtime 中的模型，再 resetGimState（resetGimState 会清空 loadedModels 索引，
- * 但 ctx.fragments.list 中的实际 Three.js 对象不会随之消失）。
- *
- * 分层边界：属于 services 编排层，可 dynamic import viewer/ 与 ui/ 模块。
- */
-
-import type { AppState } from '../app/state.js';
+import { reportBackgroundError } from '../../utils/backgroundErrors.js';
+import { projectPresentation } from '../../services/projectPresentationPort.js';
+import type { AppState } from '../state.js';
 import type * as THREE from 'three';
-import { DEBUG_RUNTIME_LOGS } from '../config/debug.js';
-import { debugLog, logger } from '../utils/logger.js';
-import { container } from './presentation/dom.js';
-import { perfCurrentSession, perfReset } from '../utils/perfTimings.js';
-import { sampleSubstationRuntimeResources } from './substationResourceTelemetry.js';
-import type { ViewerContext } from '../viewer/viewerEngine.js';
-import { cancelSubstationExtraction } from './substationExtractionJob.js';
-import { cancelIfcConversions } from '../viewer/ifcConversion.js';
-import { resetStatusRight } from './presentation/shell_statusBar.js';
-import { markMeasurementCancellation } from '../measurement/runtime.js';
+import { DEBUG_RUNTIME_LOGS } from '../../config/debug.js';
+import { debugLog, logger } from '../../utils/logger.js';
+import { container } from '../../services/presentation/dom.js';
+import { perfCurrentSession, perfReset } from '../../utils/perfTimings.js';
+import { sampleSubstationRuntimeResources } from '../../services/substationResourceTelemetry.js';
+import type { ViewerContext } from '../../viewer/viewerEngine.js';
+import { cancelSubstationExtraction } from '../../services/substationExtractionJob.js';
+import { cancelIfcConversions } from '../../viewer/ifcConversion.js';
+import { resetStatusRight } from '../../services/presentation/shell_statusBar.js';
+import { markMeasurementCancellation } from '../../measurement/runtime.js';
 
-/**
- * 在打开新 GIM 项目前 / 清空场景时执行统一清理。
- *
- * 幂等：ViewerRuntime 未创建时跳过 fragments 清理；无线路地图时跳过地图销毁。
- *
- * @param state 全局 AppState
- */
-export async function cleanupBeforeOpenNewProject(
-  state: AppState,
-  /**
-   * 可选的打开请求代次。传入后，若请求已被更新的打开动作取代，
-   * 清理会在任何可能覆盖新状态的步骤前停止并返回 false。
-   */
-  expectedGeneration?: number,
-): Promise<boolean> {
-  if (expectedGeneration !== undefined && state.projectGeneration !== expectedGeneration) {
-    return false;
-  }
+/** Close the current project or prepare the scene for a specific open request. */
+export function cleanupProject(state: AppState, expectedGeneration?: number): Promise<boolean> {
+  if (expectedGeneration !== undefined && state.projectGeneration !== expectedGeneration)
+    return Promise.resolve(false);
+  const closing = expectedGeneration === undefined;
   const shouldCaptureSubstationResources =
     state.currentProjectType === 'substation' ||
     state.currentIfcEntries.length > 0 ||
@@ -63,30 +27,51 @@ export async function cleanupBeforeOpenNewProject(
     state.loadedStlGroups.size > 0;
   // 先标记主动取消，让会话释放 Worker 时保留正确的测量原因。
   // 两步均在首个 await 前执行，旧任务在清理开始时同步失效。
+  let cleanupGeneration: number;
   try {
-    markMeasurementCancellation(
-      expectedGeneration === undefined ? 'project-closed' : 'project-replaced',
-    );
+    markMeasurementCancellation(closing ? 'project-closed' : 'project-replaced');
   } finally {
-    state.invalidatePendingLoads();
+    cleanupGeneration = state.invalidatePendingLoads();
   }
-  const cleanupGeneration = state.projectGeneration;
+  const isCurrentCleanup = () => state.projectGeneration === cleanupGeneration;
+  if (!isCurrentCleanup()) return Promise.resolve(false);
   cancelSubstationExtraction(state);
   cancelIfcConversions();
-  const { resetIfcWorkCompletion } = await import('../viewer/geometryWorkGate.js');
-  if (state.projectGeneration !== cleanupGeneration) return false;
+  // One Viewer runtime is shared. A newer cleanup waits for a disposal already
+  // admitted by its predecessor, then enumerates the remaining resources.
+  return state.projectSession.queueCleanup(() =>
+    finishCleanup(
+      state,
+      cleanupGeneration,
+      closing,
+      shouldCaptureSubstationResources,
+      isCurrentCleanup,
+    ),
+  );
+}
+
+async function finishCleanup(
+  state: AppState,
+  cleanupGeneration: number,
+  closing: boolean,
+  shouldCaptureSubstationResources: boolean,
+  isCurrentCleanup: () => boolean,
+): Promise<boolean> {
+  if (!isCurrentCleanup()) return false;
+  const { resetIfcWorkCompletion } = await import('../../viewer/geometryWorkGate.js');
+  if (!isCurrentCleanup()) return false;
   resetIfcWorkCompletion();
-  const { cancelDevGeometryPreprocessing } = await import('./devGeometryWorkerClient.js');
-  if (state.projectGeneration !== cleanupGeneration) return false;
+  const { cancelDevGeometryPreprocessing } =
+    await import('../../services/devGeometryWorkerClient.js');
+  if (!isCurrentCleanup()) return false;
   cancelDevGeometryPreprocessing(state);
   // 清空场景没有上层 open 请求负责重置性能会话；在无 expectedGeneration
   // 的直接清理路径这里切断旧工程的迟到 span/invoke/Long Task。带代次的
   // 打开流程由 openGimService 在请求开始处重置，并保留本次解压计时。
-  if (expectedGeneration === undefined) {
+  if (closing) {
     perfReset({ generation: cleanupGeneration, projectId: null, sourceSha256: null });
   }
   const cleanupPerfSession = perfCurrentSession();
-  const isCurrentCleanup = () => state.projectGeneration === cleanupGeneration;
   let cleanupViewerContext: ViewerContext | null = null;
   let beforeCleanupSampled = false;
   const sampleBeforeCleanup = (ctx?: ViewerContext | null): void => {
@@ -113,18 +98,6 @@ export async function cleanupBeforeOpenNewProject(
   if (!isCurrentCleanup()) return false;
   resetStatusRight();
 
-  // 线路地图、解析 Worker 与 MOD 来源缓存由此前失效的 SessionScope 释放。
-
-  // 关闭/切换工程时终止仍在运行的 IFC 转换 Worker。否则一个卡在 76% 的
-  // 大 IFC 会继续占用 Worker，加载遮罩也不会退场。
-  try {
-    const { cancelIfcConversions } = await import('../viewer/ifcConversion.js');
-    if (!isCurrentCleanup()) return false;
-    cancelIfcConversions();
-  } catch (err) {
-    logger.warn('[Cleanup] cancel IFC conversions failed:', err);
-  }
-
   // ---- 2. dispose ViewerRuntime 中所有 fragments 模型 ----
   // 必须在 resetGimState 之前执行：resetGimState 会清空 state.loadedModels 索引，
   // 但 ctx.fragments.list 中的 Three.js 对象仍残留，需要显式 dispose
@@ -132,7 +105,8 @@ export async function cleanupBeforeOpenNewProject(
   let attemptedCount = 0;
   let xmlModDisposedCount = 0;
   let stlDisposedCount = 0;
-  const { isViewerRuntimeCreated, getViewerRuntime } = await import('../viewer/viewerRuntime.js');
+  const { isViewerRuntimeCreated, getViewerRuntime } =
+    await import('../../viewer/viewerRuntime.js');
   if (!isCurrentCleanup()) return false;
   if (isViewerRuntimeCreated()) {
     try {
@@ -142,11 +116,13 @@ export async function cleanupBeforeOpenNewProject(
       cleanupViewerContext = ctx;
       // Preserve tree expansion before disposing the scene (camera is not restored).
       try {
-        const { saveViewState } = await import('./viewStateStore.js');
+        const { saveViewState } = await import('../../services/viewStateStore.js');
+        if (!isCurrentCleanup()) return false;
         saveViewState(state);
       } catch {
         /* best effort */
       }
+      if (!isCurrentCleanup()) return false;
       sampleBeforeCleanup(ctx);
 
       // 合并 state.loadedModels 中记录的 runtime ID 与 ctx.fragments.list 的 key
@@ -165,6 +141,7 @@ export async function cleanupBeforeOpenNewProject(
 
       attemptedCount = ids.size;
       for (const modelId of ids) {
+        if (!isCurrentCleanup()) return false;
         try {
           if (fragments) await fragments.core.disposeModel(modelId);
           if (!isCurrentCleanup()) return false;
@@ -173,6 +150,8 @@ export async function cleanupBeforeOpenNewProject(
           logger.warn('[Cleanup] dispose model failed:', modelId, err);
         }
       }
+
+      if (!isCurrentCleanup()) return false;
 
       // Fragments clears its shared coordinate anchor only after the last
       // asynchronous model disposal. Never let the next open race that reset.
@@ -196,13 +175,13 @@ export async function cleanupBeforeOpenNewProject(
         disposeOwnedXmlModMaterials,
         disposeSharedXmlModMaterials,
         disposeSharedXmlModGeometries,
-      } = await import('../viewer/xmlModLoader.js');
-      const { disposeStlGroup } = await import('../viewer/stlLoader.js');
+      } = await import('../../viewer/xmlModLoader.js');
+      const { disposeStlGroup } = await import('../../viewer/stlLoader.js');
       const {
         disposeDevGlbTemplatePool,
         DEV_GLB_TEMPLATE_PLACEMENT_USER_DATA_KEY,
         DEV_GLB_EXCLUSIVE_PLACEMENT_USER_DATA_KEY,
-      } = await import('./devGlbTemplateRuntime.js');
+      } = await import('../../services/devGlbTemplateRuntime.js');
       if (!isCurrentCleanup()) return false;
 
       // 遍历 MOD 图层中的子 Group
@@ -274,7 +253,7 @@ export async function cleanupBeforeOpenNewProject(
 
       // ---- 3. 重置高亮 ----
       try {
-        const { resetHighlight } = await import('../viewer/highlight.js');
+        const { resetHighlight } = await import('../../viewer/highlight.js');
         if (!isCurrentCleanup()) return false;
         await resetHighlight(ctx, state, isCurrentCleanup);
         if (!isCurrentCleanup()) return false;
@@ -287,6 +266,7 @@ export async function cleanupBeforeOpenNewProject(
   }
   // A project can have semantic/geometry state without a created viewer (for
   // example a partially failed open).  Still record the ownership checkpoint.
+  if (!isCurrentCleanup()) return false;
   sampleBeforeCleanup();
   debugLog(
     DEBUG_RUNTIME_LOGS,
@@ -312,17 +292,17 @@ export async function cleanupBeforeOpenNewProject(
   // ---- 5. 重置 state ----
   // 必须在 dispose 之后执行：resetGimState 会清空 state.loadedModels 索引
   // resetGimState 是集中 mutator，已包含 loadedModels.clear / highlightedItems=null / hasFittedCamera=false
-  if (!isCurrentCleanup()) return false;
-  state.resetGimState(false);
+  if (!state.finishProjectCleanup(cleanupGeneration, closing)) return false;
   // 用户主动关闭工程时撤销加载遮罩；切换到新工程的清理不能隐藏新工程刚
   // 显示的进度（expectedGeneration 有值表示本次清理服务于一次新的打开）。
-  if (expectedGeneration === undefined) {
+  if (closing) {
     try {
-      const { hideLoading } = await import('./gimOpenCore.js');
+      const { hideLoading } = await import('../../services/gimOpenCore.js');
       if (isCurrentCleanup()) hideLoading();
     } catch {
       /* best effort */
     }
+    if (!isCurrentCleanup()) return false;
     window.dispatchEvent(new CustomEvent('gim:project-closed'));
   }
   if (shouldCaptureSubstationResources && isCurrentCleanup()) {

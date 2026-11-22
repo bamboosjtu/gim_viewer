@@ -1,27 +1,11 @@
-import type { SubstationFineQueue } from './selectionContracts.js';
-import type { ProjectSelectionState } from './projectSelectionState.js';
+import type { SubstationFineQueue, ViewerSelectionState } from './selectionContracts.js';
 import type { IfcRuntimeState } from './ifcRuntimeState.js';
 import type * as THREE from 'three';
 
 import type { ProjectLoadSession } from './projectSession.js';
 
 export interface ViewerState {
-  selection: Pick<
-    ProjectSelectionState,
-    | 'onlySelected'
-    | 'hoverCleanup'
-    | 'selectionDecorationCleanup'
-    | 'selectionVisibility'
-    | 'selectionHighlightRequestId'
-    | 'highlightedItems'
-    | 'highlightedModState'
-    | 'representationSelection'
-    | 'selectionRequest'
-    | 'beginSelection'
-    | 'isCurrentSelection'
-    | 'canAutoLocate'
-    | 'selectionGuard'
-  >;
+  selection: ViewerSelectionState;
   ifc: Pick<
     IfcRuntimeState,
     | 'runtimeModelIds'

@@ -1,5 +1,5 @@
 import {it,expect,vi} from 'vitest';
-import {AppState} from '../../app/state.js';
+import {AppState} from '../../state.js';
 
 it('rejects delayed reads after replacement without exposing the result to a commit',async()=>{
   const state=new AppState(),scope=state.sessionScope(state.activateProject(1,'a')),commit=vi.fn();
@@ -22,7 +22,7 @@ it('guards publication even when replacement runs between preparation and the ca
 it('freezes tokens, keeps geometry replacement independent and refuses outgoing commits before disposal',()=>{
   const state=new AppState(),session=state.activateProject(1,'a'),scope=state.sessionScope(session),commit=vi.fn();
   expect(Object.isFrozen(session)).toBe(true);
-  state.geometryLoadToken++;
+  state.advanceGeometryBatch();
   expect(state.withSession(session,()=>{commit();})).toBe(true);
   const release=vi.fn(()=>{expect(state.withSession(session,()=>{commit();})).toBe(false);});
   scope.own(release);

@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.js';
 /**
  * 缓存管理 UI（M4-D2）
  *
@@ -10,10 +11,15 @@
  * 仅在 Tauri 模式下可用。
  */
 
-import { readProjectCaches, readCacheDatabasePath, checkProjectCache, readCachedProjectReport,
-  removeProjectCache, type ProjectCacheSummary } from '../services/projectCacheService.js';
+import {
+  readProjectCaches,
+  readCacheDatabasePath,
+  checkProjectCache,
+  readCachedProjectReport,
+  removeProjectCache,
+  type ProjectCacheSummary,
+} from '../services/projectCacheService.js';
 import { escapeHtml } from '../shared/html.js';
-import type { AppState } from '../app/state.js';
 
 let modalEl: HTMLElement | null = null;
 const listRequests = new WeakMap<HTMLElement, number>();
@@ -75,10 +81,14 @@ function createProjectRow(project: ProjectCacheSummary): HTMLElement {
   const row = document.createElement('div');
   row.className = 'cache-card';
 
-  const typeLabel = project.projectType === 'transmission_line' ? '线路'
-    : project.projectType === 'substation' ? '变电'
-    : project.projectType === 'equipment' ? '设备'
-    : '(未识别)';
+  const typeLabel =
+    project.projectType === 'transmission_line'
+      ? '线路'
+      : project.projectType === 'substation'
+        ? '变电'
+        : project.projectType === 'equipment'
+          ? '设备'
+          : '(未识别)';
   const versionLabel = project.parserVersion ?? '未发布';
   const sizeLabel = formatSize(project.size);
   const timeLabel = formatTime(project.updatedAt);
@@ -110,8 +120,10 @@ function createProjectRow(project: ProjectCacheSummary): HTMLElement {
 
 /** 加载并渲染项目列表 */
 async function loadProjects(listContainer: HTMLElement): Promise<void> {
-  const request = (listRequests.get(listContainer) ?? 0) + 1; listRequests.set(listContainer, request);
-  const countEl = listContainer.closest('.cache-body')?.querySelector<HTMLElement>('#cache-mgr-count') ?? null;
+  const request = (listRequests.get(listContainer) ?? 0) + 1;
+  listRequests.set(listContainer, request);
+  const countEl =
+    listContainer.closest('.cache-body')?.querySelector<HTMLElement>('#cache-mgr-count') ?? null;
   listContainer.innerHTML = '<div class="cache-empty">加载中…</div>';
   const result = await readProjectCaches();
   if (!listContainer.isConnected || listRequests.get(listContainer) !== request) return;
@@ -119,7 +131,8 @@ async function loadProjects(listContainer: HTMLElement): Promise<void> {
     const projects = result.value;
     if (countEl) countEl.textContent = `${projects.length} 个项目`;
     if (projects.length === 0) {
-      listContainer.innerHTML = '<div class="cache-empty">暂无缓存项目。打开 .gim 文件后会自动创建缓存。</div>';
+      listContainer.innerHTML =
+        '<div class="cache-empty">暂无缓存项目。打开 .gim 文件后会自动创建缓存。</div>';
       return;
     }
     listContainer.innerHTML = '';
@@ -133,7 +146,11 @@ async function loadProjects(listContainer: HTMLElement): Promise<void> {
 }
 
 /** 绑定事件（事件委托） */
-function bindEvents(modal: HTMLElement, onRefresh: () => void, state?: AppState): void {
+function bindEvents(
+  modal: HTMLElement,
+  onRefresh: () => void,
+  openProject?: (projectId: number) => Promise<void>,
+): void {
   // 关闭按钮
   const closeBtn = modal.querySelector('#cache-mgr-close') as HTMLButtonElement;
   const doneBtn = modal.querySelector('#cache-mgr-done') as HTMLButtonElement;
@@ -161,24 +178,30 @@ function bindEvents(modal: HTMLElement, onRefresh: () => void, state?: AppState)
     if (!target || target.disabled || !modal.isConnected) return;
 
     if (target.classList.contains('cache-mgr-open')) {
-      if (!state) return;
+      if (!openProject) return;
       const projectId = Number(target.dataset.projectId);
       target.textContent = '打开中...';
-      if (modalEl) { document.body.removeChild(modalEl); modalEl = null; }
+      if (modalEl) {
+        document.body.removeChild(modalEl);
+        modalEl = null;
+      }
       try {
-        const { openGimProjectFromId } = await import('../services/openGimService.js');
-        await openGimProjectFromId(state, () => {}, projectId);
+        await openProject(projectId);
       } catch (err) {
-        console.error('[缓存管理] 打开工程失败:', err);
+        logger.error('[缓存管理] 打开工程失败:', err);
         target.textContent = '打开失败';
-        setTimeout(() => { target.textContent = '打开工程'; }, 2000);
+        setTimeout(() => {
+          target.textContent = '打开工程';
+        }, 2000);
       }
       return;
     }
 
     if (target.classList.contains('cache-mgr-validate')) {
       const projectId = Number(target.dataset.projectId);
-      const statusEl = modal.querySelector<HTMLElement>(`.cache-mgr-status[data-project-id="${projectId}"]`);
+      const statusEl = modal.querySelector<HTMLElement>(
+        `.cache-mgr-status[data-project-id="${projectId}"]`,
+      );
       target.textContent = '校验中...';
       target.disabled = true;
       const result = await checkProjectCache(projectId);
@@ -193,7 +216,10 @@ function bindEvents(modal: HTMLElement, onRefresh: () => void, state?: AppState)
     }
 
     // 复制诊断 JSON
-    if (target.classList.contains('cache-mgr-diag') || target.classList.contains('cache-mgr-diag-summary')) {
+    if (
+      target.classList.contains('cache-mgr-diag') ||
+      target.classList.contains('cache-mgr-diag-summary')
+    ) {
       const projectId = Number(target.dataset.projectId);
       const format = target.classList.contains('cache-mgr-diag') ? 'json' : 'summary';
       const label = format === 'json' ? '复制诊断 JSON' : '复制摘要';
@@ -202,7 +228,10 @@ function bindEvents(modal: HTMLElement, onRefresh: () => void, state?: AppState)
       const result = await readCachedProjectReport(projectId, format);
       if (!modal.isConnected) return;
       if (!result.ok) {
-        target.textContent = '读取失败'; target.title = result.message; target.disabled = false; return;
+        target.textContent = '读取失败';
+        target.title = result.message;
+        target.disabled = false;
+        return;
       }
       try {
         await navigator.clipboard.writeText(result.value);
@@ -212,7 +241,9 @@ function bindEvents(modal: HTMLElement, onRefresh: () => void, state?: AppState)
         target.title = err instanceof Error ? err.message : String(err);
       }
       target.disabled = false;
-      setTimeout(() => { if (modal.isConnected) target.textContent = label; }, 2000);
+      setTimeout(() => {
+        if (modal.isConnected) target.textContent = label;
+      }, 2000);
       return;
     }
 
@@ -220,7 +251,11 @@ function bindEvents(modal: HTMLElement, onRefresh: () => void, state?: AppState)
     if (target.classList.contains('cache-mgr-delete')) {
       const projectId = Number(target.dataset.projectId);
       const projectName = target.dataset.projectName ?? '';
-      if (!confirm(`确认删除项目 "${projectName}" (ID: ${projectId}) 的全部缓存？\n\n此操作将：\n- 删除数据库中的所有索引记录\n- 尝试删除磁盘缓存文件\n\n注意：如果删除的是当前正在查看的工程，当前视图不会立即关闭；\n重新打开该 GIM 时会重新解压并重建缓存。\n\n不可恢复。`)) {
+      if (
+        !confirm(
+          `确认删除项目 "${projectName}" (ID: ${projectId}) 的全部缓存？\n\n此操作将：\n- 删除数据库中的所有索引记录\n- 尝试删除磁盘缓存文件\n\n注意：如果删除的是当前正在查看的工程，当前视图不会立即关闭；\n重新打开该 GIM 时会重新解压并重建缓存。\n\n不可恢复。`,
+        )
+      ) {
         return;
       }
       target.textContent = '删除中...';
@@ -230,7 +265,9 @@ function bindEvents(modal: HTMLElement, onRefresh: () => void, state?: AppState)
       if (result.ok) {
         target.textContent = '已删除 ✓';
         // 刷新列表
-        setTimeout(() => { if (modal.isConnected) onRefresh(); }, 500);
+        setTimeout(() => {
+          if (modal.isConnected) onRefresh();
+        }, 500);
       } else {
         target.textContent = '删除失败';
         target.title = result.message;
@@ -246,19 +283,25 @@ function bindEvents(modal: HTMLElement, onRefresh: () => void, state?: AppState)
  *
  * 仅在 Tauri 模式下可用。如果已打开则不重复创建。
  */
-export async function openCacheManager(state?: AppState): Promise<void> {
+export async function openCacheManager(
+  openProject?: (projectId: number) => Promise<void>,
+): Promise<void> {
   if (modalEl) return; // 已打开
 
-  const modal = createModal(); modalEl = modal;
+  const modal = createModal();
+  modalEl = modal;
   const dbPathEl = modal.querySelector('#cache-mgr-dbpath') as HTMLElement;
   const listEl = modal.querySelector('#cache-mgr-list') as HTMLElement;
 
   const refresh = () => loadProjects(listEl);
   // Closing and refreshing remain available while either independent read waits.
-  bindEvents(modal, refresh, state);
-  await Promise.all([refresh(), readCacheDatabasePath().then(result => {
-    if (modalEl !== modal || !modal.isConnected) return;
-    dbPathEl.textContent = result.ok ? result.value : result.message;
-    if (!result.ok) dbPathEl.style.color = '#f44336';
-  })]);
+  bindEvents(modal, refresh, openProject);
+  await Promise.all([
+    refresh(),
+    readCacheDatabasePath().then((result) => {
+      if (modalEl !== modal || !modal.isConnected) return;
+      dbPathEl.textContent = result.ok ? result.value : result.message;
+      if (!result.ok) dbPathEl.style.color = '#f44336';
+    }),
+  ]);
 }

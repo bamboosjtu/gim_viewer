@@ -15,6 +15,10 @@
 
 调用方可以继续从既有入口导入公开函数和类型；内部模块直接引用实际实现和小型契约，不反向依赖入口文件。Tauri 命令名、IPC 数据结构、缓存键和版本不因文件拆分而改变。
 
+## 工程会话与组合根
+
+`app/session/projectSessionState` 管理工程和几何的独立代次、会话作用域、打开意图与 Viewer 清理交接。`ProjectSelectionState` 管理选择请求及释放，Viewer 使用共享窄契约。`app/composition/projectRuntimes` 按来源路由 Feature。`bindProjectShell` 将打开、关闭和最近工程接到对应操作，业务模块通过端口发布展示结果。
+
 ## Worker 通信
 
 `infrastructure/workers` 持有工程 Worker 的创建、消息协议、传输编解码与请求释放。`SessionScope` 取消时，客户端解除监听、清除待处理请求及其定时器并终止 Worker。工程服务继续负责同一工程内的构建替换与结果发布。工程、线路与变电 Spatial Worker 复用 `WorkerRequests`，各业务保留自己的计算和回退。

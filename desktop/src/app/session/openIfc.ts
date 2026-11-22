@@ -1,10 +1,10 @@
-import { projectPresentation } from './projectPresentationPort.js';
-import { projectOpenPresentation } from './projectOpenPresentationPort.js';
-import { scheduleHideLoading, showLoading, hideLoading } from './gimOpenCore.js';
-import type { AppState } from '../app/state.js';
+import { projectPresentation } from '../../services/projectPresentationPort.js';
+import { projectOpenPresentation } from '../../services/projectOpenPresentationPort.js';
+import { scheduleHideLoading, showLoading, hideLoading } from '../../services/gimOpenCore.js';
+import type { AppState } from '../state.js';
 import { isTauri } from '@desktop/runtime.js';
 import { openIfcFilePaths } from '@desktop/fileDialog.js';
-import { logger } from '../utils/logger.js';
+import { logger } from '../../utils/logger.js';
 
 /** File choice belongs to UI; loading and source/session ownership belong here. */
 export async function openIfcWithDialog(
@@ -13,11 +13,19 @@ export async function openIfcWithDialog(
 ): Promise<void> {
   const native = isTauri(),
     presentation = projectOpenPresentation();
+  const session = state.captureProjectSession();
+  if (!state.isCurrentSession(session)) return;
   const paths = native ? await openIfcFilePaths() : null,
     files = native ? null : await presentation.chooseIfc();
-  if (native ? !paths?.length : !files?.length) return;
-  const session = state.captureProjectSession();
+  if (!state.isCurrentSession(session) || (native ? !paths?.length : !files?.length)) return;
+  const scope = state.sessionScope(session);
+  const ownsControls = state.projectSession.claimAttachmentControls();
   presentation.setBusy('ifc', true);
+  const releaseControls = scope.own(() => {
+    if (!ownsControls()) return;
+    if (!native) presentation.resetInput('ifc');
+    presentation.setBusy('ifc', false);
+  });
   try {
     showLoading('正在加载 3D 引擎...');
     const [
@@ -25,13 +33,13 @@ export async function openIfcWithDialog(
       { ensureEngineReady, loadStandaloneIfc },
       { fitCameraToScene },
     ] = await Promise.all([
-      import('./viewerUIBinding.js'),
-      import('../viewer/ifcLoader.js'),
-      import('../viewer/camera.js'),
+      import('../../services/viewerUIBinding.js'),
+      import('../../viewer/ifcLoader.js'),
+      import('../../viewer/camera.js'),
     ]);
     const runtime = await getViewerRuntimeWithUI(state, showMessage);
     if (!state.isCurrentSession(session)) return;
-    const reader = native ? await import('../infrastructure/native/fileReader.js') : undefined;
+    const reader = native ? await import('../../infrastructure/native/fileReader.js') : undefined;
     await ensureEngineReady(runtime.ctx, state, runtime.modelCallbacks);
     if (!state.isCurrentSession(session)) return;
     const sources = native
@@ -77,8 +85,7 @@ export async function openIfcWithDialog(
     showLoading(`IFC 加载失败: ${error instanceof Error ? error.message : String(error)}`);
     scheduleHideLoading(() => state.isCurrentSession(session), 3000);
   } finally {
-    if (!native) presentation.resetInput('ifc');
-    presentation.setBusy('ifc', false);
-    if (state.isCurrentSession(session)) hideLoading();
+    releaseControls();
+    if (scope.isCurrent() && ownsControls()) hideLoading();
   }
 }

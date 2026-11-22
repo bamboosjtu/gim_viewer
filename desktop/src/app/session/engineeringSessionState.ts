@@ -1,8 +1,8 @@
 /** Published engineering results and their worker/listener ownership for one project lifecycle. */
 export class EngineeringSessionState {
-  sources: import('../gim/engineering/buildSources.js').EngineeringSources | null = null;
-  snapshot: import('../engineering/types.js').EngineeringSnapshot | null = null;
-  navigation: import('../gim/engineering/navigation.js').EngineeringNavigationData | null = null;
+  sources: import('../../gim/engineering/buildSources.js').EngineeringSources | null = null;
+  snapshot: import('../../engineering/types.js').EngineeringSnapshot | null = null;
+  navigation: import('../../gim/engineering/navigation.js').EngineeringNavigationData | null = null;
   navigationCacheHit = false;
   treeStatus: 'none' | 'loading' | 'ready' | 'error' = 'none';
   ifcGeometryFinished = false;
@@ -15,7 +15,7 @@ export class EngineeringSessionState {
     'none';
   pipelineMetrics:
     | (NonNullable<
-        import('../infrastructure/workers/engineeringWorkerProtocol.js').EngineeringBuildResult['metrics']
+        import('../../infrastructure/workers/engineeringWorkerProtocol.js').EngineeringBuildResult['metrics']
       > & {
         caches: Array<{
           domain: string;

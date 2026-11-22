@@ -1,17 +1,18 @@
-import type { Material, Mesh, Object3D } from 'three';
-import type { ProjectLoadSession } from './projectSession.js';
+import type { ProjectLoadSession } from '../../shared/projectSession.js';
 import type {
   SelectionRequest,
   EngineeringSelectionScope,
   SelectionCommitGuard,
   SelectionGeometryState,
   SelectionVisibilityController,
-} from './selectionContracts.js';
-import type { DeviceRuntime } from './deviceRuntime.js';
-import type { IfcRegionalRuntime } from '../viewer/ifcRegionalRuntime.js';
-import type { EngineeringSnapshot } from '../engineering/types.js';
-import { logger } from '../utils/logger.js';
-import { reportBackgroundError } from '../utils/backgroundErrors.js';
+  ModHighlightState,
+  ViewerSelectionState,
+} from '../../shared/selectionContracts.js';
+import type { DeviceRuntime } from '../../shared/deviceRuntime.js';
+import type { IfcRegionalRuntime } from '../../viewer/ifcRegionalRuntime.js';
+import type { EngineeringSnapshot } from '../../engineering/types.js';
+import { logger } from '../../utils/logger.js';
+import { reportBackgroundError } from '../../utils/backgroundErrors.js';
 interface SelectionHost {
   captureSession(): ProjectLoadSession;
   isCurrentSession(session: ProjectLoadSession): boolean;
@@ -23,7 +24,7 @@ interface SelectionHost {
   recordVisibility(): void;
 }
 /** User selection owns cancellation and feedback independently of project source data. */
-export class ProjectSelectionState {
+export class ProjectSelectionState implements ViewerSelectionState {
   constructor(private readonly host: SelectionHost) {}
   onlySelected = false;
   autoLocate = true;
@@ -32,10 +33,7 @@ export class ProjectSelectionState {
   selectionVisibility: SelectionVisibilityController | null = null;
   selectionHighlightRequestId: number | null = null;
   highlightedItems: Readonly<Record<string, Iterable<number>>> | null = null;
-  highlightedModState: {
-    groups: Object3D[];
-    originalMaterials: Map<Mesh, Material | Material[]>;
-  } | null = null;
+  highlightedModState: ModHighlightState | null = null;
 
   /** The Viewer restores and disposes material clones before project reset. */
   resetHighlightState(): void {
@@ -45,7 +43,7 @@ export class ProjectSelectionState {
 
   engineeringSelection: EngineeringSelectionScope | null = null;
   representationSelection:
-    import('../shared/representationSelection.js').RepresentationSelectionScope | null = null;
+    import('../../shared/representationSelection.js').RepresentationSelectionScope | null = null;
   engineeringSelectionCleanup: (() => void) | null = null;
   selectionRequest: SelectionRequest | null = null;
   selectionGeometry: SelectionGeometryState | null = null;
@@ -56,6 +54,17 @@ export class ProjectSelectionState {
     target: SelectionRequest['target'],
     origin: SelectionRequest['origin'] = 'tree',
   ): SelectionRequest {
+    const session = this.host.captureSession();
+    if (!this.host.isCurrentSession(session)) {
+      return {
+        id: this.selectionSequence,
+        session,
+        signal: AbortSignal.abort(),
+        target,
+        origin,
+        cameraNavigationVersion: this.host.cameraNavigationVersion(),
+      };
+    }
     this.hoverCleanup?.();
     this.selectionAbort?.abort();
     // While a new target is resolving, the previous isolated range remains
@@ -74,7 +83,7 @@ export class ProjectSelectionState {
     this.selectionAbort = new AbortController();
     const request: SelectionRequest = {
       id: ++this.selectionSequence,
-      session: this.host.captureSession(),
+      session,
       signal: this.selectionAbort.signal,
       target,
       origin,
@@ -112,18 +121,26 @@ export class ProjectSelectionState {
     };
   }
   invalidateSelection(): void {
-    this.selectionAbort?.abort();
-    for (const runtime of this.host.runtimes()) {
-      runtime.clearFineSelection?.();
-      runtime.clearSelectionFilter?.();
-    }
-    this.selectionSequence++;
+    const controller = this.selectionAbort;
+    this.selectionAbort = null;
+    const sequence = ++this.selectionSequence;
     this.selectionRequest = null;
     this.engineeringSelection = null;
     this.representationSelection = null;
-    this.host.applyGeometryFilter();
     this.selectionGeometry = null;
     this.selectionMessage = '';
+    controller?.abort();
+    if (this.selectionSequence !== sequence) return;
+    for (const runtime of this.host.runtimes()) {
+      if (this.selectionSequence !== sequence) return;
+      try {
+        runtime.clearFineSelection?.();
+        runtime.clearSelectionFilter?.();
+      } catch (error) {
+        logger.error('[Selection] release failed', error);
+      }
+    }
+    if (this.selectionSequence === sequence) this.host.applyGeometryFilter();
   }
   get canIsolateSelection(): boolean {
     const request = this.selectionRequest,
@@ -152,12 +169,13 @@ export class ProjectSelectionState {
     ).catch(reportBackgroundError);
     this.host.recordVisibility();
   }
-  releaseDecorations(): void {
+  releaseDecorations(current: () => boolean): void {
     for (const key of [
       'hoverCleanup',
       'selectionDecorationCleanup',
       'engineeringSelectionCleanup',
     ] as const) {
+      if (!current()) return;
       const cleanup = this[key];
       this[key] = null;
       try {

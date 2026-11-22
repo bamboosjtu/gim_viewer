@@ -1,27 +1,25 @@
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import { bindMeasurementSession } from '../measurement/runtime.js';
-import { configurePresentation } from './presentationBindings.js';
+import { configurePresentation } from './composition/presentationBindings.js';
 import { AppState } from './state.js';
 import { setupTabs } from '../ui/tabs.js';
-import { btnLoadGim, btnLoadLocal, btnClear, btnCacheManager, assertShellDom } from '../ui/dom.js';
+import { assertShellDom } from '../ui/dom.js';
 import { isTauri } from '@desktop/runtime.js';
 import { DEBUG_FRAGMENTS } from '../config/debug.js';
-import { debugWarn } from '../utils/logger.js';
+import { debugWarn, logger } from '../utils/logger.js';
 import { summarizeDiagnostic } from '../shared/diagnosticSummary.js';
 import { summarizeBasemapStatus } from '../services/basemapStatusService.js';
-import { setStatusRight } from '../ui/shell/statusBar.js';
-import { registerPropertyReferenceHandler } from '../ui/propertyDictionary.js';
 import { setupPropsDrawerInteractions } from '../ui/propsDrawer.js';
 import { showLoading, hideLoading } from '../services/gimOpenCore.js';
 import { setupIfcDetailModeControl } from '../ui/ifcDetailModeControl.js';
-import { setupViewerShell } from '../ui/shell/viewerShell.js';
+import { bindProjectShell } from './composition/bindProjectShell.js';
 
 /** 异步启动逻辑（轻量，不加载 3D 引擎） */
 async function bootstrapAsync(): Promise<void> {
   assertShellDom();
   configurePresentation();
   const state = new AppState();
-  bindMeasurementSession(()=>state.captureProjectSession());
+  bindMeasurementSession(() => state.captureProjectSession());
 
   // 仅供本地 Playwright acceptance harness 读取当前工程所有权计数；
   // 不参与业务判断、缓存键或调度行为。
@@ -33,9 +31,10 @@ async function bootstrapAsync(): Promise<void> {
   if (import.meta.env.DEV) {
     const target = globalThis as { __GIM_DEV_BOOT_ID__?: string };
     const webCrypto = globalThis.crypto;
-    target.__GIM_DEV_BOOT_ID__ = typeof webCrypto?.randomUUID === 'function'
-      ? webCrypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    target.__GIM_DEV_BOOT_ID__ =
+      typeof webCrypto?.randomUUID === 'function'
+        ? webCrypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   }
 
   // WebView Long Task 统计从首屏开始记录；perfReset 会在工程切换时重建
@@ -49,7 +48,7 @@ async function bootstrapAsync(): Promise<void> {
     const { loadAppSettings } = await import('../services/appSettings.js');
     await loadAppSettings();
   } catch (error) {
-    console.warn('[settings] 加载应用设置失败:', error);
+    logger.warn('[settings] 加载应用设置失败:', error);
   }
 
   // 全局 unhandledrejection 监听（仅 Fragments 相关）：
@@ -58,7 +57,7 @@ async function bootstrapAsync(): Promise<void> {
   // - 开发模式（DEBUG_FRAGMENTS=true）：输出完整 warning 堆栈，便于定位
   // - 生产模式（DEBUG_FRAGMENTS=false）：静默 preventDefault，不刷屏
   window.addEventListener('unhandledrejection', (event) => {
-    const reason = event.reason;
+    const reason: unknown = event.reason;
     const msg = reason instanceof Error ? reason.message : String(reason);
     if (msg.includes('Malformed tile') || msg.includes('Fragments')) {
       debugWarn(DEBUG_FRAGMENTS, '[Global] caught fragments unhandled rejection', reason);
@@ -72,75 +71,7 @@ async function bootstrapAsync(): Promise<void> {
   // 属性检查器在变电工程会由 Viewer 装配；线路工程不创建 Viewer，
   // 因此必须在轻量启动阶段先安装页签/来源按钮的纯 DOM 事件委托。
   setupPropsDrawerInteractions();
-  setupViewerShell(state);
-
-  // 属性面板中的来源按钮统一走工程路由：正文不暴露 GUID 文件名，
-  // 点击后再定位到线路业务树或变电 CBM/IFC 节点。
-  registerPropertyReferenceHandler((detail) => {
-    if (state.currentProjectType === 'transmission_line') {
-      void import('../ui/lineProjectView.js').then(({ handleLinePropertyReference }) => {
-        handleLinePropertyReference(detail);
-      }).catch((error) => console.warn('[属性引用] 线路路由加载失败:', error));
-      return true;
-    }
-    if (state.currentProjectType === 'substation' || state.currentProjectType === 'equipment') {
-      void import('../ui/cbmTreeView.js').then(({ handleSubstationPropertyReference }) => {
-        handleSubstationPropertyReference(state, detail, (text) => setStatusRight(text));
-      }).catch((error) => console.warn('[属性引用] 变电路由加载失败:', error));
-      return true;
-    }
-    return false;
-  });
-
-  // 打开 GIM：对话框立即弹出，3D 延迟到需要时
-  btnLoadGim.addEventListener('click', async () => {
-    try {
-      const { openGimWithDialog } = await import('../services/openGimService.js');
-      await openGimWithDialog(state, (text) => showLoading(text));
-    } catch (err) {
-      console.error(err);
-      showLoading(`加载失败: ${err instanceof Error ? err.message : String(err)}`);
-      setTimeout(hideLoading, 3000);
-    }
-  });
-
-  // 打开 IFC：对话框立即弹出，3D 延迟到需要时
-  btnLoadLocal.addEventListener('click', async () => {
-    try {
-      const { openIfcWithDialog } = await import('../services/openIfcService.js');
-      await openIfcWithDialog(state, (text) => showLoading(text));
-    } catch (err) {
-      console.error(err);
-      showLoading(`加载失败: ${err instanceof Error ? err.message : String(err)}`);
-      setTimeout(hideLoading, 3000);
-    }
-  });
-
-  // 清空场景
-  btnClear.addEventListener('click', async () => {
-    // 统一走 cleanupBeforeOpenNewProject：销毁线路地图 + dispose 所有 fragments 模型
-    // （合并 state.loadedModels 与 ctx.fragments.list，避免 state 与 ctx 不同步）+
-    // 重置高亮 + 清空所有 UI 面板 + resetGimState（集中 mutator，含 loadedModels.clear）
-    const { cleanupBeforeOpenNewProject } = await import('../services/projectCleanupService.js');
-    await cleanupBeforeOpenNewProject(state);
-  });
-
-  // 缓存管理（M4-D2）：仅 Tauri 模式可用
-  btnCacheManager.addEventListener('click', async () => {
-    if (!isTauri()) {
-      showLoading('缓存管理仅在桌面版可用');
-      setTimeout(hideLoading, 2000);
-      return;
-    }
-    try {
-      const { openCacheManager } = await import('../ui/cacheManagerView.js');
-      await openCacheManager(state);
-    } catch (err) {
-      console.error('[缓存管理] 打开失败:', err);
-      showLoading(`打开缓存管理失败: ${err instanceof Error ? err.message : String(err)}`);
-      setTimeout(hideLoading, 3000);
-    }
-  });
+  bindProjectShell(state);
 
   // 首屏 UI 就绪，隐藏 loading
   hideLoading();
@@ -148,10 +79,14 @@ async function bootstrapAsync(): Promise<void> {
   // Persist tree expansion when the window closes; camera is intentionally not
   // restored for substation (default open is the station overview).
   window.addEventListener('beforeunload', () => {
-    void import('../services/viewStateStore.js').then(({ saveViewState }) => {
-      if (state.currentProjectType !== 'substation') return;
-      saveViewState(state);
-    }).catch(() => { /* best effort */ });
+    void import('../services/viewStateStore.js')
+      .then(({ saveViewState }) => {
+        if (state.currentProjectType !== 'substation') return;
+        saveViewState(state);
+      })
+      .catch(() => {
+        /* best effort */
+      });
   });
 
   // Tauri 模式：显示窗口（配置了 visible:false，消除白屏）
@@ -160,7 +95,7 @@ async function bootstrapAsync(): Promise<void> {
       const { getCurrentWindow } = await import('@tauri-apps/api/window');
       await getCurrentWindow().show();
     } catch (err) {
-      console.warn('[Tauri] 显示窗口失败:', err);
+      logger.warn('[Tauri] 显示窗口失败:', err);
     }
 
     // 诊断快捷键：Ctrl+Shift+D → 复制诊断 JSON 到剪贴板 + 控制台输出可读摘要
@@ -170,11 +105,12 @@ async function bootstrapAsync(): Promise<void> {
         const diagnosticSession = state.captureProjectSession();
         try {
           showLoading('正在生成数据库诊断...');
-          const {collectProjectDiagnostic} = await import('../services/projectDiagnosticService.js');
+          const { collectProjectDiagnostic } =
+            await import('../services/projectDiagnosticService.js');
           const snapshot = await collectProjectDiagnostic(state);
           if (!snapshot || !state.isCurrentSession(diagnosticSession)) return;
-          const {diagnostic} = snapshot;
-          const {perfSummary} = await import('../utils/perfTimings.js');
+          const { diagnostic } = snapshot;
+          const { perfSummary } = await import('../utils/perfTimings.js');
           if (!state.isCurrentSession(diagnosticSession)) return;
           const payload = JSON.stringify(snapshot, null, 2);
           // Debug-only performance harness: expose the exact diagnostic payload to
@@ -184,22 +120,30 @@ async function bootstrapAsync(): Promise<void> {
             (globalThis as { __GIM_LAST_DIAGNOSTIC__?: string }).__GIM_LAST_DIAGNOSTIC__ = payload;
           }
           // Keep the collected evidence available if clipboard access fails.
-          console.log('[诊断] 数据库诊断 JSON:\n', payload);
+          logger.log('[诊断] 数据库诊断 JSON:\n', payload);
           await navigator.clipboard.writeText(payload);
           if (!state.isCurrentSession(diagnosticSession)) return;
           // 控制台额外输出人类可读摘要（M4-D1 延伸）
           const summary = summarizeDiagnostic({ diagnostic });
-          console.log('[诊断摘要]\n' + summary);
+          logger.log('[诊断摘要]\n' + summary);
           // M4-A2 Finalization：附加底图状态人类可读摘要
-          console.log('[底图状态]\n' + summarizeBasemapStatus());
-          console.log('[性能埋点]\n' + perfSummary());
-          showLoading(Object.keys(snapshot.diagnosticReadErrors).length ? '诊断已复制，部分数据未取得；详见诊断内容' : '数据库诊断信息已复制到剪贴板');
-          setTimeout(() => { if (state.isCurrentSession(diagnosticSession)) hideLoading(); }, 2000);
+          logger.log('[底图状态]\n' + summarizeBasemapStatus());
+          logger.log('[性能埋点]\n' + perfSummary());
+          showLoading(
+            Object.keys(snapshot.diagnosticReadErrors).length
+              ? '诊断已复制，部分数据未取得；详见诊断内容'
+              : '数据库诊断信息已复制到剪贴板',
+          );
+          setTimeout(() => {
+            if (state.isCurrentSession(diagnosticSession)) hideLoading();
+          }, 2000);
         } catch (err) {
           if (!state.isCurrentSession(diagnosticSession)) return;
-          console.error('[诊断] 生成诊断信息失败:', err);
+          logger.error('[诊断] 生成诊断信息失败:', err);
           showLoading(`诊断失败: ${err instanceof Error ? err.message : String(err)}`);
-          setTimeout(() => { if (state.isCurrentSession(diagnosticSession)) hideLoading(); }, 3000);
+          setTimeout(() => {
+            if (state.isCurrentSession(diagnosticSession)) hideLoading();
+          }, 3000);
         }
       }
     });
@@ -220,13 +164,13 @@ async function bootstrapAsync(): Promise<void> {
           }
           // Keep the measured evidence available when WebView clipboard access
           // is denied or its permission dialog remains pending.
-          console.log('[性能验收] benchmark JSON:\n', payload);
+          logger.log('[性能验收] benchmark JSON:\n', payload);
           await navigator.clipboard.writeText(payload);
-          console.log('[性能验收] benchmark JSON 已复制到剪贴板');
+          logger.log('[性能验收] benchmark JSON 已复制到剪贴板');
           showLoading('性能验收 JSON 已复制到剪贴板');
           setTimeout(hideLoading, 2000);
         } catch (err) {
-          console.error('[性能验收] benchmark JSON 导出失败:', err);
+          logger.error('[性能验收] benchmark JSON 导出失败:', err);
           showLoading(`性能验收导出失败: ${err instanceof Error ? err.message : String(err)}`);
           setTimeout(hideLoading, 3000);
         }
@@ -253,21 +197,23 @@ async function bootstrapAsync(): Promise<void> {
           showLoading('正在复制悬链线参数审计 JSON...');
           const jsonStr = JSON.stringify(payload, null, 2);
           await navigator.clipboard.writeText(jsonStr);
-          const { formatLineCatenaryAuditMarkdown } = await import('../services/lineCatenaryAuditExportService.js');
-          console.log('[M4-B3A] 悬链线参数审计摘要\n' + formatLineCatenaryAuditMarkdown(payload));
-          console.log('[M4-B3A] 完整 JSON 已复制到剪贴板（' + jsonStr.length + ' 字节）');
+          const { formatLineCatenaryAuditMarkdown } =
+            await import('../services/lineCatenaryAuditExportService.js');
+          logger.log('[M4-B3A] 悬链线参数审计摘要\n' + formatLineCatenaryAuditMarkdown(payload));
+          logger.log('[M4-B3A] 完整 JSON 已复制到剪贴板（' + jsonStr.length + ' 字节）');
           showLoading('悬链线参数审计 JSON 已复制');
           setTimeout(hideLoading, 2500);
         } catch (err) {
-          console.error('[M4-B3A] 悬链线参数审计导出失败:', err);
+          logger.error('[M4-B3A] 悬链线参数审计导出失败:', err);
           showLoading(`导出失败: ${err instanceof Error ? err.message : String(err)}`);
           setTimeout(hideLoading, 3000);
         }
       }
     });
   }
-  if(import.meta.env.VITE_GIM_BENCHMARK === '1') {
-    const {installBenchmarkHost}=await import('../measurement/benchmarkHost.js');installBenchmarkHost(state);
+  if (import.meta.env.VITE_GIM_BENCHMARK === '1') {
+    const { installBenchmarkHost } = await import('../measurement/benchmarkHost.js');
+    installBenchmarkHost(state);
   }
 }
 

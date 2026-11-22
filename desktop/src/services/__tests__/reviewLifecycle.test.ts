@@ -14,7 +14,7 @@ describe('session ownership and background requests',()=>{
     state.invalidatePendingLoads();expect(release).toHaveBeenCalledTimes(1);log.mockRestore();
   });
   it('geometry changes do not cancel semantic work',()=>{
-    const state=new AppState(),session=state.activateProject(1,'a');state.geometryLoadToken++;
+    const state=new AppState(),session=state.activateProject(1,'a');state.advanceGeometryBatch();
     expect(state.isCurrentSession(session)).toBe(true);expect(isCurrentGeometry(state,session)).toBe(false);
   });
   it('old publication callbacks cannot overwrite a new session',()=>{

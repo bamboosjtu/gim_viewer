@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { AppState } from '../../app/state.js';
 import type { CbmNode, FileDevEntry, IfcEntry } from '../../gim/types.js';
 import type { StdSldParseResult } from '../stdSldService.js';
-import { onGimExtracted } from '../openGimService.js';
+import { onGimExtracted } from '../../features/substation/application/substationColdSource.js';
 import {perfReset, perfProductMomentSnapshot, perfSnapshot} from '../../utils/perfTimings.js';
 
 const mocks = vi.hoisted(() => ({

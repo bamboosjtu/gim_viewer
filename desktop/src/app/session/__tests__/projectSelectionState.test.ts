@@ -1,6 +1,6 @@
 import {afterEach,expect,it,vi} from 'vitest';
-import {AppState} from '../../app/state.js';
-import {setLogSink} from '../../utils/logger.js';
+import {AppState} from '../../state.js';
+import {setLogSink} from '../../../utils/logger.js';
 
 afterEach(()=>setLogSink());
 

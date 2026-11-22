@@ -1,12 +1,11 @@
-import { ProjectSelectionState } from '../shared/projectSelectionState.js';
+import { ProjectSelectionState } from './session/projectSelectionState.js';
 import { IfcRuntimeState } from '../shared/ifcRuntimeState.js';
 import { SourceGeometryState } from '../shared/sourceGeometryState.js';
 import { IfcLoadingState } from '../shared/ifcLoadingState.js';
-import { logger } from '../utils/logger.js';
 
 import { ProjectPropertyCache } from '../services/projectPropertyCache.js';
 import { ProjectViewState } from '../shared/projectViewState.js';
-import { EngineeringSessionState } from './engineeringSessionState.js';
+import { EngineeringSessionState } from './session/engineeringSessionState.js';
 import { RuntimeSlot } from '../shared/runtimeSlot.js';
 import type { DeviceRuntime } from '../shared/deviceRuntime.js';
 
@@ -19,7 +18,6 @@ import type { StdDocument } from '../gim/stdParser.js';
 import type { SldDocument } from '../gim/sldParser.js';
 import type { StdSldIndex } from '../gim/stdSldIndex.js';
 import type { SubstationSpatialIndex } from '../gim/ifcSpatialParser.js';
-import { isCurrentProject } from '../shared/projectSession.js';
 import type { GeometryDiagnostic } from '../gim/geometry/geometryDiagnostics.js';
 
 import type { SubstationFineQueue } from '../shared/selectionContracts.js';
@@ -48,7 +46,9 @@ export interface SubstationConnectionPreview {
 }
 
 import type { ProjectLoadSession } from '../shared/projectSession.js';
-import { SessionScope } from '../shared/sessionScope.js';
+import type { SessionScope } from '../shared/sessionScope.js';
+import { ProjectSessionState } from './session/projectSessionState.js';
+import { releaseProjectResources } from './session/releaseProjectResources.js';
 export type { ProjectLoadSession } from '../shared/projectSession.js';
 export type {
   SelectionRequest,
@@ -77,8 +77,9 @@ export class AppState {
   readonly properties = new ProjectPropertyCache();
   readonly sourceGeometry = new SourceGeometryState();
   readonly ifcLoading = new IfcLoadingState();
-  readonly sessionDisposables = new Set<() => void>();
-  private projectScope: SessionScope | null = null;
+  readonly projectSession = new ProjectSessionState((current) =>
+    releaseProjectResources(this, current),
+  );
   deviceUnknownBounds = new Set<string>();
   /** Session-owned priority lane for explicit IFC precision requests. */
   substationFineQueue: SubstationFineQueue | null = null;
@@ -138,16 +139,15 @@ export class AppState {
   currentSldDoc: SldDocument | null = null;
   currentStdSldIndex: StdSldIndex | null = null;
 
-  // 当前 GIM 项目数据库 ID（Tauri 缓存命中时使用）
-  currentProjectId: number | null = null;
-  /** 当前源 GIM 的内容身份（SHA-256）。用于防止旧几何缓存跨源复用。 */
-  currentSourceSha256: string | null = null;
-
-  /**
-   * 工程加载代次。每次开始清理/激活工程都会递增；异步任务必须携带
-   * 捕获的代次，避免旧工程在切换后把结果写入新工程。
-   */
-  projectGeneration = 0;
+  get currentProjectId(): number | null {
+    return this.projectSession.currentProjectId;
+  }
+  get currentSourceSha256(): string | null {
+    return this.projectSession.currentSourceSha256;
+  }
+  get projectGeneration(): number {
+    return this.projectSession.projectGeneration;
+  }
 
   // xml-mod Group 跟踪（key = instanceKey；同一 MOD 文件可有多个放置实例）
   // 与 IFC loadedModels 分开管理：xml-mod 不使用 OBC Fragments
@@ -181,116 +181,49 @@ export class AppState {
   // GIM_COORD_OFFSET localStorage 仍可作为手工调试入口。
   projectSourceToViewerMatrix: THREE.Matrix4 | null = null;
 
-  // 后台几何加载 token（递增防竞态：项目切换后旧任务检测 token 不匹配则停止）
-  geometryLoadToken = 0;
+  get geometryLoadToken(): number {
+    return this.projectSession.geometryLoadToken;
+  }
 
-  /** 取得当前工程的不可变身份快照，供异步任务在 await 前后校验。 */
+  advanceGeometryBatch(): void {
+    this.projectSession.advanceGeometryBatch();
+  }
+
   captureProjectSession(): ProjectLoadSession {
-    return Object.freeze({
-      generation: this.projectGeneration,
-      projectId: this.currentProjectId,
-      sourceSha256: this.currentSourceSha256,
-      geometryToken: this.geometryLoadToken,
-    }) as ProjectLoadSession;
+    return this.projectSession.capture();
   }
 
   sessionScope(session: ProjectLoadSession): SessionScope {
-    if (
-      this.projectScope &&
-      this.isCurrentSession(this.projectScope.session) &&
-      this.isCurrentSession(session)
-    )
-      return this.projectScope;
-    const scope = new SessionScope(
-      session,
-      () => this.isCurrentSession(session),
-      (error) => logger.error('[Session] 资源释放失败', error),
-    );
-    if (this.isCurrentSession(session)) this.projectScope = scope;
-    else scope.dispose();
-    return scope;
+    return this.projectSession.scopeFor(session);
   }
 
   withSession(session: ProjectLoadSession, commit: () => undefined): boolean {
     return this.sessionScope(session).withSession(commit);
   }
 
-  private safelyRelease(run: () => void): void {
-    try {
-      run();
-    } catch (error) {
-      logger.error('[Session] 资源释放失败', error);
-    }
-  }
-
-  /** Invalidate first: release callbacks cannot publish into the outgoing session. */
-  invalidatePendingLoads(): void {
-    this.projectGeneration += 1;
-    this.geometryLoadToken += 1;
-    this.releaseSessionResources();
-  }
-
-  private releaseSessionResources(): void {
-    const scope = this.projectScope;
-    this.projectScope = null;
-    if (scope) this.safelyRelease(() => scope.dispose());
-    const disposables = [...this.sessionDisposables];
-    this.sessionDisposables.clear();
-    for (const dispose of disposables) this.safelyRelease(dispose);
-    this.selection.releaseDecorations();
-    this.safelyRelease(() => this.viewState.releaseNavigation());
-    this.safelyRelease(() => this.engineering.release());
-    this.deviceLodRuntime = null;
-    const monitor = this.substationResourceMonitor;
-    this.substationResourceMonitor = null;
-    if (monitor) this.safelyRelease(() => monitor.release());
-    const preview = this.substationConnectionPreview;
-    this.substationConnectionPreview = null;
-    if (preview) this.safelyRelease(() => preview.release());
-    this.substationMemoryPressure = 'unknown';
-    this.substationFineQueue = null;
-    this.substationConnectionPorts = null;
-    this.safelyRelease(() => this.viewState.viewHistory?.clear());
-    this.viewState.stationOverview = null;
-    this.selection.onlySelected = false;
-    this.safelyRelease(() => this.selection.invalidateSelection());
-    this.ifc.releaseRuntimes();
-    this.safelyRelease(() => this.selection.selectionVisibility?.reset());
-    this.selection.selectionHighlightRequestId = null;
+  invalidatePendingLoads(): number {
+    return this.projectSession.invalidate();
   }
 
   activateProject(projectId: number | null, sourceSha256?: string | null): ProjectLoadSession {
-    this.invalidatePendingLoads();
-    this.currentProjectId = projectId;
-    this.currentSourceSha256 = sourceSha256 ?? null;
-    return this.captureProjectSession();
+    return this.projectSession.activate(projectId, sourceSha256);
   }
 
-  /** 检查快照是否仍代表当前工程；几何 token 可单独由后台批次递增。 */
   isCurrentSession(session: ProjectLoadSession): boolean {
-    return isCurrentProject(this, session);
+    return this.projectSession.isCurrent(session);
   }
 
   // 视图已可交互（含 DEV-only）；IFC WASM/worker 的初始化由 ifcLoader 独立管理。
   initialized = false;
   eventsRegistered = false;
 
-  /**
-   * 重置所有 GIM 相关状态（保留引擎初始化状态）。
-   *
-   * 集中 mutator：所有"项目切换 / 清空场景"路径统一调用此方法，
-   * 避免 state 字段在多处分散清理导致漏清。
-   *
-   * 包含：currentFiles / CBM 树 / 索引 / FAM-DEV 缓存 / 线路属性缓存 /
-   *       loadedModels / loadedXmlModGroups / loadedStlGroups / highlightedItems /
-   *       hasFittedCamera / projectSourceToViewerMatrix
-   *
-   * 注意：ifc.reset() 仅清空 state 侧索引，不 dispose Three.js 对象；
-   * ctx.fragments 中的实际模型需由 projectCleanupService 在调用本方法前显式 dispose。
-   */
-  resetGimState(invalidate = true) {
-    if (invalidate) this.invalidatePendingLoads();
-    else this.releaseSessionResources();
+  resetGimState(): void {
+    this.finishProjectCleanup(this.invalidatePendingLoads(), true);
+  }
+
+  /** Scene resources are disposed by projectCleanup before these indexes are cleared. */
+  finishProjectCleanup(generation: number, admitEmptySession: boolean): boolean {
+    if (!this.projectSession.finishCleanup(generation, admitEmptySession)) return false;
     this.engineering.reset();
     this.viewState.reset();
     this.deviceUnknownBounds.clear();
@@ -320,13 +253,11 @@ export class AppState {
     this.currentSldDoc = null;
     this.currentStdSldIndex = null;
 
-    this.currentProjectId = null;
-    this.currentSourceSha256 = null;
     // 相机 fit 状态一并重置，确保新项目加载后 fitCameraToScene 能重新执行
     // （否则切换项目后中间只剩网格，IFC 几何不显示）
 
     this.ifcLoading.reset();
-    // xml-mod Group 的 dispose 由 projectCleanupService 负责（需要 Viewer scene 引用）
+    // xml-mod Group 的 dispose 由工程会话负责（需要 Viewer scene 引用）
     // 这里只清空索引，避免 stale 引用
     this.loadedXmlModGroups.clear();
     this.loadedStlGroups.clear();
@@ -336,5 +267,6 @@ export class AppState {
     // 清空项目级坐标转换矩阵（新项目需重新自动同步或手动设置）
     this.projectSourceToViewerMatrix = null;
     this.selection.resetHighlightState();
+    return true;
   }
 }
