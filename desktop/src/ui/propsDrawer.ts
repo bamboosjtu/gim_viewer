@@ -328,6 +328,57 @@ function countChildGeometryEntries(node: CbmNode): number {
  * 这里不重新扫描 DEV/PHM/MOD；首次打开和 warm manifest 都由 runtime
  * 写入同一 session-local index，避免属性点击反过来制造一条慢解析路径。
  */
+function appendGeometryDiagnosticRows(
+  rows: PropertyRow[],
+  diagnostic: NonNullable<ReturnType<typeof getGeometryDiagnostic>>,
+): void {
+  rows.push({
+    key: '几何状态',
+    value:
+      diagnostic.reason === 'source-invalid'
+        ? '源几何异常'
+        : geometryStatusLabel(diagnostic.status),
+  });
+  rows.push({
+    key: '诊断来源',
+    value:
+      diagnostic.source === 'cold'
+        ? '首次打开/编译'
+        : diagnostic.source === 'warm'
+          ? '缓存 manifest'
+          : '按需回退',
+  });
+  if (diagnostic.reason)
+    rows.push({
+      key: '原因',
+      value:
+        diagnostic.reason === 'source-invalid'
+          ? '模型坐标超出合理范围'
+          : geometryReasonLabel(diagnostic.reason),
+    });
+  if (diagnostic.discoveredModCount != null)
+    rows.push({ key: '发现 MOD/GL', value: String(diagnostic.discoveredModCount) });
+  if (diagnostic.discoveredStlCount != null)
+    rows.push({ key: '发现 STL', value: String(diagnostic.discoveredStlCount) });
+  if (diagnostic.renderableModCount != null)
+    rows.push({ key: '可渲染 MOD/GL', value: String(diagnostic.renderableModCount) });
+  if (diagnostic.renderableStlCount != null)
+    rows.push({ key: '可渲染 STL', value: String(diagnostic.renderableStlCount) });
+  if (diagnostic.emptySourceCount != null && diagnostic.emptySourceCount > 0) {
+    rows.push({ key: '空几何源', value: String(diagnostic.emptySourceCount) });
+  }
+  if (diagnostic.unsupportedSourceCount != null && diagnostic.unsupportedSourceCount > 0) {
+    rows.push({ key: '未支持几何源', value: String(diagnostic.unsupportedSourceCount) });
+  }
+  const unsupportedTypes = Object.entries(diagnostic.unsupportedPrimitiveTypeCounts)
+    .filter(([, count]) => count > 0)
+    .map(([type, count]) => `${type} × ${count}`)
+    .join('、');
+  if (unsupportedTypes) rows.push({ key: '未支持 primitive', value: unsupportedTypes });
+  if (diagnostic.detail && diagnostic.reason !== 'source-invalid')
+    rows.push({ key: '说明', value: diagnostic.detail });
+}
+
 function renderNodeGeometryDiagnostics(state: AppState, node: CbmNode): string {
   const childDevCount = countChildGeometryEntries(node);
   if (
@@ -347,51 +398,7 @@ function renderNodeGeometryDiagnostics(state: AppState, node: CbmNode): string {
     rows.push({ key: '当前选择几何', value: state.selection.selectionGeometry.detail });
   }
   if (diagnostic) {
-    rows.push({
-      key: '几何状态',
-      value:
-        diagnostic.reason === 'source-invalid'
-          ? '源几何异常'
-          : geometryStatusLabel(diagnostic.status),
-    });
-    rows.push({
-      key: '诊断来源',
-      value:
-        diagnostic.source === 'cold'
-          ? '首次打开/编译'
-          : diagnostic.source === 'warm'
-            ? '缓存 manifest'
-            : '按需回退',
-    });
-    if (diagnostic.reason)
-      rows.push({
-        key: '原因',
-        value:
-          diagnostic.reason === 'source-invalid'
-            ? '模型坐标超出合理范围'
-            : geometryReasonLabel(diagnostic.reason),
-      });
-    if (diagnostic.discoveredModCount != null)
-      rows.push({ key: '发现 MOD/GL', value: String(diagnostic.discoveredModCount) });
-    if (diagnostic.discoveredStlCount != null)
-      rows.push({ key: '发现 STL', value: String(diagnostic.discoveredStlCount) });
-    if (diagnostic.renderableModCount != null)
-      rows.push({ key: '可渲染 MOD/GL', value: String(diagnostic.renderableModCount) });
-    if (diagnostic.renderableStlCount != null)
-      rows.push({ key: '可渲染 STL', value: String(diagnostic.renderableStlCount) });
-    if (diagnostic.emptySourceCount != null && diagnostic.emptySourceCount > 0) {
-      rows.push({ key: '空几何源', value: String(diagnostic.emptySourceCount) });
-    }
-    if (diagnostic.unsupportedSourceCount != null && diagnostic.unsupportedSourceCount > 0) {
-      rows.push({ key: '未支持几何源', value: String(diagnostic.unsupportedSourceCount) });
-    }
-    const unsupportedTypes = Object.entries(diagnostic.unsupportedPrimitiveTypeCounts)
-      .filter(([, count]) => count > 0)
-      .map(([type, count]) => `${type} × ${count}`)
-      .join('、');
-    if (unsupportedTypes) rows.push({ key: '未支持 primitive', value: unsupportedTypes });
-    if (diagnostic.detail && diagnostic.reason !== 'source-invalid')
-      rows.push({ key: '说明', value: diagnostic.detail });
+    appendGeometryDiagnosticRows(rows, diagnostic);
   } else {
     const selection =
       state.selection.selectionRequest?.target?.key === node.path

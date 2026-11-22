@@ -39,22 +39,25 @@
 
 缓存校验通过后，`substationWarmCore.publishSubstationWarmCore()` 负责恢复索引、物化工程来源文件并发布 core navigation；`substationRuntime` 只保留工作流协调、冷回退和后台阶段接线。SessionScope 守卫、迟到会话返回和失败释放仍由 Runtime 统一处理。
 
-## 巨型函数拆分队列
+## 运行时内部职责
 
-以下函数仍以单函数承担多个阶段，按“输入/输出、会话守卫、资源释放”先拆纵向流程，再考虑文件搬迁。函数长度只作定位，不设行数门禁。
+| 入口 | 组成阶段 |
+|---|---|
+| `openProject` | 原生解压与同源收据恢复、浏览器解压、工程内容识别 |
+| `projectCleanup` | IFC 模型释放、MOD/STL 图层释放、会话与界面收尾 |
+| `loadAllIfcFiles` | 引擎与队列启动、队列结算、名称索引与导航尾段 |
+| IFC Spatial | 导航记录筛选、CBM 资产关联、覆盖和诊断汇总 |
+| `serializeDevToGlbDetailed` | MOD 实例和 STL 实例分别装配，轮廓兜底、GLB 导出与统一释放 |
+| `beginEngineeringBuild` | 独立物理目录发布、暖语义缓存恢复、冷构建 |
+| 工程 Worker 处理器 | 来源抽取、逐域缓存编码、暖恢复和来源装配分别处理 |
+| `buildLineNavigationIndex` | 区段及耐张段投影、未分段对象、跨越关联与索引发布 |
+| `buildCbmTree` | 单节点名称和 DEV/FAM 展示数据、来源树递归及装配展开 |
+| `renderLineMap` | DOM 和事件生命周期、Canvas 相机和底图视角转发 |
+| IFC 浏览 LOD | 模型恢复/转换、派生缓存写入、坐标锚点交接 |
+| v1 缓存与原生传输 | 导航清册、待归诊断、组成输入校验；线路 pack 头部与条目校验 |
+| Benchmark Host | 工程生命周期、测量流与能力探针 Worker |
 
-| 归属 | 当前函数 | 先拆出的阶段 |
-|---|---|---|
-| 变电打开 | `openSubstationProject` | 暖缓存恢复已移至 `substationWarmCore`；剩余冷回退编排与后台接线 |
-| IFC 加载 | `loadAllIfcFiles` | 队列规划、逐模型装载、区域批次与终态诊断 |
-| IFC Spatial | `parseIfcModel` | 关系投影、空间对象投影、元数据/placement |
-| GLB 缓存 | `serializeDevToGlbDetailed` | 场景遍历、几何编码、诊断/预算 |
-| 工程实体 | `beginEngineeringBuild` | 输入准备、结果发布和快照缓存；Worker 请求通过会话绑定的基础设施客户端执行 |
-| 线路导航 | `buildLineNavigationIndex` | 来源、塔位与档距索引已单独准备，投影负责业务行及来源回指 |
-| 线路 UI | `renderLineMap` | 图层装配、交互绑定、生命周期释放 |
-| CBM 来源树 | `buildCbmTree` | 物理树、名称/DEV 关联、展示映射 |
-
-迁移以有实际消费者的完整工作流为单位，先确认资源所有者、接口和释放点。每个拆分保持现有读取次数、对象数量和结果形状，入口接入对应 feature 的生产流程后再移动下一条工作流。
+各阶段沿用现有会话守卫、调用顺序与读取配额。以生产入口的回归验证拆分后的行为，函数长度只用来定位职责交界。
 
 ## 变电生命周期
 

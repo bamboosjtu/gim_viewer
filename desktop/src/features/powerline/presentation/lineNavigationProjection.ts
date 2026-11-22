@@ -191,57 +191,36 @@ const PLACEHOLDER_RE = /^(?:-|\$|NULL\d*|其它|其他|&其他|无|未命名)$/i
  * `mapData` 负责地图口径（129 塔位、2232 WIRE、44 个 CROSS 业务组），
  * graph 负责 F3/F4 的来源关系。二者联合后才可处理 F3 边界复用。
  */
-export function buildLineNavigationIndex(
+type LineProjectionSources = ReturnType<typeof prepareLineNavigationSources>;
+
+interface LineProjectionIndex {
+  assignedSpanKeys: Set<string>;
+  assignedCrossPaths: Set<string>;
+  nodesByKey: Map<string, LineNavigationNode>;
+  parentByKey: Map<string, string>;
+  targetBySourcePath: Map<string, string>;
+}
+
+function buildLineSections(
   graph: GimGraph,
-  mapData: LineMapData,
-  options: LineNavigationOptions = {},
-): LineNavigationIndex {
+  routeNode: LineNavigationNode,
+  sources: LineProjectionSources,
+  index: LineProjectionIndex,
+): LineNavigationNode[] {
   const {
     parentIndex,
     f1,
     f2Nodes,
-    towerEntries,
-    towerByPath,
-    towerOrder,
-    wireTower,
-    spanRecords,
-    spanByKey,
-    spanIndexes,
-    crossProjections,
     f3Records,
-  } = prepareLineNavigationSources(graph, mapData, options);
-
-  const assignedSpanKeys = new Set<string>();
-  const assignedCrossPaths = new Set<string>();
-  const nodesByKey = new Map<string, LineNavigationNode>();
-  const parentByKey = new Map<string, string>();
-  const targetBySourcePath = new Map<string, string>();
-
-  const routeNode = makeNode(
-    routeKey(f1?.path || graph.root?.path || 'route'),
-    'route',
-    resolveLineName(f1, options),
-    routeSubtitle(f1, mapData, towerEntries.length),
-    '⌁',
-    f1 || graph.root,
-    [],
-    f1 ? [f1.path] : [],
-  );
-  const rootNode = makeNode(
-    PROJECT_KEY,
-    'project',
-    '线路工程',
-    projectSubtitle(mapData, spanRecords),
-    '⌂',
-    graph.root,
-    [],
-    graph.root ? [graph.root.path] : [],
-  );
-  routeNode.children = [];
-  registerNode(rootNode, nodesByKey, parentByKey, targetBySourcePath);
-  registerNode(routeNode, nodesByKey, parentByKey, targetBySourcePath, rootNode.key);
-  rootNode.children.push(routeNode);
-
+    spanByKey,
+    towerByPath,
+    towerEntries,
+    towerOrder,
+    spanIndexes,
+    spanRecords,
+  } = sources;
+  const { assignedSpanKeys, assignedCrossPaths, parentByKey, nodesByKey, targetBySourcePath } =
+    index;
   const sections: LineNavigationNode[] = [];
   const sourceSections = f2Nodes.length > 0 ? f2Nodes : [null];
   for (let sectionIndex = 0; sectionIndex < sourceSections.length; sectionIndex++) {
@@ -360,6 +339,17 @@ export function buildLineNavigationIndex(
     sections.push(sectionNode);
   }
 
+  return sections;
+}
+
+function appendUnsegmentedObjects(
+  graph: GimGraph,
+  routeNode: LineNavigationNode,
+  sources: LineProjectionSources,
+  index: LineProjectionIndex,
+): number {
+  const { spanRecords, towerEntries } = sources;
+  const { assignedSpanKeys, parentByKey, nodesByKey, targetBySourcePath } = index;
   // 为 F3 归属不明确的档距补到“未分段对象”，保证数据不静默消失。
   const unsegmentedChildren: LineNavigationNode[] = [];
   for (const span of spanRecords) {
@@ -402,6 +392,17 @@ export function buildLineNavigationIndex(
     routeNode.children.push(unsegmented);
   }
 
+  return unsegmentedChildren.length;
+}
+
+function attachOrGroupCrossings(
+  graph: GimGraph,
+  routeNode: LineNavigationNode,
+  sources: LineProjectionSources,
+  index: LineProjectionIndex,
+): number {
+  const { crossProjections, parentIndex, spanIndexes, towerByPath, wireTower } = sources;
+  const { assignedCrossPaths, parentByKey, nodesByKey, targetBySourcePath } = index;
   // 可靠关联优先：只有显式端点/来源引用或足够区分度的坐标证据才挂到档距。
   for (const cross of crossProjections) {
     if (assignedCrossPaths.has(cross.marker.cbmPath)) continue;
@@ -450,6 +451,59 @@ export function buildLineNavigationIndex(
     refreshSpanNode(node, node.span, parentByKey, nodesByKey, targetBySourcePath);
   }
 
+  return pendingCrosses.length;
+}
+
+export function buildLineNavigationIndex(
+  graph: GimGraph,
+  mapData: LineMapData,
+  options: LineNavigationOptions = {},
+): LineNavigationIndex {
+  const sources = prepareLineNavigationSources(graph, mapData, options);
+  const { parentIndex, f1, towerEntries, spanRecords, crossProjections } = sources;
+
+  const assignedSpanKeys = new Set<string>();
+  const assignedCrossPaths = new Set<string>();
+  const nodesByKey = new Map<string, LineNavigationNode>();
+  const parentByKey = new Map<string, string>();
+  const targetBySourcePath = new Map<string, string>();
+
+  const routeNode = makeNode(
+    routeKey(f1?.path || graph.root?.path || 'route'),
+    'route',
+    resolveLineName(f1, options),
+    routeSubtitle(f1, mapData, towerEntries.length),
+    '⌁',
+    f1 || graph.root,
+    [],
+    f1 ? [f1.path] : [],
+  );
+  const rootNode = makeNode(
+    PROJECT_KEY,
+    'project',
+    '线路工程',
+    projectSubtitle(mapData, spanRecords),
+    '⌂',
+    graph.root,
+    [],
+    graph.root ? [graph.root.path] : [],
+  );
+  routeNode.children = [];
+  registerNode(rootNode, nodesByKey, parentByKey, targetBySourcePath);
+  registerNode(routeNode, nodesByKey, parentByKey, targetBySourcePath, rootNode.key);
+  rootNode.children.push(routeNode);
+
+  const index = {
+    assignedSpanKeys,
+    assignedCrossPaths,
+    nodesByKey,
+    parentByKey,
+    targetBySourcePath,
+  };
+  const sections = buildLineSections(graph, routeNode, sources, index);
+  const unsegmentedCount = appendUnsegmentedObjects(graph, routeNode, sources, index);
+  const unassociatedCrossCount = attachOrGroupCrossings(graph, routeNode, sources, index);
+
   // 构建 parentByKey 的 root/route 链，且删除上述注册时为兼容预留的空父键。
   parentByKey.set(routeNode.key, rootNode.key);
   for (const section of sections) {
@@ -480,8 +534,8 @@ export function buildLineNavigationIndex(
     ).length,
     wireCount: mapData.stats.wireTotal,
     crossCount: crossProjections.length,
-    unassociatedCrossCount: pendingCrosses.length,
-    unsegmentedCount: unsegmentedChildren.length,
+    unassociatedCrossCount,
+    unsegmentedCount,
     unresolvedWireCount: mapData.unresolved.wires.length,
   };
 

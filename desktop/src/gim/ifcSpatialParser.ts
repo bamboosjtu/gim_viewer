@@ -370,32 +370,16 @@ export class SubstationSpatialIndexBuilder {
     }
   }
 
-  finalize(): SubstationSpatialIndex {
-    const finalizeStarted = performance.now();
-    const { models, nodes, objects } = this;
-
-    const nodeByKey = new Map(nodes.map((node) => [node.key, node]));
-    const objectByKey = new Map(objects.map((object) => [object.key, object]));
-    const objectByModelGuid = new Map<string, IfcSpatialObject | null>();
-    for (const object of objects) {
-      if (
-        !object.globalId ||
-        /^(IFCDISTRIBUTIONPORT|IFCOPENINGELEMENT|IFCOPENINGSTANDARDCASE|IFCVOIDINGFEATURE|IFCFEATUREELEMENTSUBTRACTION|IFCFEATUREELEMENTADDITION|IFCPROJECTIONELEMENT)$/.test(
-          object.ifcType,
-        )
-      )
-        continue;
-      const key = `${normalizeModelId(object.modelId)}:${normalizeGuid(object.globalId)}`;
-      objectByModelGuid.set(key, objectByModelGuid.has(key) ? null : object);
-    }
-
-    const cbmNodes = collectCbmNodes(this.cbmTree);
+  private linkSourceAssets(
+    cbmNodes: readonly CbmNode[],
+    cbmPlacementByPath: ReadonlyMap<string, number[]>,
+    objectByModelGuid: ReadonlyMap<string, IfcSpatialObject | null>,
+  ) {
     const ifcEntries = this.entries;
     // 空间索引与几何加载必须使用同一条 CBM 变换链。真实 CBM 文件中的
     // F4System 通常已经写入父链累积矩阵；PARTINDEX 往往没有自己的矩阵，
     // DEV_SUBDEVICE 虚拟节点则只保存 SUBDEVICE 局部矩阵。若这里只读取
     // 当前节点，会把所有部件误报为“没有坐标”，造成空间导航大量缺项。
-    const cbmPlacementByPath = buildCbmPlacementMap(this.cbmTree);
     const links: SpatialAssetLink[] = [];
     let directGuidCandidates = 0;
     let directGuidMatches = 0;
@@ -519,6 +503,54 @@ export class SubstationSpatialIndexBuilder {
         linksByIfcObjectKey.set(link.ifcObjectKey, bucket);
       }
     }
+
+    return {
+      links,
+      linksByCbmPath,
+      linksBySpatialKey,
+      linksByIfcObjectKey,
+      directGuidCandidates,
+      directGuidMatches,
+      spatiallyContainedMatches,
+      placementOnlyAssets,
+      unlocatedAssets,
+      confirmedWithoutSpatialContainer,
+    };
+  }
+
+  finalize(): SubstationSpatialIndex {
+    const finalizeStarted = performance.now();
+    const { models, nodes, objects } = this;
+
+    const nodeByKey = new Map(nodes.map((node) => [node.key, node]));
+    const objectByKey = new Map(objects.map((object) => [object.key, object]));
+    const objectByModelGuid = new Map<string, IfcSpatialObject | null>();
+    for (const object of objects) {
+      if (
+        !object.globalId ||
+        /^(IFCDISTRIBUTIONPORT|IFCOPENINGELEMENT|IFCOPENINGSTANDARDCASE|IFCVOIDINGFEATURE|IFCFEATUREELEMENTSUBTRACTION|IFCFEATUREELEMENTADDITION|IFCPROJECTIONELEMENT)$/.test(
+          object.ifcType,
+        )
+      )
+        continue;
+      const key = `${normalizeModelId(object.modelId)}:${normalizeGuid(object.globalId)}`;
+      objectByModelGuid.set(key, objectByModelGuid.has(key) ? null : object);
+    }
+
+    const cbmNodes = collectCbmNodes(this.cbmTree);
+    const cbmPlacementByPath = buildCbmPlacementMap(this.cbmTree);
+    const {
+      links,
+      linksByCbmPath,
+      linksBySpatialKey,
+      linksByIfcObjectKey,
+      directGuidCandidates,
+      directGuidMatches,
+      spatiallyContainedMatches,
+      placementOnlyAssets,
+      unlocatedAssets,
+      confirmedWithoutSpatialContainer,
+    } = this.linkSourceAssets(cbmNodes, cbmPlacementByPath, objectByModelGuid);
 
     for (const node of nodes) {
       node.objectKeys = node.objectKeys.filter((key) => objectByKey.has(key));
@@ -797,6 +829,27 @@ function buildIfcSpatialObjects(
   return { spatialEntities, spatialById, objects };
 }
 
+function collectIfcNavigationIds(
+  selectedRecords: RawIfcEntity[],
+  spatialContainedIds: ReadonlySet<number>,
+  spatialRelationIds: ReadonlySet<number>,
+): Set<number> {
+  const navigationIds = new Set<number>();
+  for (const record of selectedRecords) {
+    const kind = SPATIAL_TYPES.get(record.ifcType);
+    if (kind) continue;
+    const globalId = parseString(record.args[0]);
+    if (
+      spatialContainedIds.has(record.expressId) ||
+      spatialRelationIds.has(record.expressId) ||
+      (globalId && isIfcNavigationObjectType(record.ifcType))
+    ) {
+      navigationIds.add(record.expressId);
+    }
+  }
+  return navigationIds;
+}
+
 function parseIfcModel(
   entry: IfcEntry,
   text: string,
@@ -862,19 +915,11 @@ function parseIfcModel(
   const materialEntityCount = scan.materialEntityCount;
   const classificationEntityCount = scan.classificationEntityCount;
 
-  const navigationIds = new Set<number>();
-  for (const record of selectedRecords) {
-    const kind = SPATIAL_TYPES.get(record.ifcType);
-    if (kind) continue;
-    const globalId = parseString(record.args[0]);
-    if (
-      spatialContainedIds.has(record.expressId) ||
-      spatialRelationIds.has(record.expressId) ||
-      (globalId && isIfcNavigationObjectType(record.ifcType))
-    ) {
-      navigationIds.add(record.expressId);
-    }
-  }
+  const navigationIds = collectIfcNavigationIds(
+    selectedRecords,
+    spatialContainedIds,
+    spatialRelationIds,
+  );
   const relationshipStarted = performance.now();
   const indexedRelationships = indexIfcObjectRelationships(scan, navigationIds);
   const { relationshipRecordCount, relationshipReferenceCount } = indexedRelationships;

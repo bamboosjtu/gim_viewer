@@ -39,6 +39,19 @@ GIMPKGT / 裸包
 
 ## Android
 
+| 目录或入口 | 职责 |
+|---|---|
+| `app/src/main.ts` | 界面和会话编排，接线地图、工程树、导入与属性面板 |
+| `app/src/core/` | 项目头部解析和线路解析 Worker 接线，领域能力由 `powerline-core` 提供 |
+| `app/src/native/` | Tauri 桥接和单次 SAF 导入的准备、写入及回滚 |
+| `app/src/map/` | MapLibre/Canvas 底图、相机、覆盖物和地图代次 |
+| `app/src/ui/` | 虚拟工程树和展示资源 |
+| `app/src/plugins/` | 按插件接口装配移动端宿主 |
+| `app/src-tauri/src/` | Android 原生命令、设置与私有存储 |
+
+Android 使用独立工程和原生生命周期。冷导入与暖缓存重建复用已存来源的读取与解析，调用方分别拥有提交和回滚。原生准备分别校验已认领的来源、恢复重复工程及发布新工程。
+
+
 - 只面向线路；SAF 导入、私有 SQLite、HNum 预览和领域投影独立。
 - 缓存身份包含源 SHA/大小和 parser 契约；缓存不能覆盖源类型或掩盖源包替换。
 - SAF 源包复制、原生准备和解压的归档上限均取自同一份[移动端配额](../../contracts/gim-limits.json)。SAF 同时检查提供方声明大小和实际复制字节。归档超限、选取取消、I/O 和源身份不一致分别返回 v1 错误码。

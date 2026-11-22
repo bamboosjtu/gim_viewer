@@ -580,7 +580,7 @@ export async function serializeDevToGlbDetailed(
     else disposeStlGroup(group);
   };
 
-  try {
+  async function loadModGeometry() {
     let smallFallback: { geo: (typeof discovered.mods)[number]; extent: number } | undefined;
     // 加载 MOD
     for (const geo of discovered.mods) {
@@ -676,6 +676,10 @@ export async function serializeDevToGlbDetailed(
       }
     }
 
+    return smallFallback;
+  }
+
+  async function loadStlGeometry(): Promise<void> {
     // 加载 STL
     for (const geo of discovered.stls) {
       try {
@@ -770,6 +774,11 @@ export async function serializeDevToGlbDetailed(
         throw strictError;
       }
     }
+  }
+
+  try {
+    const smallFallback = await loadModGeometry();
+    await loadStlGeometry();
 
     // All-small geometry is not a source-empty DEV. Retry only the largest
     // omitted source, keeping one real silhouette instead of hiding the device.

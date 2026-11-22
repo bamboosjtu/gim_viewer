@@ -214,44 +214,16 @@ export async function buildCbmTree(
     return pending;
   };
 
-  async function build(p: string, depth = 0): Promise<CbmNode | null> {
-    if (depth > PARSER_LIMITS.maxRecursionDepth) {
-      throw new Error(`CBM 引用递归深度超过 ${PARSER_LIMITS.maxRecursionDepth}`);
-    }
-    const normalizedPath = p.replace(/\\/g, '/');
-    const visitKey = normalizedPath.toLowerCase();
-    if (visited.has(visitKey)) return null;
-    visited.add(visitKey);
-    const f = getFileByPath(files, p);
-    if (!f) return null;
-    nodeBudget.count++;
-    if (nodeBudget.count > PARSER_LIMITS.maxCbmNodes) {
-      throw new Error(`CBM 节点数超过安全上限 ${PARSER_LIMITS.maxCbmNodes}`);
-    }
-    const sourceDiagnostics: SourceDiagnostic[] = [];
-    let document;
-    try {
-      document = await readCbmSourceDocument(f, p, true);
-    } catch {
-      document = parseSourceDocument(p, '');
-      sourceDiagnostics.push({ kind: 'read-failed', path: p, field: '', lines: [], values: [] });
-    }
-    const record = parseCbmDocument(document);
-    const kv = record.properties;
-    const devEntry = p === equipmentEntry && /\.dev$/i.test(p);
-    // Report every conflicting scalar once, preserving the rows for inspection.
-    for (const key of new Set(document.fields.map((field) => field.keys[0].toUpperCase()))) {
-      if (key === 'SUBSYSTEM') continue;
-      if (devEntry && /^TRANSFORMMATRIX\d+$/.test(key)) continue;
-      const scalar = sourceScalar(document, key);
-      if (scalar.status === 'ambiguous')
-        sourceDiagnostics.push(sourceDiagnostic(document, key, scalar.fields));
-    }
-    const en = devEntry ? 'Device' : record.entityName;
+  async function resolveNodeDisplayMetadata(
+    p: string,
+    kv: Parameters<typeof extractDisplayName>[0],
+    en: string,
+    devPath: string,
+    sourceDiagnostics: SourceDiagnostic[],
+  ) {
     const { name: initialName, systemNames } = extractDisplayName(kv, p);
     let name = initialName;
     const cn = getFirstNonEmptyKv(kv, ['SYSCLASSIFYNAME', 'PARTNAME']);
-    const devPath = devEntry ? normalizedPath : record.objectModelPointer;
 
     // 读取 DEV SYMBOLNAME/TYPE（回填到节点，供 getNodeDisplayName 使用）
     let devSymbolName = '';
@@ -319,6 +291,53 @@ export async function buildCbmTree(
         break;
       }
     }
+
+    return { name, systemNames, cn, devSymbolName, devType };
+  }
+
+  async function build(p: string, depth = 0): Promise<CbmNode | null> {
+    if (depth > PARSER_LIMITS.maxRecursionDepth) {
+      throw new Error(`CBM 引用递归深度超过 ${PARSER_LIMITS.maxRecursionDepth}`);
+    }
+    const normalizedPath = p.replace(/\\/g, '/');
+    const visitKey = normalizedPath.toLowerCase();
+    if (visited.has(visitKey)) return null;
+    visited.add(visitKey);
+    const f = getFileByPath(files, p);
+    if (!f) return null;
+    nodeBudget.count++;
+    if (nodeBudget.count > PARSER_LIMITS.maxCbmNodes) {
+      throw new Error(`CBM 节点数超过安全上限 ${PARSER_LIMITS.maxCbmNodes}`);
+    }
+    const sourceDiagnostics: SourceDiagnostic[] = [];
+    let document;
+    try {
+      document = await readCbmSourceDocument(f, p, true);
+    } catch {
+      document = parseSourceDocument(p, '');
+      sourceDiagnostics.push({ kind: 'read-failed', path: p, field: '', lines: [], values: [] });
+    }
+    const record = parseCbmDocument(document);
+    const kv = record.properties;
+    const devEntry = p === equipmentEntry && /\.dev$/i.test(p);
+    // Report every conflicting scalar once, preserving the rows for inspection.
+    for (const key of new Set(document.fields.map((field) => field.keys[0].toUpperCase()))) {
+      if (key === 'SUBSYSTEM') continue;
+      if (devEntry && /^TRANSFORMMATRIX\d+$/.test(key)) continue;
+      const scalar = sourceScalar(document, key);
+      if (scalar.status === 'ambiguous')
+        sourceDiagnostics.push(sourceDiagnostic(document, key, scalar.fields));
+    }
+    const en = devEntry ? 'Device' : record.entityName;
+    const devPath = devEntry ? normalizedPath : record.objectModelPointer;
+    const {
+      name: baseName,
+      systemNames,
+      cn,
+      devSymbolName,
+      devType,
+    } = await resolveNodeDisplayMetadata(p, kv, en, devPath, sourceDiagnostics);
+    let name = baseName;
 
     const children: CbmNode[] = [];
     // 大工程（B1-4 的 F3 下 15,526 个 F4）逐个子节点 await 会把 DEV 元数据

@@ -308,7 +308,32 @@ export function assertEngineeringNavigation(
     view.compositionSearch.every((item) => typeof item.searchText === 'string'),
     'engineering search text',
   );
-  if (!failed('inventory') || view.inventory) {
+  assertCachedInventory(
+    view,
+    snapshot,
+    entities,
+    tree,
+    failed('inventory'),
+    failed('inventory-search'),
+  );
+  assertPendingDiagnostics(view, snapshot);
+  assertCompositionInput(view, snapshot, entities, failed('composition'));
+}
+
+function assertCachedInventory(
+  view: EngineeringNavigationData,
+  snapshot: EngineeringSnapshot,
+  entities: ReadonlySet<string>,
+  tree: (
+    nodes: Map<string, CacheTreeNode>,
+    root: string,
+    composition: boolean,
+    inventory?: boolean,
+  ) => void,
+  inventoryFailed: boolean,
+  searchFailed: boolean,
+): void {
+  if (!inventoryFailed || view.inventory) {
     valid(
       view.inventory?.nodes instanceof Map &&
         view.inventory.rowsByEntity instanceof Map &&
@@ -366,7 +391,7 @@ export function assertEngineeringNavigation(
       valid(inventory.rowsBySource.get(member.sourceId) === row, 'inventory source owner row');
     }
     valid(inventory.rowsBySource.size === memberRows, 'inventory source coverage');
-    if (failed('inventory-search'))
+    if (searchFailed)
       valid(
         Array.isArray(view.inventorySearch) && view.inventorySearch.length === 0,
         'failed inventory search',
@@ -390,6 +415,12 @@ export function assertEngineeringNavigation(
       Array.isArray(view.inventorySearch) && view.inventorySearch.length === 0,
       'failed inventory search',
     );
+}
+
+function assertPendingDiagnostics(
+  view: EngineeringNavigationData,
+  snapshot: EngineeringSnapshot,
+): void {
   const pending = view.metadata?.pendingWholes,
     pendingIds = new Set(snapshot.pending.map((p) => p.id));
   valid(
@@ -407,11 +438,19 @@ export function assertEngineeringNavigation(
       ),
     'pending diagnostics',
   );
+}
+
+function assertCompositionInput(
+  view: EngineeringNavigationData,
+  snapshot: EngineeringSnapshot,
+  entities: ReadonlySet<string>,
+  compositionFailed: boolean,
+): void {
   const input = view.compositionInput;
   valid(
     input &&
       Array.isArray(input.facts) &&
-      (failed('composition') || input.facts.length === snapshot.entities.length) &&
+      (compositionFailed || input.facts.length === snapshot.entities.length) &&
       new Set(input.facts.map((f) => f.entityId)).size === input.facts.length &&
       input.facts.every(
         (f) =>

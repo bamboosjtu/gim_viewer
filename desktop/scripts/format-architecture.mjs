@@ -3,6 +3,8 @@ import { fileURLToPath } from 'node:url';
 
 // The same bounded adoption scope drives Prettier and type-checked ESLint.
 export const architectureModules = [
+  '../app/src/main.ts',
+  '../app/src/map/workspace.ts',
   'src/measurement/benchmarkHost.ts',
   'src/services/devLodTemplateStore.ts',
   'src/services/geometryPresentationService.ts',

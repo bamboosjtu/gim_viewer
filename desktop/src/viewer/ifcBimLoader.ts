@@ -39,6 +39,77 @@ export interface IfcFileProfile {
   cacheWriteOk: boolean | null;
 }
 
+interface BimIfcLoadOptions {
+  standaloneSource?: boolean;
+  signal?: AbortSignal;
+  onStage?: (stage: IfcLoadStage, meta?: Record<string, unknown>) => void;
+  onProfile?: (profile: IfcFileProfile) => void;
+  onRegionalBatch?: (batch: IfcRegionalConnectionBatch) => void;
+  onRegionalComplete?: (meta: { objectCount: number; sequence: number }) => void;
+}
+
+function scheduleFarArtifactWrite(
+  key: string,
+  cached: FarArtifact,
+  path: string,
+  timing: { startedAt: number; cacheReadMs: number; writeStarted: number },
+  current: () => boolean,
+  options: BimIfcLoadOptions,
+): void {
+  const { startedAt, cacheReadMs, writeStarted } = timing;
+  let cacheWriteMs: number | null = null;
+  let cacheWriteOk: boolean | null = null;
+  // An admitted, source-keyed write may finish after the session changes.
+  // Only the originating session receives its status and profile.
+  void Promise.resolve(writeIfcLodArtifact(key, cached))
+    .then((result) => {
+      if (!current()) return;
+      const ok = (result as { ok?: boolean } | undefined)?.ok !== false;
+      cacheWriteOk = ok;
+      cacheWriteMs = performance.now() - writeStarted;
+      options.onStage?.(ok ? 'cache-written' : 'cache-write-failed', {
+        path,
+        ms: Math.round(cacheWriteMs),
+        ...(ok
+          ? {}
+          : { error: (result as { error?: string } | undefined)?.error ?? 'cache write failed' }),
+      });
+    })
+    .catch((error) => {
+      if (!current()) return;
+      cacheWriteOk = false;
+      cacheWriteMs = performance.now() - writeStarted;
+      options.onStage?.('cache-write-failed', {
+        path,
+        error: String(error),
+        ms: Math.round(cacheWriteMs),
+      });
+    })
+    .finally(() => {
+      if (!current()) return;
+      options.onProfile?.({
+        path,
+        bytes: cached.bytes.byteLength,
+        source: 'ifc',
+        cacheHit: false,
+        cacheReadMs: Math.round(cacheReadMs),
+        loadMs: Math.round(performance.now() - startedAt),
+        cacheWriteMs: cacheWriteMs == null ? null : Math.round(cacheWriteMs),
+        cacheWriteOk,
+      });
+    })
+    .catch(reportBackgroundError);
+}
+
+async function waitForCoordinateBase(ctx: ViewerContext, current: () => boolean) {
+  let baseModel = ctx.fragments.list.get(ctx.fragments.baseCoordinationModel);
+  for (let frame = 0; !baseModel && frame < 60 && current(); frame++) {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    baseModel = ctx.fragments.list.get(ctx.fragments.baseCoordinationModel);
+  }
+  return baseModel;
+}
+
 export async function loadBimIfc(
   ctx: ViewerContext,
   state: AppState,
@@ -48,14 +119,7 @@ export async function loadBimIfc(
   path: string,
   readBytes: () => Promise<Uint8Array | null>,
   onProgress?: (p: number) => void,
-  options: {
-    standaloneSource?: boolean;
-    signal?: AbortSignal;
-    onStage?: (stage: IfcLoadStage, meta?: Record<string, unknown>) => void;
-    onProfile?: (profile: IfcFileProfile) => void;
-    onRegionalBatch?: (batch: IfcRegionalConnectionBatch) => void;
-    onRegionalComplete?: (meta: { objectCount: number; sequence: number }) => void;
-  } = {},
+  options: BimIfcLoadOptions = {},
 ) {
   const current = () => !options.signal?.aborted && state.isCurrentSession(session);
   if (!current()) return;
@@ -68,8 +132,6 @@ export async function loadBimIfc(
   };
   const startedAt = performance.now();
   let cacheReadMs = 0;
-  let cacheWriteMs: number | null = null;
-  let cacheWriteOk: boolean | null = null;
   options.onStage?.('checking-cache', { path });
   if (!current()) return;
   let input: Uint8Array | null = null;
@@ -190,46 +252,14 @@ export async function loadBimIfc(
       await discardModel();
       return;
     }
-    // An admitted, source-keyed write may finish after the session changes.
-    // Only the originating session receives its status and profile.
-    void Promise.resolve(writeIfcLodArtifact(key, cached))
-      .then((result) => {
-        if (!current()) return;
-        const ok = (result as { ok?: boolean } | undefined)?.ok !== false;
-        cacheWriteOk = ok;
-        cacheWriteMs = performance.now() - writeStarted;
-        options.onStage?.(ok ? 'cache-written' : 'cache-write-failed', {
-          path,
-          ms: Math.round(cacheWriteMs),
-          ...(ok
-            ? {}
-            : { error: (result as { error?: string } | undefined)?.error ?? 'cache write failed' }),
-        });
-      })
-      .catch((error) => {
-        if (!current()) return;
-        cacheWriteOk = false;
-        cacheWriteMs = performance.now() - writeStarted;
-        options.onStage?.('cache-write-failed', {
-          path,
-          error: String(error),
-          ms: Math.round(cacheWriteMs),
-        });
-      })
-      .finally(() => {
-        if (!current()) return;
-        options.onProfile?.({
-          path,
-          bytes: cached.bytes.byteLength,
-          source: 'ifc',
-          cacheHit: false,
-          cacheReadMs: Math.round(cacheReadMs),
-          loadMs: Math.round(performance.now() - startedAt),
-          cacheWriteMs: cacheWriteMs == null ? null : Math.round(cacheWriteMs),
-          cacheWriteOk,
-        });
-      })
-      .catch(reportBackgroundError);
+    scheduleFarArtifactWrite(
+      key,
+      cached,
+      path,
+      { startedAt, cacheReadMs, writeStarted },
+      current,
+      options,
+    );
   }
   if (!current()) {
     void Promise.resolve(ctx.fragments.core.disposeModel(runtimeId)).catch(reportBackgroundError);
@@ -250,11 +280,7 @@ export async function loadBimIfc(
       cacheWriteOk: null,
     });
   }
-  let baseModel = ctx.fragments.list.get(ctx.fragments.baseCoordinationModel);
-  for (let frame = 0; !baseModel && frame < 60 && current(); frame++) {
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    baseModel = ctx.fragments.list.get(ctx.fragments.baseCoordinationModel);
-  }
+  const baseModel = await waitForCoordinateBase(ctx, current);
   if (!baseModel || !current()) {
     if (!current())
       void Promise.resolve(ctx.fragments.core.disposeModel(runtimeId)).catch(reportBackgroundError);

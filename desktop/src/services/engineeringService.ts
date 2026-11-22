@@ -391,6 +391,126 @@ function fail(state: AppState, job: EngineeringJob, error: unknown): void {
   job.update();
 }
 
+async function loadPhysicalCatalog(
+  state: AppState,
+  job: EngineeringJob,
+  files: Map<string, File>,
+  initialized: Promise<void>,
+): Promise<void> {
+  const { cache, client } = job;
+  let physical: SourceGeometryOccurrenceCatalog | undefined;
+  if (cache) {
+    try {
+      physical = await cache.readGeometry(files);
+    } catch {
+      /* Rebuild only the small physical directory; semantic caches are independent. */
+    }
+  }
+  if (!current(state, job)) return;
+  let physicalRebuilt = false;
+  if (!physical) {
+    await initialized;
+    physicalRebuilt = true;
+    if (!current(state, job)) return;
+    try {
+      physical = await client.extractGeometry(!!cache);
+    } catch (error) {
+      if (!current(state, job)) return;
+      job.resolveGeometry(null);
+      perfMark('来源物理目录失败', { reason: String(error) });
+    }
+  }
+  if (!current(state, job)) return;
+  if (physical) {
+    state.sourceGeometry.catalog = physical;
+    job.resolveGeometry(physical);
+    job.update();
+    perfMark('来源物理目录就绪', {
+      occurrences: physical.occurrences.length,
+      diagnostics: physical.diagnostics.length,
+    });
+    if (
+      cache &&
+      physicalRebuilt &&
+      !physical.diagnostics.some((d) => d.reason === 'source-read-failed')
+    ) {
+      // Cache persistence is a background publication, never a render prerequisite.
+      state.sourceGeometry.cachePending = true;
+      void (async () => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        if (!current(state, job)) return;
+        // Encode the Worker's retained catalog; no clone back to the Worker
+        // and no model-sized stringify on the rendering thread.
+        const saved = await cache.saveGeometry(() => client.encodeGeometryCache());
+        if (!saved && current(state, job)) {
+          state.sourceGeometry.cacheError = '来源物理目录缓存编码未返回内容';
+          job.update();
+        }
+      })()
+        .catch((error) => {
+          if (current(state, job)) {
+            state.sourceGeometry.cacheError = String(error);
+            perfMark('来源物理目录缓存未写入', { reason: String(error) });
+          }
+        })
+        .finally(() => {
+          if (current(state, job)) {
+            state.sourceGeometry.cachePending = false;
+            job.update();
+          }
+        });
+    }
+  }
+}
+
+async function restoreEngineeringCache(
+  state: AppState,
+  job: EngineeringJob,
+  files: Map<string, File>,
+): Promise<boolean> {
+  const { cache, client } = job;
+  if (cache) {
+    const reads = await cache.readDomains();
+    if (!current(state, job)) return true;
+    if (reads.sources) {
+      try {
+        const result = await client.restore(
+          reads.sources,
+          reads.entities,
+          cache.identity,
+          reads.navigation,
+        );
+        if (!current(state, job)) return true;
+        if (
+          !result.sources.complete ||
+          !engineeringSourceCacheMatchesFiles(result.sources, files.keys())
+        ) {
+          // Never turn a decoded-but-IFC-less body into a partial "hit".
+          // Fall through to a controlled rebuild from the actual inventory.
+          state.engineering.cacheStatus = 'partial';
+          state.engineering.cacheError = '缓存来源未覆盖当前 IFC 清单，已从来源重建';
+        } else {
+          // A source-only restore is not a full warm hit: entity/navigation
+          // were rebuilt from the source body and still need re-encoding.
+          const completeHit = result.entityCacheHit === true && result.navigationCacheHit === true;
+          state.engineering.cacheStatus = completeHit ? 'hit' : 'partial';
+          if (!completeHit)
+            state.engineering.cacheError = '部分缓存命中：实体/导航缓存已从来源重建';
+          publish(state, job, result);
+          await finishBuild(state, job, result);
+          return true;
+        }
+      } catch (error) {
+        if (!current(state, job)) return true;
+        state.engineering.cacheError = String(error);
+      }
+    }
+    state.engineering.cacheStatus = 'miss';
+    job.update();
+  }
+  return false;
+}
+
 /** Start from actual source files, never the old tree's object/grain projection.
  * Cold File blobs and warm lazy sources share one extraction protocol.
  */
@@ -563,112 +683,13 @@ export function beginEngineeringBuild(
         }
       }
     };
-    let physical: SourceGeometryOccurrenceCatalog | undefined;
-    if (cache) {
-      try {
-        physical = await cache.readGeometry(files);
-      } catch {
-        /* Rebuild only the small physical directory; semantic caches are independent. */
-      }
-    }
+    await loadPhysicalCatalog(state, job, files, initialized);
     if (!current(state, job)) return;
-    let physicalRebuilt = false;
-    if (!physical) {
-      await initialized;
-      physicalRebuilt = true;
-      if (!current(state, job)) return;
-      try {
-        physical = await client.extractGeometry(!!cache);
-      } catch (error) {
-        if (!current(state, job)) return;
-        resolveGeometry(null);
-        perfMark('来源物理目录失败', { reason: String(error) });
-      }
-    }
-    if (!current(state, job)) return;
-    if (physical) {
-      state.sourceGeometry.catalog = physical;
-      resolveGeometry(physical);
-      update();
-      perfMark('来源物理目录就绪', {
-        occurrences: physical.occurrences.length,
-        diagnostics: physical.diagnostics.length,
-      });
-      if (
-        cache &&
-        physicalRebuilt &&
-        !physical.diagnostics.some((d) => d.reason === 'source-read-failed')
-      ) {
-        // Cache persistence is a background publication, never a render prerequisite.
-        state.sourceGeometry.cachePending = true;
-        void (async () => {
-          await new Promise<void>((resolve) => setTimeout(resolve, 0));
-          if (!current(state, job)) return;
-          // Encode the Worker's retained catalog; no clone back to the Worker
-          // and no model-sized stringify on the rendering thread.
-          const saved = await cache.saveGeometry(() => client.encodeGeometryCache());
-          if (!saved && current(state, job)) {
-            state.sourceGeometry.cacheError = '来源物理目录缓存编码未返回内容';
-            job.update();
-          }
-        })()
-          .catch((error) => {
-            if (current(state, job)) {
-              state.sourceGeometry.cacheError = String(error);
-              perfMark('来源物理目录缓存未写入', { reason: String(error) });
-            }
-          })
-          .finally(() => {
-            if (current(state, job)) {
-              state.sourceGeometry.cachePending = false;
-              update();
-            }
-          });
-      }
-    }
     // Allow the independently resolved geometry consumer to dispatch work first.
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     await initialized;
-    if (cache) {
-      const reads = await cache.readDomains();
-      if (!current(state, job)) return;
-      if (reads.sources) {
-        try {
-          const result = await client.restore(
-            reads.sources,
-            reads.entities,
-            cache.identity,
-            reads.navigation,
-          );
-          if (!current(state, job)) return;
-          if (
-            !result.sources.complete ||
-            !engineeringSourceCacheMatchesFiles(result.sources, files.keys())
-          ) {
-            // Never turn a decoded-but-IFC-less body into a partial "hit".
-            // Fall through to a controlled rebuild from the actual inventory.
-            state.engineering.cacheStatus = 'partial';
-            state.engineering.cacheError = '缓存来源未覆盖当前 IFC 清单，已从来源重建';
-          } else {
-            // A source-only restore is not a full warm hit: entity/navigation
-            // were rebuilt from the source body and still need re-encoding.
-            const completeHit =
-              result.entityCacheHit === true && result.navigationCacheHit === true;
-            state.engineering.cacheStatus = completeHit ? 'hit' : 'partial';
-            if (!completeHit)
-              state.engineering.cacheError = '部分缓存命中：实体/导航缓存已从来源重建';
-            publish(state, job, result);
-            await finishBuild(state, job, result);
-            return;
-          }
-        } catch (error) {
-          if (!current(state, job)) return;
-          state.engineering.cacheError = String(error);
-        }
-      }
-      state.engineering.cacheStatus = 'miss';
-      update();
-    }
+    if (await restoreEngineeringCache(state, job, files)) return;
+    if (!current(state, job)) return;
     const graph = await client.extract();
     if (!current(state, job)) return;
     // Raw CBM/DEV demand is finished. Do not retain the initial source map

@@ -313,13 +313,261 @@ export function createEngineeringWorkerHandler(
       ),
     };
   }
+  type SourceGraphProgress = (
+    stage: 'source-index' | 'source-traverse' | 'source-sort',
+    completed: number,
+  ) => void;
+
+  async function extractSourceGraph(
+    trace: WorkerTaskProbe,
+    reportProgress: SourceGraphProgress,
+  ): Promise<EngineeringWorkerReply> {
+    graph = null;
+    latest = undefined;
+    lastSources = undefined;
+    evidence?.resetObservations();
+    wireGraph = {};
+    parked = undefined;
+    parkedCoverage = [];
+    parkedEntries.clear();
+    indexedGraph = undefined;
+    indexedRevision = -1;
+    sourceTrace = trace;
+    let lastProgress = 0,
+      lastStage = '',
+      completed = 0;
+    const progress = (stage: 'source-index' | 'source-traverse' | 'source-sort') => {
+      const now = performance.now();
+      completed++;
+      if (stage !== lastStage || now - lastProgress >= 1000) {
+        lastProgress = now;
+        lastStage = stage;
+        reportProgress(stage, completed);
+      }
+    };
+    try {
+      graph = await trace.measure('engineering.extract', () => {
+        entryIndex ??= createEntryIndex([...paths].sort());
+        return extractEngineeringSourceGraph(
+          {
+            paths,
+            entryIndex,
+            readText: (path) => readFamily(path, trace),
+            readDocument: async (path) => {
+              const doc = await documents.read(path);
+              progress('source-traverse');
+              return doc;
+            },
+            prefetchDocuments: loadSources
+              ? (wanted) => {
+                  const room = ENGINEERING_SOURCE_BATCH_FILES * 2 - sourceQueue.length;
+                  if (room > 0)
+                    void ensureSources(
+                      wanted.filter((path) => !documents.has(path)).slice(0, room),
+                    ).catch(() => {});
+                }
+              : undefined,
+          },
+          { deferFamilies: true, onProgress: progress },
+        );
+      });
+    } finally {
+      documents.clear();
+      entryIndex = undefined;
+      const needed = new Set(graph?.familyAssignments?.map((a) => a.path) ?? []);
+      for (const path of files.keys()) if (!needed.has(path)) files.delete(path);
+      batches.retain(needed);
+    }
+    return {
+      type: 'graph',
+      summary: {
+        ifcPaths: graph.ifcPaths,
+        sourceRecords: graph.records.length,
+        familyPaths: [...new Set(graph.familyAssignments?.map((a) => a.path) ?? [])],
+      },
+    };
+  }
+
+  async function encodeBuildCache(
+    request: Extract<EngineeringWorkerCommand, { type: 'encode-cache' }>,
+    trace: WorkerTaskProbe,
+    started: number,
+  ): Promise<EngineeringWorkerReply> {
+    const current = latest;
+    if (
+      !current ||
+      current.result.buildId !== request.buildId ||
+      !current.identity ||
+      current.plan[0] !== request.domain
+    )
+      throw Error('工程缓存请求的构建身份或顺序无效');
+    const response: EngineeringCacheResult = {
+      buildId: request.buildId,
+      domain: request.domain,
+      metrics: { encodeMs: 0, plainBytes: 0, encodedBytes: 0 },
+    };
+    try {
+      const { result, identity } = current;
+      if (request.projection) {
+        if (request.domain !== 'navigation')
+          throw Error('Navigation override for non-navigation domain');
+        result.navigation = applyNavigationCacheProjection(result.navigation, request.projection);
+      }
+      if (request.domain === 'sources') {
+        const encoded = await encodeEngineeringSources(result.sources, identity);
+        current.digest = encoded.digest;
+        response.bytes = encoded.bytes;
+        parked = {
+          bytes: encoded.bytes.slice(),
+          identity,
+          revision: result.sources.graph.revision ?? 0,
+        };
+      } else {
+        if (!current.digest) throw Error('工程缓存缺少来源摘要');
+        response.bytes =
+          request.domain === 'entities'
+            ? await encodeEngineeringEntities(
+                result.snapshot,
+                { sources: result.sources, digest: current.digest },
+                identity,
+              )
+            : await encodeEngineeringNavigation(
+                result.navigation,
+                result.sources,
+                result.snapshot,
+                current.digest,
+                identity,
+              );
+      }
+      Object.assign(response.metrics, engineeringCacheSizes(response.bytes));
+      current.plan.shift();
+    } catch (error) {
+      const failure: Pick<EngineeringBuildResult, 'cacheError' | 'cacheDisabled'> = {};
+      markCacheFailure(failure, error);
+      response.error = failure.cacheError;
+      response.disabled = failure.cacheDisabled;
+      current.plan = [];
+    }
+    response.metrics.encodeMs = performance.now() - started;
+    trace.record('engineering.cache-encode', response.metrics.encodeMs, {
+      bytes: response.bytes?.byteLength ?? 0,
+    });
+    return { type: 'cache', result: response };
+  }
+
+  async function restoreCachedBuild(
+    request: Extract<EngineeringWorkerCommand, { type: 'restore' }>,
+    started: number,
+  ): Promise<EngineeringWorkerReply> {
+    latest = undefined;
+    documents.clear();
+    entryIndex = undefined;
+    files.clear();
+    batches.clear();
+    const artifact = await decodeEngineeringSources(request.sourceBytes, request.identity);
+    graph = artifact.sources.graph;
+    scope = request.identity.sourceSha256;
+    lastSources = artifact.sources;
+    parked = {
+      bytes: request.sourceBytes,
+      identity: request.identity,
+      revision: graph.revision ?? 0,
+    };
+    let snapshot,
+      entityCacheHit = false,
+      stageErrors: Record<string, string> = {};
+    try {
+      if (!request.entityBytes) throw Error('entity-cache-missing');
+      snapshot = await decodeEngineeringEntities(request.entityBytes, artifact, request.identity);
+      entityCacheHit = true;
+    } catch {
+      const recovered = assembleStoredEngineeringView(scope, artifact.sources);
+      snapshot = recovered.snapshot;
+      stageErrors = recovered.stageErrors;
+    }
+    let navigation,
+      navigationCacheHit = false;
+    try {
+      if (!request.navigationBytes) throw Error('navigation-cache-missing');
+      navigation = await decodeEngineeringNavigation(
+        request.navigationBytes,
+        artifact.sources,
+        snapshot,
+        artifact.digest,
+        request.identity,
+      );
+      if (
+        graph.ifcPaths.length &&
+        (navigation.compositionComplete !== true || navigation.compositionCoverage !== 'full')
+      )
+        throw Error('navigation-projection-incomplete');
+      navigationCacheHit = true;
+    } catch {
+      navigation = projectEngineeringNavigation(artifact.sources, snapshot);
+    }
+    Object.assign(stageErrors, navigation.projectionErrors);
+    // Drop incoming cache buffers before constructing the display transport.
+    request.sourceBytes = new Uint8Array();
+    delete request.entityBytes;
+    delete request.navigationBytes;
+    const plan: EngineeringCacheDomain[] = [];
+    if (!stageErrors.recognition && !entityCacheHit) plan.push('entities');
+    if (!Object.keys(stageErrors).length && !navigationCacheHit) plan.push('navigation');
+    return publish(
+      {
+        sources: artifact.sources,
+        snapshot,
+        navigation,
+        entityCacheHit,
+        navigationCacheHit,
+        stageErrors,
+      },
+      started,
+      request.identity,
+      artifact.digest,
+      plan,
+    );
+  }
+
+  async function assembleFromSources(
+    request: Extract<EngineeringWorkerCommand, { type: 'assemble' }>,
+    trace: WorkerTaskProbe,
+    started: number,
+  ): Promise<EngineeringWorkerReply> {
+    if (!graph || !scope) throw Error('Engineering source graph is not ready');
+    latest = undefined;
+    await trace.measure('engineering.families', () =>
+      materializeEngineeringFamilies(
+        graph!,
+        (path) => readFamily(path, trace),
+        (path) => evidence?.familyDocument(path),
+      ),
+    );
+    files.clear();
+    batches.clear();
+    const built = trace.sync('engineering.normalize', () =>
+      assembleEngineeringView(scope, graph!, request.objects, request.models, request.nodes),
+    );
+    lastSources = built.sources;
+    return publish(
+      built,
+      started,
+      request.identity,
+      undefined,
+      request.identity && built.sources.complete
+        ? built.stageErrors.recognition
+          ? ['sources']
+          : Object.keys(built.stageErrors).length
+            ? ['sources', 'entities']
+            : ['sources', 'entities', 'navigation']
+        : [],
+    );
+  }
+
   return async (
     request: EngineeringWorkerCommand,
     trace: WorkerTaskProbe = NOOP_TASK,
-    reportProgress: (
-      stage: 'source-index' | 'source-traverse' | 'source-sort',
-      completed: number,
-    ) => void = () => {},
+    reportProgress: SourceGraphProgress = () => {},
   ): Promise<EngineeringWorkerReply> => {
     const started = performance.now();
     if (request.type === 'checkpoint-evidence') {
@@ -513,231 +761,9 @@ export function createEngineeringWorkerHandler(
           : undefined,
       };
     }
-    if (request.type === 'extract') {
-      graph = null;
-      latest = undefined;
-      lastSources = undefined;
-      evidence?.resetObservations();
-      wireGraph = {};
-      parked = undefined;
-      parkedCoverage = [];
-      parkedEntries.clear();
-      indexedGraph = undefined;
-      indexedRevision = -1;
-      sourceTrace = trace;
-      let lastProgress = 0,
-        lastStage = '',
-        completed = 0;
-      const progress = (stage: 'source-index' | 'source-traverse' | 'source-sort') => {
-        const now = performance.now();
-        completed++;
-        if (stage !== lastStage || now - lastProgress >= 1000) {
-          lastProgress = now;
-          lastStage = stage;
-          reportProgress(stage, completed);
-        }
-      };
-      try {
-        graph = await trace.measure('engineering.extract', () => {
-          entryIndex ??= createEntryIndex([...paths].sort());
-          return extractEngineeringSourceGraph(
-            {
-              paths,
-              entryIndex,
-              readText: (path) => readFamily(path, trace),
-              readDocument: async (path) => {
-                const doc = await documents.read(path);
-                progress('source-traverse');
-                return doc;
-              },
-              prefetchDocuments: loadSources
-                ? (wanted) => {
-                    const room = ENGINEERING_SOURCE_BATCH_FILES * 2 - sourceQueue.length;
-                    if (room > 0)
-                      void ensureSources(
-                        wanted.filter((path) => !documents.has(path)).slice(0, room),
-                      ).catch(() => {});
-                  }
-                : undefined,
-            },
-            { deferFamilies: true, onProgress: progress },
-          );
-        });
-      } finally {
-        documents.clear();
-        entryIndex = undefined;
-        const needed = new Set(graph?.familyAssignments?.map((a) => a.path) ?? []);
-        for (const path of files.keys()) if (!needed.has(path)) files.delete(path);
-        batches.retain(needed);
-      }
-      return {
-        type: 'graph',
-        summary: {
-          ifcPaths: graph.ifcPaths,
-          sourceRecords: graph.records.length,
-          familyPaths: [...new Set(graph.familyAssignments?.map((a) => a.path) ?? [])],
-        },
-      };
-    }
-    if (request.type === 'encode-cache') {
-      const current = latest;
-      if (
-        !current ||
-        current.result.buildId !== request.buildId ||
-        !current.identity ||
-        current.plan[0] !== request.domain
-      )
-        throw Error('工程缓存请求的构建身份或顺序无效');
-      const response: EngineeringCacheResult = {
-        buildId: request.buildId,
-        domain: request.domain,
-        metrics: { encodeMs: 0, plainBytes: 0, encodedBytes: 0 },
-      };
-      try {
-        const { result, identity } = current;
-        if (request.projection) {
-          if (request.domain !== 'navigation')
-            throw Error('Navigation override for non-navigation domain');
-          result.navigation = applyNavigationCacheProjection(result.navigation, request.projection);
-        }
-        if (request.domain === 'sources') {
-          const encoded = await encodeEngineeringSources(result.sources, identity);
-          current.digest = encoded.digest;
-          response.bytes = encoded.bytes;
-          parked = {
-            bytes: encoded.bytes.slice(),
-            identity,
-            revision: result.sources.graph.revision ?? 0,
-          };
-        } else {
-          if (!current.digest) throw Error('工程缓存缺少来源摘要');
-          response.bytes =
-            request.domain === 'entities'
-              ? await encodeEngineeringEntities(
-                  result.snapshot,
-                  { sources: result.sources, digest: current.digest },
-                  identity,
-                )
-              : await encodeEngineeringNavigation(
-                  result.navigation,
-                  result.sources,
-                  result.snapshot,
-                  current.digest,
-                  identity,
-                );
-        }
-        Object.assign(response.metrics, engineeringCacheSizes(response.bytes));
-        current.plan.shift();
-      } catch (error) {
-        const failure: Pick<EngineeringBuildResult, 'cacheError' | 'cacheDisabled'> = {};
-        markCacheFailure(failure, error);
-        response.error = failure.cacheError;
-        response.disabled = failure.cacheDisabled;
-        current.plan = [];
-      }
-      response.metrics.encodeMs = performance.now() - started;
-      trace.record('engineering.cache-encode', response.metrics.encodeMs, {
-        bytes: response.bytes?.byteLength ?? 0,
-      });
-      return { type: 'cache', result: response };
-    }
-    if (request.type === 'restore') {
-      latest = undefined;
-      documents.clear();
-      entryIndex = undefined;
-      files.clear();
-      batches.clear();
-      const artifact = await decodeEngineeringSources(request.sourceBytes, request.identity);
-      graph = artifact.sources.graph;
-      scope = request.identity.sourceSha256;
-      lastSources = artifact.sources;
-      parked = {
-        bytes: request.sourceBytes,
-        identity: request.identity,
-        revision: graph.revision ?? 0,
-      };
-      let snapshot,
-        entityCacheHit = false,
-        stageErrors: Record<string, string> = {};
-      try {
-        if (!request.entityBytes) throw Error('entity-cache-missing');
-        snapshot = await decodeEngineeringEntities(request.entityBytes, artifact, request.identity);
-        entityCacheHit = true;
-      } catch {
-        const recovered = assembleStoredEngineeringView(scope, artifact.sources);
-        snapshot = recovered.snapshot;
-        stageErrors = recovered.stageErrors;
-      }
-      let navigation,
-        navigationCacheHit = false;
-      try {
-        if (!request.navigationBytes) throw Error('navigation-cache-missing');
-        navigation = await decodeEngineeringNavigation(
-          request.navigationBytes,
-          artifact.sources,
-          snapshot,
-          artifact.digest,
-          request.identity,
-        );
-        if (
-          graph.ifcPaths.length &&
-          (navigation.compositionComplete !== true || navigation.compositionCoverage !== 'full')
-        )
-          throw Error('navigation-projection-incomplete');
-        navigationCacheHit = true;
-      } catch {
-        navigation = projectEngineeringNavigation(artifact.sources, snapshot);
-      }
-      Object.assign(stageErrors, navigation.projectionErrors);
-      // Drop incoming cache buffers before constructing the display transport.
-      request.sourceBytes = new Uint8Array();
-      delete request.entityBytes;
-      delete request.navigationBytes;
-      const plan: EngineeringCacheDomain[] = [];
-      if (!stageErrors.recognition && !entityCacheHit) plan.push('entities');
-      if (!Object.keys(stageErrors).length && !navigationCacheHit) plan.push('navigation');
-      return publish(
-        {
-          sources: artifact.sources,
-          snapshot,
-          navigation,
-          entityCacheHit,
-          navigationCacheHit,
-          stageErrors,
-        },
-        started,
-        request.identity,
-        artifact.digest,
-        plan,
-      );
-    }
-    if (!graph || !scope) throw Error('Engineering source graph is not ready');
-    latest = undefined;
-    await trace.measure('engineering.families', () =>
-      materializeEngineeringFamilies(
-        graph!,
-        (path) => readFamily(path, trace),
-        (path) => evidence?.familyDocument(path),
-      ),
-    );
-    files.clear();
-    batches.clear();
-    const built = trace.sync('engineering.normalize', () =>
-      assembleEngineeringView(scope, graph!, request.objects, request.models, request.nodes),
-    );
-    lastSources = built.sources;
-    return publish(
-      built,
-      started,
-      request.identity,
-      undefined,
-      request.identity && built.sources.complete
-        ? built.stageErrors.recognition
-          ? ['sources']
-          : Object.keys(built.stageErrors).length
-            ? ['sources', 'entities']
-            : ['sources', 'entities', 'navigation']
-        : [],
-    );
+    if (request.type === 'extract') return extractSourceGraph(trace, reportProgress);
+    if (request.type === 'encode-cache') return encodeBuildCache(request, trace, started);
+    if (request.type === 'restore') return restoreCachedBuild(request, started);
+    return assembleFromSources(request, trace, started);
   };
 }

@@ -97,6 +97,203 @@ const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 200;
 const FOCUS_TOWER_ZOOM = 12;
 
+/** Owns the Canvas camera and delegates map-space movement to the overlay. */
+function createLineMapCamera(
+  geometry: ReturnType<typeof prepareLineMapGeometry>,
+  viewport: LineMapViewport,
+  selection: LineMapSelection,
+  projection: LineMapProjection | undefined,
+  pathToTower: ReadonlyMap<string, TowerMarker>,
+  isDestroyed: () => boolean,
+  renderer: () => ReturnType<typeof createLineMapRenderer>,
+) {
+  const {
+    bbox,
+    valid,
+    mercY,
+    centerLng,
+    invMercY,
+    centerWYAbs,
+    centerWX,
+    centerWY,
+    getRuntimePoint,
+  } = geometry;
+  let panX = 0;
+  let panY = 0;
+  // ---- 投影 ----
+  function projectCoordinate(point: RuntimeGeoPoint): { x: number; y: number } {
+    if (projection) {
+      const result = projection.project(point.lng, point.lat);
+      return { x: result.x, y: result.y };
+    }
+    const s = viewport.baseScale * viewport.zoom;
+    return {
+      x: viewport.cssW / 2 + (point.worldX - centerWX) * s + panX,
+      y: viewport.cssH / 2 - (point.worldY - centerWY) * s + panY,
+    };
+  }
+
+  function geoToScreen(lat: number, lng: number): { x: number; y: number } {
+    return renderer().geoToScreenPoint(getRuntimePoint(lat, lng));
+  }
+
+  function screenToWorldGeo(sx: number, sy: number): { lat: number; lng: number } {
+    // M4-A2：overlay 模式委托给外部投影（MapLibre unproject）
+    if (projection?.unproject) {
+      const geo = projection.unproject(sx, sy);
+      return { lat: geo.lat, lng: geo.lng };
+    }
+    const s = viewport.baseScale * viewport.zoom;
+    const wx = centerWX + (sx - viewport.cssW / 2 - panX) / s;
+    const wy = centerWY - (sy - viewport.cssH / 2 - panY) / s;
+    return { lat: invMercY(wy + centerWYAbs), lng: wx + centerLng };
+  }
+
+  function zoomAt(mx: number, my: number, factor: number): void {
+    if (!valid) return;
+    const before = screenToWorldGeo(mx, my);
+    viewport.zoom = clamp(viewport.zoom * factor, MIN_ZOOM, MAX_ZOOM);
+    const after = geoToScreen(before.lat, before.lng);
+    panX += mx - after.x;
+    panY += my - after.y;
+    renderer().draw();
+  }
+
+  // ---- 公开方法 ----
+  function fit(): void {
+    if (isDestroyed()) return;
+    selection.selectedTowerPaths = new Set();
+    selection.selectedWire = null;
+    // M4-A2：overlay 模式下视图由 MapLibre 管理，委托 fitBounds
+    if (projection?.fitBounds && valid) {
+      projection.fitBounds({
+        minLng: bbox.minLng,
+        minLat: bbox.minLat,
+        maxLng: bbox.maxLng,
+        maxLat: bbox.maxLat,
+      });
+      renderer().requestInteractiveFrame(true);
+      renderer().requestSettledFrame();
+      return;
+    }
+    viewport.zoom = 1;
+    panX = 0;
+    panY = 0;
+    renderer().draw();
+  }
+
+  /** 定位到单个塔位：居中 + 放大 + 高亮 */
+  function focusTowerByNodePath(path: string): boolean {
+    if (isDestroyed() || !valid) return false;
+    const t = pathToTower.get(path);
+    if (!t) return false;
+    selection.selectedTowerPaths = new Set([path]);
+    selection.hoveredTower = t;
+    // M4-A2：overlay 模式下委托 MapLibre fitBounds（单塔小范围 bbox）
+    if (projection?.fitBounds) {
+      const pad = 0.002;
+      projection.fitBounds({
+        minLng: t.lng - pad,
+        minLat: t.lat - pad,
+        maxLng: t.lng + pad,
+        maxLat: t.lat + pad,
+      });
+      renderer().requestInteractiveFrame(true);
+      renderer().requestSettledFrame();
+      return true;
+    }
+    viewport.zoom = clamp(FOCUS_TOWER_ZOOM, MIN_ZOOM, MAX_ZOOM);
+    const s = viewport.baseScale * viewport.zoom;
+    const wx = t.lng - centerLng;
+    const wy = mercY(t.lat) - centerWYAbs;
+    panX = -(wx - centerWX) * s;
+    panY = (wy - centerWY) * s;
+    renderer().draw();
+    return true;
+  }
+
+  /** 定位到一组塔位的 bbox：fit + 高亮 */
+  function focusBboxByNodePaths(paths: string[]): boolean {
+    if (isDestroyed() || !valid) return false;
+    const towers: TowerMarker[] = [];
+    for (const p of paths) {
+      const t = pathToTower.get(p);
+      if (t) towers.push(t);
+    }
+    if (towers.length === 0) return false;
+
+    // 子 bbox（geo 坐标）
+    let minLat = Infinity,
+      maxLat = -Infinity,
+      minLng = Infinity,
+      maxLng = -Infinity;
+    for (const t of towers) {
+      minLat = Math.min(minLat, t.lat);
+      maxLat = Math.max(maxLat, t.lat);
+      minLng = Math.min(minLng, t.lng);
+      maxLng = Math.max(maxLng, t.lng);
+    }
+    // 给 bbox 留 padding（避免塔位贴边）
+    const latSpan = maxLat - minLat || 0.002;
+    const lngSpan = maxLng - minLng || 0.002;
+    minLat -= latSpan * 0.2;
+    maxLat += latSpan * 0.2;
+    minLng -= lngSpan * 0.2;
+    maxLng += lngSpan * 0.2;
+
+    selection.selectedTowerPaths = new Set(paths);
+
+    // M4-A2：overlay 模式下委托 MapLibre fitBounds
+    if (projection?.fitBounds) {
+      projection.fitBounds({ minLng, minLat, maxLng, maxLat });
+      renderer().requestInteractiveFrame(true);
+      renderer().requestSettledFrame();
+      return true;
+    }
+
+    // 子 bbox（world 坐标，Web Mercator）
+    const subMinWX = minLng - centerLng;
+    const subMaxWX = maxLng - centerLng;
+    const subMinWY = mercY(minLat) - centerWYAbs;
+    const subMaxWY = mercY(maxLat) - centerWYAbs;
+    const subW = Math.max(subMaxWX - subMinWX, 1e-9);
+    const subH = Math.max(subMaxWY - subMinWY, 1e-9);
+    const subCenterWX = (subMinWX + subMaxWX) / 2;
+    const subCenterWY = (subMinWY + subMaxWY) / 2;
+
+    // 计算缩放级别，使子 bbox 填满扣除边距后的视口。
+    const availW = Math.max(viewport.cssW - 2 * FIT_PADDING, 1);
+    const availH = Math.max(viewport.cssH - 2 * FIT_PADDING, 1);
+    viewport.zoom = clamp(
+      Math.min(availW / subW, availH / subH) / viewport.baseScale,
+      MIN_ZOOM,
+      MAX_ZOOM,
+    );
+
+    // pan 使子 bbox 中心居中
+    const s = viewport.baseScale * viewport.zoom;
+    panX = -(subCenterWX - centerWX) * s;
+    panY = (subCenterWY - centerWY) * s;
+
+    renderer().draw();
+    return true;
+  }
+
+  return {
+    fit,
+    zoomAt,
+    projectCoordinate,
+    focusTowerByNodePath,
+    focusBboxByNodePaths,
+    getPan: () => ({ x: panX, y: panY }),
+    panTo: (x: number, y: number) => {
+      panX = x;
+      panY = y;
+      renderer().draw();
+    },
+  };
+}
+
 /**
  * 在 container 内渲染线路工程 2D 地图。
  *
@@ -132,19 +329,7 @@ export function renderLineMap(
   // 替代原等距圆柱投影：等距投影纬线间距恒定，中高纬度东西向被压缩、
   // 形状畸变；Web Mercator 局部形状保真（正形），与主底图形态一致。
   const geometry = prepareLineMapGeometry(mapData, enableCatenary);
-  const {
-    bbox,
-    valid,
-    mercY,
-    centerLng,
-    invMercY,
-    centerWYAbs,
-    worldW,
-    worldH,
-    centerWX,
-    centerWY,
-    getRuntimePoint,
-  } = geometry;
+  const { worldW, worldH } = geometry;
 
   // ---- 视图状态 ----
   const layerState: LayerState = {
@@ -162,11 +347,24 @@ export function renderLineMap(
     selectedWire: null,
     selectedTowerPaths: new Set(),
   };
-  let panX = 0;
-  let panY = 0;
   let destroyed = false;
 
-  const renderer = createLineMapRenderer({
+  /** nodePath → TowerMarker 索引（供 focus 查找用） */
+  const pathToTower = new Map<string, TowerMarker>();
+  for (const t of mapData.towers) {
+    if (t.nodeRef && t.nodeRef.path) pathToTower.set(t.nodeRef.path, t);
+  }
+
+  const camera = createLineMapCamera(
+    geometry,
+    viewport,
+    selection,
+    projection,
+    pathToTower,
+    () => destroyed,
+    () => renderer,
+  );
+  const renderer: ReturnType<typeof createLineMapRenderer> = createLineMapRenderer({
     ctx,
     geometry,
     viewport,
@@ -177,7 +375,7 @@ export function renderLineMap(
     showCanvasScaleBar,
     enableCatenary,
     perfSession,
-    projectCoordinate,
+    projectCoordinate: camera.projectCoordinate,
   });
   const { draw, requestInteractiveFrame, requestSettledFrame } = renderer;
   const pointer = createLineMapPointer({
@@ -194,12 +392,6 @@ export function renderLineMap(
     drawnTowers: renderer.drawnTowers,
     requestVisualRender: renderer.requestVisualRender,
   });
-
-  /** nodePath → TowerMarker 索引（供 focus 查找用） */
-  const pathToTower = new Map<string, TowerMarker>();
-  for (const t of mapData.towers) {
-    if (t.nodeRef && t.nodeRef.path) pathToTower.set(t.nodeRef.path, t);
-  }
 
   // ---- 尺寸 / DPR ----
   function resize(): void {
@@ -225,35 +417,6 @@ export function renderLineMap(
     } else {
       draw();
     }
-  }
-
-  // ---- 投影 ----
-  function projectCoordinate(point: RuntimeGeoPoint): { x: number; y: number } {
-    if (projection) {
-      const result = projection.project(point.lng, point.lat);
-      return { x: result.x, y: result.y };
-    }
-    const s = viewport.baseScale * viewport.zoom;
-    return {
-      x: viewport.cssW / 2 + (point.worldX - centerWX) * s + panX,
-      y: viewport.cssH / 2 - (point.worldY - centerWY) * s + panY,
-    };
-  }
-
-  function geoToScreen(lat: number, lng: number): { x: number; y: number } {
-    return renderer.geoToScreenPoint(getRuntimePoint(lat, lng));
-  }
-
-  function screenToWorldGeo(sx: number, sy: number): { lat: number; lng: number } {
-    // M4-A2：overlay 模式委托给外部投影（MapLibre unproject）
-    if (projection?.unproject) {
-      const geo = projection.unproject(sx, sy);
-      return { lat: geo.lat, lng: geo.lng };
-    }
-    const s = viewport.baseScale * viewport.zoom;
-    const wx = centerWX + (sx - viewport.cssW / 2 - panX) / s;
-    const wy = centerWY - (sy - viewport.cssH / 2 - panY) / s;
-    return { lat: invMercY(wy + centerWYAbs), lng: wx + centerLng };
   }
 
   // ---- 图层开关事件 ----
@@ -284,139 +447,7 @@ export function renderLineMap(
     });
   }
 
-  function zoomAt(mx: number, my: number, factor: number): void {
-    if (!valid) return;
-    const before = screenToWorldGeo(mx, my);
-    viewport.zoom = clamp(viewport.zoom * factor, MIN_ZOOM, MAX_ZOOM);
-    const after = geoToScreen(before.lat, before.lng);
-    panX += mx - after.x;
-    panY += my - after.y;
-    draw();
-  }
-
-  function onFitBtnClick(): void {
-    fit();
-  }
-
-  // ---- 公开方法 ----
-  function fit(): void {
-    if (destroyed) return;
-    selection.selectedTowerPaths = new Set();
-    selection.selectedWire = null;
-    // M4-A2：overlay 模式下视图由 MapLibre 管理，委托 fitBounds
-    if (projection?.fitBounds && valid) {
-      projection.fitBounds({
-        minLng: bbox.minLng,
-        minLat: bbox.minLat,
-        maxLng: bbox.maxLng,
-        maxLat: bbox.maxLat,
-      });
-      requestInteractiveFrame(true);
-      requestSettledFrame();
-      return;
-    }
-    viewport.zoom = 1;
-    panX = 0;
-    panY = 0;
-    draw();
-  }
-
-  /** 定位到单个塔位：居中 + 放大 + 高亮 */
-  function focusTowerByNodePath(path: string): boolean {
-    if (destroyed || !valid) return false;
-    const t = pathToTower.get(path);
-    if (!t) return false;
-    selection.selectedTowerPaths = new Set([path]);
-    selection.hoveredTower = t;
-    // M4-A2：overlay 模式下委托 MapLibre fitBounds（单塔小范围 bbox）
-    if (projection?.fitBounds) {
-      const pad = 0.002;
-      projection.fitBounds({
-        minLng: t.lng - pad,
-        minLat: t.lat - pad,
-        maxLng: t.lng + pad,
-        maxLat: t.lat + pad,
-      });
-      requestInteractiveFrame(true);
-      requestSettledFrame();
-      return true;
-    }
-    viewport.zoom = clamp(FOCUS_TOWER_ZOOM, MIN_ZOOM, MAX_ZOOM);
-    const s = viewport.baseScale * viewport.zoom;
-    const wx = t.lng - centerLng;
-    const wy = mercY(t.lat) - centerWYAbs;
-    panX = -(wx - centerWX) * s;
-    panY = (wy - centerWY) * s;
-    draw();
-    return true;
-  }
-
-  /** 定位到一组塔位的 bbox：fit + 高亮 */
-  function focusBboxByNodePaths(paths: string[]): boolean {
-    if (destroyed || !valid) return false;
-    const towers: TowerMarker[] = [];
-    for (const p of paths) {
-      const t = pathToTower.get(p);
-      if (t) towers.push(t);
-    }
-    if (towers.length === 0) return false;
-
-    // 子 bbox（geo 坐标）
-    let minLat = Infinity,
-      maxLat = -Infinity,
-      minLng = Infinity,
-      maxLng = -Infinity;
-    for (const t of towers) {
-      minLat = Math.min(minLat, t.lat);
-      maxLat = Math.max(maxLat, t.lat);
-      minLng = Math.min(minLng, t.lng);
-      maxLng = Math.max(maxLng, t.lng);
-    }
-    // 给 bbox 留 padding（避免塔位贴边）
-    const latSpan = maxLat - minLat || 0.002;
-    const lngSpan = maxLng - minLng || 0.002;
-    minLat -= latSpan * 0.2;
-    maxLat += latSpan * 0.2;
-    minLng -= lngSpan * 0.2;
-    maxLng += lngSpan * 0.2;
-
-    selection.selectedTowerPaths = new Set(paths);
-
-    // M4-A2：overlay 模式下委托 MapLibre fitBounds
-    if (projection?.fitBounds) {
-      projection.fitBounds({ minLng, minLat, maxLng, maxLat });
-      requestInteractiveFrame(true);
-      requestSettledFrame();
-      return true;
-    }
-
-    // 子 bbox（world 坐标，Web Mercator）
-    const subMinWX = minLng - centerLng;
-    const subMaxWX = maxLng - centerLng;
-    const subMinWY = mercY(minLat) - centerWYAbs;
-    const subMaxWY = mercY(maxLat) - centerWYAbs;
-    const subW = Math.max(subMaxWX - subMinWX, 1e-9);
-    const subH = Math.max(subMaxWY - subMinWY, 1e-9);
-    const subCenterWX = (subMinWX + subMaxWX) / 2;
-    const subCenterWY = (subMinWY + subMaxWY) / 2;
-
-    // 计算缩放级别，使子 bbox 填满扣除边距后的视口。
-    const availW = Math.max(viewport.cssW - 2 * FIT_PADDING, 1);
-    const availH = Math.max(viewport.cssH - 2 * FIT_PADDING, 1);
-    viewport.zoom = clamp(
-      Math.min(availW / subW, availH / subH) / viewport.baseScale,
-      MIN_ZOOM,
-      MAX_ZOOM,
-    );
-
-    // pan 使子 bbox 中心居中
-    const s = viewport.baseScale * viewport.zoom;
-    panX = -(subCenterWX - centerWX) * s;
-    panY = (subCenterWY - centerWY) * s;
-
-    draw();
-    return true;
-  }
+  const onFitBtnClick = () => camera.fit();
 
   function destroy(): void {
     if (destroyed) return;
@@ -448,17 +479,13 @@ export function renderLineMap(
 
   // ---- 绑定事件 ----
   const disposeCanvasInput = bindLineMapCanvasInput(canvas, {
-    getPan: () => ({ x: panX, y: panY }),
-    panTo: (x, y) => {
-      panX = x;
-      panY = y;
-      draw();
-    },
-    zoomAt,
+    getPan: camera.getPan,
+    panTo: camera.panTo,
+    zoomAt: camera.zoomAt,
     hover: pointer.handlePointerMove,
     click: pointer.handlePointerClick,
     leave: pointer.handlePointerLeave,
-    fit,
+    fit: camera.fit,
     hasHover: pointer.hasHover,
   });
   fitBtn.addEventListener('click', onFitBtnClick);
@@ -470,10 +497,10 @@ export function renderLineMap(
   resize();
 
   return {
-    fit,
+    fit: camera.fit,
     destroy,
-    focusTowerByNodePath,
-    focusBboxByNodePaths,
+    focusTowerByNodePath: camera.focusTowerByNodePath,
+    focusBboxByNodePaths: camera.focusBboxByNodePaths,
     handlePointerMove: pointer.handlePointerMove,
     handlePointerClick: pointer.handlePointerClick,
     handlePointerLeave: pointer.handlePointerLeave,

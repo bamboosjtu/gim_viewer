@@ -451,148 +451,162 @@ export async function loadAllIfcFiles(
     loadedCount: () => state.ifc.loadedModels.size,
     skippedCount: () => state.ifcLoading.skippedLargeIfc.length,
   });
-  const lifecycleTask = (async (): Promise<void> => {
-    try {
-      const [{ ensureEngineReady }, { loadIfcEntry }, { shouldSkipLargeIfc }] = await Promise.all([
-        import('../../../viewer/ifcLoader.js'),
-        import('../../../viewer/ifcEntryLoader.js'),
-        import('../../../services/appSettings.js'),
-      ]);
-      if (!isCurrent()) return;
-      const endEngineInit = perfBegin('web-ifc / Fragments engine 初始化', undefined, perfSession);
-      await ensureEngineReady(ctx, state, modelCallbacks);
-      if (!isCurrent()) return;
-      endEngineInit(undefined, { initialized: true });
-      const skippedCount = await runSubstationIfcQueue({
-        state,
-        ctx,
-        scope,
-        entries,
-        connectionPreview,
-        loadEntry: loadIfcEntry,
-        progress,
-        perfSession,
-        measureGeometryTracks,
-        skipLargeIfc: shouldSkipLargeIfc(),
-        ifcSourceSizes: options.ifcSourceSizes,
-        isInteractive: () => interactiveInitialized,
-        onUsable: async (entry, { source, object }) => {
-          if (measureGeometryTracks)
-            perfMarkProductMoment(
-              'ifcFirstUsable',
-              { source, scope: 'registered-authoritative-base' },
-              perfSession,
-            );
-          if (!interactiveInitialized) {
-            await initializeInteractiveAfterFirstIfc(entry, source, object);
-            return;
-          }
-          void observeFirstGeometry(
-            state,
-            ctx,
-            object,
-            session,
-            onIfcPresented,
+  async function loadIfcQueue(): Promise<number | undefined> {
+    const [{ ensureEngineReady }, { loadIfcEntry }, { shouldSkipLargeIfc }] = await Promise.all([
+      import('../../../viewer/ifcLoader.js'),
+      import('../../../viewer/ifcEntryLoader.js'),
+      import('../../../services/appSettings.js'),
+    ]);
+    if (!isCurrent()) return;
+    const endEngineInit = perfBegin('web-ifc / Fragments engine 初始化', undefined, perfSession);
+    await ensureEngineReady(ctx, state, modelCallbacks);
+    if (!isCurrent()) return;
+    endEngineInit(undefined, { initialized: true });
+    return runSubstationIfcQueue({
+      state,
+      ctx,
+      scope,
+      entries,
+      connectionPreview,
+      loadEntry: loadIfcEntry,
+      progress,
+      perfSession,
+      measureGeometryTracks,
+      skipLargeIfc: shouldSkipLargeIfc(),
+      ifcSourceSizes: options.ifcSourceSizes,
+      isInteractive: () => interactiveInitialized,
+      onUsable: async (entry, { source, object }) => {
+        if (measureGeometryTracks)
+          perfMarkProductMoment(
+            'ifcFirstUsable',
+            { source, scope: 'registered-authoritative-base' },
             perfSession,
-            'ifc',
-          ).catch(reportBackgroundError);
-        },
-      });
-      if (!isCurrent()) return;
-      progress.finishQueue();
-
-      // A first usable IFC normally establishes the coordinate anchor.  Retry
-      // once after the sequential tail only when that first attempt had no
-      // usable Fragments base; this retry is a diagnostic fallback, not an
-      // interactive barrier.
-      if (!state.projectSourceToViewerMatrix) {
-        await syncCoordinateAnchor('变电 coordinate alignment（all IFC fallback）');
-        if (!isCurrent()) return;
-      }
-
-      progress.settle();
-      background.completeRemainingIfc();
-      state.ifcLoading.pending = false;
-      enqueueDevGeometry();
-      background.markAllIfcReady();
-      // All IFCs may be empty/hidden. Complete source work independently of
-      // presentation; this does not emit an interactive/visible-frame moment.
-      afterPaintOpportunity(() => startDeferredTasks());
-      if (entries.length > 0 && measureGeometryTracks)
-        perfMarkProductMoment(
-          'ifcBaseSettled',
-          {
-            total: entries.length,
-            loaded: state.ifc.loadedModels.size,
-            failed: progress.failedCount(),
-            skipped: skippedCount,
-          },
+          );
+        if (!interactiveInitialized) {
+          await initializeInteractiveAfterFirstIfc(entry, source, object);
+          return;
+        }
+        void observeFirstGeometry(
+          state,
+          ctx,
+          object,
+          session,
+          onIfcPresented,
           perfSession,
-        );
+          'ifc',
+        ).catch(reportBackgroundError);
+      },
+    });
+  }
+
+  async function settleIfcQueue(skippedCount: number): Promise<boolean> {
+    progress.finishQueue();
+
+    // A first usable IFC normally establishes the coordinate anchor.  Retry
+    // once after the sequential tail only when that first attempt had no
+    // usable Fragments base; this retry is a diagnostic fallback, not an
+    // interactive barrier.
+    if (!state.projectSourceToViewerMatrix) {
+      await syncCoordinateAnchor('变电 coordinate alignment（all IFC fallback）');
+      if (!isCurrent()) return false;
+    }
+
+    progress.settle();
+    background.completeRemainingIfc();
+    state.ifcLoading.pending = false;
+    enqueueDevGeometry();
+    background.markAllIfcReady();
+    // All IFCs may be empty/hidden. Complete source work independently of
+    // presentation; this does not emit an interactive/visible-frame moment.
+    afterPaintOpportunity(() => startDeferredTasks());
+    if (entries.length > 0 && measureGeometryTracks)
       perfMarkProductMoment(
-        'allIfcReady',
+        'ifcBaseSettled',
         {
           total: entries.length,
           loaded: state.ifc.loadedModels.size,
           failed: progress.failedCount(),
-          firstInteractive: interactiveInitialized,
+          skipped: skippedCount,
         },
         perfSession,
       );
-      void Promise.resolve(
-        sampleSubstationMemory(
-          state,
-          'allIfcReady',
-          perfSession,
-          {
-            total: entries.length,
-            loaded: state.ifc.loadedModels.size,
-            failed: progress.failedCount(),
-          },
-          ctx,
-        ),
-      ).catch(reportBackgroundError);
-
-      // buildIfcNameIndex 失败不应阻断 UI 渲染
-      const { buildIfcNameIndex } = await import('../../../services/ifcNameIndex.js');
-      if (!isCurrent()) return;
-      state.engineering.ifcGeometryFinished = true;
-      state.engineeringGeometryEvidenceChanged?.();
-      const endNameIndex = perfBegin('变电 IFC name index', undefined, perfSession);
-      await buildIfcNameIndex(ctx, state, { session }).catch((err) => {
-        logger.warn('[GIM] buildIfcNameIndex failed', err);
-      });
-      if (!isCurrent()) return;
-      endNameIndex(undefined, { models: state.ifc.loadedModels.size });
-
-      if (!interactiveInitialized && state.ifc.loadedModels.size > 0) {
-        // Defensive fallback for a loader that populated state without the
-        // usual first-model event.  Normal IFC paths initialize above.
-        for (const entry of entries) {
-          const id = state.ifc.loadedModels.get(entry.modelId)?.runtimeModelId;
-          const object =
-            id && state.ifc.isCurrentRuntimeModel(id)
-              ? ctx.fragments.list.get(id)?.object
-              : undefined;
-          if (!object) continue;
-          await initializeInteractiveAfterFirstIfc(entry, 'unknown', object);
-          break;
-        }
-        if (!isCurrent()) return;
-      }
-      await renderSubstationCoreUi(
+    perfMarkProductMoment(
+      'allIfcReady',
+      {
+        total: entries.length,
+        loaded: state.ifc.loadedModels.size,
+        failed: progress.failedCount(),
+        firstInteractive: interactiveInitialized,
+      },
+      perfSession,
+    );
+    void Promise.resolve(
+      sampleSubstationMemory(
         state,
-        (text) => showLoadingBeforeInteractive(state, text),
-        session,
+        'allIfcReady',
         perfSession,
-        '变电 navigation/UI（all IFC）',
-      );
-      if (!isCurrent()) return;
-      // Keep the heavy post-IFC lane behind the final name-index/UI pass.  The
-      // allIfcReady product moment is already recorded above, but releasing the
-      // coordinator here avoids DEV geometry or a spatial rebuild competing with
-      // the last mandatory UI bookkeeping.
-      background.markAllIfcReady();
+        {
+          total: entries.length,
+          loaded: state.ifc.loadedModels.size,
+          failed: progress.failedCount(),
+        },
+        ctx,
+      ),
+    ).catch(reportBackgroundError);
+
+    return true;
+  }
+
+  async function finishIfcNavigation(): Promise<boolean> {
+    // buildIfcNameIndex 失败不应阻断 UI 渲染
+    const { buildIfcNameIndex } = await import('../../../services/ifcNameIndex.js');
+    if (!isCurrent()) return false;
+    state.engineering.ifcGeometryFinished = true;
+    state.engineeringGeometryEvidenceChanged?.();
+    const endNameIndex = perfBegin('变电 IFC name index', undefined, perfSession);
+    await buildIfcNameIndex(ctx, state, { session }).catch((err) => {
+      logger.warn('[GIM] buildIfcNameIndex failed', err);
+    });
+    if (!isCurrent()) return false;
+    endNameIndex(undefined, { models: state.ifc.loadedModels.size });
+
+    if (!interactiveInitialized && state.ifc.loadedModels.size > 0) {
+      // Defensive fallback for a loader that populated state without the
+      // usual first-model event.  Normal IFC paths initialize above.
+      for (const entry of entries) {
+        const id = state.ifc.loadedModels.get(entry.modelId)?.runtimeModelId;
+        const object =
+          id && state.ifc.isCurrentRuntimeModel(id)
+            ? ctx.fragments.list.get(id)?.object
+            : undefined;
+        if (!object) continue;
+        await initializeInteractiveAfterFirstIfc(entry, 'unknown', object);
+        break;
+      }
+      if (!isCurrent()) return false;
+    }
+    await renderSubstationCoreUi(
+      state,
+      (text) => showLoadingBeforeInteractive(state, text),
+      session,
+      perfSession,
+      '变电 navigation/UI（all IFC）',
+    );
+    if (!isCurrent()) return false;
+    // Keep the heavy post-IFC lane behind the final name-index/UI pass.  The
+    // allIfcReady product moment is already recorded above, but releasing the
+    // coordinator here avoids DEV geometry or a spatial rebuild competing with
+    // the last mandatory UI bookkeeping.
+    background.markAllIfcReady();
+    return true;
+  }
+
+  const lifecycleTask = (async (): Promise<void> => {
+    try {
+      const skippedCount = await loadIfcQueue();
+      if (skippedCount === undefined || !isCurrent()) return;
+      if (!(await settleIfcQueue(skippedCount)) || !isCurrent()) return;
+      if (!(await finishIfcNavigation()) || !isCurrent()) return;
     } catch (err) {
       if (!isCurrent()) return;
       clearIfcPending();

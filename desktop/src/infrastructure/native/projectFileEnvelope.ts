@@ -101,14 +101,10 @@ export interface LineSemanticPackFullResult {
   profile: LineSemanticPackFullProfile;
 }
 
-/** 解析 Rust GIMF v1 full semantic-pack envelope（纯函数，供回归测试）。 */
-export function parseLineSemanticPackFullPayload(
-  value: ArrayBuffer | Uint8Array,
-): LineSemanticPackFullResult {
-  const bytes = toUint8Array(value);
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const decoder = new TextDecoder('utf-8', { fatal: true });
-  const header = 61;
+const LINE_PACK_HEADER_BYTES = 61;
+
+function readLinePackProfile(bytes: Uint8Array, view: DataView): LineSemanticPackFullProfile {
+  const header = LINE_PACK_HEADER_BYTES;
   if (
     bytes.byteLength < header ||
     new TextDecoder().decode(bytes.slice(0, 4)) !== 'GIMF' ||
@@ -133,7 +129,28 @@ export function parseLineSemanticPackFullPayload(
   }
   const packedCount = view.getUint32(57, true);
   if (packedCount > count) throw new GimError('INDEX_INVALID', '线路语义 pack packed 条目数无效');
-  let offset = header;
+  return {
+    indexMs: Number.isFinite(indexMs) && indexMs >= 0 ? indexMs : 0,
+    resolveMs: Number.isFinite(resolveMs) && resolveMs >= 0 ? resolveMs : 0,
+    readMs: Number.isFinite(readMs) && readMs >= 0 ? readMs : 0,
+    encodeMs: Number.isFinite(encodeMs) && encodeMs >= 0 ? encodeMs : 0,
+    totalMs: Number.isFinite(totalMs) && totalMs >= 0 ? totalMs : 0,
+    bytes: Number(packedBytes),
+    entryCount: count,
+    packedCount,
+  };
+}
+
+/** 解析 Rust GIMF v1 full semantic-pack envelope（纯函数，供回归测试）。 */
+export function parseLineSemanticPackFullPayload(
+  value: ArrayBuffer | Uint8Array,
+): LineSemanticPackFullResult {
+  const bytes = toUint8Array(value);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const profile = readLinePackProfile(bytes, view);
+  const { entryCount: count, packedCount, bytes: packedBytes } = profile;
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  let offset = LINE_PACK_HEADER_BYTES;
   let countedPacked = 0;
   let countedBytes = 0;
   let hasPackedCbm = false;
@@ -195,7 +212,7 @@ export function parseLineSemanticPackFullPayload(
   }
   if (offset !== bytes.byteLength)
     throw new GimError('PACK_INVALID', '线路语义 pack full envelope 存在尾随数据');
-  if (countedPacked !== packedCount || countedBytes !== Number(packedBytes)) {
+  if (countedPacked !== packedCount || countedBytes !== packedBytes) {
     throw new GimError('PACK_INVALID', '线路语义 pack full profile 与条目不一致');
   }
   if (!hasPackedCbm) {
@@ -203,16 +220,7 @@ export function parseLineSemanticPackFullPayload(
   }
   return {
     items,
-    profile: {
-      indexMs: Number.isFinite(indexMs) && indexMs >= 0 ? indexMs : 0,
-      resolveMs: Number.isFinite(resolveMs) && resolveMs >= 0 ? resolveMs : 0,
-      readMs: Number.isFinite(readMs) && readMs >= 0 ? readMs : 0,
-      encodeMs: Number.isFinite(encodeMs) && encodeMs >= 0 ? encodeMs : 0,
-      totalMs: Number.isFinite(totalMs) && totalMs >= 0 ? totalMs : 0,
-      bytes: Number(packedBytes),
-      entryCount: count,
-      packedCount,
-    },
+    profile,
   };
 }
 

@@ -18,34 +18,11 @@ import { benchmarkEvidence, benchmarkProgress } from './modelEvidence.js';
 import { scenarioTargets, runScenarioAction, projectResourceState } from './scenarios.js';
 
 /** Only loaded by an explicit benchmark build; normal release does not expose this API. */
-export function installBenchmarkHost(state: AppState): void {
-  let opening = false,
-    openError = false,
-    openErrorCode: string | null = null,
-    openStarted: number | null = null,
-    openSequence = 0;
+function createCapabilityProbe() {
   let capabilityWorker: Worker | undefined;
   let capabilityResult: unknown = null;
-  let stream: ReturnType<typeof installMeasurementStream> | undefined;
-  let closedResources: ReturnType<typeof captureMeasurementResourceCheck> | undefined;
-  const host = {
-    async ifcConnectionProbe() {
-      return (await import('./ifcConnectionVerification.js')).verifyNativeIfcConnections();
-    },
-    stream() {
-      if (stream) return;
-      const binding = (globalThis as { __gimMeasurementEmit?: (value: string) => void })
-        .__gimMeasurementEmit;
-      if (!binding) throw Error('measurement-binding-unavailable');
-      stream = installMeasurementStream(binding);
-    },
-    ack(runId: string, batchId: number) {
-      stream?.acknowledge(runId, batchId);
-    },
-    transport() {
-      return stream?.status() ?? [];
-    },
-    capabilityProbe() {
+  return {
+    start() {
       capabilityWorker?.terminate();
       capabilityResult = null;
       (globalThis as { __GIM_MEASUREMENT_CONFIG__?: unknown }).__GIM_MEASUREMENT_CONFIG__ = {
@@ -75,10 +52,42 @@ export function installBenchmarkHost(state: AppState): void {
       };
       capabilityWorker.postMessage({ type: 'allocate' });
     },
-    endCapabilityProbe() {
+    stop() {
       capabilityWorker?.terminate();
       capabilityWorker = undefined;
     },
+    result: () => capabilityResult,
+  };
+}
+
+export function installBenchmarkHost(state: AppState): void {
+  let opening = false,
+    openError = false,
+    openErrorCode: string | null = null,
+    openStarted: number | null = null,
+    openSequence = 0;
+  const capability = createCapabilityProbe();
+  let stream: ReturnType<typeof installMeasurementStream> | undefined;
+  let closedResources: ReturnType<typeof captureMeasurementResourceCheck> | undefined;
+  const host = {
+    async ifcConnectionProbe() {
+      return (await import('./ifcConnectionVerification.js')).verifyNativeIfcConnections();
+    },
+    stream() {
+      if (stream) return;
+      const binding = (globalThis as { __gimMeasurementEmit?: (value: string) => void })
+        .__gimMeasurementEmit;
+      if (!binding) throw Error('measurement-binding-unavailable');
+      stream = installMeasurementStream(binding);
+    },
+    ack(runId: string, batchId: number) {
+      stream?.acknowledge(runId, batchId);
+    },
+    transport() {
+      return stream?.status() ?? [];
+    },
+    capabilityProbe: () => capability.start(),
+    endCapabilityProbe: () => capability.stop(),
     async open(
       sampleId: string,
       nonce: string,
@@ -129,7 +138,7 @@ export function installBenchmarkHost(state: AppState): void {
         projectType: state.currentProjectType,
         session: perfCurrentSession(),
         measurement: measurementSnapshot(),
-        capabilityResult,
+        capabilityResult: capability.result(),
         openElapsedMs: openStarted === null ? null : performance.now() - openStarted,
         devArtifactWriteElapsedMs:
           openStarted === null ||
