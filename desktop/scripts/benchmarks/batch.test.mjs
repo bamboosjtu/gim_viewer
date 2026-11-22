@@ -31,6 +31,7 @@ test('HTML locates an incomplete heap by build, run, worker and observed delay w
   assert.match(html,/cccccccc/);assert.match(html,/aaaaaaaaaaaa/);assert.match(html,/堆采样覆盖间隔超限/);
   assert.match(html,/2158.7 ms/);assert.match(html,/1076.2 ms/);
   assert.doesNotMatch(html,/<th[^>]*>(输入|构建 \/ 源码|运行标识|层级|几何提交 s|缓存发布|来源覆盖|明细丢失|发布状态)<\/th>/);
+  assert.doesNotMatch(html,/<th[^>]*>(DEV|IFC) 首绘提交/);
   assert.doesNotMatch(html,/unverified-reason-omitted|private-worker|private-run/);
 });
 function run(sample,profileDigest){return {out:'private-run',dataRoot:'private-cache',report:benchmarkRun(sample.inputId,{version:undefined,
@@ -59,6 +60,7 @@ test('batch CSV, JSON and HTML preserve optional dual-track evidence in public r
     execute:async({profileDigest})=>{
       const result=run(sample,profileDigest);
       Object.assign(result.report.metrics,{devFirstDrawSubmittedMs:31,ifcFirstDrawSubmittedMs:82,
+        devBaseSettledMs:115,ifcBaseSettledMs:156,
         ifcFirstLoadAdmittedMs:40,ifcFirstOrderedWaitMs:0,ifcFirstConversionStartMs:null,
         ifcFirstConversionPath:null,ifcFirstUsableSource:'lod-cache'});
       return result;
@@ -72,6 +74,14 @@ test('batch CSV, JSON and HTML preserve optional dual-track evidence in public r
   assert.match(csv,/ifcFirstConversionSlotWaitMs/);
   assert.match(csv,/lod-cache/);
   const html=readFileSync(join(options.out,'report.html'),'utf8');
+  for(const [tableClass,suffix] of [['results-table',' s'],['summary-table','中位 s']]){
+    const table=html.match(new RegExp(`<table[^>]*class="${tableClass}"[^>]*>[\\s\\S]*?<\\/table>`))?.[0];
+    assert.ok(table,`missing ${tableClass}`);
+    const trackHeaders=['DEV 首绘提交','DEV 基础结算','IFC 首绘提交','IFC 基础结算']
+      .map(label=>`<th scope="col" class="number">${label}${suffix}</th>`).join('');
+    assert.ok(table.includes(trackHeaders));
+    assert.ok(table.includes(['0.031','0.115','0.082','0.156'].map(value=>`<td class="number">${value}</td>`).join('')));
+  }
   assert.match(html,/首个可用 IFC 的来源/);
   assert.match(html,/未观察/);
 });

@@ -79,17 +79,16 @@ it("applies catalog defaults unless an explicit family already decides the type"
 });
 
 it("resolves road position only when every position agrees", () => {
-  expect(roadPositionType("Road", [value("站内")])).toEqual({
+  expect(roadPositionType([value("站内")])).toEqual({
     ...value("站内"),
     value: "StationInRoadWays",
   });
-  expect(roadPositionType("road", [value("站外")])).toEqual({
+  expect(roadPositionType([value("站外")])).toEqual({
     ...value("站外"),
     value: "StationOutRoadWays",
   });
   expect(
-    roadPositionType("道路", [value("站内"), value("站外")]),
+    roadPositionType([value("站内"), value("站外")]),
   ).toBeUndefined();
-  expect(roadPositionType("道路", [])).toBeUndefined();
-  expect(roadPositionType("Building", [value("站内")])).toBeUndefined();
+  expect(roadPositionType([])).toBeUndefined();
 });

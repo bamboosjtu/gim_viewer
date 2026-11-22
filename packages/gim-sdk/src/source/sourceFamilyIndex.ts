@@ -1,3 +1,6 @@
+import { engineeringSourceRecords } from "../shared/sourceRecordSelectors.js";
+import { updateSourceNames } from "./graph/sourceRecordEvidence.js";
+import type { EngineeringSourceGraph } from "./sourceGraph.js";
 import type { SourceDocument } from "./sourceDocuments.js";
 import type { SourceProperty } from "./sourceEvidence.js";
 import { parseFamSectionsWithDiagnostics } from "./famParser.js";
@@ -86,4 +89,91 @@ export class SourceFamilyIndex {
     }
     return promise;
   }
+}
+
+/** Explicit recognition demand, after the physical catalog has been published. */
+export async function materializeEngineeringFamilies(
+  graph: EngineeringSourceGraph,
+  readText: (path: string) => Promise<string>,
+  parsedDocument?: (path: string) => SourceDocument | undefined,
+): Promise<void> {
+  let changed = false;
+  const docs = new Map(graph.documents.map((d) => [d.path, d]));
+  const properties = new Map<string, SourceProperty[]>();
+  for (const { path } of graph.familyAssignments ?? []) {
+    if (properties.has(path)) continue;
+    let doc = docs.get(path);
+    if (!doc) {
+      doc = parsedDocument?.(path);
+      if (doc) {
+        docs.set(path, doc);
+        graph.documents.push(doc);
+        changed = true;
+      }
+    }
+    if (!doc) {
+      try {
+        const rawLines = (await readText(path)).split(/\r?\n/);
+        doc = { path, rawLines, fields: [] };
+        docs.set(path, doc);
+        graph.documents.push(doc);
+        changed = true;
+      } catch {
+        if (
+          !graph.diagnostics.some(
+            (d) => d.kind === "read-failed" && d.source === path,
+          )
+        ) {
+          graph.diagnostics.push({ kind: "read-failed", source: path });
+          changed = true;
+        }
+        properties.set(path, []);
+        continue;
+      }
+    }
+    const diagnostics = graph.diagnostics.filter(
+      (d) => !(d.kind === "read-failed" && d.source === path),
+    );
+    if (diagnostics.length !== graph.diagnostics.length) {
+      graph.diagnostics = diagnostics;
+      changed = true;
+    }
+    if (doc.attributeStatus) {
+      properties.set(path, doc.fields);
+      continue;
+    }
+    const parsed = parseFamSectionsWithDiagnostics(
+      doc.rawLines.join("\n"),
+      path,
+    );
+    doc.attributeStatus = parsed.diagnostics.malformedLineCount
+      ? "partial"
+      : "complete";
+    changed = true;
+    properties.set(
+      path,
+      parsed.properties.map((p) => ({
+        path,
+        line: p.sourceLine,
+        keys: [...new Set([p.label, p.rawKey])],
+        value: p.rawValue,
+        rawLine: p.rawLine,
+        section: p.section,
+      })),
+    );
+    if (!doc.fields.length)
+      doc.fields = properties
+        .get(path)!
+        .map((p) => ({ ...p, path, keys: p.keys ?? [] }));
+  }
+  const records = new Map(
+    engineeringSourceRecords(graph).map((r) => [r.id, r]),
+  );
+  for (const { sourceId, path } of graph.familyAssignments ?? []) {
+    const row = records.get(sourceId);
+    if (!row || row.properties.some((p) => p.path === path)) continue;
+    row.properties = [...row.properties, ...(properties.get(path) ?? [])];
+    updateSourceNames(row);
+  }
+  if (changed) graph.revision = (graph.revision ?? 0) + 1;
 }

@@ -1,35 +1,30 @@
-import type { SourceRecord } from "../../shared/sourceRecord.js";
+import type { SourceTypeObservation } from "./sourceFormatFacts.js";
 
-/**
- * Identify complete neutral-point assemblies from raw DEV child types.
- *
- * This is a semantic decision (two direct typed witnesses are required); the
- * Adapter only supplies the records. Display names and indirect descendants do
- * not count.
- */
+/** Complete assemblies require both declared types as direct physical members. */
 export function completeNeutralAssemblies(
-  records: readonly SourceRecord[],
+  observations: readonly SourceTypeObservation[],
 ): Set<string> {
-  const possible = new Set(
-    records
-      .filter((record) =>
-        /^(?:CompleteSetOfArcSuppressionCoilAndGroundingTransformer|GroundTransformer\/ArcExtinguishingCoil)$/i.test(
-          record.source_type,
-        ),
+  const possible = new Set<string>();
+  for (const { sourceId, declaredType } of observations) {
+    if (
+      /^(?:CompleteSetOfArcSuppressionCoilAndGroundingTransformer|GroundTransformer\/ArcExtinguishingCoil)$/i.test(
+        declaredType,
       )
-      .map((record) => record.id),
-  );
+    )
+      possible.add(sourceId);
+  }
+  if (!possible.size) return possible;
   const parts = new Map<string, number>();
-  if (!possible.size) return new Set();
-  for (const record of records) {
-    if (record.track !== "dev" || !possible.has(record.parent)) continue;
-    const type = record.source_type.trim();
+  for (const { declaredType, physicalParentId } of observations) {
+    if (!physicalParentId || !possible.has(physicalParentId)) continue;
+    const type = declaredType.trim();
     const part = /^(?:GroundTransformer|接地变|接地变压器)$/i.test(type)
       ? 1
       : /^(?:ArcExtinguishingCoil|消弧线圈)$/i.test(type)
         ? 2
         : 0;
-    parts.set(record.parent, (parts.get(record.parent) ?? 0) | part);
+    if (part)
+      parts.set(physicalParentId, (parts.get(physicalParentId) ?? 0) | part);
   }
   return new Set([...parts].filter(([, mask]) => mask === 3).map(([id]) => id));
 }

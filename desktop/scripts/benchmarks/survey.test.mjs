@@ -144,10 +144,12 @@ function npm {
 test('survey ranges separate project type, voltage and cold/warm, excluding failures and missing times',()=>{
   const base={projectType:'substation',sampleLabel:'110-A.gim',cacheState:'cold',status:'PASS',
     firstResponseMs:1000,firstGeometryMs:2000,allGeometryReadyMs:3000,settledMs:4000};
-  const report={version:'gim-batch-results-v1',status:'COMPLETE',rows:[base,
-    {...base,status:'PARTIAL',firstResponseMs:1500,firstGeometryMs:null,allGeometryReadyMs:5000,settledMs:6000},
-    {...base,status:'FAIL',firstResponseMs:1,allGeometryReadyMs:1,settledMs:1},
-    {...base,cacheState:'warm',firstResponseMs:100},
+  const report={version:'gim-batch-results-v1',status:'COMPLETE',rows:[
+    {...base,devFirstDrawSubmittedMs:2200,devBaseSettledMs:2800,ifcFirstDrawSubmittedMs:2000,ifcBaseSettledMs:3000},
+    {...base,status:'PARTIAL',firstResponseMs:1500,firstGeometryMs:null,allGeometryReadyMs:5000,settledMs:6000,
+      devFirstDrawSubmittedMs:2400,devBaseSettledMs:3200,ifcFirstDrawSubmittedMs:null,ifcBaseSettledMs:5000},
+    {...base,status:'FAIL',firstResponseMs:1,allGeometryReadyMs:1,settledMs:1,devFirstDrawSubmittedMs:1,ifcBaseSettledMs:1},
+    {...base,cacheState:'warm',firstResponseMs:100,devFirstDrawSubmittedMs:1600},
     {...base,sampleLabel:'220-B.gim',firstResponseMs:9000},
     {...base,sampleLabel:'substation01.gim'},
     {...base,projectType:'transmission_line',sampleLabel:'110-line.gim',firstGeometryMs:null,allGeometryReadyMs:null}]};
@@ -157,12 +159,23 @@ test('survey ranges separate project type, voltage and cold/warm, excluding fail
   assert.deepEqual(cold.metrics.firstGeometryMs,{min:2000,max:2000,count:1});
   assert.deepEqual(cold.metrics.allGeometryReadyMs,{min:3000,max:5000,count:2});
   assert.deepEqual(cold.metrics.settledMs,{min:4000,max:6000,count:2});
+  assert.deepEqual(cold.metrics.devFirstDrawSubmittedMs,{min:2200,max:2400,count:2});
+  assert.deepEqual(cold.metrics.ifcFirstDrawSubmittedMs,{min:2000,max:2000,count:1});
+  assert.deepEqual(cold.metrics.ifcBaseSettledMs,{min:3000,max:5000,count:2});
   assert.equal(summary.groups.find(group=>group.cacheState==='warm').metrics.firstResponseMs.min,100);
   assert.ok(summary.groups.some(group=>group.projectType==='substation'&&group.voltageKv===null));
   const line=summary.groups.find(group=>group.projectType==='transmission_line');
   assert.equal(line.voltageKv,null);assert.equal(line.metrics.firstGeometryMs.count,0);
   const output=formatSurveySummary(summary);
   assert.match(output,/线路\n/);
+  assert.doesNotMatch(output,/线路 · DEV \/ IFC 分轨/);
+  const trackTable=output.split('变电 · DEV / IFC 分轨\n\n')[1]?.split('\n\n')[0];
+  assert.ok(trackTable);
+  const [headers,coldRow,warmRow]=trackTable.split('\n').filter(line=>line.startsWith('|'))
+    .map(line=>line.split('|').slice(1,-1).map(cell=>cell.trim()));
+  assert.deepEqual(headers.slice(3),['DEV 首绘提交','DEV 基础结算','IFC 首绘提交','IFC 基础结算']);
+  assert.deepEqual(coldRow,['110 kV','冷启动','2/3','2.200 - 2.400','2.800 - 3.200','2.000 - 2.000','3.000 - 5.000']);
+  assert.deepEqual(warmRow,['110 kV','暖启动','1/1','1.600 - 1.600','-','-','-']);
   assert.match(output,/\| 冷启动\s+\|\s+1\/1 \|\s+1\.000 - 1\.000 \|\s+- \|\s+- \|\s+4\.000 - 4\.000 \|/);
   // Independent display-cell check: these tables use only ASCII and CJK.
   // Every vertical separator must share a column with its border junction.

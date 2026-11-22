@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   extractEngineeringSourceGraph,
   materializeEngineeringFamilies,
@@ -26,11 +26,29 @@ describe("independent engineering source graph", () => {
         "ENTITYNAME=PARTINDEX\nOBJECTMODELPOINTER=part.dev\nBASEFAMILY=part.fam",
       "part.fam": "[设计]\n设备名称=DEVICENAME=child-name",
     });
+    const readText = vi.fn(input.readText);
     const eager = await extractEngineeringSourceGraph(input),
-      lazy = await extractEngineeringSourceGraph(input, {
-        deferFamilies: true,
-      });
-    await materializeEngineeringFamilies(lazy, input.readText);
+      lazy = await extractEngineeringSourceGraph(
+        { ...input, readText },
+        {
+          deferFamilies: true,
+        },
+      );
+    expect(
+      readText.mock.calls.flat().filter((path) => path.endsWith(".fam")),
+    ).toEqual([]);
+    expect(
+      lazy.documents.every((document) => !document.path.endsWith(".fam")),
+    ).toBe(true);
+    await materializeEngineeringFamilies(lazy, readText);
+    expect(
+      readText.mock.calls.flat().filter((path) => path.endsWith(".fam")),
+    ).toEqual(["root.fam", "part.fam"]);
+    const materialized = structuredClone(lazy);
+    const readCount = readText.mock.calls.length;
+    await materializeEngineeringFamilies(lazy, readText);
+    expect(readText).toHaveBeenCalledTimes(readCount);
+    expect(lazy).toEqual(materialized);
     for (const child of lazy.records.filter((row) => row.parent)) {
       expect(child.properties.some((p) => p.path === "root.fam")).toBe(false);
       expect(child.properties.some((p) => p.path === "part.fam")).toBe(true);
@@ -241,6 +259,23 @@ describe("independent engineering source graph", () => {
     await expect(
       extractEngineeringSourceGraph(data, { signal: controller.signal }),
     ).rejects.toThrow("cancelled");
+  });
+
+  it("uses the same occurrence budget for CBM traversal and DEV expansion", async () => {
+    const input = files({
+      "project.cbm": "OBJECTMODELPOINTER=unit.dev\nSUBSYSTEM0=bay.cbm",
+      "unit.dev": "SUBDEVICE0=part.dev",
+      "part.dev": "SYMBOLNAME=部件",
+      "bay.cbm": "ENTITYNAME=F2System",
+    });
+    await expect(
+      extractEngineeringSourceGraph(input, { maxOccurrences: 3 }),
+    ).rejects.toThrow("Engineering source occurrence budget exceeded");
+    const graph = await extractEngineeringSourceGraph(input, {
+      maxOccurrences: 4,
+    });
+    expect(graph.cbmOccurrences).toHaveLength(2);
+    expect(graph.records).toHaveLength(2);
   });
 
   it("retains repeated raw reference keys without colliding source identities", async () => {

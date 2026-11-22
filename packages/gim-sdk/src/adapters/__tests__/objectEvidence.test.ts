@@ -75,4 +75,36 @@ describe('object evidence independent of organization and geometry',()=>{
     expect(a.records[0].id).not.toBe(b.records[0].id);
     expect(collectSourceGeometryOccurrences(a).occurrences.map(o=>[o.devPath,o.placementMatrix])).toEqual(collectSourceGeometryOccurrences(b).occurrences.map(o=>[o.devPath,o.placementMatrix]));
   });
+
+  it.each([2, 3, 4])('keeps breaker classification and member ownership at CBM level F%i', async (depth) => {
+    const input: Record<string, string> = {
+      'breaker.dev': 'TYPE=ACPorcelainCircuitBreaker\nSYMBOLNAME=断路器\nSUBDEVICE0=mechanism.dev',
+      'mechanism.dev': 'TYPE=OperatingMechanismBox\nOBJECTROLE=part\nSYMBOLNAME=操动机构箱',
+    };
+    for (let level = 1; level <= depth; level++) {
+      const declaration = level === depth ? 'OBJECTMODELPOINTER=breaker.dev'
+        : `NAME=${level === 3 ? '断路器间隔' : '组织节点'}\nSUBSYSTEM0=f${level + 1}.cbm`;
+      input[level === 1 ? 'project.cbm' : `f${level}.cbm`] =
+        `ENTITYNAME=F${level}System\n${declaration}`;
+    }
+    const graph = await extract(input);
+    const breaker = graph.records.find((row) => row.source === 'breaker.dev')!;
+    const member = graph.records.find((row) => row.source === 'mechanism.dev')!;
+    expect(graph.cbmOccurrences.find((row) => row.id === breaker.devOccurrence?.cbmOccurrenceId))
+      .toMatchObject({ entityName: `F${depth}System` });
+    expect(member.parent).toBe(breaker.id);
+
+    const snapshot = model(graph);
+    expect(snapshot.pending).toEqual([]);
+    expect(snapshot.entities).toEqual([expect.objectContaining({
+      category: 'E06',
+      sourceIds: [breaker.id, member.id].sort(),
+    })]);
+    expect(snapshot.memberships.find((row) => row.sourceId === member.id)).toMatchObject({
+      ownerId: snapshot.entities[0].id,
+      parentPartId: breaker.id,
+      disposition: 'whole_member',
+      interpretation: { meaning: 'part', membershipStatus: 'confirmed' },
+    });
+  });
 });

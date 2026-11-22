@@ -1,19 +1,18 @@
-import { engineeringSourceRecords } from "../shared/sourceRecordSelectors.js";
-import type { SourceDocument } from "./sourceDocuments.js";
-import { createEntryIndex, type EntryIndex } from "./entryResolver.js";
-export type { SourceDocument } from "./sourceDocuments.js";
-import { parseFamSectionsWithDiagnostics } from "./famParser.js";
-import { ENGINEERING_EVIDENCE_FIELDS } from "./recognitionFieldPolicy.js";
-import type { ObjectNameEvidence, SourceAlias } from "../shared/contracts.js";
-import type { SourceProperty, SourceRecord } from "./sourceEvidence.js";
-import { cbmRelationKind } from "./sourceComposition.js";
-import { SourceFamilyIndex } from "./sourceFamilyIndex.js";
-import { SourceDocumentReader } from "./sourceDocumentReader.js";
+import type { SourceAlias } from "../shared/contracts.js";
+import type { EntryIndex } from "./entryResolver.js";
+import { visitCbmOccurrence } from "./graph/cbmOccurrenceTraversal.js";
 import {
-  createSourceReferenceResolver,
-  type SourceReference,
-} from "./sourceReferenceResolver.js";
+  compareSourcePaths,
+  createSourceGraphContext,
+  type SourceGraphOptions,
+} from "./graph/sourceGraphContext.js";
+import type { SourceDocument } from "./sourceDocuments.js";
+import type { SourceRecord } from "./sourceEvidence.js";
+import type { SourceReference } from "./sourceReferenceResolver.js";
+
+export type { SourceDocument } from "./sourceDocuments.js";
 export type { SourceReference } from "./sourceReferenceResolver.js";
+export { materializeEngineeringFamilies } from "./sourceFamilyIndex.js";
 
 export interface SourceFileReader {
   /** Actual archive paths, including files not reached by CBM GUID references. */
@@ -51,535 +50,47 @@ export interface EngineeringSourceGraph {
   }>;
 }
 
-const ordered = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 /** Logical attribute sources and physical sources have independent addresses. */
 export { engineeringSourceRecords } from "../shared/sourceRecordSelectors.js";
 
 /** No use of CbmNode, current UI grain, F-levels or geometry seed predicates. */
 export async function extractEngineeringSourceGraph(
   files: SourceFileReader,
-  options: {
-    deferFamilies?: boolean;
-    maxOccurrences?: number;
-    maxDepth?: number;
-    signal?: AbortSignal;
-    onProgress?: (
-      stage: "source-index" | "source-traverse" | "source-sort",
-    ) => void;
-  } = {},
+  options: SourceGraphOptions = {},
 ): Promise<EngineeringSourceGraph> {
-  const maxOccurrences = options.maxOccurrences ?? 500_000;
-  const maxDepth = options.maxDepth ?? 128;
   const result: EngineeringSourceGraph = {
     documents: [],
     cbmOccurrences: [],
     records: [],
     aliases: [],
     references: [],
-    ifcPaths: files.paths.filter((p) => /\.ifc$/i.test(p)).sort(ordered),
+    ifcPaths: files.paths
+      .filter((p) => /\.ifc$/i.test(p))
+      .sort(compareSourcePaths),
     diagnostics: [],
     familyAssignments: [],
   };
   options.onProgress?.("source-index");
-  const entryIndex =
-    files.entryIndex ?? createEntryIndex([...files.paths].sort(ordered));
-  const prefetch = (
-    doc: SourceDocument,
-    fields: SourceDocument["fields"],
-    offset = 0,
-  ) => {
-    files.prefetchDocuments?.(
-      fields.slice(offset, offset + 256).flatMap((field) => {
-        const target = entryIndex.resolve(field.value, doc.path);
-        return target ? [target] : [];
-      }),
-    );
-  };
-  const { resolve, scalar, edgesFor } = createSourceReferenceResolver(
-    entryIndex,
-    result.references,
-    (diagnostic) => result.diagnostics.push(diagnostic),
-  );
-  const reader = new SourceDocumentReader(files);
-  result.documents = reader.documents;
-  const document = (path: string): Promise<SourceDocument> =>
-    reader.document(path);
-  // Object fields are attached only to their actual OMP occurrence. Ancestor
-  // organization labels never become evidence on every descendant.
-  const objectKeys = new Set(
-    [...ENGINEERING_EVIDENCE_FIELDS, "SYMBOLNAME", "NAME", "OBJECTNAME"].map(
-      (key) => key.toUpperCase(),
-    ),
-  );
-  const objectFields = (doc: SourceDocument) =>
-    doc.fields.filter((p) => objectKeys.has(p.keys[0].toUpperCase()));
-  function updateNames(row: SourceRecord): void {
-    const names: ObjectNameEvidence[] = [];
-    for (const [kind, labels] of [
-      ["object", ["SYMBOLNAME"]],
-      ["engineering", ["工程中名称", "PROJECTNAME"]],
-      ["family", ["设备名称", "DEVICENAME"]],
-      ["source", ["NAME", "OBJECTNAME", "PARTNAME"]],
-    ] as const) {
-      for (const p of row.properties)
-        if (
-          p.keys?.some((k) =>
-            (labels as readonly string[]).includes(k.toUpperCase()),
-          ) &&
-          p.value.trim() &&
-          !["-", "/", "-100", "软件自动生成"].includes(p.value.trim())
-        ) {
-          names.push({
-            kind,
-            value: p.value,
-            evidenceId: JSON.stringify([row.id, p.path, p.line, p.keys]),
-          });
-        }
-    }
-    row.nameEvidence = names;
-    row.name = names[0]?.value ?? "";
-  }
-  const families = new SourceFamilyIndex({
-    readDocument: document,
-    resolveReference: resolve,
-    deferFamilies: options.deferFamilies,
-  });
-  let lastProgressCount = 0;
-  function check(depth: number) {
-    const count = result.records.length + result.cbmOccurrences.length;
-    if (count - lastProgressCount >= 512) {
-      lastProgressCount = count;
-      options.onProgress?.("source-traverse");
-    }
-    if (options.signal?.aborted)
-      throw new DOMException("Source extraction cancelled", "AbortError");
-    if (
-      depth > maxDepth ||
-      result.records.length +
-        result.cbmOccurrences.length +
-        (result.attributeRecords?.length ?? 0) >=
-        maxOccurrences
-    )
-      throw new Error("Engineering source occurrence budget exceeded");
-  }
-  async function expandDev(
-    path: string,
-    id: string,
-    parent: string,
-    cbm: CbmOccurrence,
-    ancestry: Set<string>,
-    depth: number,
-    rootSourceId = id,
-    assemblyPath = "",
-  ): Promise<SourceRecord[]> {
-    check(depth);
-    if (ancestry.has(path)) {
-      result.diagnostics.push({ kind: "cycle", source: id });
-      return [];
-    }
-    let doc: SourceDocument;
-    try {
-      doc = await document(path);
-    } catch (error) {
-      if (
-        options.signal?.aborted ||
-        /Engineering source unavailable/.test(String(error))
-      )
-        throw error;
-      result.diagnostics.push({ kind: "read-failed", source: path });
-      return [];
-    }
-    const edges = edgesFor(doc, /^SUBDEVICE\d+$/i).filter((p) =>
-      /\.dev$/i.test(p.value),
-    );
-    prefetch(doc, edges);
-    const cbmDoc = await document(cbm.documentPath);
-    families.assignFamilies(doc, id);
-    if (!parent) families.assignFamilies(cbmDoc, id);
-    const props = [
-      ...(!parent ? await families.family(cbmDoc) : []),
-      ...(await families.family(doc)),
-      ...objectFields(doc),
-      ...(!parent ? objectFields(cbmDoc) : []),
-    ];
-    const row: SourceRecord = {
-      id,
-      track: "dev",
-      source: path,
-      name: "",
-      source_type: scalar(doc, "TYPE") || scalar(doc, "DEVICETYPE"),
-      parent,
-      properties: props,
-      sources: [cbm.documentPath, path],
-      context: [cbm.id],
-      guid: "",
-      devOccurrence: { rootSourceId, cbmOccurrenceId: cbm.id, assemblyPath },
-    };
-    updateNames(row);
-    result.records.push(row);
-    const subtree = [row];
-    const next = new Set(ancestry);
-    next.add(path);
-    const keyCounts = new Map<string, number>();
-    for (const field of doc.fields) {
-      const key = field.keys[0].toUpperCase();
-      keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
-    }
-    for (let i = 0; i < edges.length; i++) {
-      if (i > 0 && i % 128 === 0) prefetch(doc, edges, i);
-      const field = edges[i];
-      const target = resolve(path, field.keys[0], field.value);
-      const duplicateKey =
-        (keyCounts.get(field.keys[0].toUpperCase()) ?? 0) > 1;
-      const edgeId = `${field.keys[0].toUpperCase()}${duplicateKey ? `@line:${field.line}` : ""}`;
-      const step = `sub:${Number(field.keys[0].match(/\d+$/)![0])}`;
-      if (target)
-        subtree.push(
-          ...(await expandDev(
-            target,
-            `${id}/${edgeId}:${target}`,
-            id,
-            cbm,
-            next,
-            depth + 1,
-            rootSourceId,
-            assemblyPath ? `${assemblyPath}/${step}` : step,
-          )),
-        );
-    }
-    return subtree;
-  }
-  interface PhysicalScope {
-    records: SourceRecord[];
-    rootIds: Set<string>;
-    bySource?: Map<string, SourceRecord[]>;
-  }
-  const childScopes = new WeakMap<PhysicalScope, Map<string, PhysicalScope>>();
-  function scopeCandidates(
-    scope: PhysicalScope | undefined,
-    path: string,
-  ): SourceRecord[] {
-    if (!scope) return [];
-    if (!scope.bySource) {
-      scope.bySource = new Map();
-      for (const row of scope.records) {
-        const rows = scope.bySource.get(row.source) ?? [];
-        rows.push(row);
-        scope.bySource.set(row.source, rows);
-      }
-    }
-    return scope.bySource.get(path) ?? [];
-  }
-  async function visitCbm(
-    path: string,
-    id: string,
-    parentId: string | null,
-    viaField: string,
-    ancestors: Set<string>,
-    physicalScopes: PhysicalScope[],
-    depth: number,
-  ): Promise<void> {
-    check(depth);
-    if (ancestors.has(path)) {
-      result.diagnostics.push({ kind: "cycle", source: id });
-      return;
-    }
-    let doc: SourceDocument;
-    try {
-      doc = await document(path);
-    } catch (error) {
-      if (
-        parentId === null ||
-        options.signal?.aborted ||
-        /Engineering source unavailable/.test(String(error))
-      )
-        throw error;
-      result.diagnostics.push({ kind: "read-failed", source: path });
-      return;
-    }
-    const edges = edgesFor(doc, /^(?:SUBSYSTEM\d*|SUBDEVICE\d+)$/i).filter(
-      (p) => /\.cbm$/i.test(p.value),
-    );
-    prefetch(doc, [
-      ...doc.fields.filter(
-        (p) =>
-          /^OBJECTMODELPOINTER$/i.test(p.keys[0]) && /\.dev$/i.test(p.value),
-      ),
-      ...edges,
-    ]);
-    const entityName = scalar(doc, "ENTITYNAME")?.trim() || undefined;
-    // GUID is a scalar association fact, not a list or a first-value hint.
-    scalar(doc, "IFCGUID");
-    families.referencedFamilies(doc);
-    const node = {
-      id,
-      documentPath: path,
-      parentId,
-      viaField,
-      relationKind: cbmRelationKind(viaField),
-      ...(entityName ? { entityName } : {}),
-    };
-    result.cbmOccurrences.push(node);
-    let scopes = physicalScopes;
-    const omp = scalar(doc, "OBJECTMODELPOINTER");
-    if (omp) {
-      const target = resolve(path, "OBJECTMODELPOINTER", omp);
-      if (target) {
-        // A CBM ancestor is context only. Join actual descendants by DEV identity,
-        // excluding the root itself, even if the same template is referenced twice.
-        let candidates: SourceRecord[] = [];
-        const nearest = physicalScopes[physicalScopes.length - 1];
-        candidates = nearest
-          ? scopeCandidates(nearest, target).filter(
-              (row) => !nearest.rootIds.has(row.id),
-            )
-          : [];
-        if (candidates.length && nearest) {
-          result.aliases.push({
-            sourceId: id,
-            status: candidates.length === 1 ? "confirmed" : "ambiguous",
-            candidates: candidates.map((row) => row.id),
-          });
-          if (candidates.length === 1) {
-            const row = candidates[0];
-            families.assignFamilies(doc, row.id);
-            row.sources = [...row.sources, path];
-            row.properties = [
-              ...row.properties,
-              ...(await families.family(doc)),
-              ...objectFields(doc),
-            ];
-            updateNames(row);
-          }
-          // Limit subsequent aliases to this real part subtree, not sibling instances.
-          let children = childScopes.get(nearest);
-          if (!children) {
-            children = new Map();
-            childScopes.set(nearest, children);
-          }
-          let child = children.get(target);
-          if (!child) {
-            const ids = new Set(candidates.map((row) => row.id));
-            const prefixes = candidates.map((row) => `${row.id}/`);
-            const subtree = nearest.records.filter(
-              (row) =>
-                ids.has(row.id) ||
-                prefixes.some((prefix) => row.id.startsWith(prefix)),
-            );
-            child = { records: subtree, rootIds: ids };
-            children.set(target, child);
-          }
-          scopes = [...physicalScopes, child];
-        } else if (entityName?.toUpperCase() === "PARTINDEX") {
-          // Attribute-only occurrence: preserve evidence without creating a physical root.
-          result.aliases.push({
-            sourceId: id,
-            status: "unresolved",
-            candidates: [],
-          });
-          const attributeId = `attribute:${id}:${target}`;
-          let targetDoc: SourceDocument;
-          try {
-            targetDoc = await document(target);
-          } catch (error) {
-            if (options.signal?.aborted) throw error;
-            result.diagnostics.push({ kind: "read-failed", source: target });
-            targetDoc = { path: target, rawLines: [], fields: [] };
-          }
-          const row: SourceRecord = {
-            id: attributeId,
-            track: "dev",
-            source: target,
-            source_type:
-              scalar(targetDoc, "TYPE") || scalar(targetDoc, "DEVICETYPE"),
-            name: "",
-            parent: "",
-            properties: [
-              ...(await families.family(doc)),
-              ...(await families.family(targetDoc)),
-              ...objectFields(targetDoc),
-              ...objectFields(doc),
-            ],
-            sources: [path, target],
-            context: [id],
-            guid: "",
-            attributeOnly: true,
-            attributeContextId: id,
-            relations: [],
-          };
-          updateNames(row);
-          (result.attributeRecords ??= []).push(row);
-          families.assignFamilies(doc, attributeId);
-          families.assignFamilies(targetDoc, attributeId);
-        } else {
-          const subtree = await expandDev(
-            target,
-            `dev:${id}:${target}`,
-            "",
-            node,
-            new Set(),
-            0,
-          );
-          scopes = [
-            ...physicalScopes,
-            {
-              records: subtree,
-              rootIds: new Set(subtree.slice(0, 1).map((row) => row.id)),
-            },
-          ];
-        }
-      } else
-        result.diagnostics.push({ kind: "missing-object-model", source: id });
-    }
-    for (const field of edgesFor(doc, /^(?:IFCFILE|IFC\d+)$/i).filter(
-      (p) => p.value,
-    ))
-      resolve(path, field.keys[0], field.value);
-    const next = new Set(ancestors);
-    next.add(path);
-    const edgeCounts = new Map<string, number>();
-    for (const field of edges) {
-      const key = field.keys[0].toUpperCase();
-      edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
-    }
-    for (let i = 0; i < edges.length; i++) {
-      if (i > 0 && i % 128 === 0) prefetch(doc, edges, i);
-      const field = edges[i];
-      const child = resolve(path, field.keys[0], field.value);
-      const duplicateKey =
-        (edgeCounts.get(field.keys[0].toUpperCase()) ?? 0) > 1;
-      const edgeId = `${field.keys[0].toUpperCase()}${duplicateKey ? `@line:${field.line}` : ""}`;
-      if (child)
-        await visitCbm(
-          child,
-          `${id}/${edgeId}:${child}`,
-          id,
-          field.keys[0],
-          next,
-          scopes,
-          depth + 1,
-        );
-    }
-  }
-  const root = resolve("", "project-entry", "project.cbm");
+  const context = createSourceGraphContext(files, options, result);
+  const root = context.resolve("", "project-entry", "project.cbm");
   if (!root)
     throw new Error("Engineering source graph requires a unique project.cbm");
   options.onProgress?.("source-traverse");
-  await visitCbm(root, `cbm:${root}`, null, "", new Set(), [], 0);
+  await visitCbmOccurrence(
+    context,
+    root,
+    `cbm:${root}`,
+    null,
+    "",
+    new Set(),
+    [],
+    0,
+  );
   if (options.signal?.aborted)
     throw new DOMException("Source extraction cancelled", "AbortError");
   options.onProgress?.("source-sort");
-  result.documents.sort((a, b) => ordered(a.path, b.path));
+  result.documents.sort((a, b) => compareSourcePaths(a.path, b.path));
   result.revision = 1;
-  result.familyAssignments!.push(...families.assignments);
+  result.familyAssignments!.push(...context.families.assignments);
   return result;
-}
-
-/** Explicit recognition demand, after the physical catalog has been published. */
-export async function materializeEngineeringFamilies(
-  graph: EngineeringSourceGraph,
-  readText: (path: string) => Promise<string>,
-  parsedDocument?: (path: string) => SourceDocument | undefined,
-): Promise<void> {
-  let changed = false;
-  const docs = new Map(graph.documents.map((d) => [d.path, d]));
-  const properties = new Map<string, SourceProperty[]>();
-  for (const { path } of graph.familyAssignments ?? []) {
-    if (properties.has(path)) continue;
-    let doc = docs.get(path);
-    if (!doc) {
-      doc = parsedDocument?.(path);
-      if (doc) {
-        docs.set(path, doc);
-        graph.documents.push(doc);
-        changed = true;
-      }
-    }
-    if (!doc) {
-      try {
-        const rawLines = (await readText(path)).split(/\r?\n/);
-        doc = { path, rawLines, fields: [] };
-        docs.set(path, doc);
-        graph.documents.push(doc);
-        changed = true;
-      } catch {
-        if (
-          !graph.diagnostics.some(
-            (d) => d.kind === "read-failed" && d.source === path,
-          )
-        ) {
-          graph.diagnostics.push({ kind: "read-failed", source: path });
-          changed = true;
-        }
-        properties.set(path, []);
-        continue;
-      }
-    }
-    const diagnostics = graph.diagnostics.filter(
-      (d) => !(d.kind === "read-failed" && d.source === path),
-    );
-    if (diagnostics.length !== graph.diagnostics.length) {
-      graph.diagnostics = diagnostics;
-      changed = true;
-    }
-    if (doc.attributeStatus) {
-      properties.set(path, doc.fields);
-      continue;
-    }
-    const parsed = parseFamSectionsWithDiagnostics(
-      doc.rawLines.join("\n"),
-      path,
-    );
-    doc.attributeStatus = parsed.diagnostics.malformedLineCount
-      ? "partial"
-      : "complete";
-    changed = true;
-    properties.set(
-      path,
-      parsed.properties.map((p) => ({
-        path,
-        line: p.sourceLine,
-        keys: [...new Set([p.label, p.rawKey])],
-        value: p.rawValue,
-        rawLine: p.rawLine,
-        section: p.section,
-      })),
-    );
-    if (!doc.fields.length)
-      doc.fields = properties
-        .get(path)!
-        .map((p) => ({ ...p, path, keys: p.keys ?? [] }));
-  }
-  const records = new Map(
-    engineeringSourceRecords(graph).map((r) => [r.id, r]),
-  );
-  for (const { sourceId, path } of graph.familyAssignments ?? []) {
-    const row = records.get(sourceId);
-    if (!row || row.properties.some((p) => p.path === path)) continue;
-    row.properties = [...row.properties, ...(properties.get(path) ?? [])];
-    const names: ObjectNameEvidence[] = [];
-    for (const [kind, labels] of [
-      ["object", ["SYMBOLNAME"]],
-      ["engineering", ["工程中名称", "PROJECTNAME"]],
-      ["family", ["设备名称", "DEVICENAME"]],
-      ["source", ["NAME", "OBJECTNAME", "PARTNAME"]],
-    ] as const) {
-      for (const p of row.properties)
-        if (
-          p.keys?.some((k) =>
-            (labels as readonly string[]).includes(k.toUpperCase()),
-          ) &&
-          p.value.trim() &&
-          !["-", "/", "-100", "软件自动生成"].includes(p.value.trim())
-        )
-          names.push({
-            kind,
-            value: p.value,
-            evidenceId: JSON.stringify([row.id, p.path, p.line, p.keys]),
-          });
-    }
-    row.nameEvidence = names;
-    row.name = names[0]?.value ?? "";
-  }
-  if (changed) graph.revision = (graph.revision ?? 0) + 1;
 }

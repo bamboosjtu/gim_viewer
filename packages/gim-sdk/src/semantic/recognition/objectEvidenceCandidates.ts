@@ -1,11 +1,12 @@
 import recognitionPolicy from "../catalog/recognitionPolicy.json";
-import aliases from "../catalog/sourceCompatibilityPolicy.json";
 import { directoryRecognitionCode } from "../catalogClassification.js";
 import { standardTerms } from "../standardCatalog.js";
-import type {
-  SourceEvidenceFacts,
-  SourceEvidenceOptions,
-} from "./sourceEvidenceFacts.js";
+import type { EvidenceValue } from "../types.js";
+import type { SourceFormatFacts } from "./sourceFormatFacts.js";
+import {
+  resolveSourceType,
+  sourceCategoryAlias,
+} from "./sourceTypeDecision.js";
 import { resolveMaterial } from "./materialResolver.js";
 import { resolveComponents } from "./componentResolver.js";
 import {
@@ -20,204 +21,96 @@ import {
   componentEntries,
 } from "./objectVocabularyEvidence.js";
 
+function categoryValue(value: string): string {
+  const standard = standardTerms(value);
+  if (standard.length)
+    return standard.length === 1 ? standard[0].recognitionCode : "U-OBJECT";
+  const direct = directoryRecognitionCode(value);
+  if (direct) return direct;
+  const alias = sourceCategoryAlias(value);
+  return alias === "E01" ? "E-T" : (alias ?? "U-OBJECT");
+}
+
 export function prepareObjectDecision(
-  facts: SourceEvidenceFacts,
-  options: SourceEvidenceOptions,
+  facts: SourceFormatFacts,
+  completeNeutralAssembly = false,
 ) {
-  const { sourceTypesComplete, completeNeutralAssembly } = options;
-  const record = facts.record;
-  const values = facts.values;
-  const {
-    rawType,
-    sourceTypeEvidenceId,
-    type,
-    devTypes,
-    ifcTypes,
-    typeFields,
-    typeProperties,
-    predefinedCategories,
-  } = facts;
-  const normalize = facts.normalize;
-  const typeModels = facts.typeModels.flatMap((p) => {
-    const value = standardTerms(p.value).length
-      ? p.value
-      : (normalize.cabinetModelType(p.value) ??
-        (record.track === "ifc"
-          ? normalize.ifcModelType(type, p.value)
-          : undefined));
-    return value ? [{ ...p, value }] : [];
-  });
-  const fineCabinetModel = typeModels.some(
-    (model) =>
-      model.value === "MeasurementAndControlCabinet" ||
-      model.value === "ProtectionCabinet",
-  );
+  const sourceType = resolveSourceType(facts, completeNeutralAssembly);
+  const type = sourceType.declaration.value;
   const standardTypes = standardTerms(type);
   const standardCategories = [
     ...new Set(standardTypes.map((item) => item.recognitionCode)),
   ];
-  const devCategory =
+  const typeCategoryHint =
     standardCategories.length === 1
       ? standardCategories[0]
-      : (directoryRecognitionCode(type) ?? devTypes[type.toLowerCase()]);
-  const categoryValue = (value: string): string => {
-    const standard = standardTerms(value);
-    if (standard.length)
-      return standard.length === 1 ? standard[0].recognitionCode : "U-OBJECT";
-    const direct = directoryRecognitionCode(value);
-    const alias =
-      (aliases.structured as Record<string, string>)[value.trim()] ??
-      devTypes[value.toLowerCase()] ??
-      ifcTypes[value.toUpperCase()];
-    if (direct) return direct;
-    if (alias) return alias === "E01" ? "E-T" : alias;
-    return "U-OBJECT";
-  };
+      : (directoryRecognitionCode(type) ?? sourceType.compatibilityCategory);
   return {
-    record,
-    values,
-    rawType,
-    sourceTypeEvidenceId,
-    type,
-    devTypes,
-    ifcTypes,
-    typeFields,
-    typeProperties,
-    predefinedCategories,
-    normalize,
-    typeModels,
-    fineCabinetModel,
+    facts,
+    sourceType,
     standardTypes,
-    devCategory,
+    typeCategoryHint,
     categoryValue,
-    sourceTypesComplete,
-    completeNeutralAssembly,
+    independent: facts.roles.some((p) => /独立|independent/i.test(p.value)),
   };
 }
 
-export type ObjectDecision = ReturnType<typeof prepareObjectDecision>;
+export type SemanticDecisionInput = ReturnType<typeof prepareObjectDecision>;
 
 export function resolveObjectCandidates(
-  decision: ObjectDecision,
+  decision: SemanticDecisionInput,
   equipmentMember: boolean,
   cabinetMember: boolean,
 ) {
-  const {
-    record,
-    values,
-    type,
-    typeProperties,
-    typeModels,
-    fineCabinetModel,
-    normalize,
-    predefinedCategories,
-    sourceTypesComplete,
-    typeFields,
-    sourceTypeEvidenceId,
-    completeNeutralAssembly,
-    rawType,
-  } = decision;
-  const independent = values([
-    "对象角色",
-    "组件角色",
-    "OBJECTROLE",
-    "COMPONENTROLE",
-  ]).some((p) => /独立|independent/i.test(p.value));
+  const { facts, independent, sourceType } = decision;
+  const { keywordDeclarations } = sourceType;
   const luminaireTerminal =
-    !independent && !cabinetMember && /端子板\s*$/.test(record.name)
-      ? typeProperties.find((p) => p.value.trim().toUpperCase() === "LED")
+    !independent && !cabinetMember
+      ? sourceType.luminaireDeclaration
       : undefined;
-  const partRole = values([
-    "对象角色",
-    "组件角色",
-    "OBJECTROLE",
-    "COMPONENTROLE",
-  ]).some((p) => /内部|组成|部件|component|part/i.test(p.value));
+  const partRole = facts.roles.some((p) =>
+    /内部|组成|部件|component|part/i.test(p.value),
+  );
   const componentContext =
     equipmentMember ||
     partRole ||
-    (record.attributeOnly &&
-      !!record.relations?.some((r) => r.kind === "host")) ||
-    values([
-      "COMPONENTTYPE",
-      "部件类型",
-      "所属设备编码",
-      "宿主设备编码",
-      "HOSTEQUIPMENTID",
-      "HOSTEQUIPMENTCODE",
-      "PARENTEQUIPMENTID",
-      "所属设备名称",
-      "所属设备工程中名称",
-      "宿主设备名称",
-      "HOSTEQUIPMENTNAME",
-      "PARENTEQUIPMENTNAME",
-    ]).length > 0;
+    !!facts.declaredHostSourceIds?.length ||
+    facts.componentTypeDeclarations.length > 0 ||
+    facts.hostCodes.length > 0 ||
+    facts.hostDesignations.length > 0;
   const namespaceAmbiguities: string[] = [];
-  const cabinetAliases: Readonly<Record<string, string>> =
-    aliases.cabinetTypeWithFamilyName;
-  const cabinetAlias = [type, ...typeProperties.map((p) => p.value)].find(
-    (value) => cabinetAliases[value.trim().toLowerCase()],
-  );
-  const cabinetName =
-    cabinetAlias && !partRole && !typeModels.length
-      ? values(["屏柜名称"]).find((p) => /[柜屏]/.test(p.value))
-      : undefined;
-  const roadPosition = roadPositionType(
-    type,
-    values(["道路位置", "围墙关系", "STATIONFENCERELATION"]),
-  );
-  const keywordsForType = values([
-    "SYSCLASSIFYNAME",
-    "PARTNAME",
-    "COMPONENTTYPE",
-    "部件类型",
-  ]);
+  const cabinetName = partRole
+    ? undefined
+    : sourceType.cabinetFamilyDeclaration;
+  const roadPosition = roadPositionType(sourceType.roadPositions);
   const allowNameFallback =
-    sourceTypesComplete &&
-    !values(typeFields, record.track === "dev").some((p) =>
-      normalize.isTypeDeclaration(p.value),
-    ) &&
-    !typeModels.length &&
-    !predefinedCategories.length &&
-    !keywordsForType.some(
-      (p) =>
-        keywordEntries[p.value.trim().toLowerCase()] ||
-        componentEntries[p.value.trim().toLowerCase()],
+    facts.sourceTypesComplete &&
+    !sourceType.hasTypeProperties &&
+    !sourceType.models.length &&
+    !sourceType.predefinedCategories.length &&
+    !keywordDeclarations.some(
+      ({ rawValue }) =>
+        keywordEntries[rawValue.trim().toLowerCase()] ||
+        componentEntries[rawValue.trim().toLowerCase()],
     );
-  const rawDeclarations = [
-    { value: type, evidenceId: sourceTypeEvidenceId },
-    ...(cabinetName
-      ? [
-          {
-            ...cabinetName,
-            value: cabinetAliases[cabinetAlias!.trim().toLowerCase()],
-          },
-        ]
-      : []),
+  const rawDeclarations: EvidenceValue[] = [
+    sourceType.declaration,
+    ...(cabinetName ? [cabinetName] : []),
     ...(roadPosition ? [roadPosition] : []),
-    ...typeProperties,
-    ...typeModels,
-    ...keywordsForType.map((p) => ({
-      ...p,
-      confidence: keywordEntries[p.value.trim().toLowerCase()]
-        ? confidence(keywordEntries[p.value.trim().toLowerCase()])
-        : componentEntries[p.value.trim().toLowerCase()]
-          ? confidence(componentEntries[p.value.trim().toLowerCase()])
-          : ("candidate" as const),
-    })),
-  ];
-  const resolved = applyTypeDefaults(
-    rawDeclarations.map((p) => {
-      const value =
-        completeNeutralAssembly &&
-        p.value.trim().toLowerCase() === rawType.trim().toLowerCase()
-          ? "NeutralPointEquipment"
-          : normalize.canonicalSourceType(p.value);
-      return value === p.value ? p : { ...p, value };
+    ...sourceType.properties,
+    ...sourceType.models,
+    ...keywordDeclarations.map(({ rawValue, declaration }) => {
+      const key = rawValue.trim().toLowerCase();
+      const entry = keywordEntries[key] ?? componentEntries[key];
+      return {
+        ...declaration,
+        confidence: entry ? confidence(entry) : ("candidate" as const),
+      };
     }),
-  ).filter(
+  ];
+  const resolved = applyTypeDefaults(rawDeclarations).filter(
     (p) =>
-      !fineCabinetModel ||
+      !sourceType.fineCabinetModel ||
       !["secondarycabinet", "controlcabinet", "二次屏柜", "控制柜"].includes(
         p.value.trim().toLowerCase(),
       ),
@@ -242,10 +135,7 @@ export function resolveObjectCandidates(
   });
   const chineseName =
     needsChineseHint && allowNameFallback
-      ? [
-          ...values(["设备名称", "DEVICENAME"]).map((p) => p.value),
-          record.name,
-        ].find(
+      ? [...facts.deviceNames.map((p) => p.value), facts.name].find(
           (name) =>
             /[\u3400-\u9fff]/.test(name) &&
             componentEntries[name.trim().toLowerCase()],
@@ -256,7 +146,7 @@ export function resolveObjectCandidates(
     : undefined;
   const material = resolveMaterial({
     declarations,
-    materialDeclarations: values(["MATERIALTYPE", "材料类型"]).filter(
+    materialDeclarations: facts.materialDeclarations.filter(
       (p) => !!contextRule(p.value)?.materialRecognitionCode,
     ),
     componentContext,
@@ -286,23 +176,11 @@ export function resolveObjectCandidates(
       !namespaceAmbiguities.includes(p.value),
   );
   const cabinetNameCandidate =
-    allowNameFallback &&
-    type.trim().toLowerCase() === "secondarycabinet" &&
-    !componentDeclarations.length
-      ? [
-          ...values(["设备名称", "DEVICENAME", "工程中名称", "PROJECTNAME"]),
-          ...(record.nameEvidence ?? []),
-          { value: record.name, evidenceId: `name:${record.id}` },
-        ].find((p) => normalize.cabinetModelType(p.value))
+    allowNameFallback && !componentDeclarations.length
+      ? sourceType.cabinetNameDeclaration
       : undefined;
   const catalogDeclarations = cabinetNameCandidate
-    ? [
-        {
-          ...cabinetNameCandidate,
-          value: normalize.cabinetModelType(cabinetNameCandidate.value)!,
-          confidence: "candidate" as const,
-        },
-      ]
+    ? [cabinetNameCandidate]
     : standardDeclarations;
   const standardClasses = resolveStandardClasses(
     catalogDeclarations,

@@ -18,8 +18,10 @@ semantic/
 │   ├── materialResolver.ts  # 材料宿主与成员判定
 │   ├── recognitionPolicy.ts # 上下文规则与模型优先词
 │   ├── neutralAssemblyResolver.ts # 中性点成套类型证据
-│   ├── sourceEvidenceFacts.ts # Adapter→Semantic 的 transient facts
-│   ├── objectEvidenceCandidates.ts # 来源声明、上下文与目录候选
+│   ├── sourceFormatFacts.ts # 原始声明和来源证据契约
+│   ├── sourceTypeDecision.ts # 别名、目录匹配、类型特征和细分类线索
+│   ├── sourceTypePolicy.ts # 类型文字和型号的领域解释
+│   ├── objectEvidenceCandidates.ts # SemanticDecisionInput 与上下文候选
 │   ├── objectVocabularyEvidence.ts # 词典匹配与歧义证据
 │   └── objectEvidenceDecision.ts # 解释候选并组装对象证据
 ├── catalog/
@@ -30,9 +32,9 @@ semantic/
 
 adapters/
 ├── evidenceReader.ts        # 格式字段读取，不改变原属性
-├── recognizeSource.ts       # facts reader/facade；不决定分类
-├── sourceTypeCandidates.ts  # type/model 候选读取
-└── sourceTypePolicy.ts      # 格式别名与 canonical 值
+├── sourceEvidenceReader.ts  # 对象、组成、身份及宿主证据组装
+├── recognizeSource.ts       # 对外适配入口及识别版本转发
+└── sourceTypeDeclarations.ts # 类型、型号和物理父级的声明提取
 ```
 
 ## 已完成阶段
@@ -61,22 +63,27 @@ adapters/
 
 归属恢复只构造一次宿主和子件索引；同次归属转移集中更新 owner、状态、依据与后代。它不生成宿主匹配规则，也不改来源父级。
 
-### adapters/evidenceReader 与 sourceTypeCandidates
+### 来源适配与识别契约
 
-`evidenceReader` 只读取字段、过滤空值、跳过 DEV 字段并保留证据地址；`sourceTypeCandidates` 只读取原始 `source_type`、TYPE/型号、IFC/DEV 别名和标准类别候选。两者不改变原属性，也不直接决定实体归属。
+`evidenceReader` 为当前对象建立一次字段索引并保留原始证据地址。Adapter 输出 `SourceFormatFacts`，其中包含原始类型和型号声明、身份与角色声明、宿主、组成及字段读取完整性。中性点成套的输入包含原始类型和实际物理父级。
+
+Semantic 掌管别名、标准目录匹配、隐含角色与用途、类型特征和细分类裁决，并从格式事实生成 `SemanticDecisionInput`。普通对象、设备内成员和屏柜内成员共享一次类型解释。中性点成套和最终归属继续由 Semantic 判定。
+
+分层检查拒绝 Semantic 导入原始来源记录，也拒绝 Adapter 调用目录和内部裁决模块。Adapter 通过对象识别、中性点成套和模型归一化入口接线。
 
 ### 本轮行为收口
 
 - 独立边界与分类冲突分开：显式独立对象保留 `U-OBJECT` 实体，角色本身冲突仍进入待归。
 - 物理父级与语义组成冲突时保留两侧证据，主归属进入 `composition_host_conflict`；有/无 Adapter 宿主提示结果一致。
 - 中性点成套只接受两个直接且可确认的类型证据，显示名不能升级置信状态；暖开识别决策版本变化会自动重算实体与导航。
-- `adapters/recognizeSource.ts` 建立一次字段索引。Semantic 将声明和候选裁决、词典证据、候选解释及对象证据组装分成独立阶段。普通对象、设备内成员和屏柜内成员共用已提取的来源事实。
+- Semantic 将声明和候选裁决、词典证据、候选解释及对象证据组装分成独立阶段。
 - `adapters/objectEvidence.ts` 传递来源边和读取完整性。Semantic 负责分类、成套证据、宿主和归属裁决。
 
 ## 约束
 
 - 不先冻结当前错误识别结果再拆模块；每次拆分用现有 83 个 recognition parity 用例和语义测试验证。
 - 拆分不重复读取 CBM/DEV/FAM；来源文档缓存仍由 Source 层持有。
+- 等价的设备声明与真实装配放在 CBM F2、F3、F4 时，设备类别、整体边界和部件归属一致。来源路径和 occurrence ID 各自保留。
 - Engineering 只消费 Semantic 快照做融合，Projection 不修正底层语义。
 - 解析语法归 Parser；Semantic 不直接读文件、不调用 DOM/Worker。
 

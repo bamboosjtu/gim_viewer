@@ -45,7 +45,4 @@ export interface SourceRecord {
   relations?: Array<{ kind: "host"; targetSourceId: string; evidence: string }>;
 }
 
-export const isIfcFeatureSourceType = (type: string): boolean =>
-  /^(?:IFCDISTRIBUTIONPORT|IFCPORT|IFCOPENINGELEMENT|IFCOPENINGSTANDARDCASE|IFCVOIDINGFEATURE|IFCFEATUREELEMENTSUBTRACTION|IFCFEATUREELEMENTADDITION|IFCFEATUREELEMENT|IFCPROJECTIONELEMENT|IFCANNOTATION|IFCGRID)$/.test(
-    type,
-  );
+export { isIfcFeatureSourceType } from "./ifcFeatureSourceType.js";

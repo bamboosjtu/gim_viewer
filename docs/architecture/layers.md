@@ -84,6 +84,8 @@ bootstrap
 
 桌面应用通过 `@gim/gim-sdk` 的 source / semantic / geometry / engineering / projection 五个能力出口、source-adapter 接线以及 parser 基础入口。现有目录仅保留有生产消费者的转发入口：`gim/engineering/source.ts` 提供来源收集，`gim/engineering/semanticAdapter.ts` 将来源传入领域归一化，`gim/engineering/geometry.ts` 提供独立物理目录，`engineering/fusion.ts` 提供实体/表示绑定，`gim/engineering/projection.ts` 提供现有三视图投影。宿主 Worker 和工程装配通过这些入口接线；SDK 内部按八个顶层目录组织——格式语法、原始值与诊断位于 `parser/`，来源图和原始事实位于 `source/`，候选解释和归属位于 `semantic/`（词典在 `semantic/catalog/`），几何地址位于 `geometry/`，绑定在 `engineering/`，只读投影在 `projection/`，来源适配在 `adapters/`，中立契约在 `shared/`；位置提示由几何能力显式提供。SDK 发布构建检验各入口的运行时依赖闭包。
 
+[Source Core](source.md) 定义文档、FAM 索引和两类 occurrence 遍历的所有权及会话边界。
+
 SDK 的实现及模块测试归 `packages/gim-sdk/src/`，IFC 运行时解析器仍在桌面；其共享对象/空间类型由 SDK 的 ifcSpatialTypes 提供。桌面与 Vitest 使用 gim-source 条件读取当前源码，默认包 import 消费构建后的 ESM。
 
 构建按八个顶层目录为模块分配能力角色（`semantic/catalog/` 为词典角色），未知路径直接失败；运行时和类型依赖闭包都只能包含该入口允许的角色。SDK 包清单仅公开根入口与七个能力子路径。桌面分层门禁直接拒绝内部路径，隔离消费门禁核对包清单的完整出口集合。

@@ -44,13 +44,13 @@ export function recoverComponentMembership(
   for (const row of rows) {
     const m = meaning.get(row.sourceId)!;
     const prior = owners.get(row.sourceId);
-    const reason = prior ? pending.get(prior)?.reason : undefined;
+    const priorReason = prior ? pending.get(prior)?.reason : undefined;
     // Host declarations can fill absent ownership, not erase contrary source evidence.
     const neutral = m.meaning === "neutral_set";
     if (
-      reason &&
-      reason !== "component_whole_unresolved" &&
-      !(neutral && reason === "neutral_set_main_unresolved")
+      priorReason &&
+      priorReason !== "component_whole_unresolved" &&
+      !(neutral && priorReason === "neutral_set_main_unresolved")
     )
       continue;
     if (
@@ -64,17 +64,9 @@ export function recoverComponentMembership(
     )
       continue;
     const direct = row.declaredHostSourceIds ?? [];
-    const declared = !!(
-      direct.length ||
-      row.hostCodes?.length ||
-      row.hostDesignations?.length
-    );
-    const explicit = [
-      ...direct,
-      ...(row.hostCodes ?? []),
-      ...(row.hostDesignations ?? []),
-    ];
+    const hostCodes = row.hostCodes ?? [];
     const designations = row.hostDesignations ?? [];
+    const explicit = [...direct, ...hostCodes, ...designations];
     if (!explicit.length) continue;
     const luminaireTerminal = m.basis === "luminaire_terminal_assembly";
     const luminaireHost = (host: EngineeringEntity) =>
@@ -87,12 +79,9 @@ export function recoverComponentMembership(
           ? new Set([host.id])
           : new Set<string>();
       }),
-      ...(row.hostCodes ?? []).map(
-        (p) => codes.get(key(p.value)) ?? new Set<string>(),
-      ),
+      ...hostCodes.map((p) => codes.get(key(p.value)) ?? new Set<string>()),
       ...designations.map((p) => names.get(key(p.value)) ?? new Set<string>()),
     ];
-    if (!constraints.length) continue;
     let candidates = new Set(constraints[0]);
     for (const values of constraints.slice(1))
       candidates = new Set([...candidates].filter((id) => values.has(id)));
@@ -108,14 +97,7 @@ export function recoverComponentMembership(
             (!m.componentType &&
               row.objectRoles?.some((p) => p.value === "part"));
     candidates = new Set(matched.filter(accepts));
-    if (
-      !explicit.length &&
-      m.meaning === "object" &&
-      candidates.size === 1 &&
-      candidates.has(owners.get(row.sourceId) ?? "")
-    )
-      continue;
-    const proof = [...direct, ...(row.hostCodes ?? []), ...designations]
+    const proof = explicit
       .map((p) => p.evidenceId)
       .concat(
         m.componentType?.evidence ?? [],
@@ -146,7 +128,7 @@ export function recoverComponentMembership(
           identity: row.sourceId,
           name: row.name,
         });
-      } else attach(row, target, proof, declared ? "confirmed" : "candidate");
+      } else attach(row, target, proof, "confirmed");
       continue;
     }
     const anyMatch = constraints.some((ids) => ids.size > 0);
@@ -170,7 +152,7 @@ export function recoverComponentMembership(
       m.meaning === "part" &&
       componentHostCompatibility(m, { category }) === "compatible"
     ) {
-      const code = row.hostCodes?.[0]?.value ?? "",
+      const code = hostCodes[0]?.value ?? "",
         seed = `declared-host:${JSON.stringify([code, key(name)])}`;
       const host = create(seed, category, name, row.sourceId);
       host.boundaryStatus = "candidate";
@@ -180,29 +162,27 @@ export function recoverComponentMembership(
       attach(row, host.id, proof, "candidate");
       continue;
     }
-    if (explicit.length || anyMatch) {
-      const reason = conflicting
-        ? "component_host_conflict"
-        : matched.length && !candidates.size
-          ? matched.some(
-              (id) =>
-                componentHostCompatibility(m, entities.get(id)!) ===
-                "unconfigured",
-            )
-            ? "component_host_unconfigured"
-            : "component_host_incompatible"
-          : anyMatch
-            ? "component_host_ambiguous"
-            : "component_host_not_found";
-      unresolved(row.sourceId, reason);
-      m.membershipEvidence = proof;
-      m.membershipStatus = "unresolved";
-      m.conflict = conflicting ? reason : m.conflict;
-      diagnostics.push({
-        kind: reason,
-        identity: row.sourceId,
-        name: row.name,
-      });
-    }
+    const reason = conflicting
+      ? "component_host_conflict"
+      : matched.length && !candidates.size
+        ? matched.some(
+            (id) =>
+              componentHostCompatibility(m, entities.get(id)!) ===
+              "unconfigured",
+          )
+          ? "component_host_unconfigured"
+          : "component_host_incompatible"
+        : anyMatch
+          ? "component_host_ambiguous"
+          : "component_host_not_found";
+    unresolved(row.sourceId, reason);
+    m.membershipEvidence = proof;
+    m.membershipStatus = "unresolved";
+    m.conflict = conflicting ? reason : m.conflict;
+    diagnostics.push({
+      kind: reason,
+      identity: row.sourceId,
+      name: row.name,
+    });
   }
 }

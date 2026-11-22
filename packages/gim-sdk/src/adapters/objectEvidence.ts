@@ -3,6 +3,7 @@ import type { EngineeringSourceGraph } from "../source/sourceGraph.js";
 import { adaptSourceEvidence, type SourceRecord } from "./recognizeSource.js";
 import { collectSourceComposition } from "../source/sourceComposition.js";
 import { completeNeutralAssemblies } from "../semantic/recognition/neutralAssemblyResolver.js";
+import { readSourceTypeObservation } from "./sourceTypeDeclarations.js";
 
 /** Organizational labels are retained for audit, separately from object-owned
  * designations. The domain must never use them to establish identity or hosts. */
@@ -52,7 +53,9 @@ export function engineeringObjectEvidence(
       )
       .map((ref) => ref.owner),
   );
-  const neutralAssemblies = completeNeutralAssemblies(records);
+  const neutralAssemblies = completeNeutralAssemblies(
+    records.map(readSourceTypeObservation),
+  );
   return records.map((record) => {
     const complete =
       !familyPending.has(record.id) &&

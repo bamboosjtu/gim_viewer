@@ -58,7 +58,7 @@ Windows 也可在 `desktop/` 手动执行 `powershell -ExecutionPolicy Bypass -F
 
 每批次的 `exportId` 只用于把公开输出映射回本地私有结果，不是样本身份或授权凭据。复用同一输出路径时优先查当前 controller；完成后的重复恢复按 exportId 查询该批次，历史结果不覆盖当前结果。PARTIAL 的原因类别和计数单独导出，缺陷集合签名继续用别名保留分组差异；不能仅凭相同计数合并覆盖不同的样本。
 
-末尾时间范围分别使用首次响应 `firstResponseMs`、首次几何 `firstGeometryMs`、基础几何齐备 `allGeometryReadyMs` 和完全结算 `settledMs`，单位为秒。终端输出使用定宽文本表格，按中文显示宽度补齐、数字右对齐；变电和线路分表，表头统一注明“最短 - 最长”。只统计 PASS/PARTIAL 项已有的有限非负观测；失败、跳过和缺失值不填零，缺失项显示 `-`。变电电压优先使用报告中的 `voltageKv`，否则识别文件名电压前缀，无法识别的单列“未标注”。该范围只是本轮样本描述，不作为自动性能回退判断。
+末尾先列首次响应 `firstResponseMs`、首次几何 `firstGeometryMs`、基础几何齐备 `allGeometryReadyMs` 和完全结算 `settledMs`。有分轨观测的工程类型另列 DEV 和 IFC 各自的首绘提交与基础结算范围，沿用同一电压等级和冷暖分组。终端表格以秒为单位，各项采用“最短 - 最长”，按中文显示宽度补齐并将数字右对齐。范围只取 PASS/PARTIAL 项已有的有限非负观测，缺失项显示 `-`。变电电压优先使用报告中的 `voltageKv`，其次识别文件名电压前缀，无法识别的单列“未标注”。该范围只是本轮样本描述，不作为自动性能回退判断。
 
 已有报告无需重跑工程，可在 `desktop/` 执行 `node scripts/with-workspace-temp.mjs scripts/benchmarks/survey-summary.mjs --substation <变电results.json> --line <线路results.json> --substation <通用设计results.json>` 生成同样的终端汇总；各报告须为同一构建已完成的批次。
 
@@ -450,7 +450,7 @@ system 配置仍校验 durationMs 与 bufferMiB，但当前录制入口关闭，
 
 HTML 明细和汇总中的数值列，表头与单元格统一右对齐并使用等宽数字；宽度不足时横向滚动，保持完整单位。终端范围表分别对齐最短值、分隔符和最长值；未取得的观测继续显示缺失符号。格式更新可直接用已完成 results.json 重建 report.html，不执行工程或改动原始测量值。
 
-### DEV / IFC 双轨（诊断字段）
+### DEV / IFC 几何分轨
 
 原有 `firstGeometryMs`（首个有效模型视口绘制提交）与通过/回退门槛不变。双轨只在
 benchmark / diagnostic 模式启用，里程碑共享本次工程打开的时间零点。单跑 `metrics`
@@ -460,6 +460,8 @@ benchmark / diagnostic 模式启用，里程碑共享本次工程打开的时间
 | --- | --- |
 | DEV | `devFirstStartMs`（模板获准开始，包含缓存路径）、`devFirstUsableMs`（第一个几何表示提交到场景）、`devFirstDrawSubmittedMs`（第一个有效视口绘制提交）、`devBaseSettledMs`（基础表示结算，可包含空、失败或不支持） |
 | IFC | `ifcFirstLoadAdmittedMs`（首文件离开顺序队列）、`ifcFirstConversionStartMs`（实际工作线程收到源输入开始冷转换）、`ifcFirstUsableMs`（首个权威基础模型登记）、`ifcFirstDrawSubmittedMs`（首个权威 IFC 的有效视口绘制提交）、`ifcBaseSettledMs`（基础列表结算，可包含失败或略过） |
+
+批次取得任一轨道的首绘提交或基础结算观测时，HTML 的“测量结果”和“样本覆盖”表均显示 DEV 与 IFC 的独立列。样本覆盖按现有规则汇总中位数，缺失的单元格显示 `—`。加载、转换、可用时刻及 IFC 等待时间见运行详情。
 
 `ifcFirstOrderedWaitMs` 和 `ifcFirstConversionSlotWaitMs` 是时长，分别对应首文件及首个真正开始的转换；可能来自不同文件，不应直接相减。逐文件等待看 `orderedFileWait` 和
 `conversionSlotWait` 诊断阶段，列表等待包含更早文件占用的墙钟时间。缓存命中可产生可用和绘制时刻，但不产生转换开始，

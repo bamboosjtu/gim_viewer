@@ -1,17 +1,14 @@
-import { VOCABULARY_CONTENT } from "../policyFingerprints.js";
 import recognitionPolicy from "../catalog/recognitionPolicy.json";
-import { RECOGNITION_FIELDS_FINGERPRINT } from "../../shared/recognitionFieldPolicy.js";
-import { isIfcFeatureSourceType } from "../../shared/sourceRecord.js";
+import proxyCategories from "../catalog/proxyCategories.json";
 import aliases from "../catalog/sourceCompatibilityPolicy.json";
-import type { ObjectEvidence } from "../types.js";
+import { RECOGNITION_FIELDS_FINGERPRINT } from "../../shared/recognitionFieldPolicy.js";
 import { ENGINEERING_RULES_VERSION } from "../classify.js";
-import type {
-  SourceEvidenceFacts,
-  SourceEvidenceOptions,
-} from "./sourceEvidenceFacts.js";
+import { VOCABULARY_CONTENT } from "../policyFingerprints.js";
+import type { ObjectEvidence } from "../types.js";
+import type { SourceFormatFacts } from "./sourceFormatFacts.js";
+import { canonicalSourceType } from "./sourceTypePolicy.js";
 import { contextualRule as contextRule } from "./recognitionPolicy.js";
 import { RECOGNITION_LABELS as ENGINEERING_CATEGORY_LABELS } from "../catalogClassification.js";
-import proxyCategories from "../catalog/proxyCategories.json";
 import sourceVocabulary from "../catalog/sourceVocabulary.json";
 import {
   standardTerms,
@@ -21,7 +18,7 @@ import {
 import {
   prepareObjectDecision,
   resolveObjectCandidates,
-  type ObjectDecision,
+  type SemanticDecisionInput,
   type ObjectCandidates,
 } from "./objectEvidenceCandidates.js";
 import {
@@ -29,6 +26,17 @@ import {
   confidence,
   componentEntries,
 } from "./objectVocabularyEvidence.js";
+
+export const ENGINEERING_RECOGNITION_VERSION = [
+  ENGINEERING_RULES_VERSION,
+  STANDARD_CATALOG_VERSION,
+  sourceVocabulary.version,
+  sourceVocabulary.keywordDictionary.version,
+  aliases.version,
+  proxyCategories.version,
+  `vocabulary-content:${VOCABULARY_CONTENT}`,
+  `recognition-fields:${RECOGNITION_FIELDS_FINGERPRINT}`,
+].join("|");
 
 const vocabulary: Record<string, string> = {
   ...sourceVocabulary.equipment,
@@ -43,32 +51,15 @@ const componentNameExpression = new RegExp(
     .map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
     .join("|"),
 );
-export const ENGINEERING_RECOGNITION_VERSION = [
-  ENGINEERING_RULES_VERSION,
-  STANDARD_CATALOG_VERSION,
-  sourceVocabulary.version,
-  sourceVocabulary.keywordDictionary.version,
-  aliases.version,
-  proxyCategories.version,
-  `vocabulary-content:${VOCABULARY_CONTENT}`,
-  `recognition-fields:${RECOGNITION_FIELDS_FINGERPRINT}`,
-].join("|");
-
 function interpretObjectCandidates(
-  decision: ObjectDecision,
+  decision: SemanticDecisionInput,
   candidates: ObjectCandidates,
 ) {
-  const {
-    record,
-    values,
-    type,
-    sourceTypeEvidenceId,
-    devCategory,
-    ifcTypes,
-    predefinedCategories,
-    categoryValue,
-    standardTypes,
-  } = decision;
+  const { facts, sourceType, typeCategoryHint, categoryValue, standardTypes } =
+    decision;
+  const { name } = facts;
+  const { predefinedCategories } = sourceType;
+  const sourceTypeEvidenceId = sourceType.declaration.evidenceId;
   const {
     groundMaterial,
     materialRule,
@@ -82,7 +73,6 @@ function interpretObjectCandidates(
     allowNameFallback,
     neutralAttachment,
   } = candidates;
-  const modelProperties = values(["型号", "MODEL", "MODELSPEC"]);
   const propertyCategories = [
     ...(groundMaterial && materialRule
       ? materialDeclarations.map((p) => ({
@@ -106,7 +96,7 @@ function interpretObjectCandidates(
           ? [{ ...p, value: category }]
           : [];
       }),
-    ...modelProperties
+    ...facts.modelProperties
       .filter((p) => !chinese.length || /[\u3400-\u9fff]/.test(p.value))
       .flatMap((p) => {
         const category = categoryValue(p.value);
@@ -114,20 +104,11 @@ function interpretObjectCandidates(
           ? [{ ...p, value: category }]
           : [];
       }),
+    ...sourceType.authoringCategories,
   ];
-  // Generic IFC proxies may still carry explicit authoring categories. Keep
-  // this conservative: generic models/electrical equipment are not a type.
-  if (type === "IFCBUILDINGELEMENTPROXY")
-    for (const p of values(["类别(Category)", "类别", "Category"])) {
-      const category = (proxyCategories.categories as Record<string, string>)[
-        p.value.trim()
-      ];
-      if (category) propertyCategories.push({ ...p, value: category });
-    }
   const proxyCategory = new Set(propertyCategories.map((p) => p.value));
   const proxyName =
-    type === "IFCBUILDINGELEMENTPROXY" &&
-    /^(?:代理构件|IfcBuildingElementProxy)$/i.test(record.name) &&
+    sourceType.useCategoryLabel &&
     proxyCategory.size === 1 &&
     !["E19", "C-D6"].includes([...proxyCategory][0])
       ? ENGINEERING_CATEGORY_LABELS[[...proxyCategory][0]]
@@ -144,12 +125,12 @@ function interpretObjectCandidates(
       ? declaredCategories[0]
       : predefinedCategories.length === 1
         ? predefinedCategories[0].value
-        : (devCategory ??
-          ifcTypes[type] ??
+        : (typeCategoryHint ??
+          sourceType.exactFallbackCategory ??
           (observedCategories.length === 1
             ? observedCategories[0]
             : undefined));
-  for (const p of values(["用途", "设备用途", "PURPOSE"])) {
+  for (const p of facts.purposes) {
     const category = /^(?:站用|station_service_transformer)$/i.test(
       p.value.trim(),
     )
@@ -162,41 +143,40 @@ function interpretObjectCandidates(
       ((typed === "E01" || typed === "E-T") &&
         ["E01", "E03"].includes(category)) ||
       (typed === "C-B4" && ["C-B2", "C-B3"].includes(category)) ||
-      (["IFCPUMP", "IFCVALVE"].includes(type) &&
-        /^(?:给排水设施|排水设施)$/.test(p.value))
+      (sourceType.drainageCategory && /^(?:给排水设施|排水设施)$/.test(p.value))
     )
       propertyCategories.push({
         ...p,
-        value: ["IFCPUMP", "IFCVALVE"].includes(type) ? "C-D5" : category,
+        value: sourceType.drainageCategory ?? category,
       });
   }
   const needsNameCandidate =
     allowNameFallback &&
-    !components[type.toLowerCase()] &&
+    !components[sourceType.declaration.value.toLowerCase()] &&
     !standardTypes.length &&
     !standardClasses.length &&
     !componentDeclarations.length &&
     !groundMaterial &&
     !propertyCategories.length &&
-    (!devCategory || devCategory === "part") &&
-    !standardTerms(record.name).length;
+    (!typeCategoryHint || typeCategoryHint === "part") &&
+    !standardTerms(name).length;
   const nameTerm = needsNameCandidate
-    ? (componentEntries[record.name.trim().toLowerCase()] ??
+    ? (componentEntries[name.trim().toLowerCase()] ??
       componentEntries[
-        (record.name.split(/[_－:：]/).pop() ?? "").trim().toLowerCase()
+        (name.split(/[_－:：]/).pop() ?? "").trim().toLowerCase()
       ])
     : undefined;
   const namedComponent = needsNameCandidate
     ? (nameTerm ??
-      componentEntries[componentNameExpression.exec(record.name)?.[0] ?? ""])
+      componentEntries[componentNameExpression.exec(name)?.[0] ?? ""])
     : undefined;
   const componentNameCandidate = namedComponent?.componentType
     ? [
         {
           value: namedComponent.componentType,
           evidenceId:
-            record.nameEvidence?.find((n) => n.value === record.name)
-              ?.evidenceId ?? `name:${record.id}`,
+            facts.names?.find((n) => n.value === name)?.evidenceId ??
+            `name:${facts.sourceId}`,
           confidence: "candidate" as const,
         },
       ]
@@ -210,7 +190,7 @@ function interpretObjectCandidates(
     );
   const classifiedSourceType =
     standardClasses.find((p) => p.evidenceId === sourceTypeEvidenceId)
-      ?.recognitionCode ?? devCategory;
+      ?.recognitionCode ?? typeCategoryHint;
   let typeCategory: string | undefined;
   if (groundMaterial) typeCategory = materialRule?.materialRecognitionCode;
   else if (!namespaceAmbiguities.length) {
@@ -221,9 +201,10 @@ function interpretObjectCandidates(
       typeCategory =
         predefinedCategories.length === 1
           ? predefinedCategories[0].value
-          : classifiedSourceType === "E01" && type !== "E01"
+          : classifiedSourceType === "E01" &&
+              sourceType.declaration.value !== "E01"
             ? "E-T"
-            : (classifiedSourceType ?? ifcTypes[type.toUpperCase()]);
+            : (classifiedSourceType ?? sourceType.fallbackCategory);
     }
   }
   return {
@@ -236,19 +217,14 @@ function interpretObjectCandidates(
 }
 
 function assembleObjectEvidence(
-  decision: ObjectDecision,
+  decision: SemanticDecisionInput,
   candidates: ObjectCandidates,
   classification: ReturnType<typeof interpretObjectCandidates>,
   vocabularyObservations: ObjectEvidence["vocabularyObservations"],
 ): ObjectEvidence {
-  const {
-    record,
-    values,
-    type,
-    sourceTypeEvidenceId,
-    predefinedCategories,
-    devCategory,
-  } = decision;
+  const { facts, sourceType, typeCategoryHint } = decision;
+  const { predefinedCategories } = sourceType;
+  const sourceTypeEvidenceId = sourceType.declaration.evidenceId;
   const {
     allowNameFallback,
     standardClasses,
@@ -275,27 +251,11 @@ function assembleObjectEvidence(
   } = classification;
   return {
     allowNameFallback,
-    declaredHostSourceIds: record.attributeOnly
-      ? record.relations
-          ?.filter((r) => r.kind === "host")
-          .map((r) => ({ value: r.targetSourceId, evidenceId: r.evidence }))
-      : [],
+    declaredHostSourceIds: facts.declaredHostSourceIds,
     standardClasses,
     vocabularyAmbiguities: namespaceAmbiguities,
-    hostCodes: values([
-      "所属设备编码",
-      "宿主设备编码",
-      "HOSTEQUIPMENTID",
-      "HOSTEQUIPMENTCODE",
-      "PARENTEQUIPMENTID",
-    ]),
-    hostDesignations: values([
-      "所属设备名称",
-      "所属设备工程中名称",
-      "宿主设备名称",
-      "HOSTEQUIPMENTNAME",
-      "PARENTEQUIPMENTNAME",
-    ]),
+    hostCodes: facts.hostCodes,
+    hostDesignations: facts.hostDesignations,
     vocabularyObservations,
     equipmentTypeCandidates: standardDeclarations.flatMap((p) => {
       const items = modelTerms(p.value).filter(
@@ -333,15 +293,10 @@ function assembleObjectEvidence(
         }));
       }),
     ],
-    purposes: /^stationtransformer$/i.test(type)
-      ? [
-          {
-            value: "station_service_transformer",
-            evidenceId: `${record.id}:source_type:${type}`,
-          },
-        ]
+    purposes: sourceType.impliedPurpose
+      ? [sourceType.impliedPurpose]
       : ["E01", "E-T", "E03"].includes(typed ?? "")
-        ? values(["用途", "设备用途", "PURPOSE"]).flatMap((p) =>
+        ? facts.purposes.flatMap((p) =>
             /^(?:主变|主变压器|main_transformer)$/i.test(p.value.trim())
               ? [{ ...p, value: "main_transformer" }]
               : /^(?:站用|站用变压器|station_service_transformer)$/i.test(
@@ -351,23 +306,11 @@ function assembleObjectEvidence(
                 : [],
           )
         : [],
-    sourceId: record.id,
-    name: proxyName || record.name,
-    assemblyParentId: record.parent || undefined,
-    composition: record.parent
-      ? [
-          {
-            kind:
-              record.track === "dev"
-                ? "physical_assembly"
-                : "object_decomposition",
-            parentSourceIds: [record.parent],
-            evidence: [`assembly:${record.parent}->${record.id}`],
-            status: "confirmed",
-          },
-        ]
-      : undefined,
-    names: record.nameEvidence,
+    sourceId: facts.sourceId,
+    name: proxyName || facts.name,
+    assemblyParentId: facts.assemblyParentId,
+    composition: facts.composition,
+    names: facts.names,
     typeCategory,
     typeEvidenceId:
       neutralAttachment?.evidenceId ??
@@ -377,22 +320,14 @@ function assembleObjectEvidence(
           ? componentDeclarations[0].evidenceId
           : predefinedCategories.length === 1
             ? predefinedCategories[0].evidenceId
-            : `${record.id}:source_type:${type}`),
+            : sourceType.canonicalEvidenceId),
     propertyCategories: [
       ...propertyCategories,
       ...standardClasses
         .filter((p) => p.evidenceId !== sourceTypeEvidenceId)
         .map((p) => ({ ...p, value: p.recognitionCode })),
     ],
-    typeRefinements: ["IFCPUMP", "IFCVALVE"].includes(type)
-      ? ["C-D5"]
-      : ["IFCBEAM", "IFCBEAMSTANDARDCASE"].includes(type)
-        ? ["C-A4.steel"]
-        : ["IFCCOLUMN", "IFCCOLUMNSTANDARDCASE"].includes(type)
-          ? ["C-A3.steel"]
-          : type === "IFCMEMBER"
-            ? ["C-A14", "C-A3", "C-A4", "C-B5", "C-B7"]
-            : [],
+    typeRefinements: sourceType.refinements,
     objectRoles: [
       ...(groundMember && materialRule
         ? [
@@ -406,12 +341,7 @@ function assembleObjectEvidence(
             },
           ]
         : []),
-      ...values([
-        "对象角色",
-        "组件角色",
-        "OBJECTROLE",
-        "COMPONENTROLE",
-      ]).flatMap((p) =>
+      ...facts.roles.flatMap((p) =>
         /^(?:source_only|非物理来源)$/i.test(p.value)
           ? [{ ...p, value: "source_only" }]
           : /^(?:detail|细部)$/i.test(p.value)
@@ -424,52 +354,29 @@ function assembleObjectEvidence(
                   ? [{ ...p, value: "independent" }]
                   : [],
       ),
-      ...(type === "IFCPILE"
-        ? [
-            {
-              value: "part",
-              evidenceId: `${record.id}:pile_foundation_component`,
-            },
-          ]
-        : []),
+      ...(sourceType.impliedRole ? [sourceType.impliedRole] : []),
     ],
     traits: {
-      fastener: ["IFCMECHANICALFASTENER", "IFCFASTENER"].includes(type),
-      assemblyContainer: [
-        "IFCELEMENTASSEMBLY",
-        "IFCBUILDINGELEMENTPROXY",
-      ].includes(type),
-      materialType: groundMaterial || !!devCategory?.startsWith("M"),
-      nonphysical: isIfcFeatureSourceType(type),
+      ...sourceType.traits,
+      materialType: groundMaterial || !!typeCategoryHint?.startsWith("M"),
       ...(luminaireTerminal ? { luminaireTerminal } : {}),
     },
-    designations: values(["工程中名称", "PROJECTNAME", "Projectname"]),
-    identityCodes: values([
-      "电网工程标识系统编码",
-      "设备编码",
-      "GRIDIDENTIFICATIONSYSTEMCODE",
-    ]),
-    identityNames: values([
-      "设备名称",
-      "DEVICENAME",
-      "工程中名称",
-      "PROJECTNAME",
-      "Projectname",
-    ]),
-    phases: values(["相数", "PHASECOUNT"]).map((p) => ({
+    designations: facts.designations,
+    identityCodes: facts.identityCodes,
+    identityNames: facts.identityNames,
+    phases: facts.phases.map((p) => ({
       ...p,
       value: /^(?:1|单相)$/.test(p.value) ? "单相" : p.value,
     })),
-    phaseLabels: values(["相别", "PHASE", "PHASELABEL"]),
+    phaseLabels: facts.phaseLabels,
   };
 }
 
 export function resolveObjectEvidence(
-  facts: SourceEvidenceFacts,
-  options: SourceEvidenceOptions,
+  facts: SourceFormatFacts,
+  completeNeutralAssembly = false,
 ): ObjectEvidence {
-  const decision = prepareObjectDecision(facts, options);
-  const { record, values, normalize } = decision;
+  const decision = prepareObjectDecision(facts, completeNeutralAssembly);
   const resolve = (
     equipmentMember = false,
     cabinetMember = false,
@@ -487,37 +394,16 @@ export function resolveObjectEvidence(
     );
   };
   const result = resolve();
-  const role = values(["对象角色", "组件角色", "OBJECTROLE", "COMPONENTROLE"]);
-  const contextual = [
-    record.source_type,
-    ...values([
-      "TYPE",
-      "类型",
-      "模型分类名称",
-      "装置名称",
-      "DEVICETYPE",
-      "EQUIPMENTTYPE",
-      "MATERIALTYPE",
-      "SYSCLASSIFYNAME",
-      "PARTNAME",
-      "设备类型",
-      "设备类别",
-      "材料类型",
-      "材料子类",
-      "MATERIALSUBTYPE",
-      "设备子类",
-      "EQUIPMENTSUBTYPE",
-      "COMPONENTTYPE",
-      "部件类型",
-    ]).map((p) => p.value),
-  ];
   const resolvedPart =
     result.objectRoles?.some((p) => p.value === "part") ||
     result.componentTypeCandidates?.some((p) => p.confidence !== "candidate");
-  const rules = contextual
-    .map((value) => contextRule(normalize.canonicalSourceType(value)))
-    .filter((rule) => rule !== undefined);
-  if (!role.some((p) => /独立|independent/i.test(p.value))) {
+  if (!decision.independent) {
+    const rules = [
+      facts.sourceType.declaration,
+      ...facts.contextualDeclarations,
+    ]
+      .map(({ value }) => contextRule(canonicalSourceType(value)))
+      .filter((rule) => rule !== undefined);
     if (!resolvedPart && rules.some((rule) => !rule.hostKind))
       result.equipmentMemberVariant = resolve(true);
     if (rules.some((rule) => rule.hostKind === "cabinet"))

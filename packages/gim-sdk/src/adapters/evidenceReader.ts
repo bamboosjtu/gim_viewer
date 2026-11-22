@@ -4,6 +4,7 @@ import type { EvidenceValue } from "../semantic/types.js";
 
 const recognitionKeys = new Set(ENGINEERING_EVIDENCE_FIELDS);
 const empty = new Set(["", "-", "/", "-100", "软件自动生成"]);
+const noEvidence: readonly EvidenceValue[] = [];
 
 /**
  * Build the transient property reader for one source record.
@@ -13,7 +14,10 @@ const empty = new Set(["", "-", "/", "-100", "软件自动生成"]);
  */
 export function createValueReader(
   record: SourceRecord,
-): (labels: readonly string[], skipDevFields?: boolean) => EvidenceValue[] {
+): (
+  labels: readonly string[],
+  skipDevFields?: boolean,
+) => readonly EvidenceValue[] {
   const byKey = new Map<string, number[]>();
   record.properties.forEach((property, index) => {
     const keys = property.keys;
@@ -29,10 +33,11 @@ export function createValueReader(
   });
   const evidence = new Map<number, EvidenceValue>();
   return (labels, skipDevFields = false) => {
+    if (!byKey.size) return noEvidence;
     const matched = labels.flatMap(
       (label) => byKey.get(label.toUpperCase()) ?? [],
     );
-    if (!matched.length) return [];
+    if (!matched.length) return noEvidence;
     const positions =
       labels.length === 1
         ? matched

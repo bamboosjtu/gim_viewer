@@ -19,6 +19,7 @@ function inlineRecognitionLabels(): string[] {
     if (!ts.isArrayLiteralExpression(node) || !node.elements.length) return null;
     const texts: string[] = [];
     for (const element of node.elements) {
+      if (ts.isSpreadElement(element) && ts.isIdentifier(element.expression) && /(?:Fields|Keys)$/i.test(element.expression.text)) continue;
       if (!ts.isStringLiteral(element)) return null;
       texts.push(element.text);
     }
@@ -54,15 +55,8 @@ function inlineRecognitionLabels(): string[] {
     ts.forEachChild(node, visit);
   };
   const adapterDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-  const semanticDir = resolve(adapterDir, '../semantic/recognition');
-  for (const [name, directory] of [
-    ['objectEvidenceDecision.ts', semanticDir],
-    ['objectEvidenceCandidates.ts', semanticDir],
-    ['objectVocabularyEvidence.ts', semanticDir],
-    ['sourceTypeCandidates.ts', adapterDir],
-    ['evidenceReader.ts', adapterDir],
-  ] as const) {
-    const source = readFileSync(resolve(directory, name), 'utf8');
+  for (const name of ['sourceEvidenceReader.ts', 'sourceTypeDeclarations.ts']) {
+    const source = readFileSync(resolve(adapterDir, name), 'utf8');
     visit(ts.createSourceFile(name, source, ts.ScriptTarget.Latest, true));
   }
   return [...labels];

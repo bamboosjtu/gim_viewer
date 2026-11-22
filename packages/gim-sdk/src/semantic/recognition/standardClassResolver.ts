@@ -6,7 +6,6 @@ import policy from "../catalog/sourceCompatibilityPolicy.json";
 import { standardCatalogItem, standardTerms } from "../standardCatalog.js";
 
 const defaults = new Map<string, string>(Object.entries(policy.typeDefaults));
-const coarseRoadNames = new Set(["road", "道路", "ifcroad"]);
 const key = (value: string) => value.trim().normalize("NFKC").toLowerCase();
 
 export interface StandardTermLike {
@@ -94,10 +93,9 @@ export function applyTypeDefaults(
 /** Positions are declared by the source adapter. Missing/crossing/contradictory
  * boundary evidence keeps a generic road at the family level. */
 export function roadPositionType(
-  type: string,
   positions: readonly EvidenceValue[],
 ): EvidenceValue | undefined {
-  if (!coarseRoadNames.has(key(type)) || !positions.length) return undefined;
+  if (!positions.length) return undefined;
   const id = (value: string) =>
     /^(?:站内|围墙内|inside)$/i.test(value.trim())
       ? "StationInRoadWays"

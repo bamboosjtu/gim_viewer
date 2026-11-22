@@ -1,47 +1,14 @@
 import type { SourceRecord } from "../shared/sourceRecord.js";
-import { ENGINEERING_EVIDENCE_FIELDS } from "../shared/recognitionFieldPolicy.js";
-import { createValueReader } from "./evidenceReader.js";
-import { sourceTypeCandidates } from "./sourceTypeCandidates.js";
-import {
-  cabinetModelType,
-  canonicalSourceType,
-  ifcModelType,
-  isTypeDeclaration,
-} from "./sourceTypePolicy.js";
-import {
-  ENGINEERING_RECOGNITION_VERSION,
-  resolveObjectEvidence,
-} from "../semantic/recognition/objectEvidenceDecision.js";
-import type {
-  SourceEvidenceFacts,
-  SourceEvidenceOptions,
-} from "../semantic/recognition/sourceEvidenceFacts.js";
+import { readSourceFormatFacts } from "./sourceEvidenceReader.js";
+import { resolveObjectEvidence } from "../semantic/recognition/objectEvidenceDecision.js";
 
-export { ENGINEERING_RECOGNITION_VERSION, ENGINEERING_EVIDENCE_FIELDS };
+export { ENGINEERING_RECOGNITION_VERSION } from "../semantic/recognition/objectEvidenceDecision.js";
+export { ENGINEERING_EVIDENCE_FIELDS } from "../shared/recognitionFieldPolicy.js";
 export type { SourceRecord, SourceProperty } from "../shared/sourceRecord.js";
 
-/** Read format fields and normalize values; semantic decisions are not made here. */
-export function readSourceEvidenceFacts(
-  record: SourceRecord,
-  completeNeutralAssembly = false,
-): SourceEvidenceFacts {
-  const values = createValueReader(record);
-  const candidates = sourceTypeCandidates(
-    record,
-    values,
-    completeNeutralAssembly,
-  );
-  return {
-    ...candidates,
-    record,
-    values,
-    normalize: {
-      canonicalSourceType,
-      cabinetModelType,
-      ifcModelType,
-      isTypeDeclaration,
-    },
-  };
+interface SourceEvidenceOptions {
+  sourceTypesComplete: boolean;
+  completeNeutralAssembly: boolean;
 }
 
 /** Public adapter entry retained for consumers; implementation lives in Semantic. */
@@ -50,8 +17,8 @@ export function adaptSourceEvidence(
   options: SourceEvidenceOptions,
 ): ReturnType<typeof resolveObjectEvidence> {
   return resolveObjectEvidence(
-    readSourceEvidenceFacts(record, options.completeNeutralAssembly),
-    options,
+    readSourceFormatFacts(record, options.sourceTypesComplete),
+    options.completeNeutralAssembly,
   );
 }
 

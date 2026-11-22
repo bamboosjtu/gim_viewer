@@ -88,6 +88,34 @@ test('checker rejects SDK implementation imports',()=>{
   assert.match(rejected.stderr,/gim\/model\.ts: use the SDK capability export/);
 });
 
+test('checker rejects even a type-only Semantic import of raw source records',()=>{
+  const {files,run}=fixture();
+  files('packages/gim-sdk/src/semantic/recognition/facts.ts',
+    "import type {SourceRecord} from '../../shared/sourceRecord.js';");
+  const rejected=run();
+  assert.equal(rejected.status,1);
+  assert.match(rejected.stderr,/semantic\/recognition\/facts\.ts: Semantic must consume adapted facts/);
+});
+
+test('checker allows Semantic entry points but rejects Adapter access to catalog and decision internals',()=>{
+  const {files,run}=fixture();
+  files('packages/gim-sdk/src/adapters/reader.ts',[
+    "import type {SourceFormatFacts} from '../semantic/recognition/sourceFormatFacts.js';",
+    "import {resolveObjectEvidence} from '../semantic/recognition/objectEvidenceDecision.js';",
+  ].join('\n'));
+  const accepted=run();
+  assert.equal(accepted.status,0,accepted.stderr);
+  files('packages/gim-sdk/src/adapters/catalog.ts',[
+    "import {standardTerms} from '../semantic/standardCatalog.js';",
+    "export {prepareObjectDecision} from '../semantic/recognition/objectEvidenceCandidates.js';",
+    "export const policy=()=>import('../semantic/catalog/sourceCompatibilityPolicy.json');",
+  ].join('\n'));
+  const rejected=run();
+  assert.equal(rejected.status,1);
+  for(const path of ['standardCatalog.js','objectEvidenceCandidates.js','sourceCompatibilityPolicy.json'])
+    assert.ok(rejected.stderr.split('\n').some(line=>line.includes('Adapter may call only Semantic entry points')&&line.includes(path)),path);
+});
+
 test('checker rejects a cycle within a runtime family through dynamic dependencies',()=>{
   const {files,run}=fixture();
   files('desktop/src/features/substation/presentation/substationPresentation.ts',"export const load=()=>import('../runtime/substationIfcRuntime.js');");

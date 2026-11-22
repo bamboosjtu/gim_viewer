@@ -1,59 +1,38 @@
 import { describe, expect, it } from "vitest";
 import { completeNeutralAssemblies } from "../recognition/neutralAssemblyResolver.js";
-import type { SourceRecord } from "../../shared/sourceRecord.js";
+import type { SourceTypeObservation } from "../recognition/sourceFormatFacts.js";
 
-function record(
-  id: string,
-  type: string,
-  parent = "",
-  track: "dev" | "ifc" = "dev",
-): SourceRecord {
-  return {
-    id,
-    track,
-    source: `${id}.dev`,
-    source_type: type,
-    name: id,
-    parent,
-    properties: [],
-    sources: [],
-    context: [],
-    guid: "",
-  };
-}
+const set: SourceTypeObservation = { sourceId: "set", declaredType: "GroundTransformer/ArcExtinguishingCoil" };
+const ground: SourceTypeObservation = {
+  sourceId: "ground", declaredType: "接地变压器", physicalParentId: "set",
+};
+const coil: SourceTypeObservation = {
+  sourceId: "coil", declaredType: " 消弧线圈 ", physicalParentId: "set",
+};
 
 describe("neutral assembly semantic decision", () => {
   it("requires both direct typed witnesses", () => {
     expect(
-      completeNeutralAssemblies([
-        record("set", "GroundTransformer/ArcExtinguishingCoil"),
-        record("ground", "GroundTransformer", "set"),
-        record("coil", "消弧线圈", "set"),
-      ]),
+      completeNeutralAssemblies([set, ground, coil]),
     ).toEqual(new Set(["set"]));
     expect(
       completeNeutralAssemblies([
-        record("set", "GroundTransformer/ArcExtinguishingCoil"),
-        record("ground", "接地变外壳", "set"),
-        record("coil", "消弧线圈支架", "set"),
+        set,
+        { ...ground, declaredType: "接地变外壳" },
+        coil,
       ]),
     ).toEqual(new Set());
   });
 
   it("does not accept indirect descendants or duplicate one-sided types", () => {
     expect(
-      completeNeutralAssemblies([
-        record("set", "GroundTransformer/ArcExtinguishingCoil"),
-        record("middle", "GroundTransformer", "set"),
-        record("coil", "ArcExtinguishingCoil", "middle"),
-      ]),
+      completeNeutralAssemblies([set, ground, { ...coil, physicalParentId: "ground" }]),
     ).toEqual(new Set());
     expect(
-      completeNeutralAssemblies([
-        record("set", "GroundTransformer/ArcExtinguishingCoil"),
-        record("ground", "GroundTransformer", "set"),
-        record("ground2", "GroundTransformer", "set"),
-      ]),
+      completeNeutralAssemblies([set, ground, { ...coil, physicalParentId: undefined }]),
+    ).toEqual(new Set());
+    expect(
+      completeNeutralAssemblies([set, ground, { ...ground, sourceId: "ground2" }]),
     ).toEqual(new Set());
   });
 });

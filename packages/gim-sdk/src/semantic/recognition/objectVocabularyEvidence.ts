@@ -1,8 +1,9 @@
 import sourceVocabulary from "../catalog/sourceVocabulary.json";
 import { standardTerms } from "../standardCatalog.js";
+import { compatibilityCategoryAlias } from "./sourceTypeDecision.js";
 import type { ObjectEvidence } from "../types.js";
 import type {
-  ObjectDecision,
+  SemanticDecisionInput,
   ObjectCandidates,
 } from "./objectEvidenceCandidates.js";
 
@@ -60,69 +61,66 @@ export const componentEntries = sourceVocabulary.componentDictionary
 >;
 
 export function collectVocabularyObservations(
-  { values, devTypes, ifcTypes }: ObjectDecision,
+  { facts }: SemanticDecisionInput,
   {
     declarations,
     componentDeclarations,
     namespaceAmbiguities,
   }: ObjectCandidates,
 ): ObjectEvidence["vocabularyObservations"] {
-  const keywords = dictionary.fields.flatMap((field) =>
-    values([field]).map((p) => ({
-      field,
-      property: p,
-      entry: keywordEntries[p.value.trim().toLowerCase()],
-    })),
+  const vocabularyObservations = facts.vocabularyDeclarations.map(
+    ({ field, property }) => {
+      const entry = keywordEntries[property.value.trim().toLowerCase()];
+      const component = componentEntries[property.value.trim().toLowerCase()],
+        selected = componentDeclarations.some(
+          (p) => p.evidenceId === property.evidenceId,
+        )
+          ? component
+          : entry;
+      const terms = standardTerms(property.value),
+        ambiguous =
+          namespaceAmbiguities.includes(property.value) ||
+          terms.length > 1 ||
+          (selected?.evidence.verification === "ambiguous" &&
+            !(
+              selected &&
+              ("defaultCatalogId" in selected ||
+                "defaultComponentId" in selected)
+            ));
+      const evidences =
+        selected && "evidences" in selected
+          ? (selected.evidences as KeywordSourceEvidence[])
+          : selected
+            ? [selected.evidence]
+            : [];
+      return {
+        field,
+        rawValue: property.value,
+        status: ambiguous
+          ? ("ambiguous" as const)
+          : selected
+            ? ("mapped" as const)
+            : ("unresolved" as const),
+        evidenceId: property.evidenceId,
+        dictionaryVersion: dictionary.version,
+        ...(selected
+          ? {
+              verification: ambiguous
+                ? ("ambiguous" as const)
+                : (selected.evidence.verification as
+                    "verified" | "unverified" | "ambiguous"),
+              sourceLocation: selected.evidence.sourceLocation,
+              dictionaryEvidence: JSON.stringify(
+                evidences.map(keywordEvidence),
+              ),
+            }
+          : {}),
+      };
+    },
   );
-  const vocabularyObservations = keywords.map(({ field, property, entry }) => {
-    const component = componentEntries[property.value.trim().toLowerCase()],
-      selected = componentDeclarations.some(
-        (p) => p.evidenceId === property.evidenceId,
-      )
-        ? component
-        : entry;
-    const terms = standardTerms(property.value),
-      ambiguous =
-        namespaceAmbiguities.includes(property.value) ||
-        terms.length > 1 ||
-        (selected?.evidence.verification === "ambiguous" &&
-          !(
-            selected &&
-            ("defaultCatalogId" in selected || "defaultComponentId" in selected)
-          ));
-    const evidences =
-      selected && "evidences" in selected
-        ? (selected.evidences as KeywordSourceEvidence[])
-        : selected
-          ? [selected.evidence]
-          : [];
-    return {
-      field,
-      rawValue: property.value,
-      status: ambiguous
-        ? ("ambiguous" as const)
-        : selected
-          ? ("mapped" as const)
-          : ("unresolved" as const),
-      evidenceId: property.evidenceId,
-      dictionaryVersion: dictionary.version,
-      ...(selected
-        ? {
-            verification: ambiguous
-              ? ("ambiguous" as const)
-              : (selected.evidence.verification as
-                  "verified" | "unverified" | "ambiguous"),
-            sourceLocation: selected.evidence.sourceLocation,
-            dictionaryEvidence: JSON.stringify(evidences.map(keywordEvidence)),
-          }
-        : {}),
-    };
-  });
   for (const p of declarations) {
     const terms = standardTerms(p.value),
-      alias =
-        devTypes[p.value.trim().toLowerCase()] ??
-        ifcTypes[p.value.trim().toUpperCase()];
+      alias = compatibilityCategoryAlias(p.value);
     if (
       namespaceAmbiguities.includes(p.value) ||
       terms.length > 1 ||
