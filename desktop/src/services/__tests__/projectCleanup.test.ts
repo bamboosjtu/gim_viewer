@@ -15,7 +15,6 @@ import { setProjectIdentity } from '../../ui/shell/projectBar.js';
 import { getViewerRuntime, isViewerRuntimeCreated } from '../../viewer/viewerRuntime.js';
 
 // mock 掉重依赖的动态导入目标，避免 jsdom 下加载 three/maplibre 链路
-vi.mock('../../ui/lineProjectView.js', () => ({ destroyLineMapView: vi.fn() }));
 vi.mock('../../viewer/viewerRuntime.js', () => ({
   isViewerRuntimeCreated: vi.fn(() => false),
   getViewerRuntime: vi.fn(),

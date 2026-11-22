@@ -1,7 +1,7 @@
 /**
  * 线路工程图缓存恢复服务。
  *
- * 从 SQLite 读取的 LineGraphResult 重建 GimGraph 并写入 AppState。
+ * 从 SQLite 读取的 LineGraphResult 重建 GimGraph。
  * 二次打开同一线路 GIM 时，缓存命中（valid=true）直接调用此服务，
  * 不解压、不重新解析 CBM。
  *
@@ -39,13 +39,12 @@ function emptyRefs(): GimGraphNode['refs'] {
 }
 
 /**
- * 从 SQLite 读取的线路工程图恢复到 AppState。
+ * 重建线路图，等待匹配的线路属性就绪后再提交 AppState。
  *
- * @param state 应用全局状态
  * @param result get_line_gim_graph 返回结果
- * @returns 重建后的 GimGraph（同时已写入 state.currentGimGraph）
+ * @returns 重建后的 GimGraph
  */
-export function restoreLineGraphToState(state: AppState, result: LineGraphResult): GimGraph {
+export function buildLineGraphFromCache(result: LineGraphResult): GimGraph {
   // 1. 重建 nodesByPath（children / refs 暂为空，后续挂载）
   const nodesByPath = new Map<string, GimGraphNode>();
   for (const r of result.nodes) {
@@ -176,11 +175,6 @@ export function restoreLineGraphToState(state: AppState, result: LineGraphResult
     stats,
   };
 
-  // 写入 AppState
-  state.currentGimGraph = graph;
-  state.currentProjectType = projectType;
-  state.currentFiles = null; // 缓存命中，不持有原始文件
-
   debugLog(DEBUG_GIM_CACHE, '[Restore] 线路工程图已从 SQLite 恢复:', {
     project_type: projectType,
     root: root?.path || null,
@@ -191,4 +185,10 @@ export function restoreLineGraphToState(state: AppState, result: LineGraphResult
   });
 
   return graph;
+}
+
+export function publishRestoredLineGraph(state: AppState, graph: GimGraph): void {
+  state.currentGimGraph = graph;
+  state.currentProjectType = graph.projectType;
+  state.currentFiles = null; // 缓存命中，不持有原始文件
 }

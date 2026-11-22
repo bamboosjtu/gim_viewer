@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { AppState } from '../../../../../app/state.js';
 import { SubstationSpatialIndexBuilder, buildSubstationSpatialIndexFromFiles,
-  type SubstationSpatialIndexObserver } from '../../gim/ifcSpatialParser.js';
-import type { CbmNode } from '../../gim/types.js';
-import { buildSubstationSpatialIndexInWorker, cancelSubstationSpatialWorkers } from '../substationSpatialWorkerClient.js';
+  type SubstationSpatialIndexObserver } from '../../../../../gim/ifcSpatialParser.js';
+import type { CbmNode } from '../../../../../gim/types.js';
+import { buildSubstationSpatialIndexInWorker } from '../substationSpatialWorkerClient.js';
 import type { SpatialWorkerRequest, SpatialWorkerResponse } from '../substationSpatialWorker.js';
 import { isTauri } from '@desktop/runtime.js';
-import{encodeSubstationSpatialCache}from'../substationSpatialCodec.js';
+import{encodeSubstationSpatialCache}from'../../../../../services/substationSpatialCodec.js';
 vi.mock('@desktop/runtime.js',()=>({isTauri:vi.fn(()=>false)}));
 vi.mock('@desktop/database.js',()=>({readCachedEntry:vi.fn(),writeCacheFile:vi.fn()}));
 
@@ -42,14 +43,20 @@ const entry={modelId:'model',name:'model',path:'CBM/model.ifc'};
 const text="#1=IFCPROJECT('p',#99,'Project',$,$,$,$,(#90),$);\n#2=IFCBUILDINGSTOREY('s',#99,'Floor',$,$,$,$,$,.ELEMENT.,0.);\n#10=IFCWALL('wall',#99,'Wall',$,$,$,$,$,$);\n#20=IFCRELAGGREGATES('r1',#99,$,$,#1,(#2));\n#21=IFCRELCONTAINEDINSPATIALSTRUCTURE('r2',#99,$,$,(#10),#2);";
 const tree:CbmNode={path:'CBM/wall.cbm',name:'Wall',entityName:'F4System',children:[],famPath:'',devPath:'',ifcFile:'model.ifc',ifcGuid:'wall',classifyName:'',transformMatrix:'',systemNames:[],devSymbolName:'',devType:'',devExpanded:false};
 beforeEach(()=>{SpatialWorker.instances=[];SpatialWorker.hold=false;vi.mocked(isTauri).mockReturnValue(false);vi.stubGlobal('Worker',SpatialWorker);});
-afterEach(()=>{cancelSubstationSpatialWorkers();vi.unstubAllGlobals();});
+afterEach(()=>{vi.unstubAllGlobals();});
+
+function owner() {
+  const state = new AppState();
+  const scope = state.sessionScope(state.activateProject(7, 'source-a'));
+  return { state, scope };
+}
 
 it('worker transport preserves the full spatial graph, Maps, direct links and per-file error isolation',async()=>{
   const files=new Map([['cbm/MODEL.IFC',new File([text],'model.ifc')],['CBM/broken.ifc',{arrayBuffer:async()=>{throw new Error('disk failed');},size:123} as unknown as File]]);
   const entries=[entry,{...entry,modelId:'broken',path:'CBM/broken.ifc'},{...entry,modelId:'missing',path:'CBM/missing.ifc'}];
   const expected=await buildSubstationSpatialIndexFromFiles(files,entries,tree);
   const read=vi.fn(),parsed=vi.fn();
-  const actual=await buildSubstationSpatialIndexInWorker(files,entries,tree,[],{onModelRead:read,onModelParsed:parsed},()=>true);
+  const actual=await buildSubstationSpatialIndexInWorker(files,entries,tree,[],{onModelRead:read,onModelParsed:parsed},owner().scope);
   expect(actual).toEqual(expected);
   const modelRequest=SpatialWorker.instances[0].requests.find(row=>row.type==='model');
   expect(modelRequest?.type==='model' && modelRequest.blob).toBeInstanceOf(Blob);
@@ -61,15 +68,34 @@ it('worker transport preserves the full spatial graph, Maps, direct links and pe
   expect(SpatialWorker.instances[0].terminate).toHaveBeenCalledTimes(1);
 });
 
-it('project cleanup rejects a pending STEP task and terminates its worker',async()=>{
+it('invalidating one project releases its Spatial worker without cancelling a different owner', async () => {
   SpatialWorker.hold=true;
-  const pending=buildSubstationSpatialIndexInWorker(new Map(),[],null,[],{},()=>true);
-  const rejected=expect(pending).rejects.toThrow('obsolete project');
-  cancelSubstationSpatialWorkers();await rejected;
-  expect(SpatialWorker.instances[0].terminate).toHaveBeenCalledOnce();
+  const first = owner();
+  const other = owner();
+  const onModelRead = vi.fn();
+  const start = (scope: typeof first.scope) =>
+    buildSubstationSpatialIndexInWorker(new Map(), [], null, [], { onModelRead }, scope);
+  const abandoned = expect(start(first.scope)).rejects.toMatchObject({ name: 'AbortError' });
+  const pending = expect(start(other.scope)).rejects.toMatchObject({ name: 'AbortError' });
+  const firstWorker = SpatialWorker.instances[0];
+  const receive = firstWorker.onmessage;
+  try {
+    first.state.invalidatePendingLoads();
+    await abandoned;
+    expect(firstWorker.terminate).toHaveBeenCalledOnce();
+    expect(SpatialWorker.instances[1].terminate).not.toHaveBeenCalled();
+    receive?.({ data: { type: 'diagnostic', event: 'onModelRead', profile: {} } } as MessageEvent);
+    expect(onModelRead).not.toHaveBeenCalled();
+    await expect(start(first.scope)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(SpatialWorker.instances).toHaveLength(2);
+  } finally {
+    first.scope.dispose();
+    other.scope.dispose();
+    await pending;
+  }
 });
 it('returns source-bound encoded cache bytes with the same index in the final Worker response',async()=>{
- const encoded=vi.fn(),index=await buildSubstationSpatialIndexInWorker(new Map([['CBM/model.ifc',new File([text],'model.ifc')]]),[entry],tree,[],{},()=>true,
+ const encoded=vi.fn(),index=await buildSubstationSpatialIndexInWorker(new Map([['CBM/model.ifc',new File([text],'model.ifc')]]),[entry],tree,[],{},owner().scope,
   {metadata:{sourceSha256:'source-a'},onEncoded:encoded});
  expect(encoded).toHaveBeenCalledOnce();const cache=encoded.mock.calls[0][0];
  expect(JSON.parse(new TextDecoder().decode(cache.bytes)).sourceSha256).toBe('source-a');
@@ -78,7 +104,7 @@ it('returns source-bound encoded cache bytes with the same index in the final Wo
  expect(requests[requests.length-1]).toMatchObject({type:'finish',cacheMetadata:{sourceSha256:'source-a'}});
 });
 it('rejects an encoded-cache observer error immediately and releases the Worker',async()=>{
- const pending=buildSubstationSpatialIndexInWorker(new Map([['CBM/model.ifc',new File([text],'model.ifc')]]),[entry],tree,[],{},()=>true,
+ const pending=buildSubstationSpatialIndexInWorker(new Map([['CBM/model.ifc',new File([text],'model.ifc')]]),[entry],tree,[],{},owner().scope,
   {metadata:{sourceSha256:'source-a'},onEncoded:()=>{throw Error('observer failed');}});
  await expect(pending).rejects.toThrow('observer failed');expect(SpatialWorker.instances[0].terminate).toHaveBeenCalled();
 });
@@ -86,6 +112,6 @@ it('rejects an encoded-cache observer error immediately and releases the Worker'
 it('unsupported hosts retain the existing parser contract without changing line behavior',async()=>{
   vi.stubGlobal('Worker',undefined);
   const files=new Map([['CBM/model.ifc',new File([text],'model.ifc')]]);
-  expect(await buildSubstationSpatialIndexInWorker(files,[entry],tree,[],{},()=>true))
+  expect(await buildSubstationSpatialIndexInWorker(files,[entry],tree,[],{},owner().scope))
     .toEqual(await buildSubstationSpatialIndexFromFiles(files,[entry],tree));
 });

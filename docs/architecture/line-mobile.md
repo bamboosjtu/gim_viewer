@@ -17,10 +17,10 @@
 ```text
 GIMPKGT / 裸包
   → 解压/缓存
-  → buildLineGimGraph（CBM 引用图）
-  → parseLineAttributes（FAM/DEV 来源）
-  → begin/chunks/finish 三阶段入库
-  → 线路树 + 地图
+  → Powerline Feature（冷解析、semantic pack 或 SQLite 恢复）
+  → 会话内提交线路图和 FAM/DEV 属性
+  → 地图、导航和搜索投影
+  → UI 挂载线路树与地图
 ```
 
 - 图是可共享节点的有向图；树是展示投影，不复制节点制造新塔位。
@@ -30,6 +30,8 @@ GIMPKGT / 裸包
 - 来源面板沿 DEV、PHM 引用读取 MOD。桌面和移动端依次查找显式包内路径、所属目录中的路径和全包唯一文件名。读取和在途结果归当前工程会话所有，超过每类来源遍历上限时显示诊断。来源读取失败时保留可用分支，下次查看会重试失败的来源。
 - 入库 `finish` 才提交有效 parser 标记；失败/取消的半成品不能作为合法缓存。
 - 缓存恢复包不完整时重建，不用部分 graph 冒充完整工程。
+- 线路打开入口位于 `features/powerline/application`。同一会话的冷解析与 semantic pack 恢复共用会话持有的解析 Worker，SQLite 恢复在图和属性均就绪后提交。冷开缓存经独立后台事务发布。
+- `features/powerline/presentation` 产出地图、导航与搜索投影，UI 负责 DOM、Canvas、MapLibre 和交互。会话失效时释放地图句柄和 Worker，晚到的视图句柄只释放自身代次。
 - 地图从有效 BLHA 提取经纬度/高程；导线挂点、跨越与杆塔坐标角色分开，同塔跳线不构造虚假跨塔档。导航在缺少已绑定杆塔时仅用坐标匹配唯一塔位，重合坐标保留歧义。
 - MapLibre、Canvas、树和搜索共用对象选择状态；线路不显示桌面变电的选择工具栏。
 - 默认 OSM 在线底图；OSM 官方瓦片异常时用 CARTO 同源栅格垫底，不整块空白。天地图为可配置能力；都不可达时 Canvas 覆盖层仍可用。

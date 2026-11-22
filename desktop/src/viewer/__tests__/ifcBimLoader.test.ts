@@ -234,3 +234,45 @@ it('a project switch during warm deserialization disposes the old far model', as
   expect(state.ifc.regionalRuntimes.size).toBe(0);
   expect(cache.raw).not.toHaveBeenCalled();
 });
+
+it('a stale cache restore failure cannot delete the artifact or fall back to conversion', async () => {
+  const { state, session, ctx } = setup();
+  cache.read.mockResolvedValue({ bytes: new Uint8Array([1]).buffer, index });
+  ctx.fragments.core.load.mockImplementation(async () => {
+    state.activateProject(2, 'source-sha');
+    throw Error('restore ended after cancellation');
+  });
+  const read = vi.fn();
+  await loadBimIfc(ctx, state, session, 'old', 'logical', 'CBM/a.ifc', read);
+  expect(ctx.fragments.core.disposeModel).toHaveBeenCalledWith('old');
+  expect(cache.remove).not.toHaveBeenCalled();
+  expect(cache.raw).not.toHaveBeenCalled();
+  expect(read).not.toHaveBeenCalled();
+});
+
+it.each(['before admission', 'after admission'])('isolates cancellation %s of a source-bound cache write', async (when) => {
+  const { state, session, ctx, model } = setup();
+  const onStage = vi.fn(), onProfile = vi.fn();
+  let finish!: (value: { ok: boolean }) => void;
+  cache.write.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+  cache.raw.mockImplementation(async (...args: any[]) => {
+    args[8].onFarArtifact(new Uint8Array([2]), index);
+    return model;
+  });
+  onStage.mockImplementation((stage: string) => {
+    if (stage === 'cache-write-start' && when === 'before admission')
+      state.activateProject(2, 'new-sha');
+  });
+  await loadBimIfc(ctx, state, session, 'old', 'logical', 'CBM/a.ifc', vi.fn(), undefined, { onStage, onProfile });
+  if (when === 'before admission') {
+    expect(cache.write).not.toHaveBeenCalled();
+    expect(ctx.fragments.core.disposeModel).toHaveBeenCalledWith('old');
+  } else {
+    expect(cache.write).toHaveBeenCalledWith(expect.stringContaining('|source-sha|cbm/a.ifc'), expect.anything());
+    state.activateProject(2, 'new-sha');
+    finish({ ok: false });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+  }
+  expect(onStage).not.toHaveBeenCalledWith('cache-write-failed', expect.anything());
+  expect(onProfile).not.toHaveBeenCalled();
+});

@@ -62,6 +62,9 @@ vi.mock('../../runtime/substationSpatialSemanticCache.js', () => ({
 vi.mock('../../runtime/substationSpatialRuntime.js', () => ({
   buildAndCommitSubstationSpatialSemantic: m.spatial,
   commitCachedSubstationSpatialSemantic: vi.fn(),
+}));
+vi.mock('../../runtime/spatial/substationSpatialWorkflow.js', async (original) => ({
+  ...(await original<typeof import('../../runtime/spatial/substationSpatialWorkflow.js')>()),
   scheduleSubstationSpatialSemantic: m.schedule,
 }));
 vi.mock('../../runtime/substationDocumentRuntime.js', () => ({ buildAndCommitSubstationStdSld: m.documents }));
@@ -129,7 +132,6 @@ beforeEach(async () => {
     renderNavigation: m.render,
     refreshDeviceBounds: vi.fn(),
     resetIdentity: vi.fn(),
-    destroyLineView: vi.fn(),
     clearProjectViews: vi.fn(),
     clearSelection: vi.fn(),
     hideEmptyState: vi.fn(),

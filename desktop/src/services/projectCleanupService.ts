@@ -1,5 +1,5 @@
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
-import {projectPresentation} from './projectPresentationPort.js';
+import { projectPresentation } from './projectPresentationPort.js';
 /**
  * 统一项目切换清理服务。
  *
@@ -26,16 +26,15 @@ import {projectPresentation} from './projectPresentationPort.js';
 import type { AppState } from '../app/state.js';
 import type * as THREE from 'three';
 import { DEBUG_RUNTIME_LOGS } from '../config/debug.js';
-import { debugLog } from '../utils/logger.js';
+import { debugLog, logger } from '../utils/logger.js';
 import { container } from './presentation/dom.js';
 import { perfCurrentSession, perfReset } from '../utils/perfTimings.js';
 import { sampleSubstationRuntimeResources } from './substationResourceTelemetry.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 import { cancelSubstationExtraction } from './substationExtractionJob.js';
 import { cancelIfcConversions } from '../viewer/ifcConversion.js';
-import { cancelSubstationSpatialWorkers } from './substationSpatialWorkerClient.js';
 import { resetStatusRight } from './presentation/shell_statusBar.js';
-import {markMeasurementCancellation} from '../measurement/runtime.js';
+import { markMeasurementCancellation } from '../measurement/runtime.js';
 
 /**
  * 在打开新 GIM 项目前 / 清空场景时执行统一清理。
@@ -55,24 +54,28 @@ export async function cleanupBeforeOpenNewProject(
   if (expectedGeneration !== undefined && state.projectGeneration !== expectedGeneration) {
     return false;
   }
-  const shouldCaptureSubstationResources = state.currentProjectType === 'substation'
-    || state.currentIfcEntries.length > 0
-    || state.modRootGroup != null
-    || state.stlRootGroup != null
-    || state.loadedXmlModGroups.size > 0
-    || state.loadedStlGroups.size > 0;
-  // P1 安全评审：清理开始时立即递增 geometry token，同步失效所有在途几何任务
-  // （渐进 GLB 管线 / MOD 自动加载），防止旧项目任务把 GLB、版本标记或
-  // UI 状态写入新项目。必须在任何 await 之前执行——后续新增逻辑不得移到本行之前。
-  state.invalidatePendingLoads();
-  markMeasurementCancellation(expectedGeneration===undefined?'project-closed':'project-replaced');
+  const shouldCaptureSubstationResources =
+    state.currentProjectType === 'substation' ||
+    state.currentIfcEntries.length > 0 ||
+    state.modRootGroup != null ||
+    state.stlRootGroup != null ||
+    state.loadedXmlModGroups.size > 0 ||
+    state.loadedStlGroups.size > 0;
+  // 先标记主动取消，让会话释放 Worker 时保留正确的测量原因。
+  // 两步均在首个 await 前执行，旧任务在清理开始时同步失效。
+  try {
+    markMeasurementCancellation(
+      expectedGeneration === undefined ? 'project-closed' : 'project-replaced',
+    );
+  } finally {
+    state.invalidatePendingLoads();
+  }
   const cleanupGeneration = state.projectGeneration;
   cancelSubstationExtraction(state);
   cancelIfcConversions();
   const { resetIfcWorkCompletion } = await import('../viewer/geometryWorkGate.js');
-  if(state.projectGeneration !== cleanupGeneration)return false;
+  if (state.projectGeneration !== cleanupGeneration) return false;
   resetIfcWorkCompletion();
-  cancelSubstationSpatialWorkers();
   const { cancelDevGeometryPreprocessing } = await import('./devGeometryWorkerClient.js');
   if (state.projectGeneration !== cleanupGeneration) return false;
   cancelDevGeometryPreprocessing(state);
@@ -89,58 +92,37 @@ export async function cleanupBeforeOpenNewProject(
   const sampleBeforeCleanup = (ctx?: ViewerContext | null): void => {
     if (!shouldCaptureSubstationResources || beforeCleanupSampled) return;
     beforeCleanupSampled = true;
-    void Promise.resolve(sampleSubstationRuntimeResources(
-      state,
-      'beforeCleanup',
-      cleanupPerfSession,
-      ctx,
-      { cleanupGeneration },
-      { isCurrent: isCurrentCleanup },
-    )).catch(reportBackgroundError);
+    void Promise.resolve(
+      sampleSubstationRuntimeResources(
+        state,
+        'beforeCleanup',
+        cleanupPerfSession,
+        ctx,
+        { cleanupGeneration },
+        { isCurrent: isCurrentCleanup },
+      ),
+    ).catch(reportBackgroundError);
   };
 
   // 共性 UI 契约：清理即重置顶栏工程身份与状态栏（纯 UI，位于 token 递增之后）
   try {
     await projectPresentation().resetIdentity(isCurrentCleanup);
-  } catch { /* UI 模块不可用不影响清理 */ }
+  } catch {
+    /* UI 模块不可用不影响清理 */
+  }
   if (!isCurrentCleanup()) return false;
   resetStatusRight();
 
-  // ---- 1. 销毁线路地图 canvas / tooltip / 图层控件 / 事件监听 ----
-  // 即使 ViewerRuntime 未创建，线路地图也可能存在（线路工程不创建 Viewer）
-  try {
-    await projectPresentation().destroyLineView(isCurrentCleanup);
-  } catch (err) {
-    console.warn('[Cleanup] destroyLineMapView failed:', err);
-  }
-
-  // 线路解析 Worker 只服务当前工程；切换工程时主动终止在途任务，
-  // 即使旧结果随后从消息队列到达也不会进入当前工程。
-  try {
-    const { terminateLineParserWorker } = await import('./lineParserWorkerClient.js');
-    if (!isCurrentCleanup()) return false;
-    terminateLineParserWorker();
-  } catch (err) {
-    console.warn('[Cleanup] terminate line parser worker failed:', err);
-  }
-
-  // MOD 来源解析结果按 AppState 缓存；显式清空，避免同一窗口连续打开
-  // 多个线路工程时保留旧工程的文本/Geometry IR 结果。
-  try {
-    const { clearLineModRuntimeCache } = await import('./lineModRuntimeService.js');
-    if (!isCurrentCleanup()) return false;
-    clearLineModRuntimeCache(state);
-  } catch (err) {
-    console.warn('[Cleanup] clear line MOD runtime cache failed:', err);
-  }
+  // 线路地图、解析 Worker 与 MOD 来源缓存由此前失效的 SessionScope 释放。
 
   // 关闭/切换工程时终止仍在运行的 IFC 转换 Worker。否则一个卡在 76% 的
   // 大 IFC 会继续占用 Worker，加载遮罩也不会退场。
   try {
     const { cancelIfcConversions } = await import('../viewer/ifcConversion.js');
+    if (!isCurrentCleanup()) return false;
     cancelIfcConversions();
   } catch (err) {
-    console.warn('[Cleanup] cancel IFC conversions failed:', err);
+    logger.warn('[Cleanup] cancel IFC conversions failed:', err);
   }
 
   // ---- 2. dispose ViewerRuntime 中所有 fragments 模型 ----
@@ -162,7 +144,9 @@ export async function cleanupBeforeOpenNewProject(
       try {
         const { saveViewState } = await import('./viewStateStore.js');
         saveViewState(state);
-      } catch { /* best effort */ }
+      } catch {
+        /* best effort */
+      }
       sampleBeforeCleanup(ctx);
 
       // 合并 state.loadedModels 中记录的 runtime ID 与 ctx.fragments.list 的 key
@@ -170,7 +154,9 @@ export async function cleanupBeforeOpenNewProject(
       // - ctx.fragments.list 可能比 state 多（state 被外部 reset 但 ctx 未清）
       const ids = new Set<string>();
       for (const [logicalModelId, loaded] of state.ifc.loadedModels) {
-        ids.add(loaded.runtimeModelId || state.ifc.runtimeModelIds.get(logicalModelId) || logicalModelId);
+        ids.add(
+          loaded.runtimeModelId || state.ifc.runtimeModelIds.get(logicalModelId) || logicalModelId,
+        );
       }
       // DEV-only viewers have no Fragments core yet; list also accesses core.
       // Still continue below to release their MOD/STL resources and highlights.
@@ -184,14 +170,14 @@ export async function cleanupBeforeOpenNewProject(
           if (!isCurrentCleanup()) return false;
           disposedCount++;
         } catch (err) {
-          console.warn('[Cleanup] dispose model failed:', modelId, err);
+          logger.warn('[Cleanup] dispose model failed:', modelId, err);
         }
       }
 
       // Fragments clears its shared coordinate anchor only after the last
       // asynchronous model disposal. Never let the next open race that reset.
       if (fragments && fragments.list.size !== 0) {
-        console.error('[Cleanup] 旧 IFC 模型尚未释放，停止打开以免复用错误坐标基准');
+        logger.error('[Cleanup] 旧 IFC 模型尚未释放，停止打开以免复用错误坐标基准');
         return false;
       }
 
@@ -204,8 +190,13 @@ export async function cleanupBeforeOpenNewProject(
       //     Geometry 由 disposeSharedXmlModGeometries 统一释放
       // v9（方案 B）: merged geometry 不再共享（每 MOD Group 独立），
       //              traverse 逐 mesh dispose merged geometry；Material 仍共享
-      const scene = (ctx.world.scene as any).three as import('three').Scene;
-      const { disposeXmlModGroup, disposeOwnedXmlModMaterials, disposeSharedXmlModMaterials, disposeSharedXmlModGeometries } = await import('../viewer/xmlModLoader.js');
+      const scene = ctx.world.scene.three;
+      const {
+        disposeXmlModGroup,
+        disposeOwnedXmlModMaterials,
+        disposeSharedXmlModMaterials,
+        disposeSharedXmlModGeometries,
+      } = await import('../viewer/xmlModLoader.js');
       const { disposeStlGroup } = await import('../viewer/stlLoader.js');
       const {
         disposeDevGlbTemplatePool,
@@ -231,7 +222,9 @@ export async function cleanupBeforeOpenNewProject(
             if (exclusiveGlb) {
               const materials = Array.isArray(mesh.material)
                 ? mesh.material
-                : mesh.material ? [mesh.material] : [];
+                : mesh.material
+                  ? [mesh.material]
+                  : [];
               for (const material of materials) material.dispose();
             }
           });
@@ -247,7 +240,7 @@ export async function cleanupBeforeOpenNewProject(
             disposeXmlModGroup(group);
             xmlModDisposedCount++;
           } catch (err) {
-            console.warn('[Cleanup] dispose xml-mod group failed:', modPath, err);
+            logger.warn('[Cleanup] dispose xml-mod group failed:', modPath, err);
           }
         }
       }
@@ -274,7 +267,7 @@ export async function cleanupBeforeOpenNewProject(
             disposeStlGroup(group);
             stlDisposedCount++;
           } catch (err) {
-            console.warn('[Cleanup] dispose stl group failed:', stlPath, err);
+            logger.warn('[Cleanup] dispose stl group failed:', stlPath, err);
           }
         }
       }
@@ -283,25 +276,38 @@ export async function cleanupBeforeOpenNewProject(
       try {
         const { resetHighlight } = await import('../viewer/highlight.js');
         if (!isCurrentCleanup()) return false;
-        await resetHighlight(ctx,state,isCurrentCleanup);
+        await resetHighlight(ctx, state, isCurrentCleanup);
         if (!isCurrentCleanup()) return false;
       } catch (err) {
-        console.warn('[Cleanup] resetHighlight failed:', err);
+        logger.warn('[Cleanup] resetHighlight failed:', err);
       }
     } catch (err) {
-      console.warn('[Cleanup] ViewerRuntime cleanup failed:', err);
+      logger.warn('[Cleanup] ViewerRuntime cleanup failed:', err);
     }
   }
   // A project can have semantic/geometry state without a created viewer (for
   // example a partially failed open).  Still record the ownership checkpoint.
   sampleBeforeCleanup();
-  debugLog(DEBUG_RUNTIME_LOGS, '[Cleanup] disposed viewer models:', disposedCount, '(attempted:', attemptedCount, '), xml-mod groups:', xmlModDisposedCount, ', stl groups:', stlDisposedCount);
+  debugLog(
+    DEBUG_RUNTIME_LOGS,
+    '[Cleanup] disposed viewer models:',
+    disposedCount,
+    '(attempted:',
+    attemptedCount,
+    '), xml-mod groups:',
+    xmlModDisposedCount,
+    ', stl groups:',
+    stlDisposedCount,
+  );
 
   // ---- 4. 清空 UI 残留 ----
   // disposeModel 会触发 onItemDeleted → removeModelFromUI，但保险起见再清一次
   // 同步清空其他面板，避免上一个工程（如线路 TOWER 属性）残留到下一个工程
-  try { await projectPresentation().clearProjectViews(isCurrentCleanup); }
-  catch(error) { console.warn('[Cleanup] clear project views failed:',error); }
+  try {
+    await projectPresentation().clearProjectViews(isCurrentCleanup);
+  } catch (error) {
+    logger.warn('[Cleanup] clear project views failed:', error);
+  }
 
   // ---- 5. 重置 state ----
   // 必须在 dispose 之后执行：resetGimState 会清空 state.loadedModels 索引
@@ -313,8 +319,10 @@ export async function cleanupBeforeOpenNewProject(
   if (expectedGeneration === undefined) {
     try {
       const { hideLoading } = await import('./gimOpenCore.js');
-      if(isCurrentCleanup())hideLoading();
-    } catch { /* best effort */ }
+      if (isCurrentCleanup()) hideLoading();
+    } catch {
+      /* best effort */
+    }
     window.dispatchEvent(new CustomEvent('gim:project-closed'));
   }
   if (shouldCaptureSubstationResources && isCurrentCleanup()) {
@@ -325,24 +333,28 @@ export async function cleanupBeforeOpenNewProject(
       xmlModGroups: xmlModDisposedCount,
       stlGroups: stlDisposedCount,
     };
-    void Promise.resolve(sampleSubstationRuntimeResources(
-      state,
-      'afterCleanup',
-      cleanupPerfSession,
-      cleanupViewerContext,
-      cleanupMeta,
-      { isCurrent: isCurrentCleanup },
-    )).catch(reportBackgroundError);
-    setTimeout(() => {
-      if (!isCurrentCleanup()) return;
-      void Promise.resolve(sampleSubstationRuntimeResources(
+    void Promise.resolve(
+      sampleSubstationRuntimeResources(
         state,
-        'settledAfterCleanup',
+        'afterCleanup',
         cleanupPerfSession,
         cleanupViewerContext,
         cleanupMeta,
         { isCurrent: isCurrentCleanup },
-      )).catch(reportBackgroundError);
+      ),
+    ).catch(reportBackgroundError);
+    setTimeout(() => {
+      if (!isCurrentCleanup()) return;
+      void Promise.resolve(
+        sampleSubstationRuntimeResources(
+          state,
+          'settledAfterCleanup',
+          cleanupPerfSession,
+          cleanupViewerContext,
+          cleanupMeta,
+          { isCurrent: isCurrentCleanup },
+        ),
+      ).catch(reportBackgroundError);
     }, 250);
   }
   return true;

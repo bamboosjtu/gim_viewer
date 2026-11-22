@@ -48,6 +48,7 @@ export async function getIfcBufferForEntry(
         cachePath,
       });
       const { readCachedIfc } = await import('@desktop/database.js');
+      if (!state.isCurrentSession(session)) return null;
       const bytes = await readCachedIfc(projectId, cachedEntryPath);
       if (!state.isCurrentSession(session)) return null;
 

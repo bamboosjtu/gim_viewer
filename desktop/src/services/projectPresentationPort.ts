@@ -10,7 +10,6 @@ export interface ProjectPresentation {
     current: () => boolean,
   ): Promise<void>;
   resetIdentity(current: () => boolean): Promise<void>;
-  destroyLineView(current: () => boolean): Promise<void>;
   clearProjectViews(current: () => boolean): Promise<void>;
   clearSelection(): void;
   hideEmptyState(): void;

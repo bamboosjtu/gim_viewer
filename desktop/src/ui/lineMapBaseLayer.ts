@@ -1,6 +1,6 @@
 import { logger } from '../utils/logger.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
-import type { LineMapEventTarget } from '../services/linePresentationPort.js';
+import type { LineMapEventTarget } from '../features/powerline/presentation/linePresentationPort.js';
 /**
  * MapLibre 底图层模块。
  *

@@ -87,15 +87,15 @@ DEV 实例化仍为默认关闭的试点。v0.2 的工程实体/三视图链路�
 
 | 目录 | 内容 |
 |---|---|
-| [desktop](desktop/) | 桌面前端、Tauri/Rust 后端、构建和测试 |
-| [app](app/) | Android 线路应用、SAF 导入、地图与本地缓存 |
-| [packages](packages/) / [crates](crates/) | 跨端共享纯线路解析、插件接口、原生解压与 Android 文件导入 |
-| [docs](docs/README.md) | 当前规格、架构、验证、性能、格式、问题与限制 |
-| [demo](demo/) | 本地 GIM 包及解包样本，大型文件由 Git 忽略 |
-| [research](research/) | 原始研究材料，使用前需复核 |
-| [benchmarks](benchmarks/README.md) | L0/L1/L2 本地样本登记，不含 GIM 文件；测量 CLI 见 [Benchmark](docs/performance/benchmark.md) |
-| [tools](tools/README.md) | 独立 Python 辅助工具及其界面，不属于桌面或 Android 应用前端 |
+| [desktop](desktop/) | Windows 桌面应用 |
+| [app](app/) | Android 应用 |
+| [packages](packages/) / [crates](crates/) | 跨端共享 TypeScript / Rust 能力 |
 | [contracts](contracts/) | 跨语言资源限制等共享契约 |
+| [tools](tools/README.md) | 独立开发工具 |
+| [benchmarks](benchmarks/README.md) | L0/L1/L2 本地样本登记，不含 GIM 文件；测量 CLI 见 [Benchmark](docs/performance/benchmark.md) |
+| [docs](docs/README.md) | 正式架构与技术文档 |
+| [demo](demo/) | 本地 GIM 包及解包样本 |
+| [research](research/) | 本地原始研究材料 |
 
 `tmp/` 保存忽略的测试暂存、私有诊断与权威 Benchmark 报告；`output/` 保存默认匿名的派生报告（显式非匿名 survey 例外），其中大量 HTML 是 Benchmark 生成的视图，不是产品页面。源码目录职责见[架构目录表](docs/architecture.md#项目目录与模块归属)，测试与样本约定见[开发指南](docs/development.md)。
 

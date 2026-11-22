@@ -6,14 +6,9 @@ import type { ViewerState as AppState } from '../shared/viewerState.js';
 import type { ProjectLoadSession } from '../shared/projectSession.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
-import {
-  perfCurrentSession,
-  perfBegin,
-  perfRecordExternalSpan,
-} from '../utils/perfTimings.js';
+import { perfCurrentSession, perfBegin, perfRecordExternalSpan } from '../utils/perfTimings.js';
 import { registerIfcLoadDiagnostic } from './ifcLoadDiagnostics.js';
 import type { IfcRegionalConnectionBatch } from './ifcConversion.js';
-
 
 /**
  * 输出 IFC 模型的位置诊断日志（仅 debug 模式）。
@@ -71,12 +66,17 @@ export async function loadIfcEntry(
   onProgress?: (progress: number) => void,
   options: {
     session?: ProjectLoadSession;
+    /** Optional owner for callers that can actively cancel a conversion. */
+    signal?: AbortSignal;
     /** 性能会话 id；旧工程迟到的缓存 IPC/span 不得写入新快照。 */
     perfSessionId?: number;
     /** 加载来源确定后回调一次；调用方可记录 cache hit/miss。 */
     onLoadSource?: (source: IfcLoadSource) => void;
     /** File-level BIM LOD stages for the status bar. */
-    onStage?: (stage: import('./ifcBimLoader.js').IfcLoadStage, meta?: Record<string, unknown>) => void;
+    onStage?: (
+      stage: import('./ifcBimLoader.js').IfcLoadStage,
+      meta?: Record<string, unknown>,
+    ) => void;
     /** Per-file size/source/conversion/cache-write profile. */
     onProfile?: (profile: import('./ifcBimLoader.js').IfcFileProfile) => void;
     /** Transfer the one-shot raw IFC buffer to the conversion worker. */
@@ -90,7 +90,7 @@ export async function loadIfcEntry(
   const { modelId, name, path: entryPath } = entry;
   const session = options.session ?? state.captureProjectSession();
   const perfSessionId = options.perfSessionId ?? perfCurrentSession().id;
-  const isCurrent = () => state.isCurrentSession(session);
+  const isCurrent = () => !options.signal?.aborted && state.isCurrentSession(session);
   // web-ifc 解析期间也可能持续回调进度；旧工程任务不能把提示文字写到
   // 新工程的状态栏/加载层。
   const reportProgress = (progress: number) => {
@@ -100,7 +100,8 @@ export async function loadIfcEntry(
   if (!isCurrent()) return;
 
   // 1. 防御性短路
-  if (state.ifc.loadedModels.has(modelId)) {
+  const existing = state.ifc.loadedModels.get(modelId);
+  if (existing && state.ifc.isCurrentRuntimeModel(existing.runtimeModelId)) {
     debugLog(DEBUG_IFC_LOAD, `[IFC Loader] 模型已加载，跳过: ${modelId}`);
     return;
   }
@@ -112,15 +113,28 @@ export async function loadIfcEntry(
   if (ctx.fragments.list.has(runtimeModelId)) return;
 
   const openingPolicy = options.openingPolicy ?? 'bim-lod';
-  if(openingPolicy==='bim-lod'){
-    const {loadBimIfc}=await import('./ifcBimLoader.js');
-    const model=await loadBimIfc(ctx,state,session,runtimeModelId,modelId,entryPath,getIfcBuffer,reportProgress,{
-      onStage: options.onStage,
-      onProfile: options.onProfile,
-      onRegionalBatch: options.onRegionalBatch,
-      onRegionalComplete: options.onRegionalComplete,
-    });
-    if(model)options.onLoadSource?.(model.object.userData.ifcLodCacheHit?'lod-cache':'ifc');
+  if (openingPolicy === 'bim-lod') {
+    const { loadBimIfc } = await import('./ifcBimLoader.js');
+    if (!isCurrent()) return;
+    const model = await loadBimIfc(
+      ctx,
+      state,
+      session,
+      runtimeModelId,
+      modelId,
+      entryPath,
+      getIfcBuffer,
+      reportProgress,
+      {
+        onStage: options.onStage,
+        signal: options.signal,
+        onProfile: options.onProfile,
+        onRegionalBatch: options.onRegionalBatch,
+        onRegionalComplete: options.onRegionalComplete,
+      },
+    );
+    if (model && isCurrent())
+      options.onLoadSource?.(model.object.userData.ifcLodCacheHit ? 'lod-cache' : 'ifc');
     return;
   }
   if (!isCurrent()) return;
@@ -149,9 +163,19 @@ export async function loadIfcEntry(
     { id: perfSessionId },
   );
   let webIfcLoadFailed = false;
+  let model: Awaited<ReturnType<typeof loadRawIfc>>;
   try {
-    await loadRawIfc(ctx, state, session, ifcBuffer, runtimeModelId, entryPath || name, reportProgress, perfSessionId,
-      { transferInput: options.transferInput, openingPolicy });
+    model = await loadRawIfc(
+      ctx,
+      state,
+      session,
+      ifcBuffer,
+      runtimeModelId,
+      entryPath || name,
+      reportProgress,
+      perfSessionId,
+      { transferInput: options.transferInput, openingPolicy, signal: options.signal },
+    );
   } catch (err) {
     webIfcLoadFailed = true;
     throw err;
@@ -175,7 +199,15 @@ export async function loadIfcEntry(
   // load() 可能在旧工程失效后才完成；模型已进入 Fragments 时必须立即销毁，
   // 后续不能继续写缓存或刷新当前工程 UI。
   if (!isCurrent()) {
-    try { void Promise.resolve(ctx.fragments.core.disposeModel(runtimeModelId)).catch(reportBackgroundError); } catch { /* 尚未登记时无需清理 */ }
+    if (model) {
+      try {
+        void Promise.resolve(ctx.fragments.core.disposeModel(runtimeModelId)).catch(
+          reportBackgroundError,
+        );
+      } catch {
+        /* 尚未登记时无需清理 */
+      }
+    }
     return;
   }
 
@@ -205,5 +237,4 @@ export async function loadIfcEntry(
 
   // 4c. 诊断：输出 IFC model 的 bbox（与 MOD/STL bbox 对比，辅助估算 projectSourceToViewer offset）
   logIfcModelBBox(ctx, runtimeModelId, 'ifc-load');
-
 }

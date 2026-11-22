@@ -19,10 +19,11 @@ import {
   type LineMapData,
   type TowerMarker,
   type WireSegment,
-} from '../gim/lineMapData.js';
+} from '../../../gim/lineMapData.js';
 import type { LineAttributeIndex } from '@gim/powerline-core/lineAttributeTypes.js';
 import { getFileNameLower, normalizeGimPath } from '@gim/powerline-core/linePathNormalize.js';
-import type { SearchItem } from '../shared/searchTypes.js';
+import { findExactSourceTargetKey } from './lineNavigationTargets.js';
+import type { SearchItem } from '../../../shared/searchTypes.js';
 import { classifyCrossing } from '@gim/powerline-core/crossingClassification.js';
 
 export type LineNavigationKind =
@@ -195,61 +196,20 @@ export function buildLineNavigationIndex(
   mapData: LineMapData,
   options: LineNavigationOptions = {},
 ): LineNavigationIndex {
-  const parentIndex = buildParentIndex(graph);
-  const f1 = findRouteNode(graph.root);
-  const f2Nodes = f1 ? directOrDescendant(f1, 'F2System') : [];
-  const allF3 = f2Nodes.flatMap((f2) => directOrDescendant(f2, 'F3System'));
-  const f3Nodes = uniqueByPath(allF3);
-
-  const towerEntries = collectTowerEntries(graph, mapData);
-  const towerByPath = new Map(towerEntries.map((entry) => [entry.group.path, entry]));
-  const towerOrder = buildTowerOrder(towerEntries);
-  const towerByCoord = new Map<string, TowerEntry | null>();
-  for (const entry of towerEntries) {
-    if (!entry.marker) continue;
-    const key = coordKey(entry.marker.lat, entry.marker.lng);
-    towerByCoord.set(key, towerByCoord.has(key) ? null : entry);
-  }
-  const wireTower = createLineWireTowerResolver(graph.nodesByPath.values());
-
-  const spanRecords = buildSpanRecords(
-    graph,
-    mapData,
+  const {
     parentIndex,
+    f1,
+    f2Nodes,
+    towerEntries,
     towerByPath,
-    towerByCoord,
+    towerOrder,
     wireTower,
-  );
-  const spanByKey = new Map<string, SpanRecord>();
-  for (const span of spanRecords) spanByKey.set(span.key, span);
-  const spanIndexes = buildSpanRecordIndexes(spanRecords);
-
-  const crossFamResolver = buildCrossFamResolver(options.attrs);
-  const crossProjections = mapData.crosses.map((marker) =>
-    buildCrossProjection(marker, crossFamResolver),
-  );
-  // 以每个 F3 的真实来源关系归集塔位、档距和跨越物。F3 的 WIRE 端点可能指向前一段
-  // 的塔，因此 spanRecord 的端点塔会补入 towerPaths。
-  const f3Records = f3Nodes.map((node) => {
-    const record: F3Record = {
-      node,
-      towerPaths: new Set<string>(),
-      spanKeys: new Set<string>(),
-    };
-    for (const group of collectDescendantF4(node)) {
-      if (group.rawProps['GROUPTYPE'] === 'TOWER') record.towerPaths.add(group.path);
-      if (group.rawProps['GROUPTYPE'] === 'WIRE') {
-        for (const key of spanIndexes.bySourcePath.get(group.path) || []) record.spanKeys.add(key);
-      }
-    }
-    // 也接收通过 WIRE 子节点登记的 F3 所有权。
-    for (const span of spanIndexes.byOwnerF3Path.get(node.path) || []) {
-      record.spanKeys.add(span.key);
-      if (span.startPath) record.towerPaths.add(span.startPath);
-      if (span.endPath) record.towerPaths.add(span.endPath);
-    }
-    return record;
-  });
+    spanRecords,
+    spanByKey,
+    spanIndexes,
+    crossProjections,
+    f3Records,
+  } = prepareLineNavigationSources(graph, mapData, options);
 
   const assignedSpanKeys = new Set<string>();
   const assignedCrossPaths = new Set<string>();
@@ -564,19 +524,81 @@ export function buildLineNavigationSearchIndex(index: LineNavigationIndex): Sear
   return items;
 }
 
-/** 把搜索/地图传入的业务键或来源 path 解析到渲染行键。 */
-export function resolveLineNavigationTarget(
-  index: LineNavigationIndex,
-  key: string,
-): LineNavigationNode | null {
-  const row = index.nodesByKey.get(key);
-  if (row) return row;
-  const normalized = normalizeGimPath(key);
-  const sourcePath = normalized.includes('/')
-    ? normalized
-    : index.sourcePathByBasename.get(normalized.toLowerCase());
-  const rowKey = sourcePath && findExactSourceTargetKey(index.targetBySourcePath, sourcePath);
-  return rowKey ? (index.nodesByKey.get(rowKey) ?? null) : null;
+/** Build the source relationship indexes before assembling any display nodes. */
+function prepareLineNavigationSources(
+  graph: GimGraph,
+  mapData: LineMapData,
+  options: LineNavigationOptions,
+) {
+  const parentIndex = buildParentIndex(graph);
+  const f1 = findRouteNode(graph.root);
+  const f2Nodes = f1 ? directOrDescendant(f1, 'F2System') : [];
+  const allF3 = f2Nodes.flatMap((f2) => directOrDescendant(f2, 'F3System'));
+  const f3Nodes = uniqueByPath(allF3);
+
+  const towerEntries = collectTowerEntries(graph, mapData);
+  const towerByPath = new Map(towerEntries.map((entry) => [entry.group.path, entry]));
+  const towerOrder = buildTowerOrder(towerEntries);
+  const towerByCoord = new Map<string, TowerEntry | null>();
+  for (const entry of towerEntries) {
+    if (!entry.marker) continue;
+    const key = coordKey(entry.marker.lat, entry.marker.lng);
+    towerByCoord.set(key, towerByCoord.has(key) ? null : entry);
+  }
+  const wireTower = createLineWireTowerResolver(graph.nodesByPath.values());
+
+  const spanRecords = buildSpanRecords(
+    graph,
+    mapData,
+    parentIndex,
+    towerByPath,
+    towerByCoord,
+    wireTower,
+  );
+  const spanByKey = new Map<string, SpanRecord>();
+  for (const span of spanRecords) spanByKey.set(span.key, span);
+  const spanIndexes = buildSpanRecordIndexes(spanRecords);
+
+  const crossFamResolver = buildCrossFamResolver(options.attrs);
+  const crossProjections = mapData.crosses.map((marker) =>
+    buildCrossProjection(marker, crossFamResolver),
+  );
+  // 以每个 F3 的真实来源关系归集塔位、档距和跨越物。F3 的 WIRE 端点可能指向前一段
+  // 的塔，因此 spanRecord 的端点塔会补入 towerPaths。
+  const f3Records = f3Nodes.map((node) => {
+    const record: F3Record = {
+      node,
+      towerPaths: new Set<string>(),
+      spanKeys: new Set<string>(),
+    };
+    for (const group of collectDescendantF4(node)) {
+      if (group.rawProps['GROUPTYPE'] === 'TOWER') record.towerPaths.add(group.path);
+      if (group.rawProps['GROUPTYPE'] === 'WIRE') {
+        for (const key of spanIndexes.bySourcePath.get(group.path) || []) record.spanKeys.add(key);
+      }
+    }
+    // 也接收通过 WIRE 子节点登记的 F3 所有权。
+    for (const span of spanIndexes.byOwnerF3Path.get(node.path) || []) {
+      record.spanKeys.add(span.key);
+      if (span.startPath) record.towerPaths.add(span.startPath);
+      if (span.endPath) record.towerPaths.add(span.endPath);
+    }
+    return record;
+  });
+  return {
+    parentIndex,
+    f1,
+    f2Nodes,
+    towerEntries,
+    towerByPath,
+    towerOrder,
+    wireTower,
+    spanRecords,
+    spanByKey,
+    spanIndexes,
+    crossProjections,
+    f3Records,
+  };
 }
 
 function buildParentIndex(graph: GimGraph): ParentIndex {
@@ -1225,17 +1247,6 @@ function registerGraphSourceAliases(
 }
 
 /** 精确、斜杠归一化、大小写不敏感地查找来源路径对应的投影行。 */
-function findExactSourceTargetKey(
-  targetBySourcePath: Map<string, string>,
-  sourcePath: string,
-): string | undefined {
-  const direct = targetBySourcePath.get(sourcePath);
-  if (direct) return direct;
-  const normalized = normalizeGimPath(sourcePath).replace(/^\.\//, '');
-  return targetBySourcePath.get(normalized) ?? targetBySourcePath.get(normalized.toLowerCase());
-}
-
-/** 在所有投影行完成后补齐父链，覆盖懒加载明细（塔位、档距、导线、跨越物）。 */
 function registerParentLinks(
   node: LineNavigationNode,
   parentKey: string | undefined,

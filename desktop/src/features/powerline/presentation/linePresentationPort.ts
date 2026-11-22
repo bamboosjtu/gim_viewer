@@ -1,6 +1,6 @@
-import type { AppState } from '../app/state.js';
-import type { GimGraph } from '@gim/powerline-core/gimGraphTypes.js';
-import type { PerfSession } from '../utils/perfTimings.js';
+import type { AppState } from '../../../app/state.js';
+import type { LineProjectProjection } from './lineProjectProjection.js';
+import type { PerfSession } from '../../../utils/perfTimings.js';
 /** Minimal map surface a host probe needs; services stay free of maplibre types. */
 export interface LineMapEventTarget {
   on(type: string, listener: () => void): unknown;
@@ -18,7 +18,7 @@ export interface LineProjectViewHandle {
 export interface LinePresentation {
   present(
     state: AppState,
-    graph: GimGraph,
+    prepare: () => LineProjectProjection,
     message: (text: string) => void,
     options: LineRenderOptions,
     current: () => boolean,

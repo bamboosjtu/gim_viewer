@@ -2,10 +2,11 @@
 import {describe,it,expect} from 'vitest';
 
 import type { LineAttributeIndex } from '@gim/powerline-core/lineAttributeTypes.js';
-import type { LineFamPropertyRecord } from '../../../bridge/database.js';
+import type { LineFamPropertyRecord } from '@desktop/database.js';
 
-import {node,parseFamFixture,makeLineFixture} from './lineNavigationFixture.js';
-import {buildLineNavigationIndex,resolveLineNavigationTarget} from '../lineNavigationProjection.js';
+import {node,parseFamFixture,makeLineFixture} from '../../../../services/__tests__/lineNavigationFixture.js';
+import { buildLineNavigationIndex } from '../lineNavigationProjection.js';
+import { resolveLineNavigationTarget } from '../lineNavigationTargets.js';
 
 describe('line navigation projection without DOM',()=>{
   it.each([false, true])('associates a crossing with an unresolved span only through a resolved reference (resolved=%s)', resolved => {

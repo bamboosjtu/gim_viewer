@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { AppState } from '../../../../app/state.js';
 import type { LineParserWorkerResponse } from '../lineParserWorker.js';
 
 class FakeWorker {
@@ -19,7 +20,7 @@ class FakeWorker {
     this.onmessage?.({ data: response } as MessageEvent<LineParserWorkerResponse>);
   }
 
-  terminate(): void { /* test double */ }
+  terminate = vi.fn();
 }
 
 describe('Line Parser Worker session race', () => {
@@ -29,19 +30,21 @@ describe('Line Parser Worker session race', () => {
     vi.resetModules();
   });
 
-  it('A 结果晚于 B 时，客户端拒绝 A，仅交付 B', async () => {
+  it('terminates the previous scope and rejects its late result or error without disturbing the replacement', async () => {
     vi.stubGlobal('Worker', FakeWorker);
-    // 不使用 Vite 专用的 query suffix：tsc 无法为该虚拟模块解析声明，且
-    // terminateLineParserWorker 已确保每次测试结束时模块状态被清理。
-    const { parseLineInWorker, terminateLineParserWorker } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../lineParserWorkerClient.js'); });
-    const sessionA = { generation: 1, projectId: 1, sourceSha256: 'A', geometryToken: 1 };
-    const sessionB = { generation: 2, projectId: 2, sourceSha256: 'B', geometryToken: 2 };
+    const { parseLineInWorker } = await import('../lineParserWorkerClient.js');
+    const state = new AppState();
+    const sessionA = state.activateProject(1, 'A');
     const files = [{ path: 'CBM/project.cbm', bytes: new TextEncoder().encode('').buffer }];
-    const promiseA = parseLineInWorker(files, sessionA);
-    const instance = FakeWorker.instances[0];
-    const requestA = instance.requests[0] as { requestId: number; session: typeof sessionA };
-    const promiseB = parseLineInWorker(files, sessionB);
-    const requestB = instance.requests[1] as { requestId: number; session: typeof sessionB };
+    const promiseA = parseLineInWorker(files, state.sessionScope(sessionA));
+    const abandoned = expect(promiseA).rejects.toMatchObject({ name: 'StaleSessionError' });
+    const first = FakeWorker.instances[0];
+    const requestA = first.requests[0] as { requestId: number; session: typeof sessionA };
+    const receive = first.onmessage, fail = first.onerror;
+    const sessionB = state.activateProject(2, 'B');
+    const promiseB = parseLineInWorker(files, state.sessionScope(sessionB));
+    const second = FakeWorker.instances[1];
+    const requestB = second.requests[0] as { requestId: number; session: typeof sessionB };
     const emptyGraph = {
       projectType: 'transmission_line' as const,
       root: null,
@@ -50,16 +53,20 @@ describe('Line Parser Worker session race', () => {
       stats: {},
     };
     const timings = { decodeMs: 0, graphMs: 0, attributesMs: 0, totalMs: 0, fileCount: 1, bytes: 0, cacheEntries: 1 };
-    instance.emit({
+    await abandoned;
+    expect(first.terminate).toHaveBeenCalledOnce();
+    receive?.(new MessageEvent<LineParserWorkerResponse>('message', { data: {
       type: 'result', requestId: requestA.requestId, session: requestA.session,
       graph: emptyGraph, attributes: { famPayloads: [], devPayloads: [], unmatchedRefs: [] }, timings,
-    });
-    instance.emit({
+    }}));
+    fail?.(new ErrorEvent('error', { message: 'late worker failure' }));
+    expect(second.terminate).not.toHaveBeenCalled();
+    second.emit({
       type: 'result', requestId: requestB.requestId, session: requestB.session,
       graph: emptyGraph, attributes: { famPayloads: [], devPayloads: [], unmatchedRefs: [] }, timings,
     });
-    await expect(promiseA).rejects.toThrow('过期');
     await expect(promiseB).resolves.toMatchObject({ timings: { worker: true } });
-    terminateLineParserWorker();
+    state.invalidatePendingLoads();
+    expect(second.terminate).toHaveBeenCalledOnce();
   });
 });

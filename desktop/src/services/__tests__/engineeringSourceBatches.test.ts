@@ -20,6 +20,28 @@ it('does not decode an unreferenced invalid file or let it poison a valid entry'
  const sources=new EngineeringSourceBatches();sources.add({blob:new Blob([bad,unit]),entries:[{path:'bad',offset:0,length:1},{path:'unit',offset:1,length:unit.length}]});
  await expect(sources.read('bad')).rejects.toThrow();expect(await sources.read('unit')).toBe('SYMBOLNAME=设备');
 });
+it('shares the Source document reads between physical extraction and graph extraction', async () => {
+ const source = [
+  ['project.cbm', 'OBJECTMODELPOINTER=unit.dev\nBASEFAMILY=shared.fam'],
+  ['unit.dev', 'SUBDEVICE0=part.dev\nSUBDEVICE1=part.dev'],
+  ['part.dev', 'TYPE=Radiator\nBASEFAMILY=shared.fam'],
+  ['shared.fam', '[设备]\n设备型号=TEST'],
+  ['unreferenced.dev', 'TYPE=Other'],
+ ].map(([path, text]) => {
+  const blob = new Blob([text]);
+  return { path, blob, read: vi.spyOn(blob, 'arrayBuffer') };
+ });
+ const handle = createEngineeringWorkerHandler();
+ await handle({ type: 'init', scope: 'fixture', paths: source.map(({ path }) => path) });
+ await handle({ type: 'files', files: source.map(({ path, blob }) => ({ path, blob })) });
+ expect(await handle({ type: 'extract-geometry' })).toMatchObject({ type: 'geometry' });
+ expect(await handle({ type: 'extract' })).toMatchObject({
+  type: 'graph', summary: { sourceRecords: 3, familyPaths: ['shared.fam'] },
+ });
+ expect(source.map(({ read }) => read.mock.calls.length)).toEqual([1, 1, 1, 0, 0]);
+ expect(await handle({ type: 'assemble', objects: [], models: [] })).toMatchObject({ type: 'model' });
+ expect(source.map(({ read }) => read.mock.calls.length)).toEqual([1, 1, 1, 1, 0]);
+});
 it('rejects gaps, overlap, duplicate paths and oversized carriers before accepting any path',()=>{
  const blob=new Blob(['abc']),sources=new EngineeringSourceBatches();
  for(const entries of [[{path:'a',offset:1,length:2}],[{path:'a',offset:0,length:1},{path:'a',offset:1,length:2}],[{path:'a',offset:0,length:4}],[{path:'a',offset:0,length:2}]]){

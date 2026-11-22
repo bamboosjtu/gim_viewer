@@ -2,7 +2,8 @@ import type {
   LineRenderOptions,
   LineProjectViewHandle,
   LineMapEventTarget,
-} from '../services/linePresentationPort.js';
+} from '../features/powerline/presentation/linePresentationPort.js';
+import type { LineProjectProjection } from '../features/powerline/presentation/lineProjectProjection.js';
 import { renderBasemapControls, isTiandituMode } from './lineBasemapControls.js';
 import {
   renderLineRawProperties,
@@ -49,7 +50,6 @@ import type { LineMapBaseLayerHandle } from './lineMapBaseLayer.js';
 import type { LineMapProjection, GeoBBox } from './lineMapProjection.js';
 import { createMapLibreProjection } from './lineMapProjection.js';
 import { renderLineMap } from './lineMapView.js';
-import { buildLineMapProjection } from '../services/lineMapProjection.js';
 import { buildLineAttributeIndex } from '../services/lineAttrRestoreService.js';
 import { buildWireSemanticInfo } from '../services/lineWireSemanticService.js';
 import type { WireSemanticInfo } from '../services/lineWireSemanticService.js';
@@ -68,15 +68,11 @@ import type { BasemapStatus } from '../services/basemapStatusService.js';
 import { debugLog, debugWarn, logger } from '../utils/logger.js';
 import { renderSearchBox } from './searchBox.js';
 import { setStatusRight } from './shell/statusBar.js';
-import {
-  buildLineNavigationIndex,
-  buildLineNavigationSearchIndex,
-  resolveLineNavigationTarget,
-} from '../services/lineNavigationProjection.js';
+import { resolveLineNavigationTarget } from '../features/powerline/presentation/lineNavigationTargets.js';
 import type {
   LineNavigationIndex,
   LineNavigationNode,
-} from '../services/lineNavigationProjection.js';
+} from '../features/powerline/presentation/lineNavigationProjection.js';
 import { renderLineNavigationTree, revealLineNavigationTarget } from './lineNavigationTreeView.js';
 import type { LineNavigationTreeHandle } from './lineNavigationTreeView.js';
 import {
@@ -741,24 +737,21 @@ function handleMapTowerClick(node: GimGraphNode): void {
  */
 export function renderLineProjectPanels(
   state: AppState,
-  graph: GimGraph,
+  projection: LineProjectProjection,
   showMessage: (text: string) => void,
   options: LineRenderOptions = {},
 ): LineProjectViewHandle {
   const perfSession = options.perfSession ?? perfCurrentSession();
   const catenaryEnabled = options.enableCatenary ?? ENABLE_CATENARY;
-  currentLineCatenaryEnabled = catenaryEnabled;
-  mapFrameObserver = options.observeMapFrames;
-
-  // 确保 state 与 graph 同步（调用方可能已设置，此处幂等确认）
-  state.currentGimGraph = graph;
+  const { graph, map: mapProjection, navigation, searchItems } = projection;
 
   // 0. 线路工程只保留模型树与地图视口；隐藏变电专用的设备、图层和图纸 tab。
   hideTabs(['tab-models', 'tab-filedev', 'tab-sld']);
 
-  // 1. 先清理上一条线路的地图/联动状态，再构建本次线路的业务投影。
-  //    这样异步底图回调不会把旧线路的树键或地图句柄带入新工程。
+  // 清理旧地图及其监听，再接收本次线路的投影与展示回调。
   destroyLineMapView();
+  currentLineCatenaryEnabled = catenaryEnabled;
+  mapFrameObserver = options.observeMapFrames;
   const ownedGeneration = lineViewGeneration;
   const handle = {
     destroy() {
@@ -769,34 +762,9 @@ export function renderLineProjectPanels(
   // destroyLineMapView 会使上一工程的状态失效；此处在清理完成后重新
   // 绑定当前线路，保证属性来源按钮和异步 MOD 解析能拿到当前 graph。
   currentLineState = state;
-  const attrs = buildLineAttributeIndex(state);
-  const endMapData = perfBegin('线路地图数据提取', undefined, perfSession);
-  const mapProjection = buildLineMapProjection(graph, attrs);
   const { mapData } = mapProjection;
-  endMapData(undefined, {
-    towers: mapData.stats.towerTotal,
-    wires: mapData.stats.wireTotal,
-    crosses: mapData.stats.crossTotal,
-  });
   lineMapData = mapData;
-  const endNavigationIndex = perfBegin('线路导航索引构建', undefined, perfSession);
-  lineNavigationIndex = graph.root
-    ? buildLineNavigationIndex(graph, mapData, {
-        projectName: state.projectName,
-        attrs,
-      })
-    : null;
-  endNavigationIndex(
-    undefined,
-    lineNavigationIndex
-      ? {
-          nodes: lineNavigationIndex.nodesByKey.size,
-          sections: lineNavigationIndex.stats.sectionCount,
-          strains: lineNavigationIndex.stats.strainSectionCount,
-          spans: lineNavigationIndex.stats.spanCount,
-        }
-      : { nodes: 0 },
-  );
+  lineNavigationIndex = navigation;
 
   // 2. 左侧树只渲染线路业务投影，不再把 F1/F2/F3/F4 和设备原始节点直接铺开。
   const endNavigationDom = perfBegin('线路导航树 DOM 渲染', undefined, perfSession);
@@ -831,10 +799,7 @@ export function renderLineProjectPanels(
 
   // 搜索框：索引只包含线路/区段/耐张段/塔位/档距/导线/跨越物业务行，
   // 命中后展开祖先链并复用树点击的属性和地图联动。
-  let searchItemCount = 0;
   if (lineNavigationIndex) {
-    const searchItems = buildLineNavigationSearchIndex(lineNavigationIndex);
-    searchItemCount = searchItems.length;
     lineSearchHandle = renderSearchBox(cbmTreePanel, searchItems, (key) => {
       if (!lineNavigationIndex) return;
       const target = resolveLineNavigationTarget(lineNavigationIndex, key);
@@ -846,7 +811,7 @@ export function renderLineProjectPanels(
     });
   }
   endSummaryDom(undefined, {
-    searchItems: searchItemCount,
+    searchItems: searchItems.length,
   });
   // 底图切换：保存 showMessage 引用，切换底图时给用户提示
   currentShowMessage = showMessage;
@@ -925,7 +890,9 @@ export function renderLineProjectPanels(
   // 工程已可交互后，底图切换/瓦片提示不再拉起中央加载遮罩，只写底部状态栏。
   currentShowMessage = (text) => {
     void Promise.resolve(
-      import('./shell/statusBar.js').then(({ setStatus }) => setStatus(text)),
+      import('./shell/statusBar.js').then(({ setStatus }) => {
+        if (ownedGeneration === lineViewGeneration) setStatus(text);
+      }),
     ).catch(reportBackgroundError);
   };
   debugLog(DEBUG_LINE_MAP, '[GIM] 线路工程面板已渲染:', {

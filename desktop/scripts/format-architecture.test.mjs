@@ -14,7 +14,7 @@ test('changed frontend and project scripts must join the shared list', () => {
     'packages/gim-sdk/src/shared/__tests__/sourceRecord.test.ts',
     'desktop/src/app/bootstrap.ts',
     'desktop/src/services/newPresentationPort.ts',
-    'desktop/src/services/linePresentationPort.ts',
+    'desktop/src/features/powerline/presentation/linePresentationPort.ts',
     'desktop/bridge/nativeExtension.ts',
     'desktop/bridge/__tests__/helper.ts',
     'desktop/src/adapter.test.ts',

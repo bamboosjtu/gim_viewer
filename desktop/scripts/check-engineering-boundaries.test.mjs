@@ -40,6 +40,14 @@ function fixture() {
   files('desktop/src/features/substation/application/substationColdPersistence.ts','export {};');
   files('desktop/src/features/substation/presentation/substationPresentation.ts','export {};');
   files('desktop/src/features/substation/runtime/substationRuntimeTelemetry.ts','export {};');
+  for (const name of ['substationIfcQueue', 'substationIfcModelLoad', 'substationIfcLoadProgress'])
+    files(`desktop/src/features/substation/runtime/${name}.ts`, 'export {};');
+  for (const name of ['application/openPowerlineProject','runtime/powerlineColdLoad','runtime/powerlineWarmRestore',
+    'runtime/lineSourceState','runtime/lineParserInput','runtime/lineParserWorkerClient','runtime/lineParserWorker',
+    'presentation/lineProjectProjection','presentation/linePresentationPort'])
+    files(`desktop/src/features/powerline/${name}.ts`,'export {};');
+  for(const name of ['spatialSemanticStarter','substationSpatialWorkflow','substationSpatialWorker','substationSpatialWorkerClient'])
+    files(`desktop/src/features/substation/runtime/spatial/${name}.ts`,'export {};');
   const run=()=>spawnSync(process.execPath,[join(folder,'desktop/scripts/check-engineering-boundaries.mjs')],{
     cwd:folder,encoding:'utf8',windowsHide:true,env:process.env,
   });
@@ -123,6 +131,27 @@ test('checker rejects a cycle within a runtime family through dynamic dependenci
   const rejected=run();
   assert.equal(rejected.status,1);
   assert.match(rejected.stderr,/Circular runtime module dependency/);
+});
+
+test('checker prevents shared cleanup from depending on the substation Spatial worker', () => {
+  const { files, run } = fixture();
+  files('desktop/src/services/projectCleanupService.ts',
+    "export const load = () => import('../features/substation/runtime/spatial/substationSpatialWorkerClient.js');");
+  const rejected = run();
+  assert.equal(rejected.status, 1);
+  assert.match(rejected.stderr, /Spatial workflow and worker belong to the substation feature/);
+});
+
+test('checker keeps Powerline parsing with its scope and projection construction outside UI', () => {
+  const { files, run } = fixture();
+  files('desktop/src/services/legacyCleanup.ts',
+    "export const load=()=>import('../features/powerline/runtime/lineParserWorkerClient.js');");
+  files('desktop/src/ui/lineTree.ts',
+    "import {buildLineNavigationIndex} from '../features/powerline/presentation/lineNavigationProjection.js';");
+  const rejected = run();
+  assert.equal(rejected.status, 1);
+  assert.match(rejected.stderr, /Powerline runtime belongs to the project scope/);
+  assert.match(rejected.stderr, /UI consumes Powerline projections and selection queries/);
 });
 
 test('checker rejects eager renderer dependencies behind an opening helper',()=>{

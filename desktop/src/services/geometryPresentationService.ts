@@ -2,6 +2,7 @@ import type * as THREE from 'three';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 import type { GeometryTrack } from '../viewer/modelPresentation.js';
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import {
   perfCurrentSession,
   perfGeometryTracksEnabled,
@@ -34,7 +35,8 @@ export async function observeFirstGeometry(
   track?: GeometryTrack,
   diagnosticOnly = false,
 ): Promise<void> {
-  const current = () => state.isCurrentSession(session);
+  const scope = state.sessionScope(session);
+  const current = scope.isCurrent;
   if (!current() || (diagnosticOnly && !perfGeometryTracksEnabled())) return;
   let job = jobs.get(state);
   if (
@@ -94,6 +96,11 @@ export async function observeFirstGeometry(
           : undefined,
       ),
     );
+    scope.own(() => {
+      if (jobs.get(state) === owned) jobs.delete(state);
+      owned.callbacks.clear();
+      void owned.promise.then((observer) => observer.dispose(), reportBackgroundError);
+    });
   }
   if (job.presented) {
     if (!diagnosticOnly) onPresented?.();

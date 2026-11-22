@@ -49,6 +49,7 @@ export async function loadRawIfc(
     transferInput?: boolean;
     conversionPath?: IfcConversionPath;
     openingPolicy?: IfcOpeningPolicy;
+    signal?: AbortSignal;
     /** Digest of this exact IFC buffer when already computed for its cache key. */
     sourceSha256?: string;
     onConversionStage?: (stage: string) => void;
@@ -57,7 +58,7 @@ export async function loadRawIfc(
     onRegionalComplete?: (meta: { objectCount: number; sequence: number }) => void;
   } = {},
 ) {
-  const isCurrent = () => state.isCurrentSession(session);
+  const isCurrent = () => !options.signal?.aborted && state.isCurrentSession(session);
   if (!isCurrent()) return;
   const measureTracks = perfGeometryTracksEnabled();
   const timingSession = measureTracks
@@ -105,7 +106,8 @@ export async function loadRawIfc(
         const finish = (error?: Error, bytes?: Uint8Array<ArrayBuffer>) => {
           if (finished) return;
           finished = true;
-          activeConversions.delete(cancel);
+          if (options.signal) options.signal.removeEventListener('abort', cancel);
+          else activeConversions.delete(cancel);
           if (watchdog) {
             clearInterval(watchdog);
             watchdog = null;
@@ -121,7 +123,12 @@ export async function loadRawIfc(
           finish(error instanceof Error ? error : new Error(String(error)));
         const cancel = () =>
           finish(new DOMException('IFC conversion belongs to an obsolete project', 'AbortError'));
-        activeConversions.add(cancel);
+        if (options.signal) options.signal.addEventListener('abort', cancel, { once: true });
+        else activeConversions.add(cancel);
+        if (!isCurrent()) {
+          cancel();
+          return;
+        }
         // web-ifc 对个别文件可能长时间停在某个进度（实测 76% 超过 10 分钟）。
         // 以“无进度”而非总时长判定停滞：持续有进度的大文件仍允许后台长转换。
         let lastProgressAt = 0;
@@ -303,6 +310,15 @@ export async function loadRawIfc(
     let loadFailed = false;
     try {
       const model = await ctx.fragments.core.load(converted.buffer, { modelId: runtimeModelId });
+      if (!isCurrent()) {
+        try {
+          if (ctx.fragments.list.has(runtimeModelId))
+            await ctx.fragments.core.disposeModel(runtimeModelId);
+        } catch {
+          /* Session cleanup can already have released the model. */
+        }
+        return;
+      }
       model.object.userData.ifcOpeningPolicy = options.openingPolicy ?? 'full';
       model.object.userData.removedOpeningRelations = removedOpeningRelations;
       model.object.userData.ifcColdPipeline = coldPipeline;

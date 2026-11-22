@@ -7,6 +7,7 @@
 | 入口 | 保留职责 | 实现位置 |
 |---|---|---|
 | `features/substation/application/substationRuntime.ts` | 工程冷/暖打开、核心语义发布、各后台阶段接线 | `features/substation/runtime/*`、`features/substation/presentation/substationPresentation.ts` |
+| `features/powerline/application/openPowerlineProject.ts` | 线路冷暖打开与会话视图交接 | `features/powerline/runtime/`、`features/powerline/presentation/` |
 | `services/devLodRuntime.ts` | 相机/选择、occurrence、场景提交、坐标锚点和会话关闭 | `devLodTemplateStore.ts`、`devLodArtifactWriter.ts`、`devLodSourceWorkset.ts`、`devLodReadiness.ts` |
 | `src-tauri/src/db.rs` | 数据库连接、共享版本和基础查询、命令/DTO 导出 | `src-tauri/src/db/*.rs` |
 
@@ -27,11 +28,11 @@
 | IFC Spatial | `parseIfcModel` | 关系投影、空间对象投影、元数据/placement |
 | GLB 缓存 | `serializeDevToGlbDetailed` | 场景遍历、几何编码、诊断/预算 |
 | 工程实体 | `beginEngineeringBuild` | 输入准备、Worker 启动、发布与取消 |
-| 线路导航 | `buildLineNavigationIndex` | 来源/塔位索引、路径投影、诊断 |
+| 线路导航 | `buildLineNavigationIndex` | 来源、塔位与档距索引已单独准备，投影负责业务行及来源回指 |
 | 线路 UI | `renderLineMap` | 图层装配、交互绑定、生命周期释放 |
 | CBM 来源树 | `buildCbmTree` | 物理树、名称/DEV 关联、展示映射 |
 
-每个拆分保持现有读取次数、对象数量和结果形状；不在同一步同时移动业务目录。拆分完成后，函数入口保留或由 feature 层按纵向流程接管。
+迁移以有实际消费者的完整工作流为单位，先确认资源所有者、接口和释放点。每个拆分保持现有读取次数、对象数量和结果形状，入口接入对应 feature 的生产流程后再移动下一条工作流。
 
 ## 变电生命周期
 
@@ -48,11 +49,12 @@ flowchart TD
   DEV --> UI
 ```
 
-- `substationSpatialRuntime` 负责 Spatial 恢复、重建、缓存发布与后台门控，保留捕获的工程会话检查。
-- `substationIfcRuntime` 负责 IFC 顺序队列、首个可用表示、区域批次和加载诊断。`substationIfcSource` 使用窄会话状态读取单条 IFC 源字节并处理缓存路径。
+- `runtime/spatial/substationSpatialWorkflow` 负责暖开恢复或重建的共享启动，以及后台准入。`substationSpatialRuntime` 发布 Spatial 索引，并在来源发布屏障后写缓存。
+- `runtime/spatial/substationSpatialWorkerClient` 将专用 Worker 登记到当前 `SessionScope`，由会话失效或任务完成释放。Worker 仍复用共享请求协议和 Spatial 编码器。
+- `substationIfcQueue` 负责 IFC 顺序准入、连接预览批次和交接已登记模型。`substationIfcModelLoad` 管理单条目的源读取、进度、会话取消和装载失败清理。`substationIfcRuntime` 接收场景对象，独立处理首个可用模型、首帧观察和后台阶段。
 - `substationDevRuntime` 负责 IFC 后的 DEV LOD 启动。
 - `substationDocumentRuntime` 负责可选 STD/SLD 的解析与缓存恢复。
-- `substationPresentation` 负责导航 DOM、选择回调和加载提示。与 IFC 阶段共享的提示标志放在 `substationLoadingState`，IFC 加载开始时重置。
+- `substationPresentation` 协调导航、选择回调和加载提示，DOM 由 UI 实现。与 IFC 阶段共享的提示标志放在 `substationLoadingState`，IFC 加载开始时重置。
 - `substationRuntimeTelemetry` 负责会话守卫下的资源采样和 Spatial parser observer。
 
 这些模块仍属于桌面服务编排层；领域分类留在 `engineering/`，来源适配留在 `gim/engineering/`。

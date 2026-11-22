@@ -5,23 +5,14 @@ import {
   type EncodedSpatialCache,
 } from '../../../services/substationSpatialCodec.js';
 /** Spatial semantic restore, rebuild, persistence and background scheduling. */
-import type { IfcEntry, CbmNode } from '../../../gim/types.js';
+import type { IfcEntry, CbmNode, FileDevEntry } from '../../../gim/types.js';
 import type { AppState, ProjectLoadSession } from '../../../app/state.js';
-import { parseFileDevRelation } from '../../../gim/fileDevParser.js';
 import {
   notifyEngineeringIfcEvidence,
   notifyEngineeringIfcFailure,
 } from '../../../services/engineeringService.js';
-import { buildSubstationSpatialIndexInWorker } from '../../../services/substationSpatialWorkerClient.js';
-import {
-  readSubstationSpatialSemanticCache,
-  writeSubstationSpatialSemanticCache,
-} from './substationSpatialSemanticCache.js';
-
-import {
-  SubstationBackgroundCoordinator,
-  type SubstationBackgroundGate,
-} from './substationBackgroundRuntime.js';
+import { buildSubstationSpatialIndexInWorker } from './spatial/substationSpatialWorkerClient.js';
+import { writeSubstationSpatialSemanticCache } from './substationSpatialSemanticCache.js';
 import { perfBegin, perfMarkProductMoment, type PerfSession } from '../../../utils/perfTimings.js';
 import {
   createSubstationSpatialObserver,
@@ -29,15 +20,19 @@ import {
 } from './substationRuntimeTelemetry.js';
 import { renderSubstationCoreUi } from '../presentation/substationPresentation.js';
 
+export interface SubstationSpatialInput {
+  state: AppState;
+  files: Map<string, File>;
+  ifcEntries: IfcEntry[];
+  cbmTree: CbmNode;
+  fileDevRelations: FileDevEntry[];
+  session: ProjectLoadSession;
+  perfSession: PerfSession;
+  showMessage: (text: string) => void;
+}
+
 export async function buildAndCommitSubstationSpatialSemantic(
-  state: AppState,
-  files: Map<string, File>,
-  ifcEntries: IfcEntry[],
-  cbmTree: CbmNode,
-  fileDevRelations: Awaited<ReturnType<typeof parseFileDevRelation>>,
-  session: ProjectLoadSession,
-  perfSession: PerfSession,
-  showMessage: (text: string) => void,
+  input: SubstationSpatialInput,
   label: string,
   options: {
     projectId?: number | null;
@@ -47,7 +42,10 @@ export async function buildAndCommitSubstationSpatialSemantic(
     onIndexReady?: (available: boolean) => void;
   } = {},
 ): Promise<boolean> {
+  const { state, files, ifcEntries, cbmTree, fileDevRelations, session, perfSession, showMessage } =
+    input;
   if (!state.isCurrentSession(session)) return false;
+  const scope = state.sessionScope(session);
   const rebuildStarted = performance.now();
   const cacheMissReason = options.cacheMissReason ?? 'cache-not-tried';
   try {
@@ -70,7 +68,7 @@ export async function buildAndCommitSubstationSpatialSemantic(
       cbmTree,
       fileDevRelations,
       createSubstationSpatialObserver(state, perfSession),
-      () => state.isCurrentSession(session),
+      scope,
       options.projectId != null && options.sourceSha256
         ? {
             metadata: {
@@ -247,93 +245,4 @@ export async function commitCachedSubstationSpatialSemantic(
     objects: result.objects,
   });
   return true;
-}
-
-export function scheduleSubstationSpatialSemantic(
-  coordinator: SubstationBackgroundCoordinator,
-  state: AppState,
-  files: Map<string, File>,
-  ifcEntries: IfcEntry[],
-  cbmTree: CbmNode,
-  fileDevRelations: Awaited<ReturnType<typeof parseFileDevRelation>>,
-  session: ProjectLoadSession,
-  perfSession: PerfSession,
-  showMessage: (text: string) => void,
-  label: string,
-  readinessGate: SubstationBackgroundGate = 'allIfcReady',
-  sharedStarter?: () => Promise<boolean>,
-): void {
-  if (sharedStarter) {
-    coordinator.enqueue({
-      task: 'spatialSemanticCacheRestore',
-      priority: 1,
-      heavy: false,
-      startAfter: 'interactive',
-      run: async () => {
-        await sharedStarter();
-      },
-    });
-    return;
-  }
-  let cacheMissReason = 'cache-not-tried';
-  const enqueueRebuild = (): void => {
-    coordinator.enqueue({
-      task: 'spatialSemanticRebuild',
-      priority: 1,
-      heavy: true,
-      startAfter: readinessGate,
-      run: async () => {
-        const ready = await buildAndCommitSubstationSpatialSemantic(
-          state,
-          files,
-          ifcEntries,
-          cbmTree,
-          fileDevRelations,
-          session,
-          perfSession,
-          showMessage,
-          label,
-          {
-            projectId: session.projectId,
-            sourceSha256: session.sourceSha256,
-            cacheMissReason,
-          },
-        );
-        if (!ready && state.isCurrentSession(session)) {
-          throw new Error('空间语义 rebuild 未生成可用索引');
-        }
-      },
-    });
-  };
-  coordinator.enqueue({
-    task: 'spatialSemanticCacheRestore',
-    priority: 1,
-    heavy: false,
-    startAfter: 'interactive',
-    blocksHeavy: true,
-    run: async () => {
-      const cache = await readSubstationSpatialSemanticCache(
-        session.projectId,
-        session.sourceSha256,
-        SUBSTATION_PARSER_DOMAIN_VERSION,
-      );
-      if (!state.isCurrentSession(session)) return;
-      if (cache.hit) {
-        const committed = await commitCachedSubstationSpatialSemantic(
-          state,
-          cache,
-          session,
-          perfSession,
-          showMessage,
-        );
-        if (!committed && state.isCurrentSession(session)) {
-          cacheMissReason = 'cache-commit-failed';
-          enqueueRebuild();
-        }
-        return;
-      }
-      cacheMissReason = cache.reason;
-      enqueueRebuild();
-    },
-  });
 }

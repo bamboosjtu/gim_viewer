@@ -1,5 +1,4 @@
 import { logger } from '../../../utils/logger.js';
-import { SUBSTATION_PARSER_DOMAIN_VERSION } from '../../../services/substationSpatialCodec.js';
 import { reportBackgroundError } from '../../../utils/backgroundErrors.js';
 import { beginEngineeringBuild } from '../../../services/engineeringService.js';
 import { isTauri } from '@desktop/runtime.js';
@@ -12,7 +11,6 @@ import {
 import type { GimRuntimeOpenContext } from '../../../services/gimOpenCore.js';
 import type { validateGimCache } from '@desktop/database.js';
 import { hydrateNativeSmallFiles } from '../../../services/nativeSmallFileHydration.js';
-import { readSubstationSpatialSemanticCache } from '../runtime/substationSpatialSemanticCache.js';
 import {
   SubstationBackgroundCoordinator,
   type SubstationBackgroundGate,
@@ -20,11 +18,9 @@ import {
 import { perfBegin, perfMark } from '../../../utils/perfTimings.js';
 import { showLoading, hideLoading } from '../../../services/gimOpenCore.js';
 import {
-  buildAndCommitSubstationSpatialSemantic,
-  commitCachedSubstationSpatialSemantic,
+  createWarmSpatialSemanticStarter,
   scheduleSubstationSpatialSemantic,
-} from '../runtime/substationSpatialRuntime.js';
-import { createSpatialSemanticStarter } from '../../../services/spatialSemanticStarter.js';
+} from '../runtime/spatial/substationSpatialWorkflow.js';
 import { buildAndCommitSubstationStdSld } from '../runtime/substationDocumentRuntime.js';
 import { loadAllIfcFiles } from '../runtime/substationIfcRuntime.js';
 import { publishSubstationWarmCore } from '../runtime/substationWarmCore.js';
@@ -143,14 +139,16 @@ export async function openSubstationCold(
     if (!cbmTree) return;
     scheduleSubstationSpatialSemantic(
       coordinator,
-      state,
-      extracted,
-      entries,
-      cbmTree,
-      fileDevRelationsForPersist,
-      session,
-      perfSession,
-      showMessage,
+      {
+        state,
+        files: extracted,
+        ifcEntries: entries,
+        cbmTree,
+        fileDevRelations: fileDevRelationsForPersist,
+        session,
+        perfSession,
+        showMessage,
+      },
       '变电 IFC 空间索引',
       gate,
       startSpatialSemantic,
@@ -248,44 +246,17 @@ export async function tryOpenSubstationWarm(
       );
     }
 
-    const sourceSpatial = createSpatialSemanticStarter(async (onIndexReady) => {
-      if (!scope.isCurrent()) return false;
-      if (state.substationSpatialIndex) return true;
-      const cached = await scope.read(async () =>
-        readSubstationSpatialSemanticCache(
-          session.projectId,
-          session.sourceSha256,
-          SUBSTATION_PARSER_DOMAIN_VERSION,
-        ),
-      );
-      if (!scope.isCurrent()) return false;
-      if (cached.hit)
-        return commitCachedSubstationSpatialSemantic(
-          state,
-          cached,
-          session,
-          perfSession,
-          showMessage,
-          onIndexReady,
-        );
-      return buildAndCommitSubstationSpatialSemantic(
-        state,
-        cachedIfcFiles,
-        cachedIfcEntries,
-        cbmTree,
-        fileDevRelations,
-        session,
-        perfSession,
-        showMessage,
-        '变电 IFC 来源语义（缓存重建）',
-        {
-          projectId: session.projectId,
-          sourceSha256: session.sourceSha256,
-          cacheMissReason: cached.reason,
-          onIndexReady,
-        },
-      );
-    });
+    const spatialInput = {
+      state,
+      files: cachedIfcFiles,
+      ifcEntries: cachedIfcEntries,
+      cbmTree,
+      fileDevRelations,
+      session,
+      perfSession,
+      showMessage,
+    };
+    const sourceSpatial = createWarmSpatialSemanticStarter(spatialInput, scope);
     const startSourceSpatial = sourceSpatial.complete;
     scope.withSession(() => {
       void Promise.resolve(
@@ -310,14 +281,7 @@ export async function tryOpenSubstationWarm(
     ): void => {
       scheduleSubstationSpatialSemantic(
         coordinator,
-        state,
-        cachedIfcFiles,
-        cachedIfcEntries,
-        cbmTree,
-        fileDevRelations,
-        session,
-        perfSession,
-        showMessage,
+        spatialInput,
         '变电 IFC 空间索引（缓存命中）',
         gate,
         startSourceSpatial,

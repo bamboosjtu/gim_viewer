@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { AppState } from '../../../../app/state.js';
 import type { CbmNode, IfcEntry } from '../../../../gim/types.js';
 import { loadAllIfcFiles } from '../../../../services/openGimService.js';
+import { isSubstationViewerInteractive } from '../substationLoadingState.js';
 import { perfMarkProductMoment, perfProductMomentSnapshot, perfReset, perfSnapshot } from '../../../../utils/perfTimings.js';
 
 const mocks = vi.hoisted(() => ({
@@ -104,6 +105,7 @@ describe('Substation Loading readiness lifecycle', () => {
     const backgroundStarted=deferred<void>();
     const secondIfcGate = deferred<void>();
     const secondIfcStarted = deferred<void>();
+    let firstProgress!: (amount: number) => void;
     const spatialStart = vi.fn(() => {
       backgroundStarted.resolve();
       expect(perfProductMomentSnapshot().interactive).not.toBeNull();
@@ -145,14 +147,17 @@ describe('Substation Loading readiness lifecycle', () => {
       state: AppState,
       entry: IfcEntry,
       _getIfcBuffer: unknown,
-      _onProgress: unknown,
+      onProgress: (amount: number) => void,
       options: { session?: ReturnType<AppState['captureProjectSession']>; onLoadSource?: (source: 'ifc') => void },
     ) => {
       if (entry.modelId === 'second') {
         secondIfcStarted.resolve();
         await secondIfcGate.promise;
       }
-      if (entry.modelId === 'first') expect(spatialStart).not.toHaveBeenCalled();
+      if (entry.modelId === 'first') {
+        expect(spatialStart).not.toHaveBeenCalled();
+        firstProgress = onProgress;
+      }
       if (!options.session || !state.isCurrentSession(options.session)) return;
       const runtimeModelId = state.ifc.getRuntimeModelId(entry.modelId, options.session);
       state.ifc.loadedModels.set(entry.modelId, { modelId: entry.modelId, runtimeModelId, visible: true });
@@ -181,9 +186,14 @@ describe('Substation Loading readiness lifecycle', () => {
     await secondIfcStarted.promise;
 
     expect(perfProductMomentSnapshot().interactive).toBeNull();
+    expect(isSubstationViewerInteractive(state)).toBe(false);
     expect(spatialStart).not.toHaveBeenCalled();expect(cachePersistenceStart).not.toHaveBeenCalled();
     expect(mocks.hideLoading).not.toHaveBeenCalled();
+    const statusCount = mocks.setIfcStatus.mock.calls.length;
+    firstProgress(.6);
+    expect(mocks.setIfcStatus).toHaveBeenCalledTimes(statusCount);
     mocks.frames[0]();
+    expect(isSubstationViewerInteractive(state)).toBe(true);
     expect(spatialStart).not.toHaveBeenCalled();
     expect(paintCallbacks.length).toBeGreaterThan(0);
     for(const callback of paintCallbacks.splice(0))callback(0);
@@ -220,6 +230,80 @@ describe('Substation Loading readiness lifecycle', () => {
       .toBeLessThanOrEqual(perfProductMomentSnapshot().allIfcReady!.atMs);
     await loading;
     await vi.waitFor(()=>expect(mocks.setIfcStatus).toHaveBeenLastCalledWith(expect.stringContaining('IFC 已结束')));
+  });
+
+  it('releases opening on session invalidation before an outstanding model settles', async () => {
+    vi.clearAllMocks();
+    mocks.frames.length = 0;
+    const first = deferred<void>(), started = deferred<void>();
+    const entries = ['first', 'second'].map(modelId => ({ modelId, name: modelId, path: `${modelId}.ifc` }));
+    const state = new AppState(), session = state.activateProject(7, 'source-a');
+    state.currentIfcEntries = entries;
+    state.currentFiles = new Map();
+    const ctx = { fragments: { list: new Map(), core: { disposeModel: vi.fn() } }, world: { scene: { three: new THREE.Scene() } } };
+    mocks.getViewerRuntimeWithUI.mockResolvedValue({ ctx, modelCallbacks: {} });
+    mocks.ensureEngineReady.mockResolvedValue(undefined);
+    let done = false;
+    let notify!: () => void;
+    mocks.loadIfcEntry.mockImplementation(async (_ctx, _state, _entry, _read, progress, options) => {
+      notify = () => {
+        progress(.5);
+        options.onLoadSource('ifc');
+        options.onStage('cache-write-failed');
+      };
+      started.resolve();
+      await first.promise;
+      notify();
+    });
+    const opening = loadAllIfcFiles(state, entries, vi.fn(), { session }).then(() => { done = true; });
+    try {
+      await started.promise;
+      state.activateProject(8, 'source-b');
+      expect(state.ifcLoading.pending).toBe(false);
+      state.ifcLoading.pending = true;
+      const status = mocks.setIfcStatus.mock.calls.length;
+      const loading = mocks.showLoading.mock.calls.length;
+      notify();
+      await vi.waitFor(() => expect(done).toBe(true));
+      expect(mocks.loadIfcEntry).toHaveBeenCalledOnce();
+      expect(mocks.setIfcStatus).toHaveBeenCalledTimes(status);
+      expect(mocks.showLoading).toHaveBeenCalledTimes(loading);
+      expect(mocks.frames).toHaveLength(0);
+      expect(state.ifcLoading.pending).toBe(true);
+    } finally {
+      first.resolve();
+      await opening;
+    }
+  });
+
+  it('keeps a handed-off IFC when presentation fails and continues to the next entry', async () => {
+    vi.clearAllMocks();
+    mocks.frames.length = 0;
+    const entries = ['first', 'second'].map(modelId => ({ modelId, name: modelId, path: `${modelId}.ifc` }));
+    const state = new AppState(), session = state.activateProject(7, 'source-a');
+    state.currentIfcEntries = entries;
+    const list = new Map();
+    const disposeModel = vi.fn();
+    const ctx = { fragments: { list, core: { disposeModel } }, world: { scene: { three: new THREE.Scene() } } };
+    mocks.getViewerRuntimeWithUI.mockResolvedValue({ ctx, modelCallbacks: {} });
+    mocks.ensureEngineReady.mockResolvedValue(undefined);
+    mocks.syncProjectSourceToViewerFromFragments.mockImplementation(async () => {
+      state.projectSourceToViewerMatrix = new THREE.Matrix4();
+    });
+    mocks.fitCameraToStationOverview.mockImplementationOnce(() => { throw Error('camera failed'); });
+    mocks.loadIfcEntry.mockImplementation(async (_ctx, _state, entry: IfcEntry, _read, _progress, options) => {
+      const runtimeModelId = state.ifc.getRuntimeModelId(entry.modelId, session);
+      state.ifc.loadedModels.set(entry.modelId, { modelId: entry.modelId, runtimeModelId, visible: true });
+      list.set(runtimeModelId, { object: new THREE.Group() });
+      options.onLoadSource('ifc');
+    });
+    await loadAllIfcFiles(state, entries, vi.fn(), { session });
+    await vi.waitFor(() => expect(state.ifcLoading.pending).toBe(false));
+    expect(mocks.loadIfcEntry).toHaveBeenCalledTimes(2);
+    expect(state.ifc.loadedModels.size).toBe(2);
+    expect(disposeModel).not.toHaveBeenCalled();
+    expect(mocks.frames).toHaveLength(1);
+    expect(isSubstationViewerInteractive(state)).toBe(false);
   });
 
   it('keeps the cold IFC terminal status after late cache/progress callbacks without losing cache failures',async()=>{
@@ -288,6 +372,7 @@ describe('Substation Loading readiness lifecycle', () => {
         throw new Error('source decode failed');
       }
       const runtimeModelId = state.ifc.getRuntimeModelId(entry.modelId, session);
+      state.ifc.registerIfcRuntimeModel(entry.modelId, runtimeModelId, session);
       state.ifc.loadedModels.set(entry.modelId, {modelId:entry.modelId,runtimeModelId,visible:true});
       list.set(runtimeModelId, {object:new THREE.Group()});
       options.onLoadSource?.('lod-cache');

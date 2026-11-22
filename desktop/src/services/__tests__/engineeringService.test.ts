@@ -12,7 +12,7 @@ import type { EngineeringWorkerRequest, EngineeringWorkerResponse,EngineeringSou
 import {WorkerRequests} from '../workerRequests.js';
 import { readCachedEntry, writeCacheFile, batchReadCachedFiles } from '@desktop/database.js';
 import {createByteFile} from '@desktop/byteFile.js';
-import{createSpatialSemanticStarter}from'../spatialSemanticStarter.js';
+import{createSpatialSemanticStarter}from'../../features/substation/runtime/spatial/spatialSemanticStarter.js';
 import {benchmarkProgress} from '../../measurement/modelEvidence.js';
 
 vi.mock('@desktop/runtime.js', () => ({ isTauri: () => true }));

@@ -46,7 +46,6 @@ export function createSubstationIfcLoadProgress(options: IfcLoadProgressOptions)
   const acceptsProgress = () => options.isCurrent() && !settled;
 
   return {
-    acceptsProgress,
     failedCount: () => failures,
     finishQueue: () => {
       activePath = '';

@@ -4,7 +4,7 @@ import { buildPowerlineProject } from '@gim/powerline-core';
 import { AppState } from '../../app/state.js';
 import { buildLineGimGraphFromTexts } from '../../gim/lineCbmParserCore.js';
 import { StaleSessionError } from '../../shared/sessionScope.js';
-import { clearLineModRuntimeCache, loadLineModSourcesForNode } from '../lineModRuntimeService.js';
+import { loadLineModSourcesForNode } from '../lineModRuntimeService.js';
 import { node } from './lineNavigationFixture.js';
 
 const native = vi.hoisted(() => ({
@@ -128,11 +128,9 @@ it.each([false, true])('rejects a delayed A traversal and caches only the curren
   const stale = expect(loadLineModSourcesForNode(state, source)).rejects.toBeInstanceOf(StaleSessionError);
   await started;
   state.activateProject(2, 'B');
-  clearLineModRuntimeCache(state);
   state.currentFiles = filesB;
   const reopen = () => {
     state.activateProject(1, 'A');
-    clearLineModRuntimeCache(state);
     state.currentFiles = filesA;
   };
   if (reopened) reopen();

@@ -3,7 +3,6 @@ import { reportBackgroundError } from '../../../utils/backgroundErrors.js';
 
 import { setSubstationViewerInteractive } from './substationLoadingState.js';
 /** Sequential IFC loading, early geometry, cache profiles and background gates. */
-import { setConnectionStatus } from '../../../services/presentation/shell_statusBar.js';
 import type { IfcEntry } from '../../../gim/types.js';
 import type { AppState, ProjectLoadSession } from '../../../app/state.js';
 import { logger } from '../../../utils/logger.js';
@@ -17,11 +16,9 @@ import {
   perfMark,
   perfMarkProductMoment,
   perfGeometryTracksEnabled,
-  perfRecordTaskPhase,
 } from '../../../utils/perfTimings.js';
 import { startSubstationResourceMonitor } from '../../../services/substationResourceTelemetry.js';
 import { showLoading, hideLoading } from '../../../services/gimOpenCore.js';
-import { planSubstationIfcLoad } from '../../../services/ifcLoadOrder.js';
 import { autoLoadModStlPostIfc } from './substationDevRuntime.js';
 
 import {
@@ -32,7 +29,8 @@ import { sampleSubstationMemory } from './substationRuntimeTelemetry.js';
 import { stationViewPolicy } from '../../../services/stationViewPolicy.js';
 import { observeFirstGeometry } from '../../../services/geometryPresentationService.js';
 import { createSubstationIfcLoadProgress } from './substationIfcLoadProgress.js';
-import { loadSubstationIfcModel } from './substationIfcModelLoad.js';
+import type { SubstationIfcUsableModel } from './substationIfcModelLoad.js';
+import { runSubstationIfcQueue } from './substationIfcQueue.js';
 
 const trackedIfcCanvases = new WeakSet<HTMLCanvasElement>();
 
@@ -81,9 +79,10 @@ export async function loadAllIfcFiles(
   } = {},
 ): Promise<void> {
   const session = options.session ?? state.captureProjectSession();
+  const scope = state.sessionScope(session);
   const perfSession = perfCurrentSession();
   const measureGeometryTracks = perfGeometryTracksEnabled();
-  const isCurrent = () => state.isCurrentSession(session);
+  const { isCurrent } = scope;
   const clearIfcPending = () => {
     if (isCurrent()) state.ifcLoading.pending = false;
   };
@@ -112,9 +111,17 @@ export async function loadAllIfcFiles(
   // lane as the background DEV/Spatial work.  The queue remains an optional
   // state capability so browser-only and legacy loader paths keep working.
   state.substationFineQueue = background;
+  state.ifcLoading.pending = true;
   let devGeometryQueued = false;
   background.registerRemainingIfc();
-  state.ifcLoading.pending = true;
+  const releaseBackground = scope.own(() => {
+    if (state.substationFineQueue === background) {
+      state.substationFineQueue = null;
+      state.ifcLoading.pending = false;
+    }
+    background.cancelPending();
+    background.completeRemainingIfc();
+  });
   // 调试入口：从 localStorage 读取手动坐标偏移（GIM_COORD_OFFSET="dx,dy,dz"）
   // 仅作为调试功能，不写入数据库，不作为最终算法。
   // resetGimState 会清空 projectSourceToViewerMatrix，因此每次打开项目时重新解析。
@@ -133,6 +140,7 @@ export async function loadAllIfcFiles(
       await autoLoadModStlPostIfc(state, showMessage, undefined, { session });
     } finally {
       clearIfcPending();
+      releaseBackground();
     }
     return;
   }
@@ -142,13 +150,18 @@ export async function loadAllIfcFiles(
   const [{ getViewerRuntimeWithUI }, { IfcConnectionPreviewRuntime }] = await Promise.all([
     import('../../../services/viewerUIBinding.js'),
     import('../../../viewer/ifcConnectionPreviewRuntime.js'),
-  ]);
+  ]).catch((error: unknown) => {
+    clearIfcPending();
+    releaseBackground();
+    throw error;
+  });
   if (!isCurrent()) return;
   let runtime;
   try {
     runtime = await getViewerRuntimeWithUI(state, showMessage);
   } catch (error) {
     clearIfcPending();
+    releaseBackground();
     throw error;
   }
   if (!isCurrent()) return;
@@ -171,18 +184,6 @@ export async function loadAllIfcFiles(
       ?.sync()
       .catch((error) => logger.warn('[Selection visibility]', error)),
   ).catch(reportBackgroundError);
-  const connectionFirstBatches = new Set<string>();
-  const connectionCompletions = new Set<string>();
-  const updateConnectionStatus = (): void => {
-    const d = connectionPreview.diagnostics;
-    if (d.objects === 0 && d.batches === 0 && d.partialModels === 0) {
-      setConnectionStatus('');
-      return;
-    }
-    const completed = d.readyModels > 0 ? ` · ${d.readyModels} 个来源三维就绪` : ' · 增量加载中';
-    const partial = d.partialModels > 0 ? ` · 部分 ${d.partialModels}` : '';
-    setConnectionStatus(`连接构件 ${d.objects} 个${completed}${partial}`);
-  };
   if (state.projectSourceToViewerMatrix)
     connectionPreview.setTransform?.(state.projectSourceToViewerMatrix);
   state.viewState.stationOverview = () => {
@@ -255,7 +256,7 @@ export async function loadAllIfcFiles(
       presentationGate,
     );
   };
-  setSubstationViewerInteractive(false);
+  setSubstationViewerInteractive(state, scope, false);
   let interactiveSignaled = false;
   let resolveInteractive!: () => void;
   let rejectInteractive!: (reason?: unknown) => void;
@@ -268,6 +269,7 @@ export async function loadAllIfcFiles(
     interactiveSignaled = true;
     resolveInteractive();
   };
+  const releaseOpening = scope.own(signalInteractive);
 
   const syncCoordinateAnchor = async (label: string): Promise<void> => {
     if (!isCurrent() || state.projectSourceToViewerMatrix) return;
@@ -339,7 +341,8 @@ export async function loadAllIfcFiles(
 
   const initializeInteractiveAfterFirstIfc = async (
     entry: IfcEntry,
-    loadSource: 'lod-cache' | 'ifc' | 'unknown',
+    loadSource: SubstationIfcUsableModel['source'],
+    object: SubstationIfcUsableModel['object'],
   ): Promise<void> => {
     if (interactiveInitialized || !isCurrent()) return;
     await syncCoordinateAnchor('变电 coordinate alignment（首个 IFC）');
@@ -347,7 +350,7 @@ export async function loadAllIfcFiles(
 
     await renderSubstationCoreUi(
       state,
-      (text) => showLoadingBeforeInteractive(text),
+      (text) => showLoadingBeforeInteractive(state, text),
       session,
       perfSession,
       '变电 navigation/UI（首个 IFC）',
@@ -384,13 +387,11 @@ export async function loadAllIfcFiles(
       loadedModels: state.ifc.loadedModels.size,
     };
     perfMarkProductMoment('firstUsableGeometryReady', firstMeta, perfSession);
-    const runtimeId = state.ifc.runtimeModelIds.get(entry.modelId) ?? entry.modelId;
-    const object = ctx.fragments.list.get(runtimeId)?.object;
     let frameHandled = false;
     onIfcPresented = () => {
       if (frameHandled || !isCurrent()) return;
       frameHandled = true;
-      setSubstationViewerInteractive(true);
+      setSubstationViewerInteractive(state, scope, true);
       hideLoading();
       perfMark('变电工程首次实体画面已提交', firstMeta, perfSession);
       void Promise.resolve(
@@ -405,16 +406,15 @@ export async function loadAllIfcFiles(
       };
       afterPaintOpportunity(start);
     };
-    if (object)
-      void observeFirstGeometry(
-        state,
-        ctx,
-        object,
-        session,
-        onIfcPresented,
-        perfSession,
-        'ifc',
-      ).catch(reportBackgroundError);
+    void observeFirstGeometry(
+      state,
+      ctx,
+      object,
+      session,
+      onIfcPresented,
+      perfSession,
+      'ifc',
+    ).catch(reportBackgroundError);
     signalInteractive();
     // Keep the IFC tail and DEV anchor live even if the first IFC is empty.
     // Optional work starts after a model draw, or after the full IFC tail if
@@ -463,150 +463,42 @@ export async function loadAllIfcFiles(
       await ensureEngineReady(ctx, state, modelCallbacks);
       if (!isCurrent()) return;
       endEngineInit(undefined, { initialized: true });
-      const { queue, skippedLargeIfc, evidencedConnections, hasConnections, sizes } =
-        planSubstationIfcLoad(
-          entries,
-          options.ifcSourceSizes,
-          state.currentCbmTree,
-          shouldSkipLargeIfc(),
-          state.currentFiles,
-        );
-      if (skippedLargeIfc.length) {
-        logger.warn('[IFC] 已按设置跳过超大文件:', skippedLargeIfc);
-        perfMark('IFC 跳过超大文件', { skipped: skippedLargeIfc }, perfSession);
-      }
-      state.ifcLoading.skippedLargeIfc = skippedLargeIfc.map((row) => row.path);
-      if (hasConnections) {
-        perfMark(
-          'IFC 连接线优先',
-          {
-            order: queue.slice(0, 4).map((entry) => entry.path),
-            evidencedModels: [...evidencedConnections],
-            anchorPreserved: queue[0]?.modelId === entries[0]?.modelId,
-          },
-          perfSession,
-        );
-      }
-      // Queue policy is unchanged: later IFC files wait behind earlier ones.
-      const ifcQueueReadyAt = measureGeometryTracks ? performance.now() : 0;
-      for (let queueIndex = 0; queueIndex < queue.length; queueIndex++) {
-        if (!isCurrent()) return;
-        const entry = queue[queueIndex];
-        if (measureGeometryTracks) {
-          const orderedWaitMs = performance.now() - ifcQueueReadyAt;
-          perfMarkProductMoment('ifcFirstLoadAdmitted', { orderedWaitMs }, perfSession);
-          perfRecordTaskPhase(
-            {
-              domain: 'ifc',
-              kind: 'entry',
-              taskId: 'ifc-entry:' + entry.path,
-              sourcePath: entry.path,
-            },
-            'orderedFileWait',
-            orderedWaitMs,
-            perfSession,
-          );
-        }
-        await loadSubstationIfcModel({
-          state,
-          entry,
-          ctx,
-          session,
-          perfSession,
-          loadEntry: loadIfcEntry,
-          progress,
-          index: queueIndex,
-          queueSize: queue.length,
-          sourceSize: sizes.get(entry.path.toLowerCase()) ?? 0,
-          isInteractive: () => interactiveInitialized,
-          onRegionalBatch: (batch) => {
-            if (!isCurrent()) return;
-            const accepted = connectionPreview.acceptBatch({
-              ...batch,
-              modelId: entry.modelId,
-              sourcePath: entry.path,
-              sourceIdentity: session.sourceSha256 ?? `session:${session.generation}`,
-              coordinateBasis: 'ifc-y-up-m',
-            });
-            if (
-              accepted &&
-              !connectionFirstBatches.has(entry.modelId) &&
-              batch.chunks?.some((chunk) => chunk.vertices.length > 0)
-            ) {
-              connectionFirstBatches.add(entry.modelId);
-              perfMark(
-                'IFC connection preview first batch',
-                {
-                  modelId: entry.modelId,
-                  entryPath: entry.path,
-                  sequence: batch.sequence,
-                  objects: batch.objects.length,
-                  bytes: batch.bytes,
-                  source: 'stream',
-                },
-                perfSession,
-              );
-            }
-            updateConnectionStatus();
-          },
-          onRegionalComplete: (meta) => {
-            if (!isCurrent()) return;
-            connectionPreview.markComplete(entry.modelId, meta);
-            if (!connectionCompletions.has(entry.modelId)) {
-              connectionCompletions.add(entry.modelId);
-              perfMark(
-                'IFC connection preview settled',
-                {
-                  modelId: entry.modelId,
-                  entryPath: entry.path,
-                  objectCount: meta.objectCount,
-                  sequence: meta.sequence,
-                  source: 'regional-index-complete',
-                },
-                perfSession,
-              );
-            }
-            updateConnectionStatus();
-          },
-          onModelReady: () => {
-            connectionPreview.markModelReady(
-              entry.modelId,
-              state.ifc.regionalRuntimes.get(entry.modelId)?.index.objects,
+      const skippedCount = await runSubstationIfcQueue({
+        state,
+        ctx,
+        scope,
+        entries,
+        connectionPreview,
+        loadEntry: loadIfcEntry,
+        progress,
+        perfSession,
+        measureGeometryTracks,
+        skipLargeIfc: shouldSkipLargeIfc(),
+        ifcSourceSizes: options.ifcSourceSizes,
+        isInteractive: () => interactiveInitialized,
+        onUsable: async (entry, { source, object }) => {
+          if (measureGeometryTracks)
+            perfMarkProductMoment(
+              'ifcFirstUsable',
+              { source, scope: 'registered-authoritative-base' },
+              perfSession,
             );
-            updateConnectionStatus();
-          },
-          onModelFailed: () => {
-            connectionPreview.markFailed?.(entry.modelId);
-            updateConnectionStatus();
-          },
-          onUsableModel: async (source) => {
-            if (measureGeometryTracks)
-              perfMarkProductMoment(
-                'ifcFirstUsable',
-                { source, scope: 'registered-authoritative-base' },
-                perfSession,
-              );
-            if (!interactiveInitialized) {
-              await initializeInteractiveAfterFirstIfc(entry, source);
-              return;
-            }
-            // A first usable model does not guarantee a visible frame.
-            const runtimeModelId = state.ifc.runtimeModelIds.get(entry.modelId) ?? entry.modelId;
-            const object = ctx.fragments.list.get(runtimeModelId)?.object;
-            if (object)
-              void observeFirstGeometry(
-                state,
-                ctx,
-                object,
-                session,
-                onIfcPresented,
-                perfSession,
-                'ifc',
-              ).catch(reportBackgroundError);
-          },
-        });
-        if (!isCurrent()) return;
-      }
+          if (!interactiveInitialized) {
+            await initializeInteractiveAfterFirstIfc(entry, source, object);
+            return;
+          }
+          void observeFirstGeometry(
+            state,
+            ctx,
+            object,
+            session,
+            onIfcPresented,
+            perfSession,
+            'ifc',
+          ).catch(reportBackgroundError);
+        },
+      });
+      if (!isCurrent()) return;
       progress.finishQueue();
 
       // A first usable IFC normally establishes the coordinate anchor.  Retry
@@ -633,7 +525,7 @@ export async function loadAllIfcFiles(
             total: entries.length,
             loaded: state.ifc.loadedModels.size,
             failed: progress.failedCount(),
-            skipped: skippedLargeIfc.length,
+            skipped: skippedCount,
           },
           perfSession,
         );
@@ -676,13 +568,21 @@ export async function loadAllIfcFiles(
       if (!interactiveInitialized && state.ifc.loadedModels.size > 0) {
         // Defensive fallback for a loader that populated state without the
         // usual first-model event.  Normal IFC paths initialize above.
-        const firstLoaded = entries.find((entry) => state.ifc.loadedModels.has(entry.modelId));
-        if (firstLoaded) await initializeInteractiveAfterFirstIfc(firstLoaded, 'unknown');
+        for (const entry of entries) {
+          const id = state.ifc.loadedModels.get(entry.modelId)?.runtimeModelId;
+          const object =
+            id && state.ifc.isCurrentRuntimeModel(id)
+              ? ctx.fragments.list.get(id)?.object
+              : undefined;
+          if (!object) continue;
+          await initializeInteractiveAfterFirstIfc(entry, 'unknown', object);
+          break;
+        }
         if (!isCurrent()) return;
       }
       await renderSubstationCoreUi(
         state,
-        (text) => showLoadingBeforeInteractive(text),
+        (text) => showLoadingBeforeInteractive(state, text),
         session,
         perfSession,
         '变电 navigation/UI（all IFC）',
@@ -696,6 +596,7 @@ export async function loadAllIfcFiles(
     } catch (err) {
       if (!isCurrent()) return;
       clearIfcPending();
+      releaseBackground();
       state.engineering.ifcGeometryFinished = true;
       state.engineeringGeometryEvidenceChanged?.();
       logger.error('[GIM] IFC 加载失败 (outer)', {
@@ -732,7 +633,7 @@ export async function loadAllIfcFiles(
       // If every IFC failed (or the session became stale) there is no usable
       // geometry event to signal. Release the caller rather than leaving an
       // unresolved readiness promise behind.
-      if (!interactiveSignaled) signalInteractive();
+      releaseOpening();
     })
     .catch(() => undefined);
 

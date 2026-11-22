@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AppState } from '../../app/state.js';
-import { buildLineGimGraphFromTexts } from '../../gim/lineCbmParserCore.js';
+import { AppState } from '../../../../app/state.js';
+import { buildLineGimGraphFromTexts } from '../../../../gim/lineCbmParserCore.js';
 import { createLineParserCache, parseLineAttributesFromCache } from '@gim/powerline-core/lineAttrParserCore.js';
-import { buildLineGraphPayload } from '../lineGraphPersistenceService.js';
-import { restoreLineGraphToState } from '../lineGraphRestoreService.js';
-import { buildLineAttributeIndex, restoreLineAttributesToState } from '../lineAttrRestoreService.js';
-import { extractLineMapData } from '../../gim/lineMapData.js';
-import { buildLineNavigationIndex } from '../lineNavigationProjection.js';
-import { renderLineSourceRefs } from '../lineInspectorProjection.js';
-import { buildLineSemanticWarmFiles, commitLineParserResult } from '../powerlineRuntime.js';
+import { buildLineGraphPayload } from '../../../../services/lineGraphPersistenceService.js';
+import { buildLineGraphFromCache } from '../../../../services/lineGraphRestoreService.js';
+import { buildLineAttributeIndex, restoreLineAttributesToState } from '../../../../services/lineAttrRestoreService.js';
+import { extractLineMapData } from '../../../../gim/lineMapData.js';
+import { buildLineNavigationIndex } from '../../presentation/lineNavigationProjection.js';
+import { renderLineSourceRefs } from '../../../../services/lineInspectorProjection.js';
+import { buildLineSemanticWarmFiles, commitLineParserResult } from '../lineSourceState.js';
 import { parseLineInWorker } from '../lineParserWorkerClient.js';
 import type { LineParserWorkerFile } from '../lineParserWorker.js';
 import type { LineParserWorkerResult } from '../lineParserWorkerClient.js';
@@ -28,6 +28,8 @@ function deferred<T>(): Deferred<T> {
   });
   return { promise, resolve, reject };
 }
+
+function newScope(id: number, sha: string) { const app = new AppState(); return app.sessionScope(app.activateProject(id, sha)); }
 
 function textFile(path: string, text: string): LineParserWorkerFile {
   return { path, bytes: new TextEncoder().encode(text).buffer };
@@ -91,12 +93,7 @@ describe('Line Warm Fast Path v1', () => {
     // 不把测试环境是否实现 Worker 当作业务结果的一部分。
     vi.stubGlobal('Worker', undefined);
     const cold = coldFiles();
-    const coldResult = await parseLineInWorker(cold, {
-      generation: 1,
-      projectId: 11,
-      sourceSha256: 'cold-sha',
-      geometryToken: 1,
-    });
+    const coldResult = await parseLineInWorker(cold, newScope(11, 'cold-sha'));
 
     const packedItems = cold.map((file) => ({
       entry_path: file.path,
@@ -110,12 +107,7 @@ describe('Line Warm Fast Path v1', () => {
         __semantic: semantic,
       }) as unknown as File,
     );
-    const warmResult = await parseLineInWorker(prepared.workerFiles, {
-      generation: 2,
-      projectId: 11,
-      sourceSha256: 'warm-sha',
-      geometryToken: 1,
-    });
+    const warmResult = await parseLineInWorker(prepared.workerFiles, newScope(11, 'warm-sha'));
 
     expect(warmResult.timings.worker).toBe(false);
     expect(graphShape(warmResult.graph)).toEqual(graphShape(coldResult.graph));
@@ -138,7 +130,7 @@ describe('Line Warm Fast Path v1', () => {
     const payload = buildLineGraphPayload(7, graph, 'fixture-sha');
 
     const state = new AppState();
-    const restored = restoreLineGraphToState(state, {
+    const restored = buildLineGraphFromCache({
       project_type: payload.project_type,
       nodes: payload.nodes,
       children: payload.children,
@@ -182,7 +174,7 @@ describe('Line Warm Fast Path v1', () => {
       .toEqual(['CBM/s1.cbm', 'CBM/s2.cbm']);
     expect(payload.children.some(edge => edge.parent_path === 'CBM/tower.cbm')).toBe(false);
 
-    for (const graph of [cold, restoreLineGraphToState(state, payload)]) {
+    for (const graph of [cold, buildLineGraphFromCache(payload)]) {
       const tower = graph.nodesByPath.get('CBM/tower.cbm');
       expect(graph.nodesByPath.get('CBM/s1.cbm')?.children[0]).toBe(tower);
       expect(graph.nodesByPath.get('CBM/s2.cbm')?.children[0]).toBe(tower);
@@ -215,7 +207,7 @@ describe('Line Warm Fast Path v1', () => {
     expect(attrs.unmatchedRefs).toContain('FAM: type.fam');
     expect(attrs.famPayloads.map(row => row.source_path)).toEqual(['B/type.fam']);
     const state = new AppState();
-    const warm = restoreLineGraphToState(state, buildLineGraphPayload(7, cold, 'fixture'));
+    const warm = buildLineGraphFromCache(buildLineGraphPayload(7, cold, 'fixture'));
     restoreLineAttributesToState({ fam_properties: attrs.famPayloads, dev_properties: attrs.devPayloads }, state);
     const attrIndex = buildLineAttributeIndex(state);
     for (const graph of [cold, warm]) {
@@ -233,29 +225,19 @@ describe('Line Warm Fast Path v1', () => {
   it('A→B 工程切换后迟到的 semantic Worker/pack 结果不能提交或清空 B', async () => {
     vi.stubGlobal('Worker', undefined);
     const cold = coldFiles();
-    const parsedA = await parseLineInWorker(cold, {
-      generation: 1,
-      projectId: 1,
-      sourceSha256: 'sha-a',
-      geometryToken: 1,
-    });
-    const parsedB = await parseLineInWorker(cold, {
-      generation: 3,
-      projectId: 2,
-      sourceSha256: 'sha-b',
-      geometryToken: 1,
-    });
+    const parsedA = await parseLineInWorker(cold, newScope(1, 'sha-a'));
+    const parsedB = await parseLineInWorker(cold, newScope(2, 'sha-b'));
     const state = new AppState();
     const sessionA = state.activateProject(1, 'sha-a');
     // 让 A 任务在真实的 pack/Worker await 期间失效，再激活并提交 B。
     state.invalidatePendingLoads();
     state.resetGimState();
     const sessionB = state.activateProject(2, 'sha-b');
-    expect(await commitLineParserResult(state, parsedB, new Map([['B', new File(['B'], 'B')]]), sessionB)).toBe(true);
+    expect(await commitLineParserResult(state, parsedB, new Map([['B', new File(['B'], 'B')]]), state.sessionScope(sessionB))).toBe(true);
     const graphB = state.currentGimGraph;
     const famB = new Map(state.properties.cachedLineFamProperties);
 
-    expect(await commitLineParserResult(state, parsedA, new Map([['A', new File(['A'], 'A')]]), sessionA)).toBe(false);
+    expect(await commitLineParserResult(state, parsedA, new Map([['A', new File(['A'], 'A')]]), state.sessionScope(sessionA))).toBe(false);
     expect(state.currentGimGraph).toBe(graphB);
     expect(state.currentFiles?.has('B')).toBe(true);
     expect(state.currentFiles?.has('A')).toBe(false);
@@ -270,7 +252,7 @@ describe('Line Warm Fast Path v1', () => {
     const state = new AppState();
     const sessionA = state.activateProject(1, 'sha-a');
     const sessionBFiles = new Map([['B', new File(['B'], 'B')]]);
-    const parsedA = await parseLineInWorker(coldFiles(), sessionA);
+    const parsedA = await parseLineInWorker(coldFiles(), state.sessionScope(sessionA));
 
     // 与生产 warm fast path 相同的顺序：full-read → 准备 Worker 输入 →
     // Worker → 统一 commit。每个 await 后都检查 ProjectLoadSession。
@@ -284,7 +266,7 @@ describe('Line Warm Fast Path v1', () => {
         state,
         result,
         new Map([['A', new File(['A'], 'A')]]),
-        sessionA,
+        state.sessionScope(sessionA),
       );
     })();
 
@@ -295,8 +277,8 @@ describe('Line Warm Fast Path v1', () => {
     state.invalidatePendingLoads();
     state.resetGimState();
     const activeB = state.activateProject(2, 'sha-b');
-    const parsedB = await parseLineInWorker(coldFiles(), activeB);
-    expect(await commitLineParserResult(state, parsedB, sessionBFiles, activeB)).toBe(true);
+    const parsedB = await parseLineInWorker(coldFiles(), state.sessionScope(activeB));
+    expect(await commitLineParserResult(state, parsedB, sessionBFiles, state.sessionScope(activeB))).toBe(true);
     const graphB = state.currentGimGraph;
 
     workerReady.resolve(parsedA);
@@ -334,8 +316,8 @@ describe('Line Warm Fast Path v1', () => {
     state.invalidatePendingLoads();
     state.resetGimState();
     const activeB = state.activateProject(2, 'sha-b');
-    const parsedB = await parseLineInWorker(coldFiles(), activeB);
-    expect(await commitLineParserResult(state, parsedB, new Map([['B', new File(['B'], 'B')]]), activeB)).toBe(true);
+    const parsedB = await parseLineInWorker(coldFiles(), state.sessionScope(activeB));
+    expect(await commitLineParserResult(state, parsedB, new Map([['B', new File(['B'], 'B')]]), state.sessionScope(activeB))).toBe(true);
     const graphB = state.currentGimGraph;
 
     workerReady.reject(new Error('A semantic Worker failed late'));

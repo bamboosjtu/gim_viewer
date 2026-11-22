@@ -135,6 +135,9 @@ for (const [layer, sourceRoot] of [
     const localPath = relative(sourceRoot, path).replaceAll('\\', '/');
     failures.push(...coreBoundaryErrors(readFileSync(path, 'utf8'), localPath));
     const pureLineProjection = [
+      'features/powerline/presentation/lineMapProjection.ts',
+      'features/powerline/presentation/lineNavigationProjection.ts',
+      'features/powerline/presentation/lineNavigationTargets.ts',
       'services/lineInspectorProjection.ts',
       'services/lineMapGeometry.ts',
       'services/lineMapHitTesting.ts',
@@ -240,6 +243,40 @@ for (const [layer, sourceRoot] of [
           ? relative(sourceRoot, resolve(dirname(path), name)).replaceAll('\\', '/')
           : name;
         const target = targetPath.split('/')[0];
+        if (
+          sourceRoot === root &&
+          targetPath.startsWith('features/powerline/runtime/') &&
+          !localPath.startsWith('features/powerline/')
+        ) {
+          failures.push(`${localPath}: Powerline runtime belongs to the project scope (${name})`);
+        }
+        if (layer === 'ui' && targetPath.startsWith('features/powerline/')) {
+          const clause = ts.isImportDeclaration(node) ? node.importClause : undefined;
+          const bindings = clause?.namedBindings;
+          const selectors =
+            targetPath === 'features/powerline/presentation/lineNavigationTargets.js' &&
+            !clause?.name &&
+            bindings &&
+            ts.isNamedImports(bindings) &&
+            bindings.elements.every(
+              (item) =>
+                item.isTypeOnly ||
+                (item.propertyName ?? item.name).text === 'resolveLineNavigationTarget',
+            );
+          if (!clause?.isTypeOnly && !selectors)
+            failures.push(
+              `${localPath}: UI consumes Powerline projections and selection queries (${name})`,
+            );
+        }
+        if (
+          sourceRoot === root &&
+          targetPath.startsWith('features/substation/runtime/spatial/') &&
+          !localPath.startsWith('features/substation/')
+        ) {
+          failures.push(
+            `${localPath}: Spatial workflow and worker belong to the substation feature (${name})`,
+          );
+        }
         if (layer === 'semantic' && /^shared\/sourceRecord(?:\.[jt]s)?$/.test(targetPath))
           failures.push(
             `${localPath}: Semantic must consume adapted facts instead of raw source records`,
@@ -425,10 +462,17 @@ const substationRuntimeFiles = [
   resolve(root, 'features/substation/runtime/substationDevRuntime.ts'),
   resolve(root, 'features/substation/runtime/substationDocumentRuntime.ts'),
   resolve(root, 'features/substation/runtime/substationIfcRuntime.ts'),
+  resolve(root, 'features/substation/runtime/substationIfcQueue.ts'),
+  resolve(root, 'features/substation/runtime/substationIfcModelLoad.ts'),
+  resolve(root, 'features/substation/runtime/substationIfcLoadProgress.ts'),
   resolve(root, 'features/substation/runtime/substationIfcSource.ts'),
   resolve(root, 'features/substation/runtime/substationIndexPublication.ts'),
   resolve(root, 'features/substation/runtime/substationSpatialRuntime.ts'),
   resolve(root, 'features/substation/runtime/substationSpatialSemanticCache.ts'),
+  resolve(root, 'features/substation/runtime/spatial/spatialSemanticStarter.ts'),
+  resolve(root, 'features/substation/runtime/spatial/substationSpatialWorkflow.ts'),
+  resolve(root, 'features/substation/runtime/spatial/substationSpatialWorker.ts'),
+  resolve(root, 'features/substation/runtime/spatial/substationSpatialWorkerClient.ts'),
   resolve(root, 'features/substation/runtime/substationWarmAttempt.ts'),
   resolve(root, 'features/substation/runtime/substationWarmCore.ts'),
   resolve(root, 'features/substation/runtime/substationLoadingState.ts'),
@@ -437,6 +481,17 @@ const substationRuntimeFiles = [
 ];
 const runtimeFamilies = [
   substationRuntimeFiles,
+  [
+    'application/openPowerlineProject',
+    'runtime/powerlineColdLoad',
+    'runtime/powerlineWarmRestore',
+    'runtime/lineSourceState',
+    'runtime/lineParserInput',
+    'runtime/lineParserWorkerClient',
+    'runtime/lineParserWorker',
+    'presentation/lineProjectProjection',
+    'presentation/linePresentationPort',
+  ].map((name) => resolve(root, 'features/powerline', `${name}.ts`)),
   [
     'devLodRuntime',
     'devLodTemplateStore',
@@ -461,7 +516,7 @@ for (const paths of runtimeFamilies) {
               ? node.argument.literal
               : undefined;
       if (specifier && ts.isStringLiteral(specifier) && specifier.text.startsWith('.')) {
-        const target = resolve(dirname(path), specifier.text.replace(/\.js$/, '.ts'));
+        const target = resolve(dirname(path), specifier.text.split('?')[0].replace(/\.js$/, '.ts'));
         if (graph.has(target)) graph.get(path).add(target);
         if (path !== paths[0] && target === paths[0]) {
           failures.push(

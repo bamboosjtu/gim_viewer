@@ -1,4 +1,6 @@
-import type { AppState, ProjectLoadSession } from '../../../app/state.js';
+import type { AppState } from '../../../app/state.js';
+import type { SessionScope } from '../../../shared/sessionScope.js';
+import type { Object3D } from 'three';
 import type { IfcEntry } from '../../../gim/types.js';
 import { showLoading } from '../../../services/gimOpenCore.js';
 import { projectPresentation } from '../../../services/projectPresentationPort.js';
@@ -14,7 +16,6 @@ import type { loadIfcEntry, IfcLoadSource } from '../../../viewer/ifcEntryLoader
 import type { ViewerContext } from '../../../viewer/viewerEngine.js';
 import type { SubstationIfcLoadProgress } from './substationIfcLoadProgress.js';
 import { getIfcBufferForEntry } from './substationIfcSource.js';
-import { setSubstationViewerInteractive } from './substationLoadingState.js';
 
 type EntryOptions = NonNullable<Parameters<typeof loadIfcEntry>[5]>;
 
@@ -22,7 +23,7 @@ interface SubstationIfcModelRequest {
   state: AppState;
   entry: IfcEntry;
   ctx: ViewerContext;
-  session: ProjectLoadSession;
+  scope: SessionScope;
   perfSession: PerfSession;
   loadEntry: typeof loadIfcEntry;
   progress: SubstationIfcLoadProgress;
@@ -34,17 +35,24 @@ interface SubstationIfcModelRequest {
   onRegionalComplete: NonNullable<EntryOptions['onRegionalComplete']>;
   onModelReady(): void;
   onModelFailed(): void;
-  onUsableModel(source: IfcLoadSource | 'unknown'): Promise<void>;
 }
 
-/** Own the source read, loader callbacks, terminal profiling and cleanup for one IFC entry. */
-export async function loadSubstationIfcModel(request: SubstationIfcModelRequest): Promise<void> {
-  const { state, entry, ctx, session, perfSession, progress } = request;
-  const scope = state.sessionScope(session);
-  const isCurrent = scope.isCurrent;
+export interface SubstationIfcUsableModel {
+  source: IfcLoadSource | 'unknown';
+  object: Object3D;
+}
+
+/** Hand back the registered authoritative object to the queue for presentation. */
+export async function loadSubstationIfcModel(
+  request: SubstationIfcModelRequest,
+): Promise<SubstationIfcUsableModel | undefined> {
+  const { state, entry, ctx, scope, perfSession, progress } = request;
+  const { session, isCurrent } = scope;
   if (!isCurrent()) return;
   const status = progress.begin(entry, request.index, request.queueSize, request.sourceSize);
   const stopProgress = scope.own(status.dispose);
+  let loading = true;
+  const acceptsModelCallback = () => loading && isCurrent();
   try {
     // Keep the center loader off once the viewport has its first usable model.
     if (!request.isInteractive()) showLoading(`正在加载 ${entry.name}...`);
@@ -62,8 +70,11 @@ export async function loadSubstationIfcModel(request: SubstationIfcModelRequest)
     );
 
     const readBytes = async (): Promise<Uint8Array | null> => {
+      if (!isCurrent()) return null;
       const bytes = await getIfcBufferForEntry(entry, state, session);
       if (!isCurrent()) return null;
+      // Regional runtime may reuse this reader after the base load has settled.
+      if (!loading) return bytes;
       readByteLength = bytes?.byteLength ?? 0;
       if (!readProfiled) {
         endRead(undefined, {
@@ -91,37 +102,44 @@ export async function loadSubstationIfcModel(request: SubstationIfcModelRequest)
           entry,
           readBytes,
           (amount) => {
-            if (!progress.acceptsProgress()) return;
+            if (!acceptsModelCallback()) return;
             const percentage = `${Math.round(amount * 100)}%`;
             status.publish(percentage);
             if (!request.isInteractive()) showLoading(`${entry.name}: ${percentage}`);
           },
           {
             session,
+            signal: scope.signal,
             perfSessionId: perfSession.id,
             openingPolicy: 'bim-lod',
             transferInput: true,
             onLoadSource: (source) => {
-              if (!progress.acceptsProgress()) return;
-              setSubstationViewerInteractive(true);
+              if (!acceptsModelCallback()) return;
               loadSource.value = source;
               status.recordSource(source);
             },
-            onStage: (stage, meta) => status.stage(stage, meta),
+            onStage: (stage, meta) => {
+              if (loading || stage === 'cache-written' || stage === 'cache-write-failed')
+                status.stage(stage, meta);
+            },
             onProfile: (profile) => {
               if (isCurrent()) perfRecordIfcLoadProfile(profile, perfSession);
             },
-            onRegionalBatch: request.onRegionalBatch,
-            onRegionalComplete: request.onRegionalComplete,
+            onRegionalBatch: (batch) => {
+              if (acceptsModelCallback()) request.onRegionalBatch(batch);
+            },
+            onRegionalComplete: (meta) => {
+              if (acceptsModelCallback()) request.onRegionalComplete(meta);
+            },
           },
         )
         .catch((error: unknown) => {
           readEnded = false;
           throw error;
         });
+      loading = false;
       if (!isCurrent()) return;
 
-      request.onModelReady();
       if (!readEnded) {
         // A far-LOD cache hit never calls the source reader.
         if (!readProfiled) endRead(undefined, { bytes: 0, source: 'not-read', found: false });
@@ -134,10 +152,17 @@ export async function loadSubstationIfcModel(request: SubstationIfcModelRequest)
       });
       loadEnded = true;
       status.loaded(loadSource.value);
-      const runtimeModelId = state.ifc.runtimeModelIds.get(entry.modelId) ?? entry.modelId;
-      if (state.ifc.loadedModels.has(entry.modelId) && ctx.fragments.list.has(runtimeModelId))
-        await request.onUsableModel(loadSource.value);
+      const runtimeModelId = state.ifc.loadedModels.get(entry.modelId)?.runtimeModelId;
+      const object =
+        runtimeModelId && state.ifc.isCurrentRuntimeModel(runtimeModelId)
+          ? ctx.fragments.list.get(runtimeModelId)?.object
+          : undefined;
+      if (object) {
+        request.onModelReady();
+        return { source: loadSource.value, object };
+      }
     } catch (error) {
+      loading = false;
       const message = error instanceof Error ? error.message : String(error);
       if (!readEnded) endRead('（失败）', { source: loadSource.value, error: message });
       if (!loadEnded)
@@ -146,9 +171,9 @@ export async function loadSubstationIfcModel(request: SubstationIfcModelRequest)
           cacheHit: loadSource.value === 'lod-cache',
           error: message,
         });
-      logger.error('[GIM] IFC 加载失败:', entry, error);
       if (!isCurrent()) return;
 
+      logger.error('[GIM] IFC 加载失败:', entry, error);
       request.onModelFailed();
       status.failed(message);
       try {
@@ -165,6 +190,7 @@ export async function loadSubstationIfcModel(request: SubstationIfcModelRequest)
       }
     }
   } finally {
+    loading = false;
     stopProgress();
   }
 }

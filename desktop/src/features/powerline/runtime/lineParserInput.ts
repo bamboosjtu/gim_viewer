@@ -1,4 +1,5 @@
-import { GIM_LIMITS } from '../shared/gimLimits.js';
+import { GIM_LIMITS } from '../../../shared/gimLimits.js';
+import { logger } from '../../../utils/logger.js';
 /**
  * 线路解析输入读取协调器。
  *
@@ -9,10 +10,7 @@ import { GIM_LIMITS } from '../shared/gimLimits.js';
  */
 
 import { isTauri } from '@desktop/runtime.js';
-import {
-  batchReadCachedFiles,
-  readLineSemanticPack,
-} from '@desktop/database.js';
+import { batchReadCachedFiles, readLineSemanticPack } from '@desktop/database.js';
 import { isDiskBackedFile, isSemanticPackBackedFile } from '@desktop/gimExtract.js';
 import type { LineParserWorkerFile } from './lineParserWorker.js';
 
@@ -64,23 +62,30 @@ function isLineParserTextPath(path: string, file: File): boolean {
   // Keep the old behavior for regular browser Files. Only native disk-backed
   // files are filtered, because their large MOD bytes would otherwise make a
   // needless IPC round-trip and Worker transfer.
-  return extension === 'mod'
-    && (!isDiskBackedFile(file) || file.size <= LINE_PARSER_SMALL_MOD_MAX_BYTES);
+  return (
+    extension === 'mod' && (!isDiskBackedFile(file) || file.size <= LINE_PARSER_SMALL_MOD_MAX_BYTES)
+  );
 }
 
 function toTransferable(bytes: Uint8Array | ArrayBuffer): ArrayBuffer {
   if (bytes instanceof ArrayBuffer) return bytes;
   // batchReadCachedFiles 的 envelope 解析会为每个条目生成精确长度的
   // Uint8Array；其 backing buffer 已经独占该条目时直接转移，避免再复制一遍。
-  if (bytes.buffer instanceof ArrayBuffer
-    && bytes.byteOffset === 0
-    && bytes.byteLength === bytes.buffer.byteLength) {
+  if (
+    bytes.buffer instanceof ArrayBuffer &&
+    bytes.byteOffset === 0 &&
+    bytes.byteLength === bytes.buffer.byteLength
+  ) {
     return bytes.buffer;
   }
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
-function chunkCandidates(candidates: Candidate[], maxFiles: number, maxBytes: number): Candidate[][] {
+function chunkCandidates(
+  candidates: Candidate[],
+  maxFiles: number,
+  maxBytes: number,
+): Candidate[][] {
   const chunks: Candidate[][] = [];
   let current: Candidate[] = [];
   let currentBytes = 0;
@@ -98,7 +103,9 @@ function chunkCandidates(candidates: Candidate[], maxFiles: number, maxBytes: nu
   return chunks;
 }
 
-function buildBatchByteLookup(result: Map<string, Uint8Array | null>): Map<string, Uint8Array | null> {
+function buildBatchByteLookup(
+  result: Map<string, Uint8Array | null>,
+): Map<string, Uint8Array | null> {
   const normalized = new Map<string, Uint8Array | null>();
   for (const [candidatePath, bytes] of result) {
     const key = candidatePath.replace(/\\/g, '/').toLowerCase();
@@ -130,7 +137,7 @@ async function readRegularCandidates(
       if (!isCurrent()) break;
       result.push({ path: candidate.path, bytes });
     } catch (error) {
-      console.warn('[LineParserInput] 文件读取失败:', candidate.path, error);
+      logger.warn('[LineParserInput] 文件读取失败:', candidate.path, error);
     }
   }
   return result;
@@ -153,25 +160,34 @@ export async function readLineParserInput(
   const candidatePaths = new Set(candidates.map((candidate) => candidate.path));
   const skippedLargeMod = Array.from(files.entries()).filter(([path, file]) => {
     const dot = path.lastIndexOf('.');
-    return dot >= 0
-      && path.slice(dot + 1).toLowerCase() === 'mod'
-      && isDiskBackedFile(file)
-      && file.size > LINE_PARSER_SMALL_MOD_MAX_BYTES;
+    return (
+      dot >= 0 &&
+      path.slice(dot + 1).toLowerCase() === 'mod' &&
+      isDiskBackedFile(file) &&
+      file.size > LINE_PARSER_SMALL_MOD_MAX_BYTES
+    );
   });
   const metadataFiles: LineParserWorkerFile[] = Array.from(files.keys())
     .filter((path) => !candidatePaths.has(path))
     // STL/MOD 等大二进制不属于线路语义 parser 的输入；仅发送路径元数据，
     // 让 Worker 仍能准确填充 filesByType，而不会把几何字节复制进解析线程。
     .map((path) => ({ path, bytes: new ArrayBuffer(0) }));
-  const nativeDiskCandidates = isTauri() && projectId != null
-    ? candidates.filter((candidate) => isDiskBackedFile(candidate.file))
-    : [];
-  const semanticPackCandidates = nativeDiskCandidates.filter((candidate) => isSemanticPackBackedFile(candidate.file));
-  const diskCandidates = nativeDiskCandidates.filter((candidate) => !isSemanticPackBackedFile(candidate.file));
+  const nativeDiskCandidates =
+    isTauri() && projectId != null
+      ? candidates.filter((candidate) => isDiskBackedFile(candidate.file))
+      : [];
+  const semanticPackCandidates = nativeDiskCandidates.filter((candidate) =>
+    isSemanticPackBackedFile(candidate.file),
+  );
+  const diskCandidates = nativeDiskCandidates.filter(
+    (candidate) => !isSemanticPackBackedFile(candidate.file),
+  );
   // Array.includes() 逐项排除在大线路样本上会退化为 O(n²)；使用对象
   // identity Set 保持语义不变，同时避免输入准备阶段无意义的比较。
   const nativeDiskCandidateSet = new Set(nativeDiskCandidates);
-  const regularCandidates = candidates.filter((candidate) => !nativeDiskCandidateSet.has(candidate));
+  const regularCandidates = candidates.filter(
+    (candidate) => !nativeDiskCandidateSet.has(candidate),
+  );
   // 先按原始 Map 顺序暂存读取结果，最后再统一组装 Worker 输入；这样
   // semantic pack（一次 IPC）与普通 batch（多次 IPC）不会改变 parser 的
   // 文件遍历顺序，保持大小写兼容和旧样本结果一致。
@@ -191,12 +207,17 @@ export async function readLineParserInput(
     files: Array.from(candidates, (candidate) => {
       const bytes = getResolved(candidate.path);
       return bytes ? { path: candidate.path, bytes } : null;
-    }).filter((file): file is LineParserWorkerFile => file !== null).concat(metadataFiles),
+    })
+      .filter((file): file is LineParserWorkerFile => file !== null)
+      .concat(metadataFiles),
     bytes: Array.from(resolved.values()).reduce((sum, bytes) => sum + bytes.byteLength, 0),
     batches,
     requested: files.size,
     skippedLargeModFiles: skippedLargeMod.length,
-    skippedLargeModBytes: skippedLargeMod.reduce((sum, [, file]) => sum + Math.max(0, file.size || 0), 0),
+    skippedLargeModBytes: skippedLargeMod.reduce(
+      (sum, [, file]) => sum + Math.max(0, file.size || 0),
+      0,
+    ),
     semanticPackReads,
     ...(cancelled ? { cancelled: true } : {}),
   });
@@ -222,7 +243,6 @@ export async function readLineParserInput(
       }
     }
     if (!isCurrent()) return result(true);
-
   }
 
   if (diskCandidates.length > 0 && projectId != null) {
@@ -234,7 +254,7 @@ export async function readLineParserInput(
       try {
         bytesMap = await batchReadCachedFiles(projectId, paths);
       } catch (error) {
-        console.warn('[LineParserInput] 批量读取失败，回退单文件读取:', error);
+        logger.warn('[LineParserInput] 批量读取失败，回退单文件读取:', error);
         const fallback = await readRegularCandidates(chunk, isCurrent);
         for (const file of fallback) setResolved(file.path, file.bytes);
         if (!isCurrent()) return result(true);

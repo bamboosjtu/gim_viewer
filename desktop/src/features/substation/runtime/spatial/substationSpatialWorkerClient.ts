@@ -1,23 +1,19 @@
 import measuredWorkerAsset from './substationSpatialWorker.ts?worker&url';
-import { createMeasuredWorker, measurementWorkerUrl } from '../measurement/hostWorker.js';
-import { WorkerRequests } from './workerRequests.js';
-import type { CbmNode, FileDevEntry, IfcEntry } from '../gim/types.js';
+import { createMeasuredWorker, measurementWorkerUrl } from '../../../../measurement/hostWorker.js';
+import { WorkerRequests } from '../../../../services/workerRequests.js';
+import type { SessionScope } from '../../../../shared/sessionScope.js';
+import type { CbmNode, FileDevEntry, IfcEntry } from '../../../../gim/types.js';
 import {
   buildSubstationSpatialIndexFromFiles,
   type SubstationSpatialIndex,
   type SubstationSpatialIndexObserver,
-} from '../gim/ifcSpatialParser.js';
+} from '../../../../gim/ifcSpatialParser.js';
 import type { SpatialWorkerRequest, SpatialWorkerResponse } from './substationSpatialWorker.js';
 import type {
   SubstationSpatialSnapshotMetadata,
   EncodedSpatialCache,
-} from './substationSpatialCodec.js';
+} from '../../../../services/substationSpatialCodec.js';
 import { ENGINEERING_EVIDENCE_FIELDS as recognitionFields } from '@gim/gim-sdk/source';
-
-const active = new Set<() => void>();
-export function cancelSubstationSpatialWorkers(): void {
-  for (const cancel of [...active]) cancel();
-}
 
 /** Keep the existing builder and per-file read/error semantics; isolate STEP
  * scan/finalize only. No cache format, spatial identity or property reduction. */
@@ -27,12 +23,16 @@ export async function buildSubstationSpatialIndexInWorker(
   tree: CbmNode | null,
   relations: FileDevEntry[],
   observer: SubstationSpatialIndexObserver,
-  isCurrent: () => boolean,
+  scope: Pick<SessionScope, 'isCurrent' | 'own'>,
   cacheOptions?: {
     metadata: SubstationSpatialSnapshotMetadata;
     onEncoded: (cache: EncodedSpatialCache) => void;
   },
 ): Promise<SubstationSpatialIndex> {
+  const { isCurrent } = scope;
+  const obsolete = () =>
+    new DOMException('Spatial parse belongs to an obsolete project', 'AbortError');
+  if (!isCurrent()) throw obsolete();
   if (typeof Worker === 'undefined')
     return buildSubstationSpatialIndexFromFiles(
       files,
@@ -57,12 +57,9 @@ export async function buildSubstationSpatialIndexInWorker(
     if (terminated) return;
     terminated = true;
     worker.terminate();
-    active.delete(cancel);
-    requests.rejectAll(
-      new DOMException('Spatial parse belongs to an obsolete project', 'AbortError'),
-    );
+    requests.rejectAll(obsolete());
   };
-  active.add(cancel);
+  const release = scope.own(cancel);
   worker.onmessage = (event: MessageEvent<SpatialWorkerResponse>) => {
     if (!isCurrent()) {
       cancel();
@@ -98,10 +95,7 @@ export async function buildSubstationSpatialIndexInWorker(
     cancel();
   };
   const send = (request: SpatialWorkerRequest, transfer: Transferable[] = []) => {
-    if (terminated || !isCurrent())
-      return Promise.reject(
-        new DOMException('Spatial parse belongs to an obsolete project', 'AbortError'),
-      );
+    if (terminated || !isCurrent()) return Promise.reject(obsolete());
     return requests.request(++sequence, () => worker.postMessage(request, transfer));
   };
   try {
@@ -109,8 +103,7 @@ export async function buildSubstationSpatialIndexInWorker(
     const canonical = (path: string) => path.replace(/\\/g, '/').toLowerCase();
     const sources = new Map([...files].map(([path, file]) => [canonical(path), file]));
     for (const entry of entries) {
-      if (!isCurrent())
-        throw new DOMException('Spatial parse belongs to an obsolete project', 'AbortError');
+      if (!isCurrent()) throw obsolete();
       const file = sources.get(canonical(entry.path)),
         started = performance.now();
       let bytes: ArrayBuffer | null = null,
@@ -149,7 +142,7 @@ export async function buildSubstationSpatialIndexInWorker(
       ...(cacheOptions ? { cacheMetadata: cacheOptions.metadata } : {}),
     }))!;
   } finally {
-    cancel();
+    release();
     worker.onmessage = null;
     worker.onerror = null;
     worker.onmessageerror = null;

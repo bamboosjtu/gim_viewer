@@ -35,7 +35,7 @@ import {
 } from './gimSourceService.js';
 import { extractGimFile, getProjectTypeName } from '../gim/gimExtractor.js';
 import { detectGimProjectType } from '../gim/projectType.js';
-import { openPowerlineProject } from './powerlineRuntime.js';
+import { openPowerlineProject } from '../features/powerline/application/openPowerlineProject.js';
 import {
   openSubstationProject,
   onGimExtracted,

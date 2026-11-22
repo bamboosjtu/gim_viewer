@@ -213,6 +213,6 @@ export async function renderSubstationCoreUi(
 }
 
 /** Background DEV/cache progress stays in the status bar after first IFC. */
-export function showLoadingBeforeInteractive(text: string): void {
-  if (!isSubstationViewerInteractive()) showLoading(text);
+export function showLoadingBeforeInteractive(state: AppState, text: string): void {
+  if (!isSubstationViewerInteractive(state)) showLoading(text);
 }

@@ -1,10 +1,18 @@
-/** Shared loading presentation state; project opening resets it before IFC work. */
-let viewerInteractive = false;
+import type { AppState } from '../../../app/state.js';
+import type { SessionScope } from '../../../shared/sessionScope.js';
 
-export function isSubstationViewerInteractive(): boolean {
-  return viewerInteractive;
+const presented = new WeakMap<AppState, SessionScope>();
+
+export function isSubstationViewerInteractive(state: AppState): boolean {
+  return presented.get(state)?.isCurrent() ?? false;
 }
 
-export function setSubstationViewerInteractive(value: boolean): void {
-  viewerInteractive = value;
+export function setSubstationViewerInteractive(
+  state: AppState,
+  scope: SessionScope,
+  value: boolean,
+): void {
+  if (!scope.isCurrent()) return;
+  if (value) presented.set(state, scope);
+  else presented.delete(state);
 }

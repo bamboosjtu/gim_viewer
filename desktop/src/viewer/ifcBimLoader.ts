@@ -50,13 +50,15 @@ export async function loadBimIfc(
   onProgress?: (p: number) => void,
   options: {
     standaloneSource?: boolean;
+    signal?: AbortSignal;
     onStage?: (stage: IfcLoadStage, meta?: Record<string, unknown>) => void;
     onProfile?: (profile: IfcFileProfile) => void;
     onRegionalBatch?: (batch: IfcRegionalConnectionBatch) => void;
     onRegionalComplete?: (meta: { objectCount: number; sequence: number }) => void;
   } = {},
 ) {
-  const current = () => state.isCurrentSession(session);
+  const current = () => !options.signal?.aborted && state.isCurrentSession(session);
+  if (!current()) return;
   const discardModel = async (): Promise<void> => {
     try {
       await ctx.fragments.core.disposeModel(runtimeId);
@@ -69,6 +71,7 @@ export async function loadBimIfc(
   let cacheWriteMs: number | null = null;
   let cacheWriteOk: boolean | null = null;
   options.onStage?.('checking-cache', { path });
+  if (!current()) return;
   let input: Uint8Array | null = null;
   let sourceSha256: string | undefined;
   let identity = options.standaloneSource ? null : session.sourceSha256;
@@ -118,22 +121,21 @@ export async function loadBimIfc(
       // while conversion is in progress, so there is no mesh replay on a hit.
       hit = true;
       cacheRestoreFailed = false;
-      options.onStage?.('lod-cache-hit', {
-        path,
-        bytes: restoredBytes,
-        readMs: Math.round(cacheReadMs),
-      });
     } catch {
-      try {
-        await ctx.fragments.core.disposeModel(runtimeId);
-      } catch {
-        /* A rejected load may not have registered a model. */
-      }
+      await discardModel();
+      if (!current()) return;
       await deleteIfcLodArtifact(key);
+      if (!current()) return;
       artifact = null;
       model = null;
     }
   }
+  if (hit)
+    options.onStage?.('lod-cache-hit', {
+      path,
+      bytes: restoredBytes,
+      readMs: Math.round(cacheReadMs),
+    });
   if (!model) {
     artifact = null;
     options.onStage?.('cold-convert', { path });
@@ -149,6 +151,7 @@ export async function loadBimIfc(
       {
         transferInput: true,
         openingPolicy: 'bim-lod',
+        signal: options.signal,
         conversionPath: cacheRestoreFailed ? 'cache-restore-failed' : 'cache-miss',
         sourceSha256,
         onConversionStage: (stage) =>
@@ -183,8 +186,15 @@ export async function loadBimIfc(
     const cached = artifact as FarArtifact;
     const writeStarted = performance.now();
     options.onStage?.('cache-write-start', { path, bytes: cached.bytes.byteLength });
+    if (!current()) {
+      await discardModel();
+      return;
+    }
+    // An admitted, source-keyed write may finish after the session changes.
+    // Only the originating session receives its status and profile.
     void Promise.resolve(writeIfcLodArtifact(key, cached))
       .then((result) => {
+        if (!current()) return;
         const ok = (result as { ok?: boolean } | undefined)?.ok !== false;
         cacheWriteOk = ok;
         cacheWriteMs = performance.now() - writeStarted;
@@ -197,6 +207,7 @@ export async function loadBimIfc(
         });
       })
       .catch((error) => {
+        if (!current()) return;
         cacheWriteOk = false;
         cacheWriteMs = performance.now() - writeStarted;
         options.onStage?.('cache-write-failed', {
@@ -206,6 +217,7 @@ export async function loadBimIfc(
         });
       })
       .finally(() => {
+        if (!current()) return;
         options.onProfile?.({
           path,
           bytes: cached.bytes.byteLength,
@@ -216,7 +228,8 @@ export async function loadBimIfc(
           cacheWriteMs: cacheWriteMs == null ? null : Math.round(cacheWriteMs),
           cacheWriteOk,
         });
-      });
+      })
+      .catch(reportBackgroundError);
   }
   if (!current()) {
     void Promise.resolve(ctx.fragments.core.disposeModel(runtimeId)).catch(reportBackgroundError);

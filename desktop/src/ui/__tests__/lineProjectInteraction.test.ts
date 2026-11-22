@@ -1,11 +1,14 @@
 import {beforeEach,afterEach,it,expect,vi} from 'vitest';
 import {AppState} from '../../app/state.js';
 import {makeLineFixture} from '../../services/__tests__/lineNavigationFixture.js';
+import { buildLineProjectProjection } from '../../features/powerline/presentation/lineProjectProjection.js';
+import { perfCurrentSession } from '../../utils/perfTimings.js';
+import type { LineRenderOptions } from '../../features/powerline/presentation/linePresentationPort.js';
 const m=vi.hoisted(()=>({render:vi.fn(),probe:vi.fn(),mod:vi.fn(),projection:vi.fn()}));
 vi.mock('../lineMapView.js',()=>({renderLineMap:m.render}));
 vi.mock('../lineMapBaseLayer.js',()=>({createMapLibreProbe:m.probe}));
 vi.mock('../../services/lineModRuntimeService.js',()=>({loadLineModSourcesForNode:m.mod}));
-vi.mock('../../services/lineMapProjection.js',()=>({buildLineMapProjection:m.projection}));
+vi.mock('../../features/powerline/presentation/lineMapProjection.js',()=>({buildLineMapProjection:m.projection}));
 function deferred<T>() {let resolve!:(value:T)=>void;const promise=new Promise<T>(r=>{resolve=r;});return {promise,resolve};}
 beforeEach(()=>{
   vi.resetModules();vi.clearAllMocks();HTMLElement.prototype.scrollIntoView=vi.fn();
@@ -13,15 +16,22 @@ beforeEach(()=>{
   m.mod.mockResolvedValue([]);m.probe.mockRejectedValue(Error('offline'));
 });
 afterEach(async()=>{(await import('../lineProjectView.js')).destroyLineMapView();});
-async function fixture() {
-  const data=makeLineFixture(),state=new AppState();state.currentProjectType='transmission_line';
+async function fixture(options: LineRenderOptions = {}) {
+  const data=makeLineFixture(),state=new AppState();
+  const scope = state.sessionScope(state.activateProject(1, 'line-a'));
+  state.currentProjectType='transmission_line';
   m.projection.mockReturnValue({mapData:data.mapData,renderable:true});
   const handles:Array<Record<string,ReturnType<typeof vi.fn>>>=[];
   m.render.mockImplementation(()=>{
     const layer=document.createElement('div');document.getElementById('viewport')!.append(layer);
     const handle={fit:vi.fn(),destroy:vi.fn(()=>layer.remove()),focusTowerByNodePath:vi.fn(()=>true),focusBboxByNodePaths:vi.fn(()=>true),getLayerPanel:vi.fn(()=>layer),handlePointerMove:vi.fn(),handlePointerClick:vi.fn(),handlePointerLeave:vi.fn()};handles.push(handle);return handle;
   });
-  const view=await import('../lineProjectView.js');view.renderLineProjectPanels(state,data.graph,vi.fn());return {state,...data,view,handles};
+  state.currentGimGraph = data.graph;
+  const projection = buildLineProjectProjection(state, data.graph, perfCurrentSession());
+  const view=await import('../lineProjectView.js');
+  const owner = view.renderLineProjectPanels(state,projection,vi.fn(), options);
+  scope.own(() => owner.destroy());
+  return {state,...data,view,handles};
 }
 it('links real navigation, map tower/wire selections and property references without a 3D viewer',async()=>{
   const {view,nodes,mapData,handles}=await fixture();
@@ -60,9 +70,11 @@ it('releases overlay bridges and forwards map interactions only through the acti
   const callbacks:Record<string,(arg?:never)=>void>={},offs=Array.from({length:5},()=>vi.fn()),destroy=vi.fn();let index=0;
   const probe={destroy,getMap:()=>({project:()=>({x:0,y:0}),unproject:()=>({lng:0,lat:0})}),fitBounds:vi.fn(),
     ...Object.fromEntries(['onViewChange','onViewSettled','onPointerMove','onPointerClick','onPointerLeave'].map(key=>[key,(cb:(arg?:never)=>void)=>{callbacks[key]=cb;return offs[index++];}]))};
-  m.probe.mockResolvedValue(probe);const {view,handles}=await fixture();
+  const observeMapFrames = vi.fn();
+  m.probe.mockResolvedValue(probe);const {state,handles}=await fixture({ observeMapFrames });
   await vi.waitFor(()=>expect(m.render).toHaveBeenCalledTimes(2));
   callbacks.onPointerMove({x:1,y:2} as never);callbacks.onPointerClick({x:3,y:4} as never);callbacks.onPointerLeave();callbacks.onViewChange('resize' as never);callbacks.onViewSettled();
   expect(handles[1].handlePointerMove).toHaveBeenCalledWith(1,2);expect(handles[1].handlePointerClick).toHaveBeenCalledWith(3,4);expect(handles[1].handlePointerLeave).toHaveBeenCalledOnce();
-  view.destroyLineMapView();expect(destroy).toHaveBeenCalledOnce();offs.forEach(off=>expect(off).toHaveBeenCalledOnce());
+  expect(m.probe.mock.calls[0][1].onMapCreated).toBe(observeMapFrames);
+  state.activateProject(2, 'line-b');expect(destroy).toHaveBeenCalledOnce();offs.forEach(off=>expect(off).toHaveBeenCalledOnce());
 });

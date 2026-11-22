@@ -250,7 +250,3 @@ export async function loadLineModSourcesForNode(
     return entries;
   });
 }
-
-export function clearLineModRuntimeCache(state: AppState): void {
-  sessions.delete(state);
-}

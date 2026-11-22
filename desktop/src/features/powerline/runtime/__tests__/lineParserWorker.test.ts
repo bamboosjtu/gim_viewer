@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { AppState } from '../../../../app/state.js';
 import { parseLineInWorker } from '../lineParserWorkerClient.js';
-import { buildLineGimGraphFromTexts } from '../../gim/lineCbmParserCore.js';
+import { buildLineGimGraphFromTexts } from '../../../../gim/lineCbmParserCore.js';
 import { createLineParserCache, parseLineAttributesFromCache } from '@gim/powerline-core/lineAttrParserCore.js';
 import type { LineParserWorkerFile } from '../lineParserWorker.js';
 
-const SESSION = { generation: 1, projectId: 11, sourceSha256: 'fixture-sha', geometryToken: 1 };
+function scope() { const app = new AppState(); return app.sessionScope(app.activateProject(11, 'fixture-sha')); }
 
 function textFile(path: string, text: string): LineParserWorkerFile {
   return { path, bytes: new TextEncoder().encode(text).buffer };
@@ -26,7 +27,7 @@ function fixtureFiles(): LineParserWorkerFile[] {
 describe('Line Parser Worker v1', () => {
   it('同步回退与共享 cache 产出图和属性', async () => {
     const files = fixtureFiles();
-    const result = await parseLineInWorker(files, SESSION);
+    const result = await parseLineInWorker(files, scope());
     expect(result.timings.worker).toBe(false);
     expect(result.graph.root?.children[0]?.entityName).toBe('F1System');
     expect(result.graph.stats.Tower_Device).toBe(1);
@@ -54,7 +55,7 @@ describe('Line Parser Worker v1', () => {
       textFile('B/tower.cbm', 'BASEFAMILY=A\\tower.fam'),
       textFile('A/tower.fam', 'TYPE=A'),
       textFile('B/tower.fam', 'TYPE=B'),
-    ], SESSION);
+    ], scope());
     expect(result.graph.root?.children.map(line => line.children[0]?.path)).toEqual(['A/tower.cbm', 'B/tower.cbm']);
     expect(result.graph.nodesByPath.get('A/tower.cbm')?.refs.famFiles).toEqual(['B/tower.fam']);
     expect(result.graph.nodesByPath.get('B/tower.cbm')?.refs.famFiles).toEqual(['A/tower.fam']);

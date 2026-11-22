@@ -102,7 +102,7 @@ export function prepareSubstationColdPersistence({
               });
             } else {
               // WASM 回退路径：逐文件 IPC 字节回传（慢，仅作兜底）
-              showLoadingBeforeInteractive('正在缓存 IFC 文件...');
+              showLoadingBeforeInteractive(state, '正在缓存 IFC 文件...');
               try {
                 const { cacheIfcEntries } = await scope.read(
                   async () => import('../../../services/gimExtractedCacheService.js'),
@@ -127,7 +127,7 @@ export function prepareSubstationColdPersistence({
               // WASM 回退把全部原始条目持久化，避免只缓存已知扩展名
               // 造成索引清单与可恢复来源不一致。
               if (filesForPersist) {
-                showLoadingBeforeInteractive('正在缓存 GIM 来源文件...');
+                showLoadingBeforeInteractive(state, '正在缓存 GIM 来源文件...');
                 try {
                   const { cacheExtractedFiles } = await scope.read(
                     async () => import('../../../services/gimExtractedCacheService.js'),

@@ -5,7 +5,7 @@ import { beginEngineeringBuild } from '../../../services/engineeringService.js';
 import { isTauri } from '@desktop/runtime.js';
 import { perfCurrentSession } from '../../../utils/perfTimings.js';
 import { buildAndCommitSubstationSpatialSemantic } from '../runtime/substationSpatialRuntime.js';
-import { createSpatialSemanticStarter } from '../../../services/spatialSemanticStarter.js';
+import { createSpatialSemanticStarter } from '../runtime/spatial/spatialSemanticStarter.js';
 import { buildAndCommitSubstationStdSld } from '../runtime/substationDocumentRuntime.js';
 import { publishSubstationColdCore } from '../runtime/substationColdCore.js';
 interface SubstationSemanticOptions {
@@ -54,14 +54,7 @@ export async function onGimExtracted(
 
     const spatialSemantic = createSpatialSemanticStarter((onIndexReady) =>
       buildAndCommitSubstationSpatialSemantic(
-        state,
-        files,
-        ifcEntries,
-        cbmTree,
-        fileDevRelations,
-        session,
-        perfSession,
-        showMessage,
+        { state, files, ifcEntries, cbmTree, fileDevRelations, session, perfSession, showMessage },
         '变电 IFC 空间索引',
         {
           projectId: isTauri() ? session.projectId : undefined,

@@ -25,7 +25,8 @@
 | `desktop/src/gim/` | 宿主文件发现、CBM Tree Builder、来源树/索引、IFC 空间语义与平台适配；纯格式解析在 `packages/gim-sdk/src/parser/` | SDK parser/source 类型、共享纯库 | services、viewer、ui；不新增纯 Parser |
 | `desktop/src/viewer/` | Three.js、Fragments、web-ifc、MOD/STL 编译与渲染 | three、geometry 纯函数、类型 | services、ui、DB |
 | `desktop/src/ui/` | DOM shell、三视图、属性、搜索、地图、工具栏 | services 暴露的结果、纯类型、白名单展示选择器 | 数据库、原生 IPC |
-| `desktop/src/features/substation/` | 变电打开工作流：application 编排、runtime 冷/暖/IFC/DEV/Spatial/遥测、presentation 导航与选择；跨域 Worker/codec/提取任务端口暂留 services | gim、viewer、bridge、注入的展示端口、services 端口 | 把共享缓存/Worker 协议复制成第二份实现 |
+| `desktop/src/features/substation/` | 变电打开工作流：application 编排、runtime 冷/暖/IFC/DEV/Spatial/遥测、presentation 导航与选择；专用 Spatial Worker 由变电会话持有 | gim、viewer、bridge、注入的展示端口、services 端口 | 把共享缓存/Worker 协议复制成第二份实现 |
+| `desktop/src/features/powerline/` | 线路冷暖打开、解析 Worker 的会话归属、地图与导航投影、视图句柄释放 | 共享线路 core、宿主来源/缓存端口、注入的 UI 端口 | Viewer、直接操作 DOM |
 | `desktop/src/services/` | 跨域缓存、Worker、后台任务、选择、生命周期与未迁移能力的端口 | gim、viewer、bridge、注入的展示端口 | 把领域规则塞回 UI |
 | `desktop/src/config/` | 功能与调试开关 | 无 | 业务状态 |
 | `desktop/src/measurement/` | 宿主与 Worker 探针、产品证据、Trace/Profile/GPU 采样适配 | measurement-core、只读运行时快照 | 把测量状态变成产品业务状态 |
@@ -36,7 +37,7 @@ Benchmark 注册表位于根目录 `benchmarks/l0|l1|l2/`，CLI、Trace/Profile 
 
 ## 依赖规则
 
-UI 可消费只读的稳定来源 ID 查找、路径格式化、空值判断及几何诊断文案等展示选择器；允许的模块/符号逐项登记在 `check-engineering-boundaries.mjs`。原始文本解析、FAM 来源组合与业务身份、连接归属、线路地图及导航投影由 services/gim 负责。新增纯函数不自动获得 UI 导入权限，不能用“纯函数”放宽整个 parser 或 Viewer 模块。
+UI 可消费只读的稳定来源 ID 查找、路径格式化、空值判断及几何诊断文案等展示选择器；允许的模块/符号逐项登记在 `check-engineering-boundaries.mjs`。原始文本解析、FAM 来源与连接归属由 SDK 核心、services 和 gim 按各自契约提供。Powerline Feature 负责线路地图及导航投影。新增纯函数不自动获得 UI 导入权限，不能用“纯函数”放宽整个 parser 或 Viewer 模块。
 
 1. `engineering/` 是无格式领域层。它不读取 XML/键值文本、不生成 Mesh、不访问数据库，也不接收 `CbmNode`、F2/F3/F4 标签、展示树深度或包围盒作为分类条件。新增分类规则应先落到这里和[目录](../engineering/catalogs/README.md)。
 2. `gim/engineering/` 是适配层。它只把来源事实转成 `ObjectEvidence`、`SourceRecord`、`SourceGraph` 和空间上下文；`SourceRecord` 可保留原始字段，但领域层不解析格式。
@@ -66,7 +67,7 @@ bootstrap
   │    ├─ features/substation（语义、IFC、DEV、Spatial）
   │    │    └─ engineeringService（来源/实体/导航 Worker）
   │    ├─ equipmentRuntime（DEV-only 设备）
-  │    └─ line runtime（线路图/地图）
+  │    └─ features/powerline（线路冷暖打开、导航投影、地图会话）
   └─ viewerUIBinding（选择/高亮/相机/属性路由）
 ```
 
@@ -129,7 +130,7 @@ desktop/src/
 - 新增缓存/协议常量只在对应域服务中定义，并由[缓存域](caches.md)登记；
 - 分类规则变化先改目录/领域测试，再改 UI 展示。
 
-线路导航的数据装配位于 `services/lineNavigationProjection.ts`，不依赖 DOM、AppState 或平台 IO；搜索 DTO 位于 `shared/searchTypes.ts`。`ui/lineNavigationTreeView` 只负责按需渲染、展开和交互，返回幂等 destroy 句柄；替换或关闭线路工程会撤销监听并释放树，旧句柄不能清除新树。地图绘制/交互/渐进调度仍由现有地图 handle 管理。
+线路导航的数据装配位于 `features/powerline/presentation/lineNavigationProjection.ts`，不依赖 DOM、AppState 或平台 IO；搜索 DTO 位于 `shared/searchTypes.ts`。`ui/lineNavigationTreeView` 负责按需渲染、展开和交互，返回幂等 destroy 句柄。工程会话持有地图与树的展示句柄，释放只作用于对应视图代次。
 
 线路属性分桶、来源关系与 HNum 预览格式化由 `services/lineInspectorProjection.ts` 提供；字典与纯字符串格式化在 `services/propertyPresentation.ts`，DOM 引用事件桥保留于 UI。地图唯一坐标工作集、Mercator 计算与导线样式语义由 `services/lineMapGeometry.ts` 提供。三者无 DOM、AppState、平台 IO 依赖。线路工程视图返回有代次保护的 `destroy()` 句柄，并由会话登记释放地图、导航、搜索及设置监听；旧句柄不得销毁新视图。
 

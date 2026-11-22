@@ -1,7 +1,8 @@
 import {makeLineFixture} from '../../services/__tests__/lineNavigationFixture.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import {buildLineNavigationIndex,buildLineNavigationSearchIndex,renderLineNavigationTree,revealLineNavigationTarget} from '../lineNavigationTreeView.js';
+import { renderLineNavigationTree, revealLineNavigationTarget } from '../lineNavigationTreeView.js';
+import { buildLineNavigationIndex, buildLineNavigationSearchIndex } from '../../features/powerline/presentation/lineNavigationProjection.js';
 
 describe('line navigation rendering and lifecycle', () => {
   afterEach(() => { document.body.innerHTML = ''; });

@@ -2,7 +2,7 @@ import {afterEach,expect,it,vi} from 'vitest';
 import {AppState} from '../../app/state.js';
 vi.mock('@desktop/runtime.js', () => ({ isTauri: () => false }));
 vi.mock('../../features/substation/application/substationRuntime.js', () => ({ openSubstationProject: vi.fn(), onGimExtracted: vi.fn(), loadAllIfcFiles: vi.fn() }));
-vi.mock('../powerlineRuntime.js', () => ({ openPowerlineProject: vi.fn() }));
+vi.mock('../../features/powerline/application/openPowerlineProject.js', () => ({ openPowerlineProject: vi.fn() }));
 vi.mock('../gimOpenCore.js', async () => ({ ...await vi.importActual('../gimOpenCore.js'), showLoading: vi.fn(), hideLoading: vi.fn() }));
 vi.mock('../../ui/dom.js', async () => ({ ...await vi.importActual('../../ui/dom.js'),
   gimFileInput: document.createElement('input'), btnLoadGim: document.createElement('button') }));

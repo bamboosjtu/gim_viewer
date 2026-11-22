@@ -1,20 +1,19 @@
-import { resolveLineNavigationTarget } from '../services/lineNavigationProjection.js';
-import type { LineNavigationIndex, LineNavigationNode } from '../services/lineNavigationProjection.js';
-export { buildLineNavigationIndex, buildLineNavigationSearchIndex, resolveLineNavigationTarget } from '../services/lineNavigationProjection.js';
-export type { LineNavigationKind, LineNavigationNode, LineNavigationIndex, LineNavigationOptions, LineSpanProjection, LineCrossProjection, LineNavigationStats } from '../services/lineNavigationProjection.js';
+import { resolveLineNavigationTarget } from '../features/powerline/presentation/lineNavigationTargets.js';
+import type {
+  LineNavigationIndex,
+  LineNavigationNode,
+} from '../features/powerline/presentation/lineNavigationProjection.js';
 
-
-export interface LineNavigationTreeHandle { destroy():void; }
-const treeOwners = new WeakMap<HTMLElement,LineNavigationTreeHandle>();
+export interface LineNavigationTreeHandle {
+  destroy(): void;
+}
+const treeOwners = new WeakMap<HTMLElement, LineNavigationTreeHandle>();
 
 /**
  * 搜索命中后只展开工程根到命中行的祖先链。
  * 返回渲染行键；调用方可以随后加 selected/scrollIntoView。
  */
-export function revealLineNavigationTarget(
-  index: LineNavigationIndex,
-  key: string,
-): string | null {
+export function revealLineNavigationTarget(index: LineNavigationIndex, key: string): string | null {
   const target = resolveLineNavigationTarget(index, key);
   if (!target) return null;
   const chain: string[] = [];
@@ -30,7 +29,6 @@ export function revealLineNavigationTarget(
   return target.key;
 }
 
-
 /** 渲染线路树。工程根、线路和区段默认展开；耐张段及明细按需展开。 */
 export function renderLineNavigationTree(
   index: LineNavigationIndex,
@@ -40,16 +38,22 @@ export function renderLineNavigationTree(
   treeOwners.get(parentEl)?.destroy();
   const controller = new (parentEl.ownerDocument.defaultView?.AbortController ?? AbortController)();
   let destroyed = false;
-  const handle:LineNavigationTreeHandle = { destroy() {
-    if(destroyed)return;destroyed=true;controller.abort();
-    if(treeOwners.get(parentEl)===handle){treeOwners.delete(parentEl);parentEl.replaceChildren();}
-  }};
-  treeOwners.set(parentEl,handle);
+  const handle: LineNavigationTreeHandle = {
+    destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      controller.abort();
+      if (treeOwners.get(parentEl) === handle) {
+        treeOwners.delete(parentEl);
+        parentEl.replaceChildren();
+      }
+    },
+  };
+  treeOwners.set(parentEl, handle);
   parentEl.innerHTML = '';
   renderNode(index.root, parentEl, onNodeClick, true, controller.signal);
   return handle;
 }
-
 
 function renderNode(
   node: LineNavigationNode,
@@ -114,46 +118,69 @@ function renderNode(
     if (expanded && !rendered) {
       for (const child of node.children) {
         // 工程根、线路和区段默认展开；耐张段及明细按需生成，避免首屏铺开大量对象。
-        renderNode(child, childrenEl, onNodeClick, child.kind === 'route' || child.kind === 'section', signal);
+        renderNode(
+          child,
+          childrenEl,
+          onNodeClick,
+          child.kind === 'route' || child.kind === 'section',
+          signal,
+        );
       }
       rendered = true;
     }
   };
   if (hasChildren) {
-    (toggle as HTMLButtonElement).addEventListener('click', (event) => {
-      event.stopPropagation();
-      setExpanded(!expanded);
-    }, {signal});
+    (toggle as HTMLButtonElement).addEventListener(
+      'click',
+      (event) => {
+        event.stopPropagation();
+        setExpanded(!expanded);
+      },
+      { signal },
+    );
   }
-  row.addEventListener('click', () => {
-    parentEl.closest('[role="tree"]')?.querySelectorAll('.tree-row.selected').forEach((item) => item.classList.remove('selected'));
-    document.querySelectorAll('.line-navigation-row.selected').forEach((item) => item.classList.remove('selected'));
-    row.classList.add('selected');
-    onNodeClick(node);
-  }, {signal});
-  row.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      row.click();
-    } else if (event.key === 'ArrowRight' && hasChildren && !expanded) {
-      event.preventDefault();
-      setExpanded(true);
-    } else if (event.key === 'ArrowLeft' && hasChildren && expanded) {
-      event.preventDefault();
-      setExpanded(false);
-    }
-  }, {signal});
+  row.addEventListener(
+    'click',
+    () => {
+      parentEl
+        .closest('[role="tree"]')
+        ?.querySelectorAll('.tree-row.selected')
+        .forEach((item) => item.classList.remove('selected'));
+      document
+        .querySelectorAll('.line-navigation-row.selected')
+        .forEach((item) => item.classList.remove('selected'));
+      row.classList.add('selected');
+      onNodeClick(node);
+    },
+    { signal },
+  );
+  row.addEventListener(
+    'keydown',
+    (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        row.click();
+      } else if (event.key === 'ArrowRight' && hasChildren && !expanded) {
+        event.preventDefault();
+        setExpanded(true);
+      } else if (event.key === 'ArrowLeft' && hasChildren && expanded) {
+        event.preventDefault();
+        setExpanded(false);
+      }
+    },
+    { signal },
+  );
 
   parentEl.appendChild(nodeEl);
   if (initiallyExpanded) setExpanded(true);
 }
 
-
 function ensureLineNavigationRowExpanded(key: string): void {
   // 通过 dataset 精确比较，避免 CSS.escape 在带冒号/百分号的业务键上
   // 作为属性选择器值时出现浏览器实现差异。
-  const row = Array.from(document.querySelectorAll<HTMLElement>('.line-navigation-row'))
-    .find((candidate) => candidate.dataset.nodePath === key);
+  const row = Array.from(document.querySelectorAll<HTMLElement>('.line-navigation-row')).find(
+    (candidate) => candidate.dataset.nodePath === key,
+  );
   if (!row) return;
   const toggle = row.querySelector<HTMLButtonElement>('.tree-toggle[data-toggle-key]');
   if (!toggle || toggle.classList.contains('expanded')) return;

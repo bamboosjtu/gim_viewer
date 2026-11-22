@@ -104,24 +104,31 @@ it('records actual IFC worker start only after input, with its slot wait and sou
   }
 });
 
-it('cancels the booted worker while native source reading is pending', async () => {
+it('cancels the session worker during a pending source read and admits the replacement', async () => {
   const state = new AppState(), session = state.activateProject(1, 'sha'), {ctx} = context(state);
   let supply!: (bytes: Uint8Array) => void;
   const read = vi.fn(() => new Promise<Uint8Array>(resolve => { supply = resolve; }));
-  const loading = loadRawIfc(ctx, state, session, read, 'old', entry.path, undefined, undefined, {transferInput:true});
+  const loading = loadRawIfc(ctx, state, session, read, 'old', entry.path, undefined, undefined,
+    { transferInput: true, signal: state.sessionScope(session).signal });
   const settled = expect(loading).rejects.toThrow('obsolete project');
   await vi.waitFor(() => expect(read).toHaveBeenCalledOnce());
   const worker = ConversionWorker.instances[0];
-  state.activateProject(2, 'new-sha');
-  cancelIfcConversions();
+  const next = state.activateProject(2, 'new-sha');
   await settled;
+  const nextId = state.ifc.getRuntimeModelId(entry.modelId, next);
+  state.ifc.registerIfcRuntimeModel(entry.modelId, nextId, next);
+  const replacement = loadRawIfc(ctx, state, next, new Uint8Array([7]), nextId, entry.path);
+  await vi.waitFor(() => expect(ConversionWorker.instances[1]?.input?.bytes[0]).toBe(7));
+  ConversionWorker.instances[1].reply({ type: 'complete', bytes: new Uint8Array([9]), conversionMs: 1 });
+  await replacement;
   const bytes = new Uint8Array([1]);
   supply(bytes);
   await Promise.resolve();
   expect(worker.input).toBeUndefined();
   expect(bytes.byteLength).toBe(1);
   expect(worker.terminate).toHaveBeenCalledOnce();
-  expect(ctx.fragments.core.load).not.toHaveBeenCalled();
+  expect(ctx.fragments.core.load).toHaveBeenCalledTimes(1);
+  expect(ctx.fragments.core.load).toHaveBeenCalledWith(expect.any(ArrayBuffer), { modelId: nextId });
   expect(geometryWorkSnapshot().ifcActive).toBe(0);
 });
 
