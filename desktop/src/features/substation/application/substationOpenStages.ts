@@ -44,7 +44,7 @@ export async function openSubstationCold(
 
   if (extractedSource.projectType === 'equipment') {
     const { openEquipmentProject } = await scope.read(
-      async () => import('../../../services/equipmentRuntime.js'),
+      async () => import('../../equipment/application/openEquipmentProject.js'),
     );
     if (scope.isCurrent()) await scope.read(async () => openEquipmentProject(context));
     return;
@@ -199,7 +199,7 @@ export async function openSubstationCold(
       state.ifcLoading.pending = false;
     });
     const { startGeometryOnlyView } = await scope.read(
-      async () => import('../../../services/equipmentRuntime.js'),
+      async () => import('../../../services/geometryOnlyRuntime.js'),
     );
 
     await scope.read(async () => startGeometryOnlyView(context));
@@ -309,7 +309,7 @@ export async function tryOpenSubstationWarm(
         state.ifcLoading.pending = false;
       });
       const { startGeometryOnlyView } = await scope.read(
-        async () => import('../../../services/equipmentRuntime.js'),
+        async () => import('../../../services/geometryOnlyRuntime.js'),
       );
 
       await scope.read(async () => startGeometryOnlyView(context));

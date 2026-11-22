@@ -8,10 +8,16 @@
 |---|---|---|
 | `features/substation/application/substationRuntime.ts` | 工程冷/暖打开、核心语义发布、各后台阶段接线 | `features/substation/runtime/*`、`features/substation/presentation/substationPresentation.ts` |
 | `features/powerline/application/openPowerlineProject.ts` | 线路冷暖打开与会话视图交接 | `features/powerline/runtime/`、`features/powerline/presentation/` |
+| `features/equipment/application/openEquipmentProject.ts` | 独立设备来源准备、导航发布与节点选择 | `features/equipment/runtime/`、`features/equipment/presentation/` |
+| `services/geometryOnlyRuntime.ts` | 基于已发布来源树启动纯 DEV 场景、相机与首帧观察 | 独立设备和纯 DEV 变电共同使用 |
 | `services/devLodRuntime.ts` | 相机/选择、occurrence、场景提交、坐标锚点和会话关闭 | `devLodTemplateStore.ts`、`devLodArtifactWriter.ts`、`devLodSourceWorkset.ts`、`devLodReadiness.ts` |
 | `src-tauri/src/db.rs` | 数据库连接、共享版本和基础查询、命令/DTO 导出 | `src-tauri/src/db/*.rs` |
 
 调用方可以继续从既有入口导入公开函数和类型；内部模块直接引用实际实现和小型契约，不反向依赖入口文件。Tauri 命令名、IPC 数据结构、缓存键和版本不因文件拆分而改变。
+
+## 纯 DEV 启动
+
+纯 DEV 启动复用 Viewer 与 DEV LOD 管线。LOD 运行时从创建起就归当前工程会话持有，切换工程时同步释放 Worker、定时器和场景资源。相机命令和坐标锚点按对应的发布实例释放，设备导航由独立设备 Feature 通过端口登记。
 
 ## 暖启动核心
 

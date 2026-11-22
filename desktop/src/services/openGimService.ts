@@ -471,7 +471,8 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
   }
 
   if (routingType === 'equipment') {
-    const { openEquipmentProject } = await import('./equipmentRuntime.js');
+    const { openEquipmentProject } =
+      await import('../features/equipment/application/openEquipmentProject.js');
     await openEquipmentProject(context);
   } else if (routingType === 'transmission_line') {
     await openPowerlineProject(context);

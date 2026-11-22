@@ -51,8 +51,10 @@ vi.mock('@desktop/gimExtract.js', () => ({
 vi.mock('../../../../services/gimIndexRestoreService.js', () => ({ restoreGimIndexToState: m.restore }));
 vi.mock('../../../../services/engineeringService.js', () => ({ beginEngineeringBuild: m.build }));
 vi.mock('../../runtime/substationIfcRuntime.js', () => ({ loadAllIfcFiles: m.load }));
-vi.mock('../../../../services/equipmentRuntime.js', () => ({
+vi.mock('../../../../services/geometryOnlyRuntime.js', () => ({
   startGeometryOnlyView: m.geometry,
+}));
+vi.mock('../../../equipment/application/openEquipmentProject.js', () => ({
   openEquipmentProject: m.geometry,
 }));
 vi.mock('../../runtime/substationRuntimeTelemetry.js', () => ({ sampleSubstationMemory: async () => {} }));

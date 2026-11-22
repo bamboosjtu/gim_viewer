@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { workspaceTemp } from './test-workspace.mjs';
 import { changedProductionSources, formattedArchitectureModules, unadoptedProductionSources } from './format-architecture.mjs';
 import { changedRustSources } from './check-rust.mjs';
@@ -74,6 +75,39 @@ test('incremental scope finds committed, renamed and untracked files against the
   assert.throws(()=>changedProductionSources(folder,'--staged'),/Git commit SHA/);
   assert.deepEqual(changedRustSources(folder,base), ['crates/example/src/lib.rs']);
   assert.deepEqual(changedRustSources(folder), []);
+});
+
+test('Windows CI fetches the exact previous push tip after an amend', () => {
+  const origin = gitFixture('false'), checkout = gitFixture('false');
+  const path = 'desktop/src/entry.ts';
+  mkdirSync(dirname(join(origin.folder, path)), { recursive: true });
+  const commit = (...args) => origin.git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', ...args);
+  writeFileSync(join(origin.folder, path), 'export const revision = 1;\n');
+  origin.git('add', '--', path);
+  commit('-qm', 'before');
+  const before = origin.git('rev-parse', 'HEAD');
+  writeFileSync(join(origin.folder, path), 'export const revision = 2;\n');
+  origin.git('add', '--', path);
+  commit('--amend', '-qm', 'after');
+  origin.git('config', 'uploadpack.allowAnySHA1InWant', 'true');
+  checkout.git('remote', 'add', 'origin', pathToFileURL(origin.folder).href);
+  checkout.git('fetch', '--depth=1', 'origin', 'HEAD');
+  checkout.git('checkout', '--detach', 'FETCH_HEAD');
+  assert.notEqual(spawnSync('git', ['cat-file', '-e', `${before}^{commit}`], { cwd: checkout.folder }).status, 0);
+
+  const workflow = readFileSync(resolve('../.github/workflows/windows-ci.yml'), 'utf8').replace(/\r\n/g, '\n');
+  const step = workflow.split('      - name: Resolve incremental gate base\n')[1]?.split('\n      - name:')[0];
+  const body = step?.split('        run: |\n')[1]?.trimEnd().split('\n').map(line => line.slice(10)).join('\n');
+  assert.ok(body);
+  const envFile = join(checkout.folder, 'actions.env');
+  const run = spawnSync('pwsh', ['-NoProfile', '-Command', body], {
+    cwd: checkout.folder, encoding: 'utf8', windowsHide: true, env: {
+      ...process.env, GITHUB_EVENT_NAME: 'push', EVENT_BASE: before, GITHUB_ENV: envFile,
+    },
+  });
+  assert.equal(run.status, 0, run.stderr || String(run.error));
+  assert.equal(readFileSync(envFile, 'utf8').trim(), `GIM_FORMAT_BASE=${before}`);
+  assert.deepEqual(changedProductionSources(checkout.folder, before), [path]);
 });
 
 test('Git and Prettier agree on CRLF, with explicit build-tool exceptions', async () => {

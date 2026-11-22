@@ -1,15 +1,20 @@
 import {beforeEach,it,expect,vi} from 'vitest';
-import {AppState} from '../../app/state.js';
-import {openEquipmentProject} from '../equipmentRuntime.js';
-import type {GimRuntimeOpenContext,ExtractionResult} from '../gimOpenCore.js';
-import type {EquipmentPresentationPort} from '../equipmentPresentationPort.js';
+import {AppState} from '../../../../app/state.js';
+import {openEquipmentProject} from '../openEquipmentProject.js';
+import {startGeometryOnlyView} from '../../../../services/geometryOnlyRuntime.js';
+import type {GimRuntimeOpenContext,ExtractionResult} from '../../../../services/gimOpenCore.js';
+import type {EquipmentPresentationPort} from '../../presentation/equipmentPresentationPort.js';
 
-const runtime=vi.hoisted(()=>({viewer:vi.fn(),lod:vi.fn(),fit:vi.fn(),hide:vi.fn(),show:vi.fn()}));
-vi.mock('../viewerUIBinding.js',()=>({getViewerRuntimeWithUI:runtime.viewer}));
-vi.mock('../devLodRuntime.js',()=>({startDeviceLod:runtime.lod}));
-vi.mock('../../viewer/camera.js',()=>({fitCameraToScene:runtime.fit}));
-vi.mock('../../features/substation/presentation/substationPresentation.js',()=>({createNodeClickHandler:()=>vi.fn()}));
-vi.mock('../gimOpenCore.js',()=>({showLoading:runtime.show,hideLoading:runtime.hide}));
+const runtime=vi.hoisted(()=>({viewer:vi.fn(),lod:vi.fn(),fit:vi.fn(),hide:vi.fn(),show:vi.fn(),status:vi.fn(),select:vi.fn()}));
+vi.mock('../../../../services/viewerUIBinding.js',()=>({getViewerRuntimeWithUI:runtime.viewer}));
+vi.mock('../../../../services/devLodRuntime.js',()=>({startDeviceLod:runtime.lod}));
+vi.mock('../../../../viewer/camera.js',()=>({fitCameraToScene:runtime.fit}));
+vi.mock('../../../../services/nodeInteractionService.js',()=>({handleNodeClick:runtime.select}));
+vi.mock('../../../../services/presentation/shell_statusBar.js', async (original) => ({
+  ...(await original<typeof import('../../../../services/presentation/shell_statusBar.js')>()),
+  setDeviceStatus: runtime.status,
+}));
+vi.mock('../../../../services/gimOpenCore.js',()=>({showLoading:runtime.show,hideLoading:runtime.hide}));
 
 function deferred<T>() {
   let resolve!:(value:T)=>void;
@@ -20,7 +25,7 @@ function inputs():Map<string,File> {
 }
 function fixture() {
   const state=new AppState(),session=state.activateProject(1,'a'),dispose=vi.fn();
-  const presentation={navigation:vi.fn((_input:Parameters<EquipmentPresentationPort['navigation']>[0])=>dispose),deviceStatus:vi.fn()} satisfies EquipmentPresentationPort;
+  const presentation={navigation:vi.fn((_input:Parameters<EquipmentPresentationPort['navigation']>[0])=>dispose)} satisfies EquipmentPresentationPort;
   const context:GimRuntimeOpenContext={state,session,projectId:1,projectName:'Unit',projectTypeName:'设备',
     source:{} as GimRuntimeOpenContext['source'],showMessage:vi.fn(),getExtracted:async()=>({status:'ok',magic:'GIMPKGS',files:inputs()})};
   return {state,session,context,presentation,dispose};
@@ -73,11 +78,56 @@ it('guards late LOD callbacks and permits recovery from a failed equipment entry
   context.getExtracted=async()=>({status:'ok',magic:'GIMPKGS',files:inputs()});await openEquipmentProject(context,presentation);
   const status=runtime.lod.mock.calls[0][3] as (text:string)=>void;
   state.activateProject(2,'b');status('old status');
-  expect(presentation.deviceStatus).not.toHaveBeenCalled();expect(runtime.fit).not.toHaveBeenCalled();
+  expect(runtime.status).not.toHaveBeenCalled();expect(runtime.fit).not.toHaveBeenCalled();
 });
 
 it('cancellation before extraction completion leaves navigation unpublished',async()=>{
   const {context,presentation}=fixture();context.getExtracted=async()=>({status:'cancelled'});
   await openEquipmentProject(context,presentation);
   expect(presentation.navigation).not.toHaveBeenCalled();expect(runtime.viewer).not.toHaveBeenCalled();
+});
+
+it('rejects a device selection whose handler becomes available after replacing the project', async () => {
+  const { state, context, presentation } = fixture();
+  await openEquipmentProject(context, presentation);
+  await import('../../../../services/nodeInteractionService.js');
+  const { onSelect, tree } = presentation.navigation.mock.calls[0][0];
+  onSelect(tree);
+  state.activateProject(2, 'b');
+  await new Promise<void>(resolve => setTimeout(resolve, 0));
+  expect(runtime.select).not.toHaveBeenCalled();
+});
+
+it('releases navigation and geometry presentation when startup fails and permits a fresh attempt', async () => {
+  const { state, context, presentation, dispose } = fixture();
+  runtime.lod.mockRejectedValueOnce(Error('geometry startup failed'));
+  await expect(openEquipmentProject(context, presentation)).rejects.toThrow('geometry startup failed');
+  expect(dispose).toHaveBeenCalledOnce();
+  expect(state.projectSourceToViewerMatrix).toBeNull();
+  expect(state.viewState.stationOverview).toBeNull();
+  const staleStatus = runtime.lod.mock.calls[0][3] as (text: string) => void;
+  await openEquipmentProject(context, presentation);
+  staleStatus('old status');
+  expect(runtime.status).not.toHaveBeenCalled();
+  expect(state.projectSourceToViewerMatrix).not.toBeNull();
+  state.invalidatePendingLoads();
+  expect(dispose).toHaveBeenCalledTimes(2);
+});
+
+it('starts shared DEV geometry for a station from the published tree and releases only its presentation', async () => {
+  const { state, context, presentation } = fixture();
+  state.currentProjectType = 'substation';
+  const extract = vi.fn(context.getExtracted);
+  await startGeometryOnlyView({ ...context, getExtracted: extract } as GimRuntimeOpenContext);
+  expect(extract).not.toHaveBeenCalled();
+  expect(state.currentProjectType).toBe('substation');
+  expect(presentation.navigation).not.toHaveBeenCalled();
+  expect(runtime.lod).toHaveBeenCalledOnce();
+  const overview = state.viewState.stationOverview;
+  expect(overview).toBeTypeOf('function');
+  state.activateProject(2, 'b');
+  overview?.();
+  expect(runtime.fit).not.toHaveBeenCalled();
+  expect(state.projectSourceToViewerMatrix).toBeNull();
+  expect(state.viewState.stationOverview).toBeNull();
 });

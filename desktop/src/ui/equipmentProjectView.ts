@@ -1,16 +1,16 @@
-import type {AppState} from '../app/state.js';
-import type {EquipmentPresentationPort} from '../services/equipmentPresentationPort.js';
-import {cbmTreePanel, emptyTipEl} from './dom.js';
-import {renderCbmTreeUI, selectCbmTreeRow} from './cbmTreeView.js';
-import {renderSearchBox} from './searchBox.js';
-import {setProjectIdentity, refreshNavigatorTitle} from './shell/projectBar.js';
-import {setDeviceStatus, setIfcStatus} from './shell/statusBar.js';
-import {getNodeDisplayName} from '../shared/displayName.js';
+import type { AppState } from '../app/state.js';
+import type { EquipmentPresentationPort } from '../features/equipment/presentation/equipmentPresentationPort.js';
+import { cbmTreePanel, emptyTipEl } from './dom.js';
+import { renderCbmTreeUI, selectCbmTreeRow } from './cbmTreeView.js';
+import { renderSearchBox } from './searchBox.js';
+import { setProjectIdentity, refreshNavigatorTitle } from './shell/projectBar.js';
+import { setIfcStatus } from './shell/statusBar.js';
+import { getNodeDisplayName } from '../shared/displayName.js';
 
 export function createEquipmentProjectPresentation(state: AppState): EquipmentPresentationPort {
   return {
-    deviceStatus: setDeviceStatus,
-    navigation({name, tree, onSelect, signal}) {
+    navigation({ name, tree, onSelect, signal }) {
+      if (signal.aborted) return () => {};
       setProjectIdentity(name, 'equipment');
       refreshNavigatorTitle();
       setIfcStatus('');
@@ -23,7 +23,9 @@ export function createEquipmentProjectPresentation(state: AppState): EquipmentPr
       };
       visit(tree);
       const view = new AbortController();
-      const select = (node: typeof tree) => { if (!signal.aborted && !view.signal.aborted) onSelect(node); };
+      const select = (node: typeof tree) => {
+        if (!signal.aborted && !view.signal.aborted) onSelect(node);
+      };
       let search: ReturnType<typeof renderSearchBox> | undefined;
       const dispose = () => {
         if (view.signal.aborted) return;
@@ -33,16 +35,23 @@ export function createEquipmentProjectPresentation(state: AppState): EquipmentPr
         nodes.clear();
         host.remove();
       };
-      signal.addEventListener('abort', dispose, {once: true});
+      signal.addEventListener('abort', dispose, { once: true });
       try {
-        search = renderSearchBox(host, [...nodes].map(([key, node]) => ({
-          key,
-          title: getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries),
-          subtitle: node.entityName,
-        })), key => {
-          const node = nodes.get(key);
-          if (node) { select(node); selectCbmTreeRow(key); }
-        });
+        search = renderSearchBox(
+          host,
+          [...nodes].map(([key, node]) => ({
+            key,
+            title: getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries),
+            subtitle: node.entityName,
+          })),
+          (key) => {
+            const node = nodes.get(key);
+            if (node) {
+              select(node);
+              selectCbmTreeRow(key);
+            }
+          },
+        );
         renderCbmTreeUI(state, tree, host, select, view.signal);
         if (emptyTipEl) emptyTipEl.style.display = 'none';
         if (signal.aborted) dispose();

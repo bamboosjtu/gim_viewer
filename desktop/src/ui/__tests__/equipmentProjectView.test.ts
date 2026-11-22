@@ -12,6 +12,7 @@ it('owns equipment tree listeners and prevents an outgoing disposer from removin
   const row=document.querySelector<HTMLElement>('.tree-row')!;row.click();expect(select).toHaveBeenCalledOnce();
   first.abort();row.click();expect(select).toHaveBeenCalledOnce();
   const next=presentation.navigation({name:'B',tree:tree!,onSelect:select,signal:second.signal});
+  presentation.navigation({name:'late A',tree:tree!,onSelect:select,signal:first.signal})();
   dispose();dispose();
   expect(document.querySelectorAll('.tree-row')).toHaveLength(1);expect(document.querySelector('#project-title')?.textContent).toBe('B');
   second.abort();next();expect(document.querySelectorAll('.tree-row')).toHaveLength(0);

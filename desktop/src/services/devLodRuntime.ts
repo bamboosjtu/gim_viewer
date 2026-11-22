@@ -1740,29 +1740,40 @@ export async function startDeviceLod(
   ctx: ViewerContext,
   session: ProjectLoadSession,
   status: (text: string, detail?: string) => void,
-): Promise<DevLodRuntime> {
+): Promise<DevLodRuntime | undefined> {
+  const scope = state.sessionScope(session);
+  if (!scope.isCurrent()) return;
   if (!state.substationResourceMonitor) startSubstationResourceMonitor(state, ctx);
   if (
     state.deviceLodRuntime instanceof DevLodRuntime &&
     state.deviceLodRuntime.belongsTo(session)
   ) {
-    state.deviceLodRuntime.setOnlySelected(state.selection.onlySelected);
-    state.deviceLodRuntime.notifyCoordinateAnchor();
-    await state.deviceLodRuntime.startup;
-    return state.deviceLodRuntime;
+    const active = state.deviceLodRuntime;
+    active.setOnlySelected(state.selection.onlySelected);
+    active.notifyCoordinateAnchor();
+    try {
+      await active.startup;
+    } catch (error) {
+      if (scope.isCurrent()) throw error;
+      return;
+    }
+    return scope.isCurrent() ? active : undefined;
   }
-  state.deviceLodRuntime?.release();
   const runtime = new DevLodRuntime(state, ctx, session, status);
   state.deviceLodRuntime = runtime;
-  runtime.setExternalMemoryPressure(state.substationMemoryPressure);
-  runtime.setOnlySelected(state.selection.onlySelected);
+  const release = scope.own(() => {
+    // The AppState runtime slot releases its previous value on replacement.
+    if (state.deviceLodRuntime === runtime) state.deviceLodRuntime = null;
+  });
   try {
+    if (!scope.isCurrent()) return;
+    runtime.setExternalMemoryPressure(state.substationMemoryPressure);
+    runtime.setOnlySelected(state.selection.onlySelected);
     runtime.startup = runtime.start();
     await runtime.startup;
-    return runtime;
+    return scope.isCurrent() ? runtime : undefined;
   } catch (error) {
-    runtime.release();
-    if (state.deviceLodRuntime === runtime) state.deviceLodRuntime = null;
-    throw error;
+    release();
+    if (scope.isCurrent()) throw error;
   }
 }

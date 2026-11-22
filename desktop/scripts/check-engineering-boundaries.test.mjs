@@ -40,6 +40,8 @@ function fixture() {
   files('desktop/src/features/substation/application/substationColdPersistence.ts','export {};');
   files('desktop/src/features/substation/presentation/substationPresentation.ts','export {};');
   files('desktop/src/features/substation/runtime/substationRuntimeTelemetry.ts','export {};');
+  for (const name of ['application/openEquipmentProject','runtime/equipmentSource','presentation/equipmentSelection','presentation/equipmentPresentationPort'])
+    files(`desktop/src/features/equipment/${name}.ts`,'export {};');
   for (const name of ['substationIfcQueue', 'substationIfcModelLoad', 'substationIfcLoadProgress'])
     files(`desktop/src/features/substation/runtime/${name}.ts`, 'export {};');
   for (const name of ['application/openPowerlineProject','runtime/powerlineColdLoad','runtime/powerlineWarmRestore',
@@ -152,6 +154,18 @@ test('checker keeps Powerline parsing with its scope and projection construction
   assert.equal(rejected.status, 1);
   assert.match(rejected.stderr, /Powerline runtime belongs to the project scope/);
   assert.match(rejected.stderr, /UI consumes Powerline projections and selection queries/);
+});
+
+test('checker keeps equipment independent of station presentation and shared DEV startup independent of features', () => {
+  const { files, run } = fixture();
+  files('desktop/src/features/equipment/application/openEquipmentProject.ts',
+    "const station = () => import('../../substation/presentation/substationPresentation.js');");
+  files('desktop/src/services/geometryOnlyRuntime.ts',
+    "import { equipmentPresentationFor } from '../features/equipment/presentation/equipmentPresentationPort.js';");
+  const rejected = run();
+  assert.equal(rejected.status, 1);
+  assert.match(rejected.stderr, /Equipment must not depend on another feature/);
+  assert.match(rejected.stderr, /shared DEV geometry must stay independent of features/);
 });
 
 test('checker rejects eager renderer dependencies behind an opening helper',()=>{

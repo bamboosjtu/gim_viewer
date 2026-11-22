@@ -1,6 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
-import { DevLodRuntime } from '../devLodRuntime.js';
+import { DevLodRuntime, startDeviceLod } from '../devLodRuntime.js';
+import { AppState } from '../../app/state.js';
+import type { ViewerContext } from '../../viewer/viewerEngine.js';
 import { DEV_GEOMETRY_VERSION } from '../devSpatialCatalog.js';
 import { perfProductMomentSnapshot, perfReset, perfSnapshot } from '../../utils/perfTimings.js';
 import {ByteWorkBudget} from '../../utils/byteWorkBudget.js';
@@ -28,6 +30,41 @@ function fixture() {
   Object.assign(runtime.diagnostics, { anchorReady: true, catalogReady: true,baseRepresentationsSettled:true });
   return { runtime, internal: runtime as any, status };
 }
+
+it('owns a pending DEV startup in its project scope and leaves a replacement runtime alone', async () => {
+  const state = new AppState(), session = state.activateProject(1, 'old');
+  state.substationResourceMonitor = { release: vi.fn() };
+  const ctx = {} as ViewerContext;
+  const release = vi.spyOn(DevLodRuntime.prototype, 'release');
+  let failOld!: (error: Error) => void;
+  const held = new Promise<void>((_resolve, reject) => { failOld = reject; });
+  const start = vi.spyOn(DevLodRuntime.prototype, 'start')
+    .mockReturnValueOnce(held)
+    .mockResolvedValueOnce(undefined);
+  try {
+    const stale = startDeviceLod(state, ctx, session, vi.fn());
+    const old = state.deviceLodRuntime;
+    expect(old).toBeInstanceOf(DevLodRuntime);
+    expect(release).not.toHaveBeenCalled();
+    state.sessionScope(session).dispose();
+    expect(release).toHaveBeenCalledOnce();
+    expect(release.mock.contexts[0]).toBe(old);
+    expect(state.deviceLodRuntime).toBeNull();
+
+    const nextSession = state.activateProject(2, 'new');
+    state.substationResourceMonitor = { release: vi.fn() };
+    const next = await startDeviceLod(state, ctx, nextSession, vi.fn());
+    expect(next).toBeInstanceOf(DevLodRuntime);
+    failOld(Error('old startup ended after cancellation'));
+    await expect(stale).resolves.toBeUndefined();
+    expect(state.deviceLodRuntime).toBe(next);
+    expect(release).toHaveBeenCalledOnce();
+  } finally {
+    state.invalidatePendingLoads();
+    start.mockRestore();
+    release.mockRestore();
+  }
+});
 
 it('uses a valid warm template without rehashing bytes, reading sources or recompiling',async()=>{
   const {webcrypto}=await import('node:crypto');vi.stubGlobal('crypto',webcrypto);

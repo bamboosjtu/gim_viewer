@@ -12,7 +12,7 @@ vi.mock('../substationExtractionJob.js',()=>({inspectEarlySemanticEligibility:m.
 vi.mock('../projectCleanupService.js',()=>({cleanupBeforeOpenNewProject:m.cleanup}));
 vi.mock('../../features/substation/application/substationRuntime.js',()=>({openSubstationProject:m.station,onGimExtracted:vi.fn(),loadAllIfcFiles:vi.fn()}));
 vi.mock('../../features/powerline/application/openPowerlineProject.js',()=>({openPowerlineProject:m.line}));
-vi.mock('../equipmentRuntime.js',()=>({openEquipmentProject:m.equipment}));
+vi.mock('../../features/equipment/application/openEquipmentProject.js',()=>({openEquipmentProject:m.equipment}));
 vi.mock('../../gim/projectType.js',()=>({detectGimProjectType:m.detect}));
 vi.mock('../../gim/gimExtractor.js',async original=>({...await original<typeof import('../../gim/gimExtractor.js')>(),extractGimFile:m.extract}));
 vi.mock('../substationResourceTelemetry.js',()=>({sampleSubstationRuntimeResources:async()=>{}}));

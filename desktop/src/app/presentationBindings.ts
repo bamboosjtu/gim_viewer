@@ -11,7 +11,7 @@ import * as loadingView from '../ui/loadingView.js';
 import { bindViewerPresentation } from '../services/viewerPresentationPort.js';
 import { bindSourceInspectorPresentation } from '../services/sourceInspectorPresentationPort.js';
 import { bindPublicationView } from '../services/cachePublishStatus.js';
-import { bindEquipmentPresentation } from '../services/equipmentPresentationPort.js';
+import { bindEquipmentPresentation } from '../features/equipment/presentation/equipmentPresentationPort.js';
 import { createEquipmentProjectPresentation } from '../ui/equipmentProjectView.js';
 import * as shell_statusBar from '../ui/shell/statusBar.js';
 import { bind as bind_shell_statusBar } from '../services/presentation/shell_statusBar.js';

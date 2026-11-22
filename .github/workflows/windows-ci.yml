@@ -106,8 +106,14 @@ jobs:
           if ($LASTEXITCODE -or $base -notmatch '^[0-9a-f]{40}$') {
             throw 'Could not resolve the baseline for the format and Rust gates'
           }
-          git cat-file -e "$base^{commit}"
-          if ($LASTEXITCODE -ne 0) { throw "Baseline commit $base is unavailable" }
+          git cat-file -e "$base^{commit}" 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            # After an amend the previous push tip may be absent from all checked-out refs.
+            git fetch --no-tags --depth=1 origin $base
+            if ($LASTEXITCODE -ne 0) { throw "Could not fetch baseline commit $base" }
+            git cat-file -e "$base^{commit}"
+            if ($LASTEXITCODE -ne 0) { throw "Baseline commit $base is unavailable" }
+          }
           "GIM_FORMAT_BASE=$base" >> $env:GITHUB_ENV
 
       - name: Build and consume the standalone SDK

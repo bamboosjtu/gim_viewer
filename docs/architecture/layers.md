@@ -27,6 +27,7 @@
 | `desktop/src/ui/` | DOM shell、三视图、属性、搜索、地图、工具栏 | services 暴露的结果、纯类型、白名单展示选择器 | 数据库、原生 IPC |
 | `desktop/src/features/substation/` | 变电打开工作流：application 编排、runtime 冷/暖/IFC/DEV/Spatial/遥测、presentation 导航与选择；专用 Spatial Worker 由变电会话持有 | gim、viewer、bridge、注入的展示端口、services 端口 | 把共享缓存/Worker 协议复制成第二份实现 |
 | `desktop/src/features/powerline/` | 线路冷暖打开、解析 Worker 的会话归属、地图与导航投影、视图句柄释放 | 共享线路 core、宿主来源/缓存端口、注入的 UI 端口 | Viewer、直接操作 DOM |
+| `desktop/src/features/equipment/` | 独立设备来源准备、导航、节点选择与会话发布 | gim 来源能力、共享 DEV 启动、注入的展示端口 | 其他 Feature 的内部模块、直接操作 DOM |
 | `desktop/src/services/` | 跨域缓存、Worker、后台任务、选择、生命周期与未迁移能力的端口 | gim、viewer、bridge、注入的展示端口 | 把领域规则塞回 UI |
 | `desktop/src/config/` | 功能与调试开关 | 无 | 业务状态 |
 | `desktop/src/measurement/` | 宿主与 Worker 探针、产品证据、Trace/Profile/GPU 采样适配 | measurement-core、只读运行时快照 | 把测量状态变成产品业务状态 |
@@ -66,7 +67,8 @@ bootstrap
   ├─ openGimService（文件入口、解压、类型分派）
   │    ├─ features/substation（语义、IFC、DEV、Spatial）
   │    │    └─ engineeringService（来源/实体/导航 Worker）
-  │    ├─ equipmentRuntime（DEV-only 设备）
+  │    ├─ features/equipment（设备来源与导航）
+  │    │    └─ geometryOnlyRuntime（与纯 DEV 变电共用）
   │    └─ features/powerline（线路冷暖打开、导航投影、地图会话）
   └─ viewerUIBinding（选择/高亮/相机/属性路由）
 ```
