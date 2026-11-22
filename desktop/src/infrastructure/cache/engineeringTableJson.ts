@@ -132,9 +132,7 @@ export async function parseEngineeringTable(
     return fail();
   const nodes: PackedEngineeringSource['nodes'] = [];
   let scratch = new Uint8Array();
-  let inString = false,
-    escaped = false,
-    depth = 0,
+  let depth = 0,
     batchStart = start + marker.length,
     rows = 0,
     lastEnd = batchStart,
@@ -155,16 +153,20 @@ export async function parseEngineeringTable(
     if (!Array.isArray(batch)) return fail();
     for (const row of batch) nodes.push(row);
   };
+  let nextEscape = bytes.indexOf(92, batchStart);
   for (let i = batchStart; i < bytes.length; i++) {
     const byte = bytes[i];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (byte === 92) escaped = true;
-      else if (byte === 34) inString = false;
-      continue;
-    }
     if (byte === 34) {
-      inString = true;
+      // Search quoted spans using native byte search. Keep escape searches
+      // moving forward so a rare backslash does not cause repeated suffix scans.
+      if (nextEscape >= 0 && nextEscape <= i) nextEscape = bytes.indexOf(92, i + 1);
+      let end = bytes.indexOf(34, i + 1);
+      while (end >= 0 && nextEscape >= 0 && nextEscape < end) {
+        if (nextEscape + 1 === end) end = bytes.indexOf(34, end + 1);
+        nextEscape = bytes.indexOf(92, nextEscape + 2);
+      }
+      if (end < 0) return fail();
+      i = end;
       continue;
     }
     if (byte === 91) depth++;
@@ -187,7 +189,7 @@ export async function parseEngineeringTable(
       }
     }
   }
-  if (outerEnd < 0 || inString || depth !== 0) return fail();
+  if (outerEnd < 0 || depth !== 0) return fail();
   if (lastEnd > batchStart) consume(lastEnd);
   // A nonempty tail other than the final node-array bracket is malformed.
   if (

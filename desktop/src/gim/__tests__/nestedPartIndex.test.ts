@@ -1,7 +1,7 @@
 import { expect,it } from 'vitest';
 import { buildSubstationAliasIndex,deviceOccurrenceScope } from '../substationEvidence.js';
 import { collectEquipmentGeometryOccurrences } from '../equipmentGeometryOccurrences.js';
-import { resolveGeometryLoadNode } from '../../services/nodeInteractionService.js';
+import { resolveGeometryLoadNode } from '../../services/nodeGeometrySources.js';
 import { nestedPartFixture } from '../../services/__tests__/nestedPartIndexFixture.js';
 
 it.each([1,2])('nested alias is limited to %i parent candidates and excludes unrelated B.dev',async (copies) => {

@@ -91,7 +91,8 @@ it('ordinary selection reports through selection status without reusing project 
   const {state,a}=fixture();
   const overlay=document.createElement('div');overlay.id='loading';overlay.style.display='none';document.body.append(overlay);
   const openingFeedback=vi.fn(() => { overlay.style.display='block'; });
-  const {handleNodeClick,selectionMessage}=await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../nodeInteractionService.js'); });
+  const {handleNodeClick}=await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../nodeInteractionService.js'); });
+  const {selectionMessage}=await import('../nodeSelectionFeedback.js');
   await handleNodeClick(state,a,openingFeedback);
   expect(openingFeedback).not.toHaveBeenCalled();expect(overlay.style.display).toBe('none');
   expect(state.selection.selectionMessage).not.toBe('');
@@ -401,7 +402,7 @@ it('SLD topology A → 3D B invalidates A properties and the previous topology h
 it('a resource helper from an old session cannot create a new user selection', async () => {
   const {state,a,b}=fixture(),old=state.captureProjectSession();state.activateProject(3,'replacement');
   const request=state.selection.beginSelection({kind:'cbm',key:b.path});
-  const {loadModStlForNode,frameAndHighlightDevice}=await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../nodeInteractionService.js'); });
+  const {loadModStlForNode,frameAndHighlightDevice}=await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../nodeGeometrySelection.js'); });
   await loadModStlForNode(state,a,old);
   await frameAndHighlightDevice(runtime.ctx,state,a.devPath,{rootOccurrence:a.path},old);
   expect(state.selection.selectionRequest).toBe(request);expect(state.loadedXmlModGroups.size).toBe(0);

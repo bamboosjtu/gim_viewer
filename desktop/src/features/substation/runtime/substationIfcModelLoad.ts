@@ -15,7 +15,7 @@ import {
 import type { loadIfcEntry, IfcLoadSource } from '../../../viewer/ifcEntryLoader.js';
 import type { ViewerContext } from '../../../viewer/viewerEngine.js';
 import type { SubstationIfcLoadProgress } from './substationIfcLoadProgress.js';
-import { getIfcBufferForEntry } from './substationIfcSource.js';
+import { getIfcBufferForEntry } from '../../../services/ifcGeometrySource.js';
 
 type EntryOptions = NonNullable<Parameters<typeof loadIfcEntry>[5]>;
 

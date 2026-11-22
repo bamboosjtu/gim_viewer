@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { serializeDevToGlbDetailed, parseDevGlbAsset, analyzeDevCompilation, buildDevCompilePlan, mergeDevGlbParts, aggregateDevGlbDiagnostics, InvalidDevGeometryError } from '../glbCacheService.js';
 import type { DiscoveredGeometries, DiscoveredModGeometry } from '../modGeometryDiscovery.js';
-import { collectDeviceGroups } from '../nodeInteractionService.js';
+import { collectDeviceGroups } from '../nodeGeometrySelection.js';
 import { AppState } from '../../app/state.js';
 import { invalidGeometryExtent, invalidGeometryBounds } from '../../viewer/geometryBounds.js';
 import { DevGlbTemplate } from '../devGlbTemplateRuntime.js';

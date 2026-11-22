@@ -92,6 +92,9 @@ flowchart TD
 |---|---|---|
 | `modGeometryScene` | 创建并复用 MOD/STL 图层根节点 | 图层随场景释放；放置与范围校验由 DEV LOD 运行时及 Viewer 的几何工具负责 |
 | `modGeometrySourceFiles` | 为当前会话建立共享的设备来源文件索引 | 读请求沿真实引用链触发；会话失效后拒绝读取 |
+| `nodeInteractionService` / `nodeGeometrySelection` | 协调节点选择、属性、导航、高亮和相机 | 选择请求可以失效，已开始的同工程几何任务仍可供后续选择复用 |
+| `nodeGeometryLoader` / `nodeDevGlbLoader` | 去重加载同一 occurrence，提交原始 MOD/STL 或缓存 GLB | 发布前检查工程会话，落后结果释放资源 |
+| `nodeGeometrySources` / `ifcGeometrySource` | 按来源引用读取当前文件和缓存条目 | 共享 IFC 来源读取，原生批次的借用字节在构建独立 File 后释放 |
 | `devLodTemplateStore` | 请求去重、缓存输入预算、模板校验/编译、L1 demand 和 LRU | 与一个工程会话绑定；取消时关闭 reader、拒绝排队请求；移除场景使用者后释放模板 |
 | `devLodArtifactWriter` | 缓存准备、写入准入、并发槽和写入诊断 | 取消未准入写入；已开始的原生写入继续持有预算，完成后释放 |
 | `devLodSourceWorkset` | 有界预取、部分缓存缺失后的来源恢复 | 使用当前会话及压力回调；不抢占几何计算槽 |
@@ -99,6 +102,8 @@ flowchart TD
 | `devLodDiagnostics` / `devLodTypes` | 诊断形状和内部共享类型 | 诊断实例由会话共享；类型模块只使用类型导入 |
 
 `DevLodRuntime` 组合这些组件，向它们提供会话有效性、Worker、来源准备、诊断发布和就绪刷新回调。组件不接收整个运行时实例，也不通过类型断言访问其私有状态。普通选择、自动 LOD 和显式 L2 的策略仍由运行时协调。
+
+Viewer 的初始化只加载 `selectionNavigation`。节点选择在用户操作时接入几何加载，源读取与 Viewer 提交分别持有会话检查。
 
 ## 原生持久化
 

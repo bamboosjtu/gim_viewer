@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { CbmNode } from '../../gim/types.js';
 import { collectEquipmentGeometryOccurrences } from '../../gim/equipmentGeometryOccurrences.js';
 import { isSubstationGeometryRoot } from '../../gim/substationEvidence.js';
-import { resolveGeometryLoadNode } from '../nodeInteractionService.js';
+import { resolveGeometryLoadNode } from '../nodeGeometrySources.js';
 
 function node(overrides: Partial<CbmNode>): CbmNode {
   return {

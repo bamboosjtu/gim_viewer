@@ -585,7 +585,7 @@ const substationRuntimeFiles = [
   resolve(root, 'features/substation/runtime/substationIfcQueue.ts'),
   resolve(root, 'features/substation/runtime/substationIfcModelLoad.ts'),
   resolve(root, 'features/substation/runtime/substationIfcLoadProgress.ts'),
-  resolve(root, 'features/substation/runtime/substationIfcSource.ts'),
+  resolve(root, 'services/ifcGeometrySource.ts'),
   resolve(root, 'features/substation/runtime/substationIndexPublication.ts'),
   resolve(root, 'features/substation/runtime/substationSpatialRuntime.ts'),
   resolve(root, 'features/substation/runtime/substationSpatialSemanticCache.ts'),

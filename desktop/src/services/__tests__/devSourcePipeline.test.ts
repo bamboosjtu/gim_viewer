@@ -31,6 +31,18 @@ it('coalesces concurrent shared dependency reads and installs each file once',as
   expect(paths).toEqual(['a.dev','b.dev','shared.phm','part.mod']);
   expect(install.mock.calls.flatMap(([files])=>[...files.keys()])).toEqual(paths);
 });
+it('publishes only the entry bytes from a borrowed batch before that buffer is released', async () => {
+  const content = '<Device/>';
+  const envelope = new TextEncoder().encode(`header${content}trailer`);
+  const { work, read, files } = source(new Map([['part.mod', content]]));
+  read.mockResolvedValue(new Map([['part.mod', envelope.subarray(6, 6 + content.length)]]));
+  const file = await work.readForWorker('part.mod');
+  expect(read.mock.calls[0]?.[3]).toEqual({ borrowPayload: true });
+  expect(files.get('part.mod')).toBe(file);
+  envelope.fill(0);
+  expect(file?.size).toBe(content.length);
+  expect(await file?.text()).toBe(content);
+});
 it('coalesces a catalog window of independent roots before dispatching native reads',async()=>{
   const roots=Array.from({length:32},(_,i)=>`r${i}.dev`);
   const texts=new Map([...roots.map(path=>[path,'SOLIDMODELS.NUM=1\nSOLIDMODEL0=shared.phm'] as const),

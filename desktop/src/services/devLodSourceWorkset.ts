@@ -11,6 +11,8 @@ import type { MemoryPressure } from './devLodTypes.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import { WorkQueue } from '../utils/workQueue.js';
 
+const sourceTextDecoder = new TextDecoder();
+
 export interface DevLodSourceWorksetOptions {
   session: ProjectLoadSession;
   perf: ReturnType<typeof perfCurrentSession>;
@@ -195,6 +197,8 @@ export class DevLodSourceWorkset {
         batchReadCachedFiles(
           this.options.session.projectId!,
           batch.map((row) => row.path),
+          this.current,
+          { borrowPayload: true },
         ),
         new Promise<never>((_resolve, reject) => {
           timer = setTimeout(() => reject(Error('DEV source preparation timed out')), 5000);
@@ -207,7 +211,7 @@ export class DevLodSourceWorkset {
         if (!data || data.byteLength !== row.size) continue;
         const file = new File([data as Uint8Array<ArrayBuffer>], row.path.split('/').pop()!);
         if (/\.(dev|phm)$/i.test(row.path)) {
-          const text = new TextDecoder().decode(data);
+          const text = sourceTextDecoder.decode(data);
           Object.defineProperty(file, 'text', { value: () => Promise.resolve(text) });
         }
         loaded.set(row.path, file);

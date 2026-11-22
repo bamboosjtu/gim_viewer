@@ -39,7 +39,7 @@ function loadBindingModules() {
     import('../viewer/selection.js'),
     import('./selectionVisibility.js'),
     import('../viewer/viewHistory.js'),
-    import('./nodeInteractionService.js'),
+    import('./selectionNavigation.js'),
     prepareViewerPresentation(),
     // Load the engine code alongside its consumers. Engine creation remains
     // the responsibility of getViewerRuntime after the presentation is ready.

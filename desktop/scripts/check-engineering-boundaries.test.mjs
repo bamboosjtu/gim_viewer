@@ -31,10 +31,11 @@ function fixture() {
     'devLodRuntime','devLodTemplateStore','devLodArtifactWriter','devLodSourceWorkset','devLodReadiness','devLodDiagnostics','devLodTypes'])
     files(`desktop/src/services/${name}.ts`,'export {};');
   files('desktop/src/services/engineeringWorkerHandler.ts', 'export {};');
+  files('desktop/src/services/ifcGeometrySource.ts', 'export {};');
   for (const name of ['engineeringWorkerClient', 'engineeringWorker', 'engineeringWorkerTransport', 'workerRequests'])
     files(`desktop/src/infrastructure/workers/${name}.ts`, 'export {};');
   for(const name of ['substationBackgroundRuntime','substationColdCore','substationDevRuntime','substationDocumentRuntime',
-    'substationIfcRuntime','substationIfcSource','substationIndexPublication','substationSpatialRuntime',
+    'substationIfcRuntime','substationIndexPublication','substationSpatialRuntime',
     'substationSpatialSemanticCache','substationWarmAttempt','substationWarmCore','substationLoadingState'])
     files(`desktop/src/features/substation/runtime/${name}.ts`,'export {};');
   files('desktop/src/features/substation/application/substationRuntime.ts','export {};');

@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { AppState } from '../../app/state.js';
 import { buildCbmTree } from '../../gim/cbmParser.js';
 import { deviceOccurrenceScope } from '../../gim/substationEvidence.js';
-import { loadModStlForNode, collectDeviceGroups, frameAndHighlightDevice } from '../nodeInteractionService.js';
+import { loadModStlForNode, collectDeviceGroups, frameAndHighlightDevice } from '../nodeGeometrySelection.js';
 import { serializeDevToGlbDetailed, parseDevGlbAsset } from '../glbCacheService.js';
 import { DevGlbTemplatePool } from '../devGlbTemplateRuntime.js';
 import { highlightModGroups, resetModHighlight } from '../../viewer/highlight.js';

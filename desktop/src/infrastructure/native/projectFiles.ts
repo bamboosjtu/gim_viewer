@@ -100,6 +100,7 @@ export async function batchReadCachedFiles(
   projectId: number,
   entryPaths: string[],
   isCurrent?: NativeOwner,
+  options?: { borrowPayload: boolean },
 ): Promise<Map<string, Uint8Array | null>> {
   requireNativeOwner(isCurrent);
   const perfSession = perfCurrentSession();
@@ -118,7 +119,9 @@ export async function batchReadCachedFiles(
     },
     { requestBytes, isCurrent },
   );
-  const parsed = parseBatchCachePayload(payload);
+  // Borrow only when the consumer immediately builds an independent File or
+  // decodes the bytes. A retained view would pin the whole response buffer.
+  const parsed = parseBatchCachePayload(payload, { copyBytes: !options?.borrowPayload });
   if (parsed.profile) perfRecordBatchRead(parsed.profile, perfSession.id);
   const map = new Map<string, Uint8Array | null>();
   for (const item of parsed.items) {

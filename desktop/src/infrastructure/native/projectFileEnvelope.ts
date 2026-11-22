@@ -235,11 +235,8 @@ export function parseBatchCachePayload(
   profile?: BatchReadRustProfile;
 } {
   const bytes = toUint8Array(value);
-  if (
-    bytes.byteLength < 9 ||
-    new TextDecoder().decode(bytes.slice(0, 4)) !== 'GIMR' ||
-    bytes[4] !== 1
-  ) {
+  const decoder = new TextDecoder();
+  if (bytes.byteLength < 9 || decoder.decode(bytes.subarray(0, 4)) !== 'GIMR' || bytes[4] !== 1) {
     throw new Error('批量缓存读取响应 envelope 无效');
   }
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -281,7 +278,7 @@ export function parseBatchCachePayload(
     offset += 4;
     if (pathLen > 4096 || offset + pathLen + 1 + 8 > bytes.byteLength)
       throw new Error('批量缓存读取路径或长度无效');
-    const entryPath = new TextDecoder().decode(bytes.slice(offset, offset + pathLen));
+    const entryPath = decoder.decode(bytes.subarray(offset, offset + pathLen));
     offset += pathLen;
     const present = bytes[offset++] === 1;
     const sizeBig = view.getBigUint64(offset, true);

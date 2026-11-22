@@ -6,7 +6,7 @@ vi.mock('../../viewer/viewerEngine.js',()=>({createViewerEngine:vi.fn()}));
 vi.mock('../../viewer/selection.js',()=>({setupSelection:mocks.selection}));
 vi.mock('../../viewer/viewHistory.js',()=>({ViewerViewHistory:class {dispose=mocks.historyDispose;}}));
 vi.mock('../selectionVisibility.js',()=>({createSelectionVisibility:()=>({reset:mocks.resetVisibility,registerModel:vi.fn(),removeModel:vi.fn()})}));
-vi.mock('../nodeInteractionService.js',()=>({syncSelectionNavigation:mocks.sync}));
+vi.mock('../selectionNavigation.js',()=>({syncSelectionNavigation:mocks.sync}));
 vi.mock('../engineeringViewportSelection.js',()=>({selectEngineeringFragmentPick:mocks.fragmentPick,selectEngineeringIfcPick:mocks.regionalPick}));
 beforeEach(()=>{vi.resetModules();vi.clearAllMocks();mocks.get.mockResolvedValue({ctx:{fragments:{list:new Map()}}});mocks.drawer.mockReturnValue(mocks.disposeDrawer);mocks.selection.mockReturnValue(mocks.disposeSelection);});
 async function prepare() {

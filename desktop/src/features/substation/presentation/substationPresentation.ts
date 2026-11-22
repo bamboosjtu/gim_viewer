@@ -91,8 +91,10 @@ export function setupSldGridIdInteraction(
       if (session && !state.isCurrentSession(session)) return;
       const nodes = getCbmNodesByGridId(state.currentStdSldIndex, gridId);
       if (nodes.length === 0) {
-        const { clearSelectionHighlight, syncSelectionNavigation } =
-          await import('../../../services/nodeInteractionService.js');
+        const [{ clearSelectionHighlight }, { syncSelectionNavigation }] = await Promise.all([
+          import('../../../services/nodeInteractionService.js'),
+          import('../../../services/selectionNavigation.js'),
+        ]);
         if (!state.selection.isCurrentSelection(request)) return;
         await selectionPresentation().unlinkedDiagram(state, gridId, request);
         await Promise.all([

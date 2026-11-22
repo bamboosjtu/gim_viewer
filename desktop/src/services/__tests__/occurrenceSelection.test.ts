@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
 import { AppState } from '../../app/state.js';
-import { collectDeviceGroups } from '../nodeInteractionService.js';
+import { collectDeviceGroups } from '../nodeGeometrySelection.js';
 
 describe('device occurrence selection', () => {
   it('isolates two F4 placements of a shared DEV template', () => {

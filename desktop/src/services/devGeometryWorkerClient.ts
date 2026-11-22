@@ -892,12 +892,13 @@ export class DevGeometryPreprocessor {
     );
     if (!loaded.length) return;
     for (const [path, file] of loaded) this.files.set(path, file);
+    const message: DevGeometryWorkerRequest = {
+      kind: 'sources',
+      files: loaded.map(([path, file]) => [path, file.size, file]),
+    };
     for (const worker of [...this.workers]) {
       try {
-        worker.postMessage({
-          kind: 'sources',
-          files: loaded.map(([path, file]) => [path, file.size, file]),
-        } satisfies DevGeometryWorkerRequest);
+        worker.postMessage(message);
       } catch (error) {
         this.workerFailed(worker, error instanceof Error ? error : Error(String(error)));
       }
