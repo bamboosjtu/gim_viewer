@@ -1,7 +1,7 @@
 import {geometryTrackMetrics} from './geometry-track-metrics.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {compareRuns,compareSuites,approveBaseline,baselineApprovalIssue,runReadiness,digest,createPartialReview} from './compare.mjs';
+import {compareRuns,compareSuites,approveBaseline,baselineApprovalIssue,runReadiness,digest} from './compare.mjs';
 import {selectSamples} from './samples.mjs';
 import {CdpConnection} from './cdp.mjs';
 import {cacheVerified,coldWarmEquivalent,freezeProfile,verifyProfile,warmCatalogCoverage} from './profiles.mjs';
@@ -233,7 +233,7 @@ test('formal content gate detects byte changes hidden by the structural fingerpr
   assert.equal(result.outcome,'INCONCLUSIVE');
   assert.ok(result.reasons.includes('dev-content-digest-differs'));
 });
-test('single paired process is comparable; partial coverage needs explicit baseline acceptance',()=>{
+test('a complete PARTIAL baseline uses one approval and preserves the source coverage',()=>{
   const b=runs('base',100).slice(0,1),c=runs('candidate',100).slice(0,1);
   assert.equal(compareRuns(b,c).outcome,'PASS');
   const partial=row=>({...row,correctness:'partial',defectAssessment:{kind:'source-geometry',status:'evidence-backed',sourceSha256:'source',sourceSetDigest:'a'.repeat(64),failedOccurrences:34}});
@@ -241,25 +241,20 @@ test('single paired process is comparable; partial coverage needs explicit basel
   assert.equal(compareRuns(b,c.map(partial)).outcome,'INCONCLUSIVE');
   assert.equal(compareRuns(b.map(partial),c.map(row=>({...partial(row),evidence:{progress:{cache:{writeFailures:1}}}}))).outcome,'FAIL');
   const candidate={outcome:'PARTIAL',selectionFrozen:true,runs:b.map(partial)};
-  assert.throws(()=>approveBaseline(candidate,'developer'),/explicit approver/);
-  assert.throws(()=>approveBaseline(candidate,'developer',{acceptPartial:true}),/partial-review-required/);
-  assert.throws(()=>createPartialReview(candidate,'auditor','free text with a private path'),/controlled source limitation/);
-  const review=createPartialReview(candidate,'auditor','source-geometry');
-  assert.throws(()=>approveBaseline(candidate,'developer',{acceptPartial:true,partialReview:{...review,partialReason:'engineering-coverage'},firstPartial:true}),/partial-review-digest-mismatch/);
-  assert.throws(()=>approveBaseline(candidate,'auditor',{acceptPartial:true,partialReview:review,firstPartial:true}),/distinct source reviewer/);
-  assert.throws(()=>approveBaseline(candidate,'developer',{acceptPartial:true,partialReview:review}),/first-partial review or a previous approved baseline/);
-  assert.throws(()=>approveBaseline({...candidate,selectionFrozen:false},'developer',{acceptPartial:true,partialReview:review,firstPartial:true}));
-  const approved=approveBaseline(candidate,'developer',{acceptPartial:true,partialReview:review,firstPartial:true});
-  assert.equal(approved.approval.partialAccepted,true);
+  assert.throws(() => approveBaseline(candidate, ''), /explicit approver/);
+  assert.throws(() => approveBaseline({...candidate, selectionFrozen:false}, 'developer'), /frozen candidate/);
+  assert.throws(() => approveBaseline({...candidate, outcome:'PASS'}, 'developer'), /coverage status/);
+  assert.throws(() => approveBaseline({...candidate, runs:b}, 'developer'), /coverage status/);
+  assert.throws(() => approveBaseline({...candidate, runs:candidate.runs.map(run=>({
+    ...run, defectAssessment:{...run.defectAssessment,status:'unverified'},
+  }))}, 'developer'), /incomplete|runtime evidence/);
+  const approved = approveBaseline(candidate, 'developer');
+  assert.equal(approved.outcome, 'PARTIAL');
+  assert.equal(approved.approval.approver, 'developer');
+  assert.deepEqual(approved.runs[0].defectAssessment, candidate.runs[0].defectAssessment);
   assert.equal(baselineApprovalIssue(approved),null);
-  assert.equal(baselineApprovalIssue({...approved,approval:{...approved.approval,partialReason:'changed'}}),
+  assert.equal(baselineApprovalIssue({...approved, approval:{...approved.approval, approver:'changed'}}),
     'baseline-approval-metadata-mismatch');
-  const previous=approveBaseline({outcome:'PASS',selectionFrozen:true,runs:b},'developer');
-  assert.ok(approveBaseline(candidate,'developer',{acceptPartial:true,partialReview:review,
-    previousBaseline:approved}).approval.previousBaselineDigest);
-  assert.throws(()=>approveBaseline(candidate,'developer',{acceptPartial:true,partialReview:review,
-    previousBaseline:previous}),/differs from the previous approved baseline/);
-  assert.equal(baselineApprovalIssue({...approved,approval:{...approved.approval,partialAccepted:false}}),'baseline-approval-metadata-mismatch');
   assert.equal(baselineApprovalIssue({...approved,outcome:'PASS'}),'baseline-approval-digest-mismatch');
 });
 test('warm cache proof is domain-specific and misses cannot masquerade as a warm run',()=>{

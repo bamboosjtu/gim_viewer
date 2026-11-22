@@ -122,7 +122,7 @@ DEV 模板额外保留每轮最慢 20 个槽位等待者和最久 20 个槽位�
 
 `bench build` 显式构建并核验 Vite Benchmark 前端，再创建 Cargo `benchmark` feature 的原生产物；发布清单前核验 EXE 确实内嵌探针 chunk。运行器拒绝没有 `frontendProbeVerified` 凭据的旧构建，避免 CDP 已连接普通页面却重复等待 Benchmark API。原生命令只授权私有运行清单指定的匿名样本，并重新核对源 SHA；清单、源、缓存根必须在编译时绑定的工作区，清单/缓存在 `tmp/gim-bench` 下。普通产品构建拒绝 Benchmark 授权，且不导出 Benchmark UI 控制面。
 
-正式原生候选先由 `accept-measurement` 校验并绑定同构建、同机器和同运行时的 doctor、探针开销及十轮生命周期证据，输出新的候选文件；绑定包含候选摘要和可复核的精简证据，不依赖手工编辑 JSON。`approve-baseline` 要求明确的候选文件、认可者和完整冷暖配对；PARTIAL 候选针对绑定后的文件，由另一位复核者通过 `review-partial` 生成候选摘要绑定的私有记录，批准者再以 `--accept-partial --partial-review` 引用，原因使用受控代码。首次须指定 `--first-partial`，后续须提供上一份已批准基线，防止相同来源覆盖倒退；它只成为覆盖基线，不能自动升级成完整 PASS。run/report/compare 不调用批准命令。GLB 字节变化默认 INCONCLUSIVE，仅允许导入独立网格等价性证据后显式批准对应内容变更，放置与覆盖仍须一致；CLI 不实现网格等价算法。命令和证据契约见 [Benchmark CLI](../performance/benchmark.md#比较与基线)。性能分析列出明显收益候选、回退和具体成本，不设置统一耗时、内存或增长比例验收线；相同机器/样本/场景的重复仍须完整，缺少可比证据保持 INCONCLUSIVE。开销技术证据与性能决定分开，是否接受及是否追加复测由开发者显式决定。协议/值单元测试进入 CI，样本、性能与内存曲线仅在本地执行。
+正式原生候选先由 `accept-measurement` 校验并绑定同构建、同机器和同运行时的 doctor、探针开销及十轮生命周期证据，输出新的候选文件；绑定包含候选摘要和可复核的精简证据，不依赖手工编辑 JSON。`approve-baseline` 要求明确的候选文件、认可者和完整冷暖配对；PASS 和有来源证据的 PARTIAL 使用同一个批准入口。PARTIAL 保留已记录的缺口，后续比较仍检查覆盖状态和缺口签名。run/report/compare 不调用批准命令。GLB 字节变化默认 INCONCLUSIVE，仅允许导入独立网格等价性证据后显式批准对应内容变更，放置与覆盖仍须一致；CLI 不实现网格等价算法。命令和证据契约见 [Benchmark CLI](../performance/benchmark.md#比较与基线)。性能分析列出明显收益候选、回退和具体成本，不设置统一耗时、内存或增长比例验收线；相同机器/样本/场景的重复仍须完整，缺少可比证据保持 INCONCLUSIVE。开销技术证据与性能决定分开，是否接受及是否追加复测由开发者显式决定。协议/值单元测试进入 CI，样本、性能与内存曲线仅在本地执行。
 
 ## Operation Trace 与定点诊断
 

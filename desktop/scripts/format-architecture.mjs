@@ -350,6 +350,8 @@ export const architectureModules = [
   'scripts/check-engineering-boundaries.mjs',
   'scripts/app-state-boundaries.mjs',
   'scripts/benchmarks/batch-report.mjs',
+  'scripts/benchmarks/cli.mjs',
+  'scripts/benchmarks/compare.mjs',
   'scripts/benchmarks/survey-summary.mjs',
 ];
 export const formattedArchitectureModules = [...architectureModules];

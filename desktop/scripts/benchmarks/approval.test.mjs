@@ -102,7 +102,7 @@ async function exerciseLifecycle(root,evidence,mutate=()=>{},secondEvidence=null
     processSampler:{checkpoint:async()=>({availability:'available',bytes:1000})}});
 }
 
-for(const combined of [false,true])test(`${combined?'combined':'source-geometry'} PARTIAL completes actual lifecycle -> acceptance -> review -> approval`,async t=>{
+for(const combined of [false,true])test(`${combined?'combined':'source-geometry'} PARTIAL completes actual lifecycle -> acceptance -> one approval`,async t=>{
   const {root,save,record}=setup(t),evidence={...sourcePartialEvidence(combined),sourceSha256:digest(root)};
   const candidate=await candidateFor(root,'matrix',evidence);
   assert.equal(candidate.outcome,'PARTIAL');assert.equal(candidate.runs[0].defectAssessment.kind,combined?'combined':'source-geometry');
@@ -113,12 +113,11 @@ for(const combined of [false,true])test(`${combined?'combined':'source-geometry'
   const acceptedFile=record(['accept-measurement','--candidate',save('partial-candidate.json',candidate),
     '--doctor',save('doctor.json',reports.doctor),'--overhead',save('overhead.json',reports.overhead),
     '--lifecycle',save('lifecycle.json',reports.lifecycle)]);
-  const reviewFile=record(['review-partial','--candidate',acceptedFile,'--reviewer','source-auditor',
-    '--reason',combined?'combined-source':'source-geometry']);
-  const baselineFile=record(['approve-baseline','--candidate',acceptedFile,'--approver','developer',
-    '--accept-partial','--partial-review',reviewFile,'--first-partial']);
+  const baselineFile=record(['approve-baseline','--candidate',acceptedFile,'--approver','developer']);
   const baseline=JSON.parse(readFileSync(baselineFile,'utf8'));
   assert.equal(baseline.outcome,'PARTIAL');assert.equal(baselineApprovalIssue(baseline),null);
+  assert.deepEqual(baseline.runs[0].defectAssessment, candidate.runs[0].defectAssessment);
+  assert.equal(baseline.approval.approver, 'developer');
 });
 
 test('lifecycle permits stable PARTIAL replacement but rejects changing defects and product failures',async t=>{

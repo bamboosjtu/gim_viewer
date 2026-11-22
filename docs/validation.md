@@ -150,7 +150,7 @@
 | 真实几何门禁 | `GIM_VERIFY_SUBSTATION01=1` 后运行 `devGeometryGate.test.ts --maxWorkers=1 --minWorkers=1` |
 | 本地真实工程 | `npm run test:local` 或 `npm run bench -- batch`；缺样本与跳过须单列，不计通过 |
 | 测量协议/Trace/诊断 | `npm run test:measurement-tools`；不运行工程样本，不证明真实 Trace 覆盖或系统级诊断可用 |
-| 基线批准/几何等价 | `npm run bench -- accept-measurement`、`review-partial`、`approve-baseline`、`approve-geometry-change`；缺同构建证据或人工复核时保持 INCONCLUSIVE |
+| 基线批准/几何等价 | `npm run bench -- accept-measurement`、`approve-baseline`、`approve-geometry-change`。PASS 和有来源证据的 PARTIAL 走同一批准入口，几何内容变化另行提供等价证据 |
 
 样本只读检查可使用[样本验证技能](../.agents/skills/gim-sample-verification/SKILL.md)，在工作区 `output/` 保存结果。
 

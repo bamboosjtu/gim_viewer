@@ -84,9 +84,8 @@ CLI 支持以下子命令。参数只列关键项；完整格式以 `npm run ben
 | `analyze` | 从私有运行报告生成覆盖、Span、等待和阻塞分析 | `--input <tmp 下的 report.json>` |
 | `export-trace` | 导出私有 Perfetto 兼容 Chrome JSON | `--input <tmp 下的 report.json>` |
 | `report` | 从已有结果 JSON 重新生成 HTML 报告 | `--input <json>` |
-| `review-partial` | 独立复核 PARTIAL 来源证据并生成候选摘要绑定的私有记录 | `--candidate <json> --reviewer <复核者> --reason <受控代码>` |
 | `accept-measurement` | 校验测量验收报告，输出携带验收凭据的新候选文件 | `--candidate <json> --doctor <report.json> --overhead <overhead.json> --lifecycle <report.json>` |
-| `approve-baseline` | 显式批准候选为基线 | `--candidate <json> --approver <批准者>`；PARTIAL 还需 `--accept-partial --partial-review <复核记录>`，首次加 `--first-partial`，后续提供 `--previous-baseline <已批准基线>` |
+| `approve-baseline` | 批准测量验收通过的 PASS 或有来源证据的 PARTIAL 候选 | `--candidate <json> --approver <批准者>` |
 | `approve-geometry-change` | 导入独立网格验证结果，生成几何内容变更批准记录 | `--baseline <已批准基线> --candidate <json> --verification <验证结果> --approver <批准者>` |
 | `batch` | 按目录或注册表批量执行冷开、暖开与重复轮次 | `--build <清单>`；`--directory <目录>` 或 `--registry <json>`；可选 `--output <目录>`、`--anonymize`（`true`/`false`）、`--preset`（`survey`/`baseline`）、`-repeat`/`--repeat <n>`、`--timeout-seconds <n>` |
 | `recover-batch` | 控制器被外部结束后，结算遗留 RUNNING/PENDING 行 | `--output <已停止的批次目录>`；旧批次缺所有权凭据时需显式 `--force`；只从工作区私有进度快照恢复状态，不补造耗时 |
@@ -102,7 +101,7 @@ CLI 支持以下子命令。参数只列关键项；完整格式以 `npm run ben
 | 矩阵与开销 | `matrix`、`overhead` | `PASS`/`PARTIAL`→0；其他→2；`FAIL` 也是 2 |
 | 单样本 | `run` | `PASS`/`PARTIAL`→0；`FAIL`→1；其他→2 |
 | 自检 | `doctor`、`lifecycle` | 只有 `PASS`→0；其他→2 |
-| 辅助命令 | `init`、`samples`、`inventory`、`select`、`freeze-profile`、`build`、`report`、`recover-batch`、`review-partial`、`accept-measurement`、`approve-baseline`、`approve-geometry-change` | 成功→0；参数或执行异常→1 |
+| 辅助命令 | `init`、`samples`、`inventory`、`select`、`freeze-profile`、`build`、`report`、`recover-batch`、`accept-measurement`、`approve-baseline`、`approve-geometry-change` | 成功→0；参数或执行异常→1 |
 
 - 缺少必需参数、未知命令或未捕获异常走统一异常路径，返回 1；上表描述的是命令完成后的结果映射。
 - `batch` 是唯一安装 Ctrl+C / SIGTERM 取消控制并返回 130 的命令；取消还写入 `CANCELLED`。
@@ -337,7 +336,7 @@ npm run bench -- gate --baseline ../tmp/gim-bench/<已批准基线>.approved.jso
 - 普通 `compare` 可读取结构指纹和已有内容证据，但不把缺少内容证明作为普通测量失败。正式 `approve-baseline` 和 `gate` 要求 DEV L0 内容摘要覆盖所有已显示根；字节摘要变化默认 INCONCLUSIVE，只有下述独立网格验证与显式审批流程可以接受这项变化。放置指纹或覆盖变化保持 INCONCLUSIVE，不能仅凭相同包围盒自动通过。无 DEV 表示的输入标为不适用，不伪造内容 SHA。
 - 比较输出绝对耗时、百分比、节省秒数和内存字节代价，不以统一耗时、内存或增长比例自动裁决。是否明显提升、功能成本是否过大及是否需要复测由开发者决定。详见[性能决策原则](#性能决策原则)。
 - 摸底批次的 `PASS`/`PARTIAL` 仅表示该次计划执行结果。`baseline` 批次要求冷暖等价、来源缺口摘要及工作量一致；正式认可仍需探针开销、十轮生命周期与测量能力等验收。
-- 完整正确性基线只接受 `PASS`。`PARTIAL` 是显式接受的覆盖基线：来源复核者先运行 `review-partial`，其记录绑定候选摘要、复核身份、时间和受控原因；另一位批准者再引用该记录，不能仅在批准命令中自报已复核。原因只接受与候选证据相符的 `source-geometry`、`engineering-coverage`、`combined-source` 或 `mixed-source`。首次须显式 `--first-partial`；本地已有同来源批准记录时 CLI 拒绝再次声明首次，后续须提供上一份已批准基线，相同来源从 PASS 退到 PARTIAL 或缺口签名变化会被拒绝。复核和批准文件以候选摘要及时间命名，保存在工作区私有 `tmp/`，不覆盖上一份记录，也不存自由文本工程名或路径。工具核对记录与身份不同，仍无法替代实际人工审阅。
+- PASS 和经证据验证的 PARTIAL 使用同一批准入口。PARTIAL 保留原始缺口类型和签名，比较只在覆盖一致时进行。批准文件按候选摘要和时间命名，保存在本地 `tmp/`。
 - SDK 迁移不在本轮 Benchmark 范围内。完整指标口径见[测量架构](../architecture/measurement.md)。
 
 ### 测量验收与正式批准
@@ -356,7 +355,7 @@ npm run bench -- approve-baseline --candidate <accepted-candidate文件> --appro
 npm run bench -- gate --baseline <approved基线文件> --candidate <下一版候选JSON> --output ../tmp/gim-bench/new-comparison.json
 ```
 
-冻结矩阵使用 `overhead --profile <冻结Profile>`，也可同时指定 `--candidate <矩阵候选JSON>`，此时必须匹配 Profile 摘要。矩阵的场景、精化动作和超时均从冻结 case 读取，不使用样本注册表推断动作；单独使用 `--candidate` 只支持批次候选。省略 `--registry` / `--directory` 时，`overhead` 与 `lifecycle` 使用 `samples` 登记的私有语料。当前开销入口每次只执行一组配置的交替轮次，不自动追加复测；历史报告中的独立复测证据仍校验完整性和进程隔离。验收绑定不覆盖候选、不批准基线，也不自动运行工程样本；记录只保存验收所需字段，绑定候选摘要，候选修改后须重新绑定。PARTIAL 的 `review-partial` 须针对绑定后的新候选执行。`approve-baseline` 和后续 `gate` 都复核验收记录，不能用另一构建的能力报告替代。
+冻结矩阵使用 `overhead --profile <冻结Profile>`，也可同时指定 `--candidate <矩阵候选JSON>`，此时必须匹配 Profile 摘要。矩阵的场景、精化动作和超时均从冻结 case 读取，不使用样本注册表推断动作；单独使用 `--candidate` 只支持批次候选。省略 `--registry` / `--directory` 时，`overhead` 与 `lifecycle` 使用 `samples` 登记的私有语料。当前开销入口每次只执行一组配置的交替轮次，不自动追加复测；历史报告中的独立复测证据仍校验完整性和进程隔离。验收绑定不覆盖候选、不批准基线，也不自动运行工程样本；记录只保存验收所需字段，绑定候选摘要，候选修改后须重新绑定。`approve-baseline` 和后续 `gate` 都复核验收记录，不能用另一构建的能力报告替代。
 
 `--output` 可以指定新文件及尚未创建的子目录，但只能位于工作区 `tmp/` 或 `output/`。逐层拒绝目录链接、文件链接和目录型文件目标；输入文件仍须已存在。
 
