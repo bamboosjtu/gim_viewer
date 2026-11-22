@@ -46,7 +46,7 @@
 
 ## 样本身份
 
-设备输入逐项匿名身份、SHA、容器、载荷偏移及文件统计见 [equipment-corpus.csv](equipment-corpus.csv)。`equipment-generic-001` 至 `409` 为通用目录按相对路径排序编号；`equipment-vendor-01/02` 为两份独立供应输入。CSV 不保存真实设备名称、工程名或源路径，身份以 SHA 为准。
+设备输入的逐项身份和容器统计由开发者在本地维护。`equipment-generic-001` 至 `409` 为通用目录按相对路径排序编号，`equipment-vendor-01/02` 为两份独立供应输入。身份以本地记录的源 SHA 为准。
 
 2018 范围按同一匿名规则编号为 `equipment-2018-001` 至 `508`，不重排原台账；逐包身份不另设公开 CSV，本文件只维护汇总事实。该范围包含 507 个裸 7z、1 个裸 ZIP，载荷偏移均为 0；共 28,039 个物理文件、53,396,036 B 未压缩数据。508 包均无 CBM，具有唯一、全 DEV 可达且无环的 DEV 装配根，入口不依赖目录名称。PHM 同时存在 `SOLIDS.NUM/SOLIDSn` 与 `SOLIDMODELS.NUM/SOLIDMODELn` 两组记录，各组的同下标矩阵与颜色独立。
 
