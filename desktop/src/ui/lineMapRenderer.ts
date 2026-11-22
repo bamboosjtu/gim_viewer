@@ -1,11 +1,14 @@
 import { COLOR_BG } from './lineMapBackground.js';
 import { perfBegin, perfMark, type PerfSession } from '../utils/perfTimings.js';
-import type { prepareLineMapGeometry, RuntimeGeoPoint } from '../services/lineMapGeometry.js';
+import type {
+  prepareLineMapGeometry,
+  RuntimeGeoPoint,
+} from '../features/powerline/presentation/lineMapGeometry.js';
 import {
   lineMapStageBatchSize,
   runLineMapStageSlice,
   type LineMapStage,
-} from '../services/lineMapStages.js';
+} from '../features/powerline/presentation/lineMapStages.js';
 import {
   createLineMapPainter,
   type LineMapSelection,

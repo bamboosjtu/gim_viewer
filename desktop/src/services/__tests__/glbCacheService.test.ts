@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
-import { serializeDevToGlb, serializeDevToGlbDetailed, parseDevGlbAsset, analyzeDevCompilation, buildDevCompilePlan, mergeDevGlbParts, aggregateDevGlbDiagnostics, InvalidDevGeometryError } from '../glbCacheService.js';
+import { serializeDevToGlbDetailed, parseDevGlbAsset, analyzeDevCompilation, buildDevCompilePlan, mergeDevGlbParts, aggregateDevGlbDiagnostics, InvalidDevGeometryError } from '../glbCacheService.js';
 import type { DiscoveredGeometries, DiscoveredModGeometry } from '../modGeometryDiscovery.js';
 import { collectDeviceGroups } from '../nodeInteractionService.js';
 import { AppState } from '../../app/state.js';
@@ -250,7 +250,7 @@ describe('serializeDevToGlb strict dependency semantics', () => {
   });
 
   it('missing DEV rejects instead of producing an empty cache entry', async () => {
-    await expect(serializeDevToGlb('DEV/missing.dev', new Map())).rejects.toThrow('DEV 文件不存在');
+    await expect(serializeDevToGlbDetailed('DEV/missing.dev', new Map())).rejects.toThrow('DEV 文件不存在');
   });
 
   it('missing PHM/MOD rejects instead of producing an empty cache entry', async () => {
@@ -259,7 +259,7 @@ describe('serializeDevToGlb strict dependency semantics', () => {
       'SOLIDMODEL0=missing.phm',
       `TRANSFORMMATRIX0=${IDENTITY}`,
     ].join('\n'), 'device.dev');
-    await expect(serializeDevToGlb(
+    await expect(serializeDevToGlbDetailed(
       'DEV/device.dev',
       new Map([['DEV/device.dev', dev]]),
     )).rejects.toThrow('PHM 文件不存在');
@@ -270,7 +270,7 @@ describe('serializeDevToGlb strict dependency semantics', () => {
       `TRANSFORMMATRIX0=${IDENTITY}`,
       'COLOR0=',
     ].join('\n'), 'device.phm');
-    await expect(serializeDevToGlb(
+    await expect(serializeDevToGlbDetailed(
       'DEV/device.dev',
       new Map([
         ['DEV/device.dev', file([
@@ -283,7 +283,7 @@ describe('serializeDevToGlb strict dependency semantics', () => {
     )).rejects.toThrow('MOD 文件不存在');
   });
 
-  it('所有依赖存在但 MOD 是合法空占位时返回 null（可记录 empty）', async () => {
+  it('所有依赖存在但 MOD 是合法空占位时报告 empty 且不输出 GLB', async () => {
     const dev = file([
       'SOLIDMODELS.NUM=1',
       'SOLIDMODEL0=device.phm',
@@ -297,14 +297,14 @@ describe('serializeDevToGlb strict dependency semantics', () => {
     ].join('\n'), 'device.phm');
     const emptyMod = file('<?xml version="1.0"?><Device><Entities /></Device>', 'empty.mod');
 
-    await expect(serializeDevToGlb(
+    await expect(serializeDevToGlbDetailed(
       'DEV/device.dev',
       new Map([
         ['DEV/device.dev', dev],
         ['PHM/device.phm', phm],
         ['MOD/empty.mod', emptyMod],
       ]),
-    )).resolves.toBeNull();
+    )).resolves.toMatchObject({ status: 'empty', bytes: null });
   });
 
   it('空 DEV 在诊断中记录 IR 原因', async () => {

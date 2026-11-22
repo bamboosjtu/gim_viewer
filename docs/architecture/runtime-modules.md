@@ -19,6 +19,8 @@
 
 `app/session/projectSessionState` 管理工程和几何的独立代次、会话作用域、打开意图与 Viewer 清理交接。`ProjectSelectionState` 管理选择请求及释放，Viewer 使用共享窄契约。`app/composition/projectRuntimes` 按来源路由 Feature。`bindProjectShell` 将打开、关闭和最近工程接到对应操作，业务模块通过端口发布展示结果。
 
+组合根为清理注入 Viewer、任务取消和展示端口。共享宿主适配器持有 IFC、MOD/STL、DEV 模板释放与高亮清理。Viewer 仍报告 IFC 模型时，当前清理保留索引并阻止打开，以便重试释放。
+
 ## Worker 通信
 
 `infrastructure/workers` 持有工程 Worker 的创建、消息协议、传输编解码与请求释放。`SessionScope` 取消时，客户端解除监听、清除待处理请求及其定时器并终止 Worker。工程服务继续负责同一工程内的构建替换与结果发布。工程、线路与变电 Spatial Worker 复用 `WorkerRequests`，各业务保留自己的计算和回退。
@@ -43,8 +45,8 @@
 
 | 入口 | 组成阶段 |
 |---|---|
-| `openProject` | 原生解压与同源收据恢复、浏览器解压、工程内容识别 |
-| `projectCleanup` | IFC 模型释放、MOD/STL 图层释放、会话与界面收尾 |
+| `openProject` | 清理、激活与分派。Native/WASM 获取、同源收据恢复、内容校验由 `projectSourceAcquisition` 负责 |
+| `projectCleanup` | 串行交接、状态重置与关闭通知。Viewer 释放由 `ProjectViewerLifecycle` 端口交给宿主适配器 |
 | `loadAllIfcFiles` | 引擎与队列启动、队列结算、名称索引与导航尾段 |
 | IFC Spatial | 导航记录筛选、CBM 资产关联、覆盖和诊断汇总 |
 | `serializeDevToGlbDetailed` | MOD 实例和 STL 实例分别装配，轮廓兜底、GLB 导出与统一释放 |

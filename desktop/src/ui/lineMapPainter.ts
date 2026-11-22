@@ -7,7 +7,7 @@ import {
   type prepareLineMapGeometry,
   type RuntimeGeoPoint,
   type RuntimeWire,
-} from '../services/lineMapGeometry.js';
+} from '../features/powerline/presentation/lineMapGeometry.js';
 import {
   paintEmptyHint,
   paintBorder,

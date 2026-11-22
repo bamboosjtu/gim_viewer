@@ -16,7 +16,7 @@ import {
   pathMatchesReference,
   formatNumber,
   renderLineModSources,
-} from '../services/lineInspectorProjection.js';
+} from '../features/powerline/presentation/lineInspectorProjection.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
 /**
  * 线路工程 UI 渲染层。
@@ -50,10 +50,10 @@ import type { LineMapBaseLayerHandle } from './lineMapBaseLayer.js';
 import type { LineMapProjection, GeoBBox } from './lineMapProjection.js';
 import { createMapLibreProjection } from './lineMapProjection.js';
 import { renderLineMap } from './lineMapView.js';
-import { buildLineAttributeIndex } from '../services/lineAttrRestoreService.js';
-import { buildWireSemanticInfo } from '../services/lineWireSemanticService.js';
-import type { WireSemanticInfo } from '../services/lineWireSemanticService.js';
-import type { LineCatenaryAuditExportPayload } from '../services/lineCatenaryAuditExportService.js';
+import { buildLineAttributeIndex } from '../features/powerline/presentation/lineAttributeIndex.js';
+import { buildWireSemanticInfo } from '../features/powerline/presentation/lineWireSemanticService.js';
+import type { WireSemanticInfo } from '../features/powerline/presentation/lineWireSemanticService.js';
+import type { LineCatenaryAuditExportPayload } from '../features/powerline/diagnostics/lineCatenaryAuditExportService.js';
 import { DEBUG_LINE_MAP } from '../config/debug.js';
 import {
   ENABLE_CATENARY,
@@ -81,7 +81,7 @@ import {
   type PropertyReferenceDetail,
 } from './propertyDictionary.js';
 import { renderInspectorTabs } from './propsDrawer.js';
-import { loadLineModSourcesForNode } from '../services/lineModRuntimeService.js';
+import { loadLineModSourcesForNode } from '../features/powerline/presentation/lineModSourcePort.js';
 
 import { perfBegin, perfCurrentSession } from '../utils/perfTimings.js';
 
@@ -532,7 +532,7 @@ export async function getLatestCatenaryAuditPayload(): Promise<LineCatenaryAudit
   if (!context || latestCatenaryAuditPayload) return latestCatenaryAuditPayload;
 
   const { buildLineCatenaryAuditExportPayload } =
-    await import('../services/lineCatenaryAuditExportService.js');
+    await import('../features/powerline/diagnostics/lineCatenaryAuditExportService.js');
   if (context !== latestCatenaryAuditContext) return null;
   latestCatenaryAuditPayload ??= buildLineCatenaryAuditExportPayload(context);
   return latestCatenaryAuditPayload;

@@ -1,7 +1,10 @@
 import type { GimGraphNode } from '@gim/powerline-core/gimGraphTypes.js';
 import type { TowerMarker, WireSegment } from '../gim/lineMapData.js';
-import type { prepareLineMapGeometry, RuntimeGeoPoint } from '../services/lineMapGeometry.js';
-import { nearestTower, nearestWire } from '../services/lineMapHitTesting.js';
+import type {
+  prepareLineMapGeometry,
+  RuntimeGeoPoint,
+} from '../features/powerline/presentation/lineMapGeometry.js';
+import { nearestTower, nearestWire } from '../features/powerline/presentation/lineMapHitTesting.js';
 import { logger } from '../utils/logger.js';
 import type { LayerState } from './lineMapControls.js';
 import type { LineMapSelection, LineMapViewport } from './lineMapPainter.js';

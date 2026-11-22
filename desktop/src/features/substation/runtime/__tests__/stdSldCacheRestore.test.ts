@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AppState } from '../../../../app/state.js';
-import { commitStdSldResult, type StdSldParseResult } from '../../../../services/stdSldService.js';
+import { commitStdSldResult, type StdSldParseResult } from '../stdSldService.js';
 import { buildAndCommitSubstationStdSld } from '../substationDocumentRuntime.js';
 import { bindDiagramPresentation } from '../../../../services/diagramPresentationPort.js';
 import { buildCbmTree } from '../../../../gim/cbmParser.js';

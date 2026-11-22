@@ -141,7 +141,7 @@
 
 | 改动范围 | 门禁（`desktop/` 下） |
 |---|---|
-| IFC 加载/转换 | `npm run test:ifc-critical`；连接几何真实指针和固定 WebView2 验证还须执行下述本地门禁，单测不代替 |
+| IFC 加载/转换 | `npm run test:module -- viewer infrastructure/native`；连接几何真实指针和固定 WebView2 另见下述本地门禁 |
 | 静态容器矩阵 | `src/viewer/__tests__/staticContainer.test.ts` |
 | 视角历史 | `src/viewer/__tests__/viewHistory.test.ts`、`src/ui/__tests__/viewHistoryFeedback.test.ts` |
 | 原生批读/GIMR 协议 | `bridge/__tests__/devLodCache.test.ts`、`bridge/__tests__/devLodNativeBatch.test.ts`、`src/infrastructure/native/__tests__/projectFileEnvelope.test.ts`、`projectFiles.test.ts` |
@@ -162,7 +162,7 @@
 
 ### IFC 连接几何本地门禁
 
-`test:ifc-critical` 的连接分块测试使用模拟 API，验证协议、索引边界、分块及堆替换。`npm run test:ifc-connections-local` 用匿名最小 IFC4 和真实 Node web-ifc/WASM 对照完整扫描；追加 `-- --build <当前源码对应的隔离 Benchmark Release 清单>`，在控制器拥有的固定 WebView2 进程中执行同一案例和生产读取器。两者均覆盖六分量、三角形顺序、矩阵、颜色、包围盒、重复/非顺序索引、空对象、归一化、消费等待及真实堆增长。报告保存源、WASM、读取器/案例 SHA、逐部分结果；原生分支另保存浏览器版本、构建和固定运行时指纹。失败退出非零，`nativeWebView2Verified` 仅原生分支通过时为 true，Node 通过保持 false。入口不加入 CI；真实工程连接语义、冷暖及跨机器的完整门禁仍需下列额外证据，不能用一个引擎案例替代：
+Viewer 的连接分块单测使用模拟 API，验证协议、索引边界、分块及堆替换。`npm run test:ifc-connections-local` 用匿名最小 IFC4 和真实 Node web-ifc/WASM 对照完整扫描；追加 `-- --build <当前源码对应的隔离 Benchmark Release 清单>`，在控制器拥有的固定 WebView2 进程中执行同一案例和生产读取器。两者均覆盖六分量、三角形顺序、矩阵、颜色、包围盒、重复/非顺序索引、空对象、归一化、消费等待及真实堆增长。报告保存源、WASM、读取器/案例 SHA、逐部分结果；原生分支另保存浏览器版本、构建和固定运行时指纹。失败退出非零，`nativeWebView2Verified` 仅原生分支通过时为 true，Node 通过保持 false。入口不加入 CI；真实工程连接语义、冷暖及跨机器的完整门禁仍需下列额外证据，不能用一个引擎案例替代：
 
 - 固定本轮构建、`web-ifc` / WASM 哈希、WebView2 版本与源 SHA；选择确有连接构件和多块网格的来源，冷开、暖开各保留完整性与错误证据。
 - 在本地诊断中，以同一模型、同一 ExpressId/geometryExpressID 和同一变换，对照完整 `GetIndexArray` / `GetVertexArray` 扫描与分块读取。确认 `GetVertexDataSize()` 为 Float32 元素数、指针偏移以字节为单位；逐块比较索引展开后的 position/normal 六分量、三角形数量、变换矩阵与包围盒。
@@ -249,7 +249,10 @@ cargo test --manifest-path app/src-tauri/Cargo.toml six_native_imports -- --igno
 ### 设备与系统集成
 
 - 在指定 API/WebView/设备上验证 SAF 导入、权限/定位拒绝、折叠屏与沉浸模式。
+- 发布前覆盖塔、档、跨越的树和地图入口及双向选择，验证 HNum 有输入可预览、缺失可降级，以及天地图、OSM、Canvas 的回退链路。
 - 模拟器数据不能替代真机性能承诺。
+
+移动端既定真机验收使用 vivo X Fold5 和 line02 或开发者选定的更大线路样本，目标为冷导入不超过 10 秒、合法缓存打开不超过 3 秒。冷开从 SAF 返回选择计时，暖开从点击已有工程计时，终点均为工程树和 Canvas 工程覆盖层可交互。记录连续响应、ANR 和内存，底图网络耗时单列。这项验收由开发者在本地执行，当前状态见[移动端遗留问题](open-issues.md#移动端验收与遗留问题)。
 
 ## 证据记录
 
@@ -283,11 +286,11 @@ cargo test --manifest-path app/src-tauri/Cargo.toml six_native_imports -- --igno
 | `packages/gim-sdk/src/semantic/` | 95% | 95% | 90% |
 | `packages/gim-sdk/src/{source,geometry,engineering,projection,adapters,shared}/` | 90% | 90% | 80% |
 | `gim/`（桌面按归属检查） | 90% | 90% | 80% |
-| `app/session/openProject.ts` | 70% | 80% | 50% |
+| `app/session/{openProject,projectSourceAcquisition}.ts` | 70% | 80% | 50% |
 | `features/substation/application/{substationRuntime,substationOpenStages,substationColdPersistence,substationColdSource}.ts`（合并计算） | 70% | 45% | 70% |
 | `services/viewerUIBinding.ts` | 80% | 50% | 70% |
 | `ui/lineProjectView.ts` | 70% | 60% | 65% |
-| `ui/lineMapView.ts` | 65% | 65% | 60% |
+| `ui/{lineMapView,lineMapPainter,lineMapPointer,lineMapRenderer}.ts`（合并计算） | 65% | 65% | 60% |
 
 `test:coverage` 先用 Vitest 的阈值匹配器检查变电应用层四个模块是否受同一门禁约束，并用低覆盖夹具验证门禁会失败。随后采集 SDK 自有用例和桌面消费者，合并同一源码的 Istanbul 覆盖数据后对 SDK 的领域/来源实施原门槛。桌面热点门槛由 Vitest 配置执行。SDK 与桌面报告分别在 output/coverage/sdk 和 desktop，合并摘要在 output/coverage/coverage-summary.json。两个采集范围必须非空，防止跨目录匹配失效被当成通过。SDK 用例在同一命令中只执行一次。桌面 npm test 是工作区全量入口，包含 SDK 用例，SDK npm test 也可单独运行。
 

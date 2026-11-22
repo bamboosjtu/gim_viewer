@@ -20,7 +20,7 @@ export async function buildAndCommitSubstationStdSld(
   const endStdSld = perfBegin(label, undefined, perfSession);
   try {
     const { commitStdSldResult, parseStdSldOnGimExtracted, restoreStdSldFromCache } =
-      await import('../../../services/stdSldService.js');
+      await import('./stdSldService.js');
     if (!state.isCurrentSession(session)) return false;
 
     const result =
@@ -82,7 +82,7 @@ export async function buildAndCommitSubstationStdSld(
     // attempt visible.  This clears only the STD/SLD projection; IFC and core
     // semantic state remain intact.
     try {
-      const { commitStdSldResult } = await import('../../../services/stdSldService.js');
+      const { commitStdSldResult } = await import('./stdSldService.js');
       if (!state.isCurrentSession(session)) return false;
       commitStdSldResult(state, null);
     } catch (clearErr) {

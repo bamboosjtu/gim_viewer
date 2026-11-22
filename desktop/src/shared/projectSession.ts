@@ -8,17 +8,24 @@ export interface ProjectSessionIdentity {
 }
 declare const projectLoadSession: unique symbol;
 /** Only AppState mints this commit capability; Worker DTOs carry identity only. */
-export interface ProjectLoadSession extends ProjectSessionIdentity { readonly [projectLoadSession]: true }
+export interface ProjectLoadSession extends ProjectSessionIdentity {
+  readonly [projectLoadSession]: true;
+}
 
-export interface SessionOwner {
-  projectGeneration: number; currentProjectId: number | null; currentSourceSha256: string | null; geometryLoadToken: number;
+interface ProjectIdentityOwner {
+  projectGeneration: number;
+  currentProjectId: number | null;
+  currentSourceSha256: string | null;
 }
-export function isCurrentProject(owner: Pick<SessionOwner, 'projectGeneration' | 'currentProjectId' | 'currentSourceSha256'>, session: ProjectSessionIdentity): boolean {
-  return owner.projectGeneration === session.generation && owner.currentProjectId === session.projectId
-    && owner.currentSourceSha256 === session.sourceSha256;
-}
-export function isCurrentGeometry(owner: SessionOwner, session: ProjectSessionIdentity): boolean {
-  return isCurrentProject(owner, session) && owner.geometryLoadToken === session.geometryToken;
+export function isCurrentProject(
+  owner: ProjectIdentityOwner,
+  session: ProjectSessionIdentity,
+): boolean {
+  return (
+    owner.projectGeneration === session.generation &&
+    owner.currentProjectId === session.projectId &&
+    owner.currentSourceSha256 === session.sourceSha256
+  );
 }
 
 export function createIfcRuntimeModelId(

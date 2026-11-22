@@ -6,6 +6,7 @@ import { bindDiagramPresentation } from '../../services/diagramPresentationPort.
 import { diagramPresentation } from '../../ui/diagramPresentation.js';
 import { bindLinePresentation } from '../../features/powerline/presentation/linePresentationPort.js';
 import { linePresentation } from '../../ui/linePresentation.js';
+import { bindLineModSourceReader } from '../../features/powerline/presentation/lineModSourcePort.js';
 import { bindLoadingPresentation } from '../../services/loadingPresentationPort.js';
 import * as loadingView from '../../ui/loadingView.js';
 import { bindViewerPresentation } from '../../services/viewerPresentationPort.js';
@@ -27,6 +28,13 @@ export function configurePresentation(): void {
   bindSelectionPresentation(selectionPresentation);
   bindDiagramPresentation(diagramPresentation);
   bindLinePresentation(linePresentation);
+  bindLineModSourceReader(async (state, node) => {
+    const scope = state.sessionScope(state.captureProjectSession());
+    const { loadLineModSourcesForNode } = await scope.read(
+      () => import('../../features/powerline/runtime/lineModRuntimeService.js'),
+    );
+    return scope.read(() => loadLineModSourcesForNode(state, node));
+  });
   bindLoadingPresentation(loadingView);
   bindViewerPresentation(
     async () => (await import('../../ui/viewerPresentation.js')).viewerPresentation,

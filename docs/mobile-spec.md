@@ -3,7 +3,7 @@
 本页维护 `app/` Android 输电线路查看应用的当前实现、数据与缓存契约、隐私边界和验收口径；不覆盖桌面端行为、构建环境细节或性能实测记录。当前版本 `0.1.6 Preview`，以 `app/package.json` 为准。
 
 - 实现：Tauri 2、TypeScript/Vite 与 MapLibre。
-- 需求与验收基准：[软件规格说明](../app/软件规格说明.md)；UI 参考[响应式设计](../app/输电线路GIM地图应用响应式设计展示.png)。
+- UI 参考[响应式设计](../app/输电线路GIM地图应用响应式设计展示.png)。
 - 平台基线：minSdk 29、targetSdk 36。
 - 构建方法：[App README](../app/README.md)。
 - 验收条件：[验证](validation.md#移动端验证)。
@@ -177,6 +177,5 @@ filesDir/projects/<sha256>/
 - [验证](validation.md)：移动端门禁、证据边界与记录规则。
 - [问题与限制](open-issues.md#移动端验收与遗留问题)：移动端未完成验收项与已接受限制。
 - [线路与移动端](architecture/line-mobile.md)：线路运行时、共享 core 与 Android 边界。
-- [软件规格说明](../app/软件规格说明.md)：需求与验收基准。
 - [App README](../app/README.md)：开发、构建、签名与存储说明。
 - [缓存域](architecture/caches.md)：缓存版本、失效与恢复规则。

@@ -17,6 +17,11 @@ export interface FamilyAssignment {
   path: string;
 }
 
+interface ParsedFamily {
+  document: SourceDocument;
+  sections: ReturnType<typeof parseFamSectionsWithDiagnostics>;
+}
+
 /**
  * FAM demand is a source-graph side concern, not traversal.
  *
@@ -27,6 +32,7 @@ export interface FamilyAssignment {
 export class SourceFamilyIndex {
   readonly assignments: FamilyAssignment[] = [];
   private readonly familyCache = new Map<string, Promise<SourceProperty[]>>();
+  private readonly parsedFamilies = new Map<string, Promise<ParsedFamily>>();
   private readonly familyPaths = new Map<string, string[]>();
   private readonly assigned = new Set<string>();
 
@@ -64,23 +70,20 @@ export class SourceFamilyIndex {
         const properties: SourceProperty[] = [];
         for (const path of this.referencedFamilies(doc)) {
           if (this.host.deferFamilies) continue;
-          const familyDoc = await this.host.readDocument(path);
-          const parsed = parseFamSectionsWithDiagnostics(
-            familyDoc.rawLines.join("\n"),
-            path,
-          );
-          familyDoc.attributeStatus = parsed.diagnostics.malformedLineCount
+          const { document, sections } = await this.parseFamily(path);
+          document.attributeStatus = sections.diagnostics.malformedLineCount
             ? "partial"
             : "complete";
-          const fields = parsed.properties.map((p) => ({
+          // Keep each owner's mutable fields independent, as before.
+          const fields = sections.properties.map((property) => ({
             path,
-            line: p.sourceLine,
-            keys: [...new Set([p.label, p.rawKey])],
-            value: p.rawValue,
-            rawLine: p.rawLine,
-            section: p.section,
+            line: property.sourceLine,
+            keys: [...new Set([property.label, property.rawKey])],
+            value: property.rawValue,
+            rawLine: property.rawLine,
+            section: property.section,
           }));
-          familyDoc.fields = fields;
+          document.fields = fields;
           properties.push(...fields);
         }
         return properties;
@@ -88,6 +91,24 @@ export class SourceFamilyIndex {
       this.familyCache.set(doc.path, promise);
     }
     return promise;
+  }
+
+  private parseFamily(path: string): Promise<ParsedFamily> {
+    let pending = this.parsedFamilies.get(path);
+    if (!pending) {
+      pending = (async () => {
+        const document = await this.host.readDocument(path);
+        return {
+          document,
+          sections: parseFamSectionsWithDiagnostics(
+            document.rawLines.join("\n"),
+            path,
+          ),
+        };
+      })();
+      this.parsedFamilies.set(path, pending);
+    }
+    return pending;
   }
 }
 

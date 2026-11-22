@@ -6,10 +6,10 @@ import { buildSubstationAliasIndex, buildSubstationIfcEvidence, discoverSubstati
 import { hydrateSubstationGeometryGraph } from '../geometry/substationSourceGraph.js';
 import { discoverGeometriesFromNode } from '../../services/modGeometryDiscovery.js';
 import { parseFamSectionsWithDiagnostics, resolveSubstationBusinessIdentity } from '@gim/gim-sdk/source';
-import { buildGimIndexPayload } from '../../services/gimIndexPersistenceService.js';
+import { buildGimIndexPayload } from '../../features/substation/runtime/gimIndexPersistenceService.js';
 import { inspectAuxiliarySources } from '../../services/inspectorService.js';
 import { buildGeometryRefsPayload } from '../../services/__tests__/geometryRefsPayload.js';
-import { restoreGimIndexToState } from '../../services/gimIndexRestoreService.js';
+import { restoreGimIndexToState } from '../../features/substation/runtime/gimIndexRestoreService.js';
 import { AppState } from '../../app/state.js';
 import { loadXmlModFromText } from '../../viewer/xmlModLoader.js';
 import { parseXmlMod } from '../geometry/xmlModParser.js';

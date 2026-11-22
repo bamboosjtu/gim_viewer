@@ -67,7 +67,7 @@ import {
 } from './devSpatialCatalog.js';
 import { ensureGeometryLayers } from './modGeometryScene.js';
 import { getSourceGeometryOccurrences } from './sourceGeometryService.js';
-import { startSubstationResourceMonitor } from './substationResourceTelemetry.js';
+import { startSubstationResourceMonitor } from './projectResourceTelemetry.js';
 import { observeFirstGeometry } from './geometryPresentationService.js';
 
 const READINESS_AUDIT_STORAGE_KEY = 'GIM_READINESS_AUDIT';

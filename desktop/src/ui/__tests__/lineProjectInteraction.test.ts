@@ -1,23 +1,30 @@
 import {beforeEach,afterEach,it,expect,vi} from 'vitest';
 import {AppState} from '../../app/state.js';
-import {makeLineFixture} from '../../services/__tests__/lineNavigationFixture.js';
+import {makeLineFixture} from '../../features/powerline/presentation/__tests__/lineNavigationFixture.js';
 import { buildLineProjectProjection } from '../../features/powerline/presentation/lineProjectProjection.js';
 import { perfCurrentSession } from '../../utils/perfTimings.js';
 import type { LineRenderOptions } from '../../features/powerline/presentation/linePresentationPort.js';
 const m=vi.hoisted(()=>({render:vi.fn(),probe:vi.fn(),mod:vi.fn(),projection:vi.fn()}));
 vi.mock('../lineMapView.js',()=>({renderLineMap:m.render}));
 vi.mock('../lineMapBaseLayer.js',()=>({createMapLibreProbe:m.probe}));
-vi.mock('../../services/lineModRuntimeService.js',()=>({loadLineModSourcesForNode:m.mod}));
+vi.mock('../../features/powerline/runtime/lineModRuntimeService.js',()=>({loadLineModSourcesForNode:m.mod}));
 vi.mock('../../features/powerline/presentation/lineMapProjection.js',()=>({buildLineMapProjection:m.projection}));
 function deferred<T>() {let resolve!:(value:T)=>void;const promise=new Promise<T>(r=>{resolve=r;});return {promise,resolve};}
-beforeEach(()=>{
-  vi.resetModules();vi.clearAllMocks();HTMLElement.prototype.scrollIntoView=vi.fn();
+let activeState: AppState | undefined;
+beforeEach(async ()=>{
+  vi.resetModules();vi.resetAllMocks();HTMLElement.prototype.scrollIntoView=vi.fn();
   document.body.innerHTML=['viewport','cbm-tree-panel','file-dev-panel','model-list','props-drawer','props-drawer-body','empty-tip','status-right'].map(id=>`<div id="${id}"></div>`).join('');
   m.mod.mockResolvedValue([]);m.probe.mockRejectedValue(Error('offline'));
+  (await import('../../app/composition/presentationBindings.js')).configurePresentation();
 });
-afterEach(async()=>{(await import('../lineProjectView.js')).destroyLineMapView();});
+afterEach(async()=>{
+  activeState?.invalidatePendingLoads();
+  activeState = undefined;
+  (await import('../lineProjectView.js')).destroyLineMapView();
+});
 async function fixture(options: LineRenderOptions = {}) {
   const data=makeLineFixture(),state=new AppState();
+  activeState = state;
   const scope = state.sessionScope(state.activateProject(1, 'line-a'));
   state.currentProjectType='transmission_line';
   m.projection.mockReturnValue({mapData:data.mapData,renderable:true});
@@ -50,10 +57,15 @@ it('discards a lazily loaded audit request when its project closes',async()=>{
   expect(await pending).toBeNull();
 });
 it('late MOD details cannot replace another node or a new project inspector',async()=>{
-  const {view,nodes,state}=await fixture(),first=deferred<[]>(),second=deferred<[]>();m.mod.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
-  view.showLineNodeProperties(nodes.tower0,state,'First');view.showLineNodeProperties(nodes.tower2,state,'Second');
-  first.resolve([]);await Promise.resolve();expect(document.querySelector('.props-header')!.textContent).toBe('Second');
-  view.destroyLineMapView();document.getElementById('props-drawer-body')!.textContent='New project';second.resolve([]);await Promise.resolve();expect(document.getElementById('props-drawer-body')!.textContent).toBe('New project');
+  const {view,nodes,state}=await fixture(),first=deferred<[]>(),second=deferred<[]>();
+  m.mod.mockImplementation((_state, node) => node === nodes.tower0 ? first.promise : second.promise);
+  view.showLineNodeProperties(nodes.tower0,state,'First');
+  await vi.waitFor(() => expect(m.mod).toHaveBeenCalledWith(state, nodes.tower0));
+  view.showLineNodeProperties(nodes.tower2,state,'Second');
+  await vi.waitFor(() => expect(m.mod).toHaveBeenCalledWith(state, nodes.tower2));
+  first.resolve([]);await new Promise(resolve => setTimeout(resolve, 0));expect(document.querySelector('.props-header')!.textContent).toBe('Second');
+  state.activateProject(2, 'line-b');
+  document.getElementById('props-drawer-body')!.textContent='New project';second.resolve([]);await new Promise(resolve => setTimeout(resolve, 0));expect(document.getElementById('props-drawer-body')!.textContent).toBe('New project');
 });
 it('isolates current MOD failure while retaining basic properties',async()=>{
   const {view,nodes,state}=await fixture();m.mod.mockRejectedValueOnce(Error('<missing MOD>'));view.showLineNodeProperties(nodes.tower0,state);

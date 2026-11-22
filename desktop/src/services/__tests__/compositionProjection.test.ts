@@ -7,7 +7,7 @@ import { projectEngineeringComposition } from '@gim/gim-sdk/projection';
 import type { IfcSpatialObject } from '../../gim/ifcSpatialParser.js';
 import { installCompositionProjection, reconcileProjectionSelection } from '../compositionProjectionService.js';
 import { projectSpatialComposition } from '../projections/compositionSpatial.js';
-import type { ProjectionInput } from '../compositionProjectionWorker.js';
+import type { ProjectionInput } from '../../infrastructure/workers/compositionProjectionWorker.js';
 import { selectEngineeringTarget, clearEngineeringHighlight } from '../engineeringSelection.js';
 import { EngineeringWorkerClient } from '../../infrastructure/workers/engineeringWorkerClient.js';
 import { measurementWorkerTask } from '../../measurement/hostWorker.js';

@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SourceDocumentReader } from "../sourceDocumentReader.js";
 import { SourceFamilyIndex } from "../sourceFamilyIndex.js";
 import { parseSourceDocument } from "../sourceDocuments.js";
+import * as famParser from "../famParser.js";
 
 function host(
   options: {
@@ -68,7 +69,9 @@ describe("SourceFamilyIndex", () => {
     ]);
   });
 
-  it("shares one underlying FAM read across concurrent owners", async () => {
+  it("shares one FAM read and one parse across concurrent owners", async () => {
+    const parse = vi.spyOn(famParser, "parseFamSectionsWithDiagnostics");
+    try {
     const h = host();
     const cbm = parseSourceDocument("a.cbm", "BASEFAMILY=base.fam");
     const dev = parseSourceDocument("b.dev", "BASEFAMILYPOINTER=base.fam");
@@ -78,8 +81,15 @@ describe("SourceFamilyIndex", () => {
     expect(h.reads).toEqual(["FAM/base.fam"]);
     const [fromCbm, fromDev] = await Promise.all([first, second]);
     expect(fromCbm).toEqual(fromDev);
+    expect(fromCbm).not.toBe(fromDev);
+    expect(fromCbm[0]).not.toBe(fromDev[0]);
+    expect(fromCbm[0].keys).not.toBe(fromDev[0].keys);
     expect(fromCbm).toHaveLength(1);
     expect(h.reads).toEqual(["FAM/base.fam"]);
+    expect(parse).toHaveBeenCalledOnce();
+    } finally {
+      parse.mockRestore();
+    }
   });
 
   it("defers FAM IO while retaining assignments for later materialization", async () => {

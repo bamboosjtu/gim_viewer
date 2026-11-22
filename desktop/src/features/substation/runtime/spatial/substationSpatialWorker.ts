@@ -12,7 +12,7 @@ import {
   SUBSTATION_PARSER_DOMAIN_VERSION,
   type SubstationSpatialSnapshotMetadata,
   type EncodedSpatialCache,
-} from '../../../../services/substationSpatialCodec.js';
+} from '../../../../infrastructure/cache/substationSpatialCodec.js';
 
 export type SpatialWorkerRequest =
   | {

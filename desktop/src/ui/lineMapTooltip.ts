@@ -1,5 +1,5 @@
 import type { TowerMarker } from '../gim/lineMapData.js';
-import { towerLabel } from '../services/lineMapGeometry.js';
+import { towerLabel } from '../features/powerline/presentation/lineMapGeometry.js';
 import { escapeHtml } from '../shared/html.js';
 
 export function createLineMapTooltip(element: HTMLElement) {

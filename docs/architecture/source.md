@@ -11,7 +11,7 @@ Source Core 在 Parser 的无损字段之上建立来源文档、引用、组成
 | `graph/physicalScopeIndex.ts` | 按需索引当前装配子树，并复用已匹配的子作用域。 |
 | `sourceFamilyIndex.ts` | 管理 FAM 引用、occurrence 分配与延迟物化。 |
 
-同一会话的文档请求按解析后的路径共享 Promise。读取拒绝保留在本次提取的缓存中，新会话可以重新读取。FAM 引用路径与聚合结果按拥有引用的文档路径缓存，底层读取按实际 FAM 路径共享。两个拥有者的 eager 聚合可能分别解析同一个已读取的 FAM。
+同一会话的文档请求按解析后的路径共享 Promise。读取拒绝保留在本次提取的缓存中，新会话可以重新读取。FAM 引用路径和聚合结果按拥有引用的文档路径缓存。多个 Owner 引用同一个 FAM 时，底层读取和解析按实际 FAM 路径共享，各 Owner 按自身引用顺序聚合属性。
 
 开启 `deferFamilies` 时，遍历仅记录 FAM 分配。识别请求到达后，`materializeEngineeringFamilies` 按路径复用已经获得的 FAM 文档和字段，并向各 occurrence 补充属性。再次物化已取得的文档时，读取数、属性和图修订保持稳定。
 

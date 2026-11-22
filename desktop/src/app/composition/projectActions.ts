@@ -1,4 +1,24 @@
+import { perfCurrentSession } from '../../utils/perfTimings.js';
+import type { ProjectOpenRouting } from '../session/openProject.js';
 import type { AppState } from '../state.js';
+
+function scheduleBaselineBeforeOpen(state: AppState, generation: number): void {
+  const perfSession = perfCurrentSession();
+  void import('../../services/projectResourceTelemetry.js')
+    .then(({ sampleSubstationRuntimeResources }) =>
+      sampleSubstationRuntimeResources(
+        state,
+        'baselineBeforeOpen',
+        perfSession,
+        undefined,
+        { requestGeneration: generation },
+        { isCurrent: () => state.projectGeneration === generation },
+      ),
+    )
+    .catch(() => undefined);
+}
+
+const loadCleanup = async () => (await import('./projectLifecycle.js')).cleanupProject;
 
 async function prepareOpen(state: AppState) {
   const { isCurrent } = state.projectSession.claimIntent();
@@ -7,7 +27,19 @@ async function prepareOpen(state: AppState) {
     import('./projectRuntimes.js'),
   ]);
   if (isCurrent())
-    return { open, routing: { ownsIntent: isCurrent, dispatch: runtimes.dispatchProjectRuntime } };
+    return {
+      open,
+      routing: {
+        ownsIntent: isCurrent,
+        dispatch: runtimes.dispatchProjectRuntime,
+        loadCleanup,
+        beforeOpen: scheduleBaselineBeforeOpen,
+        recentProjectsChanged: () =>
+          window.dispatchEvent(new CustomEvent('gim:recent-projects-changed')),
+        loadEarlySubstation: () =>
+          import('../../features/substation/runtime/substationExtractionJob.js'),
+      } satisfies ProjectOpenRouting,
+    };
 }
 
 export async function openGimWithDialog(
@@ -35,6 +67,6 @@ export async function openGimForBenchmark(state: AppState, path: string): Promis
 
 export async function closeProject(state: AppState): Promise<boolean> {
   const { isLatest } = state.projectSession.claimIntent();
-  const { cleanupProject } = await import('../session/projectCleanup.js');
+  const cleanupProject = await loadCleanup();
   return isLatest() && (await cleanupProject(state));
 }

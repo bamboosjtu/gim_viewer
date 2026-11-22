@@ -1040,15 +1040,6 @@ export async function mergeDevGlbParts(
   }
 }
 
-/** Compatibility wrapper retained for the existing progressive/runtime APIs. */
-export async function serializeDevToGlb(
-  devPath: string,
-  files: Map<string, File>,
-): Promise<Uint8Array | null> {
-  const result = await serializeDevToGlbDetailed(devPath, files);
-  return result.bytes;
-}
-
 // ===== GLB 加载（方案 C v2：DEV 粒度缓存命中路径） =====
 
 /**

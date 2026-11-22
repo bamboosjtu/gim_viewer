@@ -3,7 +3,7 @@ import {
   SUBSTATION_PARSER_DOMAIN_VERSION,
   type SubstationSpatialCacheHit,
   type EncodedSpatialCache,
-} from '../../../services/substationSpatialCodec.js';
+} from '../../../infrastructure/cache/substationSpatialCodec.js';
 /** Spatial semantic restore, rebuild, persistence and background scheduling. */
 import type { IfcEntry, CbmNode, FileDevEntry } from '../../../gim/types.js';
 import type { AppState, ProjectLoadSession } from '../../../app/state.js';

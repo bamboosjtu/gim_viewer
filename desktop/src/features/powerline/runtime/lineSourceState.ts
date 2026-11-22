@@ -22,8 +22,7 @@ export async function commitLineParserResult(
 ): Promise<boolean> {
   // 动态 import 也属于异步边界；必须在任何 AppState 写入前完成，避免
   // 工程切换恰好发生在 import 期间时留下“图已是 A、属性仍是 B”的半提交。
-  const { restoreLineAttributesToState } =
-    await import('../../../services/lineAttrRestoreService.js');
+  const { restoreLineAttributesToState } = await import('./lineAttrRestoreService.js');
   if (!scope.isCurrent()) return false;
   state.currentGimGraph = result.graph;
   state.currentFiles = files;

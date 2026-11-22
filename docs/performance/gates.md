@@ -32,7 +32,7 @@
 | 首批目录 | 后续缓存批次挂起时，首批 bounds 仍可消费，完整标记不提前 | `devLodRuntime.test.ts` |
 | 普通模板命中 | 不重 hash 缓存、不回读原始来源、不再次扫描已有 bounds 的顶点 | `devLodRuntime.test.ts`、`devGlbTemplateRuntime.test.ts` |
 | 几何/表示 | 模板复用、多实例矩阵、小构件兜底、局部失败与过期结果拒绝 | `glbCacheService.test.ts`、`sourceGeometryService.test.ts`、几何矩阵对应测试 |
-| IFC | 单源解析、近景范围、可见性、连接分块和 WASM 所有权 | `test:ifc-critical`；真实引擎证据另由开发者选择 |
+| IFC | 单源解析、近景范围、可见性、连接分块和 WASM 所有权 | `npm run test:module -- viewer infrastructure/native`；真实引擎证据另由开发者选择 |
 | 传输/缓存 | 有界输入、独占最终缓冲、按域保存、先发布后写、修订一致 | `engineeringSourceBatches.test.ts`、`engineeringTableJson.test.ts`、缓存/Worker 对应测试 |
 | 绘制/交互 | 无变化不重绘；静态矩阵不重算；显隐、选择和相机可唤醒 | `demandRendering.test.ts`、`staticContainer.test.ts`、选择对应测试 |
 | 生命周期/测量 | 输入回复不建伪任务；尾批确认；未完成/不可用不补零 | `hostWorker.test.ts`、`test:measurement-tools` |

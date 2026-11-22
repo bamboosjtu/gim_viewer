@@ -4,7 +4,7 @@ import {
   buildGimIndexPayload,
   buildSubstationRestPayload,
   type SubstationRestPayload,
-} from '../../../services/gimIndexPersistenceService.js';
+} from './gimIndexPersistenceService.js';
 
 export interface SubstationPublicationInput {
   projectId: number;

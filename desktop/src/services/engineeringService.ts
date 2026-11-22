@@ -14,7 +14,7 @@ import { EngineeringWorkerClient } from '../infrastructure/workers/engineeringWo
 import {
   SUBSTATION_PARSER_DOMAIN_VERSION,
   SUBSTATION_SPATIAL_SEMANTIC_VERSION,
-} from './substationSpatialCodec.js';
+} from '../infrastructure/cache/substationSpatialCodec.js';
 import { isTauri } from '@desktop/runtime.js';
 import { readCachedEntry } from '../infrastructure/native/projectFiles.js';
 import { perfMark, perfMarkProductMoment } from '../utils/perfTimings.js';

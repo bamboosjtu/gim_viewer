@@ -10,7 +10,7 @@ import {
   perfRecordSubstationFinalizeProfile,
   type PerfSession,
 } from '../../../utils/perfTimings.js';
-import { sampleSubstationRuntimeResources } from '../../../services/substationResourceTelemetry.js';
+import { sampleSubstationRuntimeResources } from '../../../services/projectResourceTelemetry.js';
 
 export async function sampleSubstationMemory(
   state: AppState,

@@ -1463,9 +1463,6 @@ export function createDevGeometryPreprocessor(
   clients.set(state, client);
   return client;
 }
-export function getDevGeometryPreprocessor(state: AppState) {
-  return clients.get(state);
-}
 export function cancelDevGeometryPreprocessing(state: AppState): void {
   clients.get(state)?.cancel();
   clients.delete(state);

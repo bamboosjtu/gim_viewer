@@ -7,7 +7,7 @@ import type {
 import { parseDev } from '../../gim/geometry/devParser.js';
 import { parsePhm } from '../../gim/geometry/phmParser.js';
 import { normalizeFilePath } from '../../gim/fileLookup.js';
-import { IndexBuildCancelledError } from '../gimIndexPersistenceService.js';
+import { IndexBuildCancelledError } from '../../features/substation/runtime/gimIndexPersistenceService.js';
 
 /** Test-only native index fixture: production intentionally publishes empty refs. */
 export async function buildGeometryRefsPayload(

@@ -4,7 +4,7 @@ import{AppState}from'../../../../app/state.js';
 import type{SubstationSpatialIndex}from'../../../../gim/ifcSpatialParser.js';
 import{buildAndCommitSubstationSpatialSemantic}from'../substationSpatialRuntime.js';
 import{createSpatialSemanticStarter}from'../spatial/spatialSemanticStarter.js';
-import{SUBSTATION_PARSER_DOMAIN_VERSION}from'../../../../services/substationSpatialCodec.js';
+import{SUBSTATION_PARSER_DOMAIN_VERSION}from'../../../../infrastructure/cache/substationSpatialCodec.js';
 import{buildSubstationSpatialIndexInWorker}from'../spatial/substationSpatialWorkerClient.js';
 import{writeSubstationSpatialSemanticCache}from'../substationSpatialSemanticCache.js';
 import type{PerfSession}from'../../../../utils/perfTimings.js';

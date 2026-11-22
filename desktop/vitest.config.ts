@@ -43,7 +43,6 @@ export default defineConfig({
     exclude: ['src/features/substation/runtime/__tests__/substationSqlite.integration.test.ts'],
     setupFiles: ['./vitest.setup.ts'],
     coverage: {
-      // 覆盖率配置（review0709.md §4.3：原项目未安装覆盖率工具，无法量化行/分支覆盖）
       provider: 'v8',
       allowExternal: true,
       reporter: ['text-summary', 'json-summary', 'json', 'html'],
@@ -61,7 +60,7 @@ export default defineConfig({
       // Pure-layer gates are enforced by the normal unit suite, without GIM samples.
       thresholds: {
         'src/gim/**': { statements:90, lines:90, functions:90, branches:80 },
-        'src/app/session/openProject.ts': {statements:70,lines:70,functions:80,branches:50},
+        'src/app/session/{openProject,projectSourceAcquisition}.ts': {statements:70,lines:70,functions:80,branches:50},
         'src/features/substation/application/{substationRuntime,substationOpenStages,substationColdPersistence,substationColdSource}.ts': {statements:70,lines:70,functions:45,branches:70},
         'src/services/viewerUIBinding.ts': {statements:80,lines:80,functions:50,branches:70},
         'src/ui/lineProjectView.ts': {statements:70,lines:70,functions:60,branches:65},

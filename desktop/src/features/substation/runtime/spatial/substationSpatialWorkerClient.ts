@@ -12,7 +12,7 @@ import type { SpatialWorkerRequest, SpatialWorkerResponse } from './substationSp
 import type {
   SubstationSpatialSnapshotMetadata,
   EncodedSpatialCache,
-} from '../../../../services/substationSpatialCodec.js';
+} from '../../../../infrastructure/cache/substationSpatialCodec.js';
 import { ENGINEERING_EVIDENCE_FIELDS as recognitionFields } from '@gim/gim-sdk/source';
 
 /** Keep the existing builder and per-file read/error semantics; isolate STEP

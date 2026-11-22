@@ -198,7 +198,7 @@ async function bootstrapAsync(): Promise<void> {
           const jsonStr = JSON.stringify(payload, null, 2);
           await navigator.clipboard.writeText(jsonStr);
           const { formatLineCatenaryAuditMarkdown } =
-            await import('../services/lineCatenaryAuditExportService.js');
+            await import('../features/powerline/diagnostics/lineCatenaryAuditExportService.js');
           logger.log('[M4-B3A] 悬链线参数审计摘要\n' + formatLineCatenaryAuditMarkdown(payload));
           logger.log('[M4-B3A] 完整 JSON 已复制到剪贴板（' + jsonStr.length + ' 字节）');
           showLoading('悬链线参数审计 JSON 已复制');

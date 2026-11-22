@@ -74,7 +74,7 @@ export async function publishSubstationWarmCore(
     showLoading('正在从本地缓存恢复 GIM 索引...');
   });
   const { restoreGimIndexToState } = await scope.read(
-    async () => import('../../../services/gimIndexRestoreService.js'),
+    async () => import('./gimIndexRestoreService.js'),
   );
 
   const endRestoreCore = perfBegin(

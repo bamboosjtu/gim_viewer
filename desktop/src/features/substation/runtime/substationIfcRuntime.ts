@@ -17,7 +17,7 @@ import {
   perfMarkProductMoment,
   perfGeometryTracksEnabled,
 } from '../../../utils/perfTimings.js';
-import { startSubstationResourceMonitor } from '../../../services/substationResourceTelemetry.js';
+import { startSubstationResourceMonitor } from '../../../services/projectResourceTelemetry.js';
 import { showLoading, hideLoading } from '../../../services/gimOpenCore.js';
 import { autoLoadModStlPostIfc } from './substationDevRuntime.js';
 
@@ -26,7 +26,7 @@ import {
   showLoadingBeforeInteractive,
 } from '../presentation/substationPresentation.js';
 import { sampleSubstationMemory } from './substationRuntimeTelemetry.js';
-import { stationViewPolicy } from '../../../services/stationViewPolicy.js';
+import { stationViewPolicy } from './stationViewPolicy.js';
 import { observeFirstGeometry } from '../../../services/geometryPresentationService.js';
 import { createSubstationIfcLoadProgress } from './substationIfcLoadProgress.js';
 import type { SubstationIfcUsableModel } from './substationIfcModelLoad.js';
@@ -172,7 +172,7 @@ export async function loadAllIfcFiles(
   // authoritative Fragments model for that IFC is ready.
   const connectionPreview = new IfcConnectionPreviewRuntime(ctx, session, isCurrent);
   state.substationConnectionPreview = connectionPreview;
-  void import('../../../services/connectionOwnershipService.js')
+  void import('./connectionOwnershipService.js')
     .then(({ prepareConnectionOwnership }) => {
       if (isCurrent()) return prepareConnectionOwnership(state, session);
     })

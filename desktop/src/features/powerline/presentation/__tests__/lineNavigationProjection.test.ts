@@ -4,7 +4,7 @@ import {describe,it,expect} from 'vitest';
 import type { LineAttributeIndex } from '@gim/powerline-core/lineAttributeTypes.js';
 import type { LineFamPropertyRecord } from '@desktop/database.js';
 
-import {node,parseFamFixture,makeLineFixture} from '../../../../services/__tests__/lineNavigationFixture.js';
+import {node,parseFamFixture,makeLineFixture} from './lineNavigationFixture.js';
 import { buildLineNavigationIndex } from '../lineNavigationProjection.js';
 import { resolveLineNavigationTarget } from '../lineNavigationTargets.js';
 

@@ -6,7 +6,7 @@ import type { CbmNode } from '../../../../../gim/types.js';
 import { buildSubstationSpatialIndexInWorker } from '../substationSpatialWorkerClient.js';
 import type { SpatialWorkerRequest, SpatialWorkerResponse } from '../substationSpatialWorker.js';
 import { isTauri } from '@desktop/runtime.js';
-import{encodeSubstationSpatialCache}from'../../../../../services/substationSpatialCodec.js';
+import{encodeSubstationSpatialCache}from'../../../../../infrastructure/cache/substationSpatialCodec.js';
 vi.mock('@desktop/runtime.js',()=>({isTauri:vi.fn(()=>false)}));
 vi.mock('../../../../../infrastructure/native/projectFiles.js', () => ({ readCachedEntry:vi.fn(), writeCacheFile:vi.fn() }));
 

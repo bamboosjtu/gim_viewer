@@ -33,7 +33,7 @@
 | `desktop/src/infrastructure/workers/` | 工程 Worker 入口、协议、传输与请求释放；共享请求队列供变电 Spatial 与线路 Worker 使用 | Worker 安全的编解码、工程计算处理器和测量端口 | Feature、应用组合或渲染 |
 | `desktop/src/infrastructure/cache/` | 工程来源、实体、导航与物理目录的 v1 编解码及会话持久化 | 领域投影契约、原生缓存端口 | Worker 客户端、Feature、应用组合或渲染 |
 | `desktop/src/infrastructure/native/` | 工程路径授权、源文件与缓存条目读写、原生解压载体、v1 错误映射及会话守卫 | 生成契约、Tauri invoke、宿主路径解析和测量 | UI、Viewer、Worker 客户端、业务 Feature |
-| `desktop/src/services/` | 跨域缓存、Worker、后台任务、选择、生命周期与未迁移能力的端口 | gim、viewer、bridge、注入的展示端口 | 把领域规则塞回 UI |
+| `desktop/src/services/` | 共享应用运行时、后台业务编排与展示端口 | gim、viewer、bridge、注入的展示端口 | 把领域规则塞回 UI |
 | `desktop/src/config/` | 功能与调试开关 | 无 | 业务状态 |
 | `desktop/src/measurement/` | 宿主与 Worker 探针、产品证据、Trace/Profile/GPU 采样适配 | measurement-core、只读运行时快照 | 把测量状态变成产品业务状态 |
 | `desktop/bridge/` | 生成契约出口、SQLite 索引/设置、文件选择与专用缓存封装 | `@tauri-apps/api` | UI、Viewer |
@@ -102,7 +102,7 @@ SDK 的实现及模块测试归 `packages/gim-sdk/src/`，IFC 运行时解析器
 
 ## 宿主业务域收敛
 
-`desktop/src/services/` 仍承载跨域打开、缓存、选择和展示端口，以及尚未迁移的 Worker。后续按业务能力逐步收敛，不在一次性搬迁中改变运行结果：
+`desktop/src/services/` 承载跨域选择、工程构建、共享几何运行时和展示端口：
 
 ```text
 desktop/src/
@@ -119,11 +119,12 @@ desktop/src/
 
 约束：
 
-- 变电打开工作流已迁入 `features/substation/{application,runtime,presentation}`；专用 Spatial Worker 由变电持有，并复用基础设施请求队列。Spatial 编码器和资源遥测端口留在 `services/`。
+- 变电打开工作流已迁入 `features/substation/{application,runtime,presentation}`；专用 Spatial Worker 由变电持有，并复用基础设施请求队列。Spatial v1 编解码归 `infrastructure/cache/`。DEV 资源遥测由变电与独立设备共同使用，归共享服务。
 - 每次只迁一个纵向工作流，先固定其输入、输出、会话守卫和资源释放器，再移动文件。
 - `packages/powerline-core/` 是独立可复用线路能力包，不并入 `features/powerline`；桌面 feature 只保留应用编排、宿主状态和展示接线。
-- `services/` 中的跨域入口先保留转发，迁移完成后删除；测试跟随被测模块移动，不复制到新目录。
+- 线路专属缓存恢复与发布、MOD 来源读取归 `features/powerline/runtime/`。线路地图、导航、属性索引和检查器投影归 `presentation/`，悬链线与关系诊断归 `diagnostics/`。UI 经组合根注入的端口请求 MOD 来源。
 - 工程 Worker 入口、通信契约和共享请求队列位于 `infrastructure/workers/`。工程派生缓存的共享编解码和读写归 `infrastructure/cache/`，工程文件传输由 `infrastructure/native/` 提供。SQLite 索引和设置命令由 bridge 接线。
+- DEV 几何运行时由变电和独立设备复用。DEV 计算池和 GLB 模板管线随共享运行时管理，因为它们共同持有几何调度、传输预算和模板释放契约。缓存管理界面继续通过应用服务读取工程缓存摘要。
 
 ## 边界检查
 
@@ -139,10 +140,10 @@ desktop/src/
 
 线路导航的数据装配位于 `features/powerline/presentation/lineNavigationProjection.ts`，不依赖 DOM、AppState 或平台 IO；搜索 DTO 位于 `shared/searchTypes.ts`。`ui/lineNavigationTreeView` 负责按需渲染、展开和交互，返回幂等 destroy 句柄。工程会话持有地图与树的展示句柄，释放只作用于对应视图代次。
 
-线路属性分桶、来源关系与 HNum 预览格式化由 `services/lineInspectorProjection.ts` 提供；字典与纯字符串格式化在 `services/propertyPresentation.ts`，DOM 引用事件桥保留于 UI。地图唯一坐标工作集、Mercator 计算与导线样式语义由 `services/lineMapGeometry.ts` 提供。三者无 DOM、AppState、平台 IO 依赖。线路工程视图返回有代次保护的 `destroy()` 句柄，并由会话登记释放地图、导航、搜索及设置监听；旧句柄不得销毁新视图。
+线路属性分桶、来源关系与 HNum 预览格式化由 `features/powerline/presentation/lineInspectorProjection.ts` 提供；字典与纯字符串格式化在 `services/propertyPresentation.ts`，DOM 引用事件桥保留于 UI。地图唯一坐标工作集、Mercator 计算与导线样式语义由 `features/powerline/presentation/lineMapGeometry.ts` 提供。三者无 DOM、AppState、平台 IO 依赖。线路工程视图返回有代次保护的 `destroy()` 句柄，并由会话登记释放地图、导航、搜索及设置监听；旧句柄不得销毁新视图。
 
-属性抽屉的页签、FAM、IFC 与概览 HTML 位于 `services/inspectorMarkup.ts`；线路地图的导线路径、命中距离和塔位分类位于 `services/lineMapGeometry.ts`，分帧预算位于 `services/lineMapStages.ts`。UI 持有 DOM、Canvas 句柄和取消代次，纯模块只接收值与回调。
-`ui/lineMapView.ts` 负责线路地图的 DOM、相机和实例释放。`ui/lineMapRenderer.ts` 持有分帧任务和相机投影缓存，`ui/lineMapPainter.ts` 绘制工程覆盖层并保留 Canvas 模式的塔位屏幕快照。`ui/lineMapPointer.ts` 负责选择、光标与塔位提示，Canvas 手势监听仍由 `ui/lineMapCanvasInput.ts` 持有。塔位和导线命中计算位于 `services/lineMapHitTesting.ts`，与绘制使用同一条导线屏幕路径。销毁实例后，迟到的绘制、定位和交互回调均被拒绝。
+属性抽屉的页签、FAM、IFC 与概览 HTML 位于 `services/inspectorMarkup.ts`；线路地图的导线路径、命中距离和塔位分类位于 `features/powerline/presentation/lineMapGeometry.ts`，分帧预算位于 `features/powerline/presentation/lineMapStages.ts`。UI 持有 DOM、Canvas 句柄和取消代次，纯模块只接收值与回调。
+`ui/lineMapView.ts` 负责线路地图的 DOM、相机和实例释放。`ui/lineMapRenderer.ts` 持有分帧任务和相机投影缓存，`ui/lineMapPainter.ts` 绘制工程覆盖层并保留 Canvas 模式的塔位屏幕快照。`ui/lineMapPointer.ts` 负责选择、光标与塔位提示，Canvas 手势监听仍由 `ui/lineMapCanvasInput.ts` 持有。塔位和导线命中计算位于 `features/powerline/presentation/lineMapHitTesting.ts`，与绘制使用同一条导线屏幕路径。销毁实例后，迟到的绘制、定位和交互回调均被拒绝。
 线路底图按钮和配置状态由 `ui/lineBasemapControls.ts` 渲染；`lineProjectView` 只连接当前地图实例、切换回调和清理代次。
 
 ## 相关文档

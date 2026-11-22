@@ -104,10 +104,8 @@ function scheduleLinePersistence(
     const persistLineCache = async (): Promise<void> => {
       if (!scope.isCurrent()) return;
       try {
-        const { estimatePayloadSizeMB } =
-          await import('../../../services/lineAttrPersistenceService.js');
-        const { buildLineGraphPayload } =
-          await import('../../../services/lineGraphPersistenceService.js');
+        const { estimatePayloadSizeMB } = await import('./lineAttrPersistenceService.js');
+        const { buildLineGraphPayload } = await import('./lineGraphPersistenceService.js');
         const { saveLineProjectCache } = await import('@desktop/database.js');
         if (!scope.isCurrent()) return;
 

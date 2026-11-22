@@ -160,6 +160,22 @@ test('checker keeps feature entry wiring in host composition', () => {
   assert.match(rejected.stderr, /Host composition is only entered by the application/);
 });
 
+test('checker prevents the cleanup coordinator from reaching the DOM shim or Viewer', () => {
+  const { files, run } = fixture();
+  files('desktop/src/app/session/projectCleanup.ts', [
+    "import { container } from '../../services/presentation/dom.js';",
+    "import { releaseProjectViewer } from '../../services/projectViewerLifecycle.js';",
+    "export const load = () => import('../../viewer/viewerRuntime.js');",
+    "export const closed = () => window.dispatchEvent(new Event('gim:project-closed'));",
+  ].join('\n'));
+  const rejected = run();
+  assert.equal(rejected.status, 1);
+  assert.match(rejected.stderr, /Session uses injected project routing and presentation ports.*presentation\/dom\.js/);
+  assert.match(rejected.stderr, /Session uses injected project routing and presentation ports.*projectViewerLifecycle\.js/);
+  assert.match(rejected.stderr, /Session uses injected project routing and presentation ports.*viewerRuntime\.js/);
+  assert.match(rejected.stderr, /Session uses presentation ports instead of browser globals.*window/);
+});
+
 test('checker keeps Powerline parsing with its scope and projection construction outside UI', () => {
   const { files, run } = fixture();
   files('desktop/src/services/legacyCleanup.ts',
@@ -178,10 +194,13 @@ test('checker keeps equipment independent of station presentation and shared DEV
     "const station = () => import('../../substation/presentation/substationPresentation.js');");
   files('desktop/src/services/geometryOnlyRuntime.ts',
     "import { equipmentPresentationFor } from '../features/equipment/presentation/equipmentPresentationPort.js';");
+  files('desktop/src/services/devLodRuntime.ts',
+    "import { stationViewPolicy } from '../features/substation/runtime/stationViewPolicy.js';");
   const rejected = run();
   assert.equal(rejected.status, 1);
   assert.match(rejected.stderr, /Equipment must not depend on another feature/);
   assert.match(rejected.stderr, /shared DEV geometry must stay independent of features/);
+  assert.match(rejected.stderr, /devLodRuntime\.ts: shared DEV geometry must stay independent of features/);
 });
 
 test('checker keeps Worker infrastructure between host orchestration and worker-safe dependencies', () => {

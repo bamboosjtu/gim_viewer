@@ -1,6 +1,5 @@
 import { describe,it,expect,vi } from 'vitest';
 import { AppState } from '../../app/state.js';
-import { isCurrentGeometry } from '../../shared/projectSession.js';
 import { createCachePublishStatus } from '../cachePublishStatus.js';
 describe('session ownership and background requests',()=>{
   it.each(['activate','reset','invalidate'])('%s releases runtimes even when another disposer throws',entry=>{
@@ -12,10 +11,6 @@ describe('session ownership and background requests',()=>{
     expect(release).toHaveBeenCalledTimes(1);expect(state.deviceLodRuntime).toBeNull();expect(state.isCurrentSession(session)).toBe(false);
     expect(log).toHaveBeenCalledOnce();expect(log).toHaveBeenCalledWith('[Session] 资源释放失败',failure);
     state.invalidatePendingLoads();expect(release).toHaveBeenCalledTimes(1);log.mockRestore();
-  });
-  it('geometry changes do not cancel semantic work',()=>{
-    const state=new AppState(),session=state.activateProject(1,'a');state.advanceGeometryBatch();
-    expect(state.isCurrentSession(session)).toBe(true);expect(isCurrentGeometry(state,session)).toBe(false);
   });
   it('old publication callbacks cannot overwrite a new session',()=>{
     document.body.innerHTML='<span id="status-publish"></span>';let current=true;

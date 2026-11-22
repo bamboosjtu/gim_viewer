@@ -5,7 +5,7 @@ import { perfMark, perfMarkProductMoment } from '../utils/perfTimings.js';
 import {
   isSubstationSourceMaterializing,
   substationSourcePreparationMessage,
-} from './substationExtractionJob.js';
+} from './projectSourcePreparation.js';
 import {
   buildSubstationAliasIndex,
   deviceOccurrenceScope,

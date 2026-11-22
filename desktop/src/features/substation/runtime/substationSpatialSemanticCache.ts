@@ -12,7 +12,7 @@ import {
   type SubstationSpatialSemanticSnapshot,
   type SubstationSpatialCacheReadResult,
   type EncodedSpatialCache,
-} from '../../../services/substationSpatialCodec.js';
+} from '../../../infrastructure/cache/substationSpatialCodec.js';
 
 /** Try a derived cache without touching IFC files. All failures are misses. */
 export async function readSubstationSpatialSemanticCache(

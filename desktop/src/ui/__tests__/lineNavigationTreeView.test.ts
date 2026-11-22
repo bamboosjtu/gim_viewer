@@ -1,4 +1,4 @@
-import {makeLineFixture} from '../../services/__tests__/lineNavigationFixture.js';
+import {makeLineFixture} from '../../features/powerline/presentation/__tests__/lineNavigationFixture.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { renderLineNavigationTree, revealLineNavigationTarget } from '../lineNavigationTreeView.js';

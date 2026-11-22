@@ -2,7 +2,7 @@ import {
   clamp,
   prepareLineMapGeometry,
   type RuntimeGeoPoint,
-} from '../services/lineMapGeometry.js';
+} from '../features/powerline/presentation/lineMapGeometry.js';
 import { mountLineMapControls, LAYER_ITEMS, type LayerState } from './lineMapControls.js';
 import { createLineMapRenderer } from './lineMapRenderer.js';
 import { createLineMapPointer } from './lineMapPointer.js';

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AppState } from '../../app/state.js';
 import type { CbmNode, FileDevEntry, IfcEntry } from '../../gim/types.js';
-import type { StdSldParseResult } from '../stdSldService.js';
+import type { StdSldParseResult } from '../../features/substation/runtime/stdSldService.js';
 import { onGimExtracted } from '../../features/substation/application/substationColdSource.js';
 import {perfReset, perfProductMomentSnapshot, perfSnapshot} from '../../utils/perfTimings.js';
 
@@ -46,7 +46,7 @@ vi.mock('../../gim/ifcSpatialParser.js', () => ({
 vi.mock('../../gim/fileDevParser.js', () => ({ parseFileDevRelation: mocks.parseFileDevRelation }));
 vi.mock('../../ui/cbmTreeView.js', () => ({ buildAndRenderCbmTree: mocks.buildAndRenderCbmTree }));
 vi.mock('../../ui/fileDevView.js', () => ({ renderFileDevPanel: mocks.renderFileDevPanel }));
-vi.mock('../stdSldService.js', () => ({
+vi.mock('../../features/substation/runtime/stdSldService.js', () => ({
   parseStdSldOnGimExtracted: mocks.parseStdSldOnGimExtracted,
   restoreStdSldFromCache: mocks.restoreStdSldFromCache,
   commitStdSldResult: mocks.commitStdSldResult,

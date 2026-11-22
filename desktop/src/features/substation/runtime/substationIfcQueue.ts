@@ -1,6 +1,6 @@
 import type { AppState } from '../../../app/state.js';
 import type { IfcEntry } from '../../../gim/types.js';
-import { planSubstationIfcLoad } from '../../../services/ifcLoadOrder.js';
+import { planSubstationIfcLoad } from './ifcLoadOrder.js';
 import { setConnectionStatus } from '../../../services/presentation/shell_statusBar.js';
 import type { SessionScope } from '../../../shared/sessionScope.js';
 import { logger } from '../../../utils/logger.js';

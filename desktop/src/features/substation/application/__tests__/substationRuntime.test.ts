@@ -48,7 +48,7 @@ vi.mock("../../../../infrastructure/native/archiveFilePersistence.js", () => ({
 vi.mock("../../../../infrastructure/native/gimExtract.js", () => ({
   createDiskBackedFile: (_id: number, path: string) => new File([''], path),
 }));
-vi.mock('../../../../services/gimIndexRestoreService.js', () => ({ restoreGimIndexToState: m.restore }));
+vi.mock('../../runtime/gimIndexRestoreService.js', () => ({ restoreGimIndexToState: m.restore }));
 vi.mock('../../../../services/engineeringService.js', () => ({ beginEngineeringBuild: m.build }));
 vi.mock('../../runtime/substationIfcRuntime.js', () => ({ loadAllIfcFiles: m.load }));
 vi.mock('../../../../services/geometryOnlyRuntime.js', () => ({

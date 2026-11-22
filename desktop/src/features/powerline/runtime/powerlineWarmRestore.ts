@@ -104,10 +104,10 @@ export async function restorePowerlineProject(
     () => import('@desktop/database.js'),
   );
   const { buildLineGraphFromCache, publishRestoredLineGraph } = await scope.read(
-    () => import('../../../services/lineGraphRestoreService.js'),
+    () => import('./lineGraphRestoreService.js'),
   );
   const { restoreLineAttributesToState } = await scope.read(
-    () => import('../../../services/lineAttrRestoreService.js'),
+    () => import('./lineAttrRestoreService.js'),
   );
   const result = await scope.read(() => getLineGraph(projectId));
   if (!scope.isCurrent()) return;

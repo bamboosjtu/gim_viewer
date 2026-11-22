@@ -209,18 +209,6 @@ describe('extractGimHeader', () => {
     expect(extractGimHeader(buf)).toBeNull();
   });
 
-  it('archiveOffset 与 findArchiveOffset 一致', () => {
-    const buf = buildGimBuffer({
-      magicSuffix: 0x53,
-      projectId: 'P',
-      archiveSig: SEVEN_ZIP_SIG,
-      zeroPadCount: 12,
-    });
-    const info = extractGimHeader(buf);
-    const directOffset = findArchiveOffset(buf);
-    expect(info!.archiveOffset).toBe(directOffset);
-  });
-
   it('连续 4+ 个 \\0 视为零填充，后续字段不再解析', () => {
     // projectId \0 \0\0\0\0 projectName 应在 projectId 后停止
     const bytes: number[] = [];

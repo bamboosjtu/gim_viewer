@@ -1,7 +1,7 @@
 import { it, expect } from 'vitest';
-import { buildGimIndexPayload } from '../../../../services/gimIndexPersistenceService.js';
+import { buildGimIndexPayload } from '../gimIndexPersistenceService.js';
 import { buildGeometryRefsPayload } from '../../../../services/__tests__/geometryRefsPayload.js';
-import { restoreGimIndexToState } from '../../../../services/gimIndexRestoreService.js';
+import { restoreGimIndexToState } from '../gimIndexRestoreService.js';
 import { parseFamSectionsWithDiagnostics } from '@gim/gim-sdk/source';
 import { buildCbmTree } from '../../../../gim/cbmParser.js';
 import { AppState } from '../../../../app/state.js';

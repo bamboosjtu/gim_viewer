@@ -80,9 +80,25 @@ const viewerBridgeImports = new Map([
 ]);
 const infrastructurePorts = new Map([
   ['infrastructure/workers/engineeringWorker.ts', 'services/engineeringWorkerHandler.js'],
+  [
+    'infrastructure/workers/compositionProjectionWorker.ts',
+    'services/projections/compositionSpatial.js',
+  ],
   ['infrastructure/cache/engineeringCacheCodec.ts', 'services/projections/compositionSpatial.js'],
   ['infrastructure/native/invokeTimed.ts', '@tauri-apps/api/core'],
 ]);
+const linePresentationReads = new Set(
+  [
+    'lineAttributeIndex.js',
+    'lineInspectorProjection.js',
+    'lineMapGeometry.js',
+    'lineMapHitTesting.js',
+    'lineMapStages.js',
+    'lineWireSemanticService.js',
+  ].map((name) => `features/powerline/presentation/${name}`),
+);
+// This optional UI export consumes read-only graph and map projections.
+linePresentationReads.add('features/powerline/diagnostics/lineCatenaryAuditExportService.js');
 // Views may use explicit presentation selectors/formatters, never parsers or business classifiers.
 const uiPresentationValues = new Map([
   [
@@ -142,10 +158,13 @@ for (const [layer, sourceRoot] of [
       'features/powerline/presentation/lineMapProjection.ts',
       'features/powerline/presentation/lineNavigationProjection.ts',
       'features/powerline/presentation/lineNavigationTargets.ts',
-      'services/lineInspectorProjection.ts',
-      'services/lineMapGeometry.ts',
-      'services/lineMapHitTesting.ts',
-      'services/lineMapStages.ts',
+      'features/powerline/presentation/lineInspectorProjection.ts',
+      'features/powerline/presentation/lineMapGeometry.ts',
+      'features/powerline/presentation/lineMapHitTesting.ts',
+      'features/powerline/presentation/lineMapStages.ts',
+      'features/powerline/presentation/lineAttributeIndex.ts',
+      'features/powerline/presentation/lineWireSemanticService.ts',
+      'features/powerline/diagnostics/lineCatenaryAuditExportService.ts',
       'services/inspectorMarkup.ts',
       'services/propertyPresentation.ts',
     ].includes(localPath);
@@ -165,6 +184,14 @@ for (const [layer, sourceRoot] of [
         }
     }
     function visit(node) {
+      if (
+        localPath.startsWith('app/session/') &&
+        ts.isIdentifier(node) &&
+        ['document', 'window', 'HTMLElement'].includes(node.text)
+      )
+        failures.push(
+          `${localPath}: Session uses presentation ports instead of browser globals (${node.text})`,
+        );
       if (
         localPath.startsWith('features/equipment/') ||
         localPath === 'services/geometryOnlyRuntime.ts'
@@ -244,7 +271,12 @@ for (const [layer, sourceRoot] of [
         const target = targetPath.split('/')[0];
         if (
           localPath.startsWith('app/session/') &&
-          (target === 'features' || target === 'ui' || targetPath.startsWith('app/composition/'))
+          (target === 'features' ||
+            target === 'ui' ||
+            targetPath.startsWith('app/composition/') ||
+            targetPath === 'services/presentation/dom.js' ||
+            targetPath === 'services/projectViewerLifecycle.js' ||
+            (localPath === 'app/session/projectCleanup.ts' && target === 'viewer'))
         )
           failures.push(
             `${localPath}: Session uses injected project routing and presentation ports (${name})`,
@@ -300,7 +332,12 @@ for (const [layer, sourceRoot] of [
           failures.push(
             `${localPath}: Worker infrastructure cannot depend on host composition or rendering (${name})`,
           );
-        if (localPath === 'services/geometryOnlyRuntime.ts' && target === 'features')
+        if (
+          /^(?:services\/geometryOnlyRuntime|services\/devLod\w+|services\/devGeometryWorker\w*)\.ts$/.test(
+            localPath,
+          ) &&
+          target === 'features'
+        )
           failures.push(
             `${localPath}: shared DEV geometry must stay independent of features (${name})`,
           );
@@ -313,24 +350,32 @@ for (const [layer, sourceRoot] of [
         if (
           sourceRoot === root &&
           targetPath.startsWith('features/powerline/runtime/') &&
-          !localPath.startsWith('features/powerline/')
+          !localPath.startsWith('features/powerline/') &&
+          !(
+            localPath === 'app/composition/presentationBindings.ts' &&
+            targetPath === 'features/powerline/runtime/lineModRuntimeService.js'
+          )
         ) {
           failures.push(`${localPath}: Powerline runtime belongs to the project scope (${name})`);
         }
         if (layer === 'ui' && targetPath.startsWith('features/powerline/')) {
           const clause = ts.isImportDeclaration(node) ? node.importClause : undefined;
           const bindings = clause?.namedBindings;
+          const selector =
+            targetPath === 'features/powerline/presentation/lineNavigationTargets.js'
+              ? 'resolveLineNavigationTarget'
+              : targetPath === 'features/powerline/presentation/lineModSourcePort.js'
+                ? 'loadLineModSourcesForNode'
+                : undefined;
           const selectors =
-            targetPath === 'features/powerline/presentation/lineNavigationTargets.js' &&
+            selector &&
             !clause?.name &&
             bindings &&
             ts.isNamedImports(bindings) &&
             bindings.elements.every(
-              (item) =>
-                item.isTypeOnly ||
-                (item.propertyName ?? item.name).text === 'resolveLineNavigationTarget',
+              (item) => item.isTypeOnly || (item.propertyName ?? item.name).text === selector,
             );
-          if (!clause?.isTypeOnly && !selectors)
+          if (!clause?.isTypeOnly && !selectors && !linePresentationReads.has(targetPath))
             failures.push(
               `${localPath}: UI consumes Powerline projections and selection queries (${name})`,
             );
@@ -689,6 +734,7 @@ for (const path of all) {
 for (const entry of [
   'main.ts',
   'app/session/openProject.ts',
+  'app/session/projectSourceAcquisition.ts',
   'app/composition/projectRuntimes.ts',
 ]) {
   const pending = [resolve(root, entry)],

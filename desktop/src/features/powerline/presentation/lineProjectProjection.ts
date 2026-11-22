@@ -1,6 +1,6 @@
 import type { AppState } from '../../../app/state.js';
 import type { GimGraph } from '@gim/powerline-core/gimGraphTypes.js';
-import { buildLineAttributeIndex } from '../../../services/lineAttrRestoreService.js';
+import { buildLineAttributeIndex } from './lineAttributeIndex.js';
 import { perfBegin, type PerfSession } from '../../../utils/perfTimings.js';
 import { buildLineMapProjection } from './lineMapProjection.js';
 import {

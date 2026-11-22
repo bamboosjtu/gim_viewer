@@ -23,4 +23,4 @@
 
 按实际改动选择桌面线路或设备/Android 路线，记录导入、语义暖恢复、地图首显、连续交互及开闭保留。不得用桌面 Node、模拟器或高内存机器替代手机权限、SAF、显示与原生内存验收；也不因形式统一而默认重跑全部变电样本。
 
-代码：[共享核心](../../packages/powerline-core/src/index.ts)、[线路运行时](../../desktop/src/features/powerline/application/openPowerlineProject.ts)、[地图几何](../../desktop/src/services/lineMapGeometry.ts)。检查：[暖语义](../../desktop/src/features/powerline/runtime/__tests__/lineSemanticWarmFastPath.test.ts)、[解析竞态](../../desktop/src/features/powerline/runtime/__tests__/lineParserWorkerRace.test.ts)、[地图生命周期](../../desktop/src/ui/__tests__/lineMapLifecycle.test.ts)及 Android 原生现有存储测试。
+代码：[共享核心](../../packages/powerline-core/src/index.ts)、[线路运行时](../../desktop/src/features/powerline/application/openPowerlineProject.ts)、[地图几何](../../desktop/src/features/powerline/presentation/lineMapGeometry.ts)。检查：[暖语义](../../desktop/src/features/powerline/runtime/__tests__/lineSemanticWarmFastPath.test.ts)、[解析竞态](../../desktop/src/features/powerline/runtime/__tests__/lineParserWorkerRace.test.ts)、[地图生命周期](../../desktop/src/ui/__tests__/lineMapLifecycle.test.ts)及 Android 原生现有存储测试。

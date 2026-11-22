@@ -74,7 +74,7 @@ npm run tauri:dev     # Tauri 开发窗口
 | `npm run local-tests:check` | 检查跟踪的 `local-tests/mini-samples.example.json` |
 | `npm run test:local -- --build <原生构建清单>` | 打开开发者登记的一变、一线、一设备；skip 不计通过 |
 | `npm run test:coverage` | 领域、来源及打开/Viewer/线路热点逐文件覆盖率下限，权威门槛见验证文档 |
-| `npm run test:ifc-critical` | IFC 转换、会话竞态、缓存与开洞策略 |
+| `npm run test:module -- viewer infrastructure/native` | 按模块发现 IFC 转换、会话竞态、缓存、开洞策略和原生提取的测试及消费者 |
 | `npm run test:ifc-connections-local` | 仅本地：真实 web-ifc/WASM 分块/完整扫描对照和实际堆增长；默认 Node，追加 `-- --build <隔离构建清单>` 在固定 WebView2 执行同一案例；证据写入 `tmp/local-tests/`，不加入 CI |
 | `npm run test:acceptance-tools` | 验收构建、清单与探针协议 |
 | `npm run test:measurement-tools` | 测量 CLI、Trace/CPU/WPA 协议与正确性规则（无工程样本） |
