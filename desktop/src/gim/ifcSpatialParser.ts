@@ -41,7 +41,6 @@ import {
   scanIfcEntityBoundaries,
   type RawIfcEntity,
   type ScannedIfcEntity,
-  type ScannedIfcEntityCallback,
 } from '@gim/gim-sdk/parser';
 
 export interface SpatialAssetLink {
@@ -1010,27 +1009,6 @@ function parseIfcModel(
   };
 }
 
-function scanIfcEntitiesSelective(
-  text: string,
-  shouldRetain: (ifcType: string, expressId: number) => boolean,
-  onScanned?: ScannedIfcEntityCallback,
-): { retained: RawIfcEntity[]; rawEntityCount: number; totalTypeCounts: Map<string, number> } {
-  const retained: RawIfcEntity[] = [];
-  const totalTypeCounts = new Map<string, number>();
-  const rawEntityCount = scanIfcEntityBoundaries(text, (expressId, ifcType, bodyStart, bodyEnd) => {
-    totalTypeCounts.set(ifcType, (totalTypeCounts.get(ifcType) ?? 0) + 1);
-    // 仅 placement 候选需要回调；避免对数百万普通实体产生一次额外
-    // callback/分支，再由 pass 1 统一收集其压缩位置编码。
-    if (onScanned && isIfcPlacementEntityType(ifcType)) {
-      onScanned(expressId, ifcType, bodyStart, bodyEnd);
-    }
-    if (shouldRetain(ifcType, expressId)) {
-      retained.push(materializeIfcEntity(text, { expressId, ifcType, bodyStart, bodyEnd }));
-    }
-  });
-  return { retained, rawEntityCount, totalTypeCounts };
-}
-
 function isIfcUnitEntityType(ifcType: string): boolean {
   return (
     ifcType === 'IFCSIUNIT' ||
@@ -1060,19 +1038,30 @@ function addRelationReference(
  */
 function scanIfcSemanticPass1(text: string): SelectiveIfcScanResult {
   const placementCandidates = new Map<number, number>();
-  const first = scanIfcEntitiesSelective(
-    text,
-    (ifcType) =>
-      SPATIAL_TYPES.has(ifcType) ||
-      isIfcNavigationObjectType(ifcType) ||
-      isIfcUnitEntityType(ifcType) ||
-      ifcType.startsWith('IFCREL'),
-    (expressId, ifcType, bodyStart) => {
-      if (isIfcPlacementEntityType(ifcType)) {
-        placementCandidates.set(expressId, encodePlacementCandidate(ifcType, bodyStart));
-      }
-    },
-  );
+  const retained: RawIfcEntity[] = [];
+  // STEP repeats the same resource types millions of times. Use the per-type
+  // counter to share the classification and placement decision across records.
+  const types = new Map<string, { count: number; retain: boolean; placementCode: number }>();
+  const rawEntityCount = scanIfcEntityBoundaries(text, (expressId, ifcType, bodyStart, bodyEnd) => {
+    let type = types.get(ifcType);
+    if (!type) {
+      type = {
+        count: 0,
+        retain:
+          SPATIAL_TYPES.has(ifcType) ||
+          isIfcNavigationObjectType(ifcType) ||
+          isIfcUnitEntityType(ifcType) ||
+          ifcType.startsWith('IFCREL'),
+        placementCode: PLACEMENT_TYPE_CODE[ifcType] ?? 0,
+      };
+      types.set(ifcType, type);
+    }
+    type.count++;
+    if (type.placementCode) placementCandidates.set(expressId, bodyStart * 8 + type.placementCode);
+    if (type.retain)
+      retained.push(materializeIfcEntity(text, { expressId, ifcType, bodyStart, bodyEnd }));
+  });
+  const totalTypeCounts = new Map([...types].map(([type, { count }]) => [type, count]));
   const selectedById = new Map<number, RawIfcEntity>();
   const relationships: RawIfcEntity[] = [];
   const relationshipRefsById = new Map<number, number[]>();
@@ -1085,7 +1074,7 @@ function scanIfcSemanticPass1(text: string): SelectiveIfcScanResult {
   const boundarySpaceIdsByObjectId = new Map<number, number[]>();
   const spatialRelationIds = new Set<number>();
   const referencedIds = new Set<number>();
-  for (const record of first.retained) {
+  for (const record of retained) {
     if (record.ifcType.startsWith('IFCREL')) {
       relationships.push(record);
       const relationRefs = record.args.flatMap((arg) => parseRefs(arg));
@@ -1153,10 +1142,13 @@ function scanIfcSemanticPass1(text: string): SelectiveIfcScanResult {
   // 关系引用可能指向厂商扩展的实体类型；定向二遍只取这些 express id。
   const rescueIds = new Set<number>([...referencedIds].filter((id) => !selectedById.has(id)));
   if (rescueIds.size > 0) {
-    const rescue = scanIfcEntitiesSelective(text, (_ifcType, expressId) =>
-      rescueIds.has(expressId),
-    );
-    for (const record of rescue.retained) selectedById.set(record.expressId, record);
+    scanIfcEntityBoundaries(text, (expressId, ifcType, bodyStart, bodyEnd) => {
+      if (rescueIds.has(expressId))
+        selectedById.set(
+          expressId,
+          materializeIfcEntity(text, { expressId, ifcType, bodyStart, bodyEnd }),
+        );
+    });
   }
 
   const placementRoots = new Set<number>();
@@ -1172,23 +1164,23 @@ function scanIfcSemanticPass1(text: string): SelectiveIfcScanResult {
     relationshipRefsById,
     spatialRelationRefsById,
     placementCandidates,
-    rawEntityCount: first.rawEntityCount,
-    totalTypeCounts: first.totalTypeCounts,
+    rawEntityCount,
+    totalTypeCounts,
     spatialContainedIds,
     hostObjectIdsByChildId,
     boundarySpaceIdsByObjectId,
     spatialRelationIds,
     placementRoots,
-    propertyEntityCount: [...first.totalTypeCounts.entries()]
+    propertyEntityCount: [...totalTypeCounts.entries()]
       .filter(([type]) => type.startsWith('IFCPROPERTY'))
       .reduce((sum, [, count]) => sum + count, 0),
-    quantityEntityCount: [...first.totalTypeCounts.entries()]
+    quantityEntityCount: [...totalTypeCounts.entries()]
       .filter(([type]) => type.startsWith('IFCQUANTITY') || type === 'IFCELEMENTQUANTITY')
       .reduce((sum, [, count]) => sum + count, 0),
-    materialEntityCount: [...first.totalTypeCounts.entries()]
+    materialEntityCount: [...totalTypeCounts.entries()]
       .filter(([type]) => type.startsWith('IFCMATERIAL'))
       .reduce((sum, [, count]) => sum + count, 0),
-    classificationEntityCount: [...first.totalTypeCounts.entries()]
+    classificationEntityCount: [...totalTypeCounts.entries()]
       .filter(([type]) => type.startsWith('IFCCLASSIFICATION'))
       .reduce((sum, [, count]) => sum + count, 0),
   };
@@ -1246,10 +1238,6 @@ const PLACEMENT_TYPE_BY_CODE: Readonly<Record<number, string>> = {
   5: 'IFCDIRECTION',
 };
 
-function encodePlacementCandidate(ifcType: string, bodyStart: number): number {
-  return bodyStart * 8 + (PLACEMENT_TYPE_CODE[ifcType] ?? 0);
-}
-
 function decodePlacementCandidate(expressId: number, encoded: number): ScannedIfcEntity {
   const typeCode = encoded % 8;
   return {
@@ -1259,16 +1247,6 @@ function decodePlacementCandidate(expressId: number, encoded: number): ScannedIf
     // bodyEnd is deliberately resolved lazily only for closure members.
     bodyEnd: -1,
   };
-}
-
-function isIfcPlacementEntityType(ifcType: string): boolean {
-  return (
-    ifcType === 'IFCLOCALPLACEMENT' ||
-    ifcType === 'IFCAXIS2PLACEMENT3D' ||
-    ifcType === 'IFCAXIS2PLACEMENT2D' ||
-    ifcType === 'IFCCARTESIANPOINT' ||
-    ifcType === 'IFCDIRECTION'
-  );
 }
 
 function isIfcSpatialSemanticRelationship(ifcType: string): boolean {

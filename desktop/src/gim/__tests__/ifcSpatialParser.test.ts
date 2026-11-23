@@ -282,6 +282,35 @@ describe('ifc spatial parser', () => {
     expect(index.models[0].resourceTypeCounts?.IFCPROPERTYSINGLEVALUE).toBe(1);
   });
 
+  it('counts repeated resource types once per record and rescues only referenced vendor products', () => {
+    const text = [
+      "#1=IFCBUILDING('building',$,'Building',$,$,$,$,$,.ELEMENT.,$,$,$);",
+      "#2=IFCVENDOREQUIPMENT('kept',$,'Referenced',$,$,$,$,$);",
+      "#3=ifcvendorequipment('unrelated',$,'Unreferenced',$,$,$,$,$);",
+      "#4=IFCRELCONTAINEDINSPATIALSTRUCTURE('relation',$,$,$,(#2),#1);",
+      '#5=IFCCARTESIANPOINT((1.,0.,0.));',
+      '#6=ifccartesianpoint((2.,0.,0.));',
+    ].join('\n');
+    const scans: IfcSpatialParseProfile[] = [];
+    const index = buildSubstationSpatialIndexFromTexts([{ entry, text }], null, [], {
+      onModelParsed: (profile) => scans.push(profile),
+    });
+
+    expect(index.objects.map(({ globalId, spatialContainment }) => ({
+      globalId, spatialContainment,
+    }))).toEqual([{ globalId: 'kept', spatialContainment: 'direct' }]);
+    expect(index.models[0].resourceTypeCounts).toMatchObject({
+      IFCCARTESIANPOINT: 2,
+      IFCVENDOREQUIPMENT: 1,
+    });
+    expect(scans[0]).toMatchObject({
+      rawEntityCount: 6,
+      retainedEntityCount: 3,
+      placementCandidateCount: 2,
+      placementEntityCount: 0,
+    });
+  });
+
   it('placement 闭包支持超过 32 层的深链', () => {
     const depth = 40;
     const placements: string[] = [];
