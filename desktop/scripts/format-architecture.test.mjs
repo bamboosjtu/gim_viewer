@@ -27,7 +27,7 @@ test('changed frontend and project scripts must join the shared list', () => {
     'desktop/scripts/new-check.test.mjs',
     '.github/scripts/new-check.mjs',
     'contracts/generated/native.ts',
-    'packages/powerline-core/src/generated/nativeContracts.ts',
+    'packages/contracts-native/src/generated/nativeContracts.ts',
   ]), ['.github/scripts/new-check.mjs', 'app/src/native/new.ts',
     'desktop/bridge/nativeExtension.ts', 'desktop/scripts/new-check.mjs', 'desktop/src/app/startupProbe.ts',
     'desktop/src/services/newPresentationPort.ts', 'packages/gim-sdk/src/new.ts',

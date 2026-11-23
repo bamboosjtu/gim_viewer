@@ -3,7 +3,7 @@
 本文只回答一个问题：当前 parser 认到的 primitive，在浏览视图中变成了什么。字段解释来自
 [xmlModParser](../../desktop/src/gim/geometry/xmlModParser.ts)，几何生成来自
 [xmlModGeometry](../../desktop/src/viewer/xmlModGeometry.ts)，类型契约见
-[ir.ts](../../packages/powerline-core/src/geometry/ir.ts)。它不是 GIM/IFC 格式标准；解析成功不等于精确重建，也不等于源形状、尺寸或安装关系已被验证。
+[ir.ts](../../packages/gim-primitives/src/geometry/ir.ts)。它不是 GIM/IFC 格式标准；解析成功不等于精确重建，也不等于源形状、尺寸或安装关系已被验证。
 
 文件 grammar、Entity 字段回退、Boolean 求值规则和状态计数的完整说明见 [substation-mod](substation-mod.md)；矩阵、单位与颜色契约见 [geometry-model](geometry-model.md)。本文只补充 primitive 粒度的字段映射、LOD 与上限。
 
@@ -169,7 +169,7 @@ loader 另叠一条 1px 中心线：每 Entity 一条 Line，超过 1000 条时�
 
 - parser：[xmlModParser](../../desktop/src/gim/geometry/xmlModParser.ts)；几何与 LOD：[xmlModGeometry](../../desktop/src/viewer/xmlModGeometry.ts)
 - 语义单点：[stretchedBody](../../desktop/src/gim/geometry/stretchedBody.ts)、[offsetRectangularTable](../../desktop/src/gim/geometry/offsetRectangularTable.ts)
-- 类型契约：[ir.ts](../../packages/powerline-core/src/geometry/ir.ts)；加载、中心线与状态汇总：[xmlModLoader](../../desktop/src/viewer/xmlModLoader.ts)
+- 类型契约：[ir.ts](../../packages/gim-primitives/src/geometry/ir.ts)；加载、中心线与状态汇总：[xmlModLoader](../../desktop/src/viewer/xmlModLoader.ts)
 - 格式与 Entity 契约：[substation-mod](substation-mod.md)、[geometry-model](geometry-model.md)
 
 - parser 接受不等于几何支持：19 个 canonical 类型都有分支，但字段缺失、NaN、非正尺寸、退化轮廓、栅格超限会得到 null 或零尺寸几何；renderableTypes 只是诊断分类，不保证该 Entity 出图。

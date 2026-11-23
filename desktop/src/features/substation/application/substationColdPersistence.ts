@@ -8,7 +8,7 @@ import { perfMark, perfMarkProductMoment } from '../../../utils/perfTimings.js';
 import { showLoadingBeforeInteractive } from '../presentation/substationPresentation.js';
 import type { SessionScope } from '../../../shared/sessionScope.js';
 import type { PerfSession } from '../../../utils/perfTimings.js';
-import type { ExtractionResult } from '../../../services/gimOpenCore.js';
+import type { ExtractionResult } from '../../../services/project/gimOpenCore.js';
 import type { CbmNode, FileDevEntry } from '../../../gim/types.js';
 
 type ColdPersistenceInput = {
@@ -161,7 +161,7 @@ export function prepareSubstationColdPersistence({
             const { saveGimIndex, saveGeometryRefs, saveSubstationSemanticRest, validateGimCache } =
               await scope.read(async () => import('@desktop/database.js'));
             const { createCachePublishStatus } = await scope.read(
-              async () => import('../../../services/cachePublishStatus.js'),
+              async () => import('../../../services/project/cachePublishStatus.js'),
             );
             const publication = createCachePublishStatus(() => scope.isCurrent());
             scope.own(publication.resetCachePublishStatus);

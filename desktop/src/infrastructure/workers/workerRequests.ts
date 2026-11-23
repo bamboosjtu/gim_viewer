@@ -1,4 +1,4 @@
-import { GimError } from '@gim/powerline-core/errors.js';
+import { GimError } from '@gim/contracts-native/errors.js';
 /** One settlement path for worker requests, regardless of transport/protocol. */
 export class WorkerRequests<T> {
   get size(): number {

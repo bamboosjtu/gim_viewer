@@ -1,7 +1,7 @@
 import {
   projectSpatialComposition,
   type CompositionBounds,
-} from '../../services/projections/compositionSpatial.js';
+} from '../../services/engineering/compositionSpatial.js';
 import { createWorkerProbe } from '../../measurement/workerProbe.js';
 import {
   finalizeEngineeringComposition,

@@ -1,10 +1,10 @@
-import type { GimRuntimeOpenContext } from '../../../services/gimOpenCore.js';
+import type { GimRuntimeOpenContext } from '../../../services/project/gimOpenCore.js';
 import type { SessionScope } from '../../../shared/sessionScope.js';
 import type { PerfSession } from '../../../utils/perfTimings.js';
 import type { GimGraph } from '@gim/powerline-core/gimGraphTypes.js';
 import { validateGimCache } from '@desktop/database.js';
 import { isTauri } from '@desktop/runtime.js';
-import { projectPresentation } from '../../../services/projectPresentationPort.js';
+import { projectPresentation } from '../../../services/presentation/projectPresentationPort.js';
 import { linePresentation } from '../presentation/linePresentationPort.js';
 import { buildLineProjectProjection } from '../presentation/lineProjectProjection.js';
 import { restorePowerlineProject } from '../runtime/powerlineWarmRestore.js';
@@ -15,7 +15,7 @@ import {
   hideLoading,
   showLoading,
   scheduleHideLoading,
-} from '../../../services/gimOpenCore.js';
+} from '../../../services/project/gimOpenCore.js';
 import { DEBUG_GIM_CACHE, DEBUG_RUNTIME_LOGS } from '../../../config/debug.js';
 import { debugLog, logger } from '../../../utils/logger.js';
 import { observeMap } from '../../../measurement/mapMeasurement.js';

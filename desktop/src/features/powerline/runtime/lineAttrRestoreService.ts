@@ -14,7 +14,7 @@
  * 设计参考 gimIndexRestoreService.ts（变电工程索引恢复）。
  */
 
-import type { ProjectPropertyCache } from '../../../services/projectPropertyCache.js';
+import type { ProjectPropertyCache } from '../../../services/project/projectPropertyCache.js';
 import type {
   LineAttributeResult,
   LineFamPropertyRecord,

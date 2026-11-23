@@ -3,7 +3,7 @@ import { IfcRuntimeState } from '../shared/ifcRuntimeState.js';
 import { SourceGeometryState } from '../shared/sourceGeometryState.js';
 import { IfcLoadingState } from '../shared/ifcLoadingState.js';
 
-import { ProjectPropertyCache } from '../services/projectPropertyCache.js';
+import { ProjectPropertyCache } from '../services/project/projectPropertyCache.js';
 import { ProjectViewState } from '../shared/projectViewState.js';
 import { EngineeringSessionState } from './session/engineeringSessionState.js';
 import { RuntimeSlot } from '../shared/runtimeSlot.js';

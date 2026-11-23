@@ -1,6 +1,6 @@
 import { getFileEntryResolver } from '../../../gim/entryResolver.js';
-import type { SubstationRestPayload } from '@gim/powerline-core/generated/nativeContracts.js';
-export type { SubstationRestPayload } from '@gim/powerline-core/generated/nativeContracts.js';
+import type { SubstationRestPayload } from '@gim/contracts-native';
+export type { SubstationRestPayload } from '@gim/contracts-native';
 import type { CbmNode, FileDevEntry, IfcEntry } from '../../../gim/types.js';
 import type {
   GimIndexPayload,
@@ -17,7 +17,7 @@ import { parseFamSectionsWithDiagnostics } from '../../../gim/famParser.js';
 
 /** 属性文件文本读取并发数（acc-plan P2-3） */
 const PARSE_CONCURRENCY = 32;
-import { parseKeyValue, keyValueDiagnostics } from '@gim/powerline-core/kvParser.js';
+import { parseKeyValue, keyValueDiagnostics } from '@gim/gim-primitives/kvParser.js';
 import { SourceConflictError } from '../../../gim/sourceDocument.js';
 import { normalizeFilePath } from '../../../gim/fileLookup.js';
 import { isGimEmptyValue, resolveBaseFamilyReferences } from '../../../gim/gimValueSemantics.js';

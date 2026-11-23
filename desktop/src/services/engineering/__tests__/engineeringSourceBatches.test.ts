@@ -1,0 +1,102 @@
+// @vitest-environment node
+import{it,expect,vi}from'vitest';
+import{EngineeringSourceBatches}from'../engineeringSourceBatches.js';
+import{ENGINEERING_SOURCE_BATCH_BYTES}from'../../../infrastructure/workers/engineeringWorkerProtocol.js';
+import{createEngineeringWorkerHandler}from'../engineeringWorkerHandler.js';
+import{decodeEngineeringWorkerResult}from'../../../infrastructure/workers/engineeringWorkerTransport.js';
+
+it('reads a carrier once, preserves byte boundaries and decodes each encoding independently',async()=>{
+ const utf8=new TextEncoder().encode('\uFEFFNAME=匿名设备'),gbk=new Uint8Array([0xd6,0xd0,0xce,0xc4]);
+ const blob=new Blob([utf8,gbk]),read=vi.spyOn(blob,'arrayBuffer'),sources=new EngineeringSourceBatches();
+ sources.add({blob,entries:[{path:'a.dev',offset:0,length:utf8.length},{path:'b.fam',offset:utf8.length,length:gbk.length},{path:'empty.cbm',offset:blob.size,length:0}]});
+ expect(await sources.read('b.fam')).toBe('中文');expect(await sources.read('a.dev')).toContain('NAME=匿名设备');expect(await sources.read('empty.cbm')).toBe('');
+ expect(read).toHaveBeenCalledTimes(1);expect(sources.has('a.dev')).toBe(false);await expect(sources.read('a.dev')).rejects.toThrow('unavailable');
+});
+it('does not decode an unreferenced invalid file or let it poison a valid entry',async()=>{
+ const valid=new TextEncoder().encode('OBJECTMODELPOINTER=unit.dev'),unit=new TextEncoder().encode('SYMBOLNAME=设备'),bad=new Uint8Array([0x81]);
+ const handle=createEngineeringWorkerHandler();await handle({type:'init',scope:'fixture',paths:['project.cbm','unit.dev','unreferenced.fam']});
+ await handle({type:'packed-files',batch:{blob:new Blob([valid,bad,unit]),entries:[{path:'project.cbm',offset:0,length:valid.length},{path:'unreferenced.fam',offset:valid.length,length:bad.length},{path:'unit.dev',offset:valid.length+bad.length,length:unit.length}]}});
+ expect(await handle({type:'extract'})).toMatchObject({type:'graph',summary:{sourceRecords:1}});
+ const sources=new EngineeringSourceBatches();sources.add({blob:new Blob([bad,unit]),entries:[{path:'bad',offset:0,length:1},{path:'unit',offset:1,length:unit.length}]});
+ await expect(sources.read('bad')).rejects.toThrow();expect(await sources.read('unit')).toBe('SYMBOLNAME=设备');
+});
+it('shares the Source document reads between physical extraction and graph extraction', async () => {
+ const source = [
+  ['project.cbm', 'OBJECTMODELPOINTER=unit.dev\nBASEFAMILY=shared.fam'],
+  ['unit.dev', 'SUBDEVICE0=part.dev\nSUBDEVICE1=part.dev'],
+  ['part.dev', 'TYPE=Radiator\nBASEFAMILY=shared.fam'],
+  ['shared.fam', '[设备]\n设备型号=TEST'],
+  ['unreferenced.dev', 'TYPE=Other'],
+ ].map(([path, text]) => {
+  const blob = new Blob([text]);
+  return { path, blob, read: vi.spyOn(blob, 'arrayBuffer') };
+ });
+ const handle = createEngineeringWorkerHandler();
+ await handle({ type: 'init', scope: 'fixture', paths: source.map(({ path }) => path) });
+ await handle({ type: 'files', files: source.map(({ path, blob }) => ({ path, blob })) });
+ expect(await handle({ type: 'extract-geometry' })).toMatchObject({ type: 'geometry' });
+ expect(await handle({ type: 'extract' })).toMatchObject({
+  type: 'graph', summary: { sourceRecords: 3, familyPaths: ['shared.fam'] },
+ });
+ expect(source.map(({ read }) => read.mock.calls.length)).toEqual([1, 1, 1, 0, 0]);
+ expect(await handle({ type: 'assemble', objects: [], models: [] })).toMatchObject({ type: 'model' });
+ expect(source.map(({ read }) => read.mock.calls.length)).toEqual([1, 1, 1, 1, 0]);
+});
+it('rejects gaps, overlap, duplicate paths and oversized carriers before accepting any path',()=>{
+ const blob=new Blob(['abc']),sources=new EngineeringSourceBatches();
+ for(const entries of [[{path:'a',offset:1,length:2}],[{path:'a',offset:0,length:1},{path:'a',offset:1,length:2}],[{path:'a',offset:0,length:4}],[{path:'a',offset:0,length:2}]]){
+  expect(()=>sources.add({blob,entries})).toThrow();expect(sources.has('a')).toBe(false);
+ }
+ expect(()=>sources.add({blob:new Blob([new Uint8Array(ENGINEERING_SOURCE_BATCH_BYTES+1)]),entries:[{path:'a',offset:0,length:ENGINEERING_SOURCE_BATCH_BYTES+1}]})).toThrow('bounds');
+});
+it('does not reread failed carriers and releases registered sources on clear',async()=>{
+ const blob=new Blob(['x']),read=vi.spyOn(blob,'arrayBuffer').mockRejectedValue(Error('read failed')),sources=new EngineeringSourceBatches();
+ sources.add({blob,entries:[{path:'a',offset:0,length:1}]});
+ await expect(sources.read('a')).rejects.toThrow('read failed');await expect(sources.read('a')).rejects.toThrow('read failed');expect(read).toHaveBeenCalledOnce();
+ sources.clear();expect(sources.has('a')).toBe(false);
+});
+it('releases packed and individual sources on failed root extraction and refuses to reuse a stale graph',async()=>{
+ const handle=createEngineeringWorkerHandler(),good=new Blob(['OBJECTMODELPOINTER=unit.dev']);
+ await handle({type:'init',scope:'fixture',paths:['project.cbm','unit.dev']});
+ await handle({type:'files',files:[{path:'project.cbm',blob:good},{path:'unit.dev',blob:new Blob(['SYMBOLNAME=设备'])}]});
+ await handle({type:'extract'});
+ const bad=new Blob([new Uint8Array([0x81])]),unused=new Blob(['unused']),read=vi.spyOn(unused,'arrayBuffer');
+ const batch={blob:bad,entries:[{path:'project.cbm',offset:0,length:1}]};
+ await handle({type:'packed-files',batch});await handle({type:'files',files:[{path:'unit.dev',blob:unused}]});
+ await expect(handle({type:'extract'})).rejects.toThrow();expect(read).not.toHaveBeenCalled();
+ await expect(handle({type:'assemble',objects:[],models:[]})).rejects.toThrow('graph is not ready');
+ // A fresh carrier replaces the failed root. The unreferenced individual
+ // source was released, so its earlier contents cannot leak into this graph.
+ await expect(handle({type:'packed-files',batch:{blob:good,entries:[{path:'project.cbm',offset:0,length:good.size}]}})).resolves.toMatchObject({type:'ready'});
+ expect(await handle({type:'extract'})).toMatchObject({type:'graph'});
+ const reply=await handle({type:'assemble',objects:[],models:[]});if(reply.type!=='model')throw Error('model expected');
+ const model=await decodeEngineeringWorkerResult(reply.result,()=>true);
+ expect(model.sources.complete).toBe(false);
+ expect(model.sources.graph.diagnostics).toContainEqual(expect.objectContaining({kind:'read-failed',source:'unit.dev'}));
+ expect(read).not.toHaveBeenCalled();
+});
+it('retains healthy siblings when an available child source cannot be decoded',async()=>{
+ const handle=createEngineeringWorkerHandler();
+ const source=[['project.cbm',new Blob(['SUBSYSTEM0=bad.cbm\nSUBSYSTEM1=good.cbm'])],
+  ['bad.cbm',new Blob([new Uint8Array([0x81])])],['good.cbm',new Blob(['OBJECTMODELPOINTER=unit.dev'])],['unit.dev',new Blob(['SYMBOLNAME=设备'])]] as const;
+ await handle({type:'init',scope:'fixture',paths:source.map(([path])=>path)});
+ await handle({type:'files',files:source.map(([path,blob])=>({path,blob}))});
+ expect(await handle({type:'extract'})).toMatchObject({type:'graph',summary:{sourceRecords:1}});
+ const reply=await handle({type:'assemble',objects:[],models:[]});if(reply.type!=='model')throw Error('model expected');
+ const model=await decodeEngineeringWorkerResult(reply.result,()=>true);
+ expect(model.sources.complete).toBe(false);expect(model.sources.graph.records).toHaveLength(1);
+ expect(model.sources.graph.diagnostics).toContainEqual(expect.objectContaining({kind:'read-failed',source:'bad.cbm'}));
+});
+it('keeps packed extraction identical across shared references and discards prior-run packs on init',async()=>{
+ const source=[['project.cbm','OBJECTMODELPOINTER=unit.dev'],['unit.dev','SYMBOLNAME=设备\nSUBDEVICE0=part.dev\nSUBDEVICE1=part.dev'],['part.dev','SYMBOLNAME=附件']];
+ const parts=source.map(([,text])=>new TextEncoder().encode(text)),entries=source.map(([path],i)=>({path,offset:parts.slice(0,i).reduce((n,p)=>n+p.length,0),length:parts[i].length}));
+ const packed=createEngineeringWorkerHandler(),legacy=createEngineeringWorkerHandler();
+ for(const handler of [packed,legacy])await handler({type:'init',scope:'same',paths:source.map(([path])=>path)});
+ await packed({type:'packed-files',batch:{blob:new Blob(parts),entries}});await legacy({type:'files',files:source.map(([path,text])=>({path,blob:new Blob([text])}))});
+ expect(await packed({type:'extract'})).toEqual(await legacy({type:'extract'}));
+ const results=await Promise.all([packed,legacy].map(async handler=>{
+  const reply=await handler({type:'assemble',objects:[],models:[]});if(reply.type!=='model')throw Error('model expected');
+  const result=await decodeEngineeringWorkerResult(reply.result,()=>true);return{sources:result.sources,snapshot:result.snapshot,navigation:result.navigation};
+ }));expect(results[0]).toEqual(results[1]);
+ await packed({type:'init',scope:'new',paths:['project.cbm']});await expect(packed({type:'extract'})).rejects.toThrow('unavailable');
+});

@@ -29,9 +29,9 @@ function fixture() {
   files('desktop/src/viewer/ifcRegionalRuntime.ts',"import '@desktop/ifcLodCache.js';\nexport {};");
   for(const name of [
     'devLodRuntime','devLodTemplateStore','devLodArtifactWriter','devLodSourceWorkset','devLodReadiness','devLodDiagnostics','devLodTypes'])
-    files(`desktop/src/services/${name}.ts`,'export {};');
-  files('desktop/src/services/engineeringWorkerHandler.ts', 'export {};');
-  files('desktop/src/services/ifcGeometrySource.ts', 'export {};');
+    files(`desktop/src/services/dev-geometry/${name}.ts`,'export {};');
+  files('desktop/src/services/engineering/engineeringWorkerHandler.ts', 'export {};');
+  files('desktop/src/services/project/ifcGeometrySource.ts', 'export {};');
   for (const name of ['engineeringWorkerClient', 'engineeringWorker', 'engineeringWorkerTransport', 'workerRequests'])
     files(`desktop/src/infrastructure/workers/${name}.ts`, 'export {};');
   for(const name of ['substationBackgroundRuntime','substationColdCore','substationDevRuntime','substationDocumentRuntime',
@@ -165,7 +165,7 @@ test('checker prevents the cleanup coordinator from reaching the DOM shim or Vie
   const { files, run } = fixture();
   files('desktop/src/app/session/projectCleanup.ts', [
     "import { container } from '../../services/presentation/dom.js';",
-    "import { releaseProjectViewer } from '../../services/projectViewerLifecycle.js';",
+    "import { releaseProjectViewer } from '../../services/project/projectViewerLifecycle.js';",
     "export const load = () => import('../../viewer/viewerRuntime.js');",
     "export const closed = () => window.dispatchEvent(new Event('gim:project-closed'));",
   ].join('\n'));
@@ -193,10 +193,10 @@ test('checker keeps equipment independent of station presentation and shared DEV
   const { files, run } = fixture();
   files('desktop/src/features/equipment/application/openEquipmentProject.ts',
     "const station = () => import('../../substation/presentation/substationPresentation.js');");
-  files('desktop/src/services/geometryOnlyRuntime.ts',
-    "import { equipmentPresentationFor } from '../features/equipment/presentation/equipmentPresentationPort.js';");
-  files('desktop/src/services/devLodRuntime.ts',
-    "import { stationViewPolicy } from '../features/substation/runtime/stationViewPolicy.js';");
+  files('desktop/src/services/dev-geometry/geometryOnlyRuntime.ts',
+    "import { equipmentPresentationFor } from '../../features/equipment/presentation/equipmentPresentationPort.js';");
+  files('desktop/src/services/dev-geometry/devLodRuntime.ts',
+    "import { stationViewPolicy } from '../../features/substation/runtime/stationViewPolicy.js';");
   const rejected = run();
   assert.equal(rejected.status, 1);
   assert.match(rejected.stderr, /Equipment must not depend on another feature/);
@@ -209,11 +209,11 @@ test('checker keeps Worker infrastructure between host orchestration and worker-
   files('desktop/src/features/powerline/runtime/lineParserWorkerClient.ts',
     "import { WorkerRequests } from '../../../infrastructure/workers/workerRequests.js';");
   files('desktop/src/infrastructure/workers/engineeringWorker.ts',
-    "import { createEngineeringWorkerHandler } from '../../services/engineeringWorkerHandler.js';");
+    "import { createEngineeringWorkerHandler } from '../../services/engineering/engineeringWorkerHandler.js';");
   const accepted = run();
   assert.equal(accepted.status, 0, accepted.stderr);
   files('desktop/src/infrastructure/workers/engineeringWorkerClient.ts',
-    "export const lazy = () => import('../../app/state.js'); import '../../services/engineeringService.js';");
+    "export const lazy = () => import('../../app/state.js'); import '../../services/engineering/engineeringService.js';");
   files('desktop/src/gim/model.ts',
     "import { EngineeringWorkerClient } from '../infrastructure/workers/engineeringWorkerClient.js';");
   const rejected = run();
@@ -230,7 +230,7 @@ test('checker keeps the native port outside domain code and cache codecs usable 
   files('desktop/src/infrastructure/native/invokeTimed.ts',
     "import { invoke } from '@tauri-apps/api/core';");
   files('desktop/src/infrastructure/cache/engineeringCacheCodec.ts',
-    "import { SPATIAL_PROJECTION_POLICY } from '../../services/projections/compositionSpatial.js';");
+    "import { SPATIAL_PROJECTION_POLICY } from '../../services/engineering/compositionSpatial.js';");
   assert.equal(run().status, 0);
   files('desktop/src/infrastructure/cache/otherCodec.ts',
     "import '@desktop/database.js'; import '../workers/engineeringWorkerClient.js';");

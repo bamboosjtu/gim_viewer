@@ -7,8 +7,8 @@ import { resolveIfcModelId } from './modelIdentity.js';
 import { stripIfcExtension } from './modelIdentity.js';
 import { parseDev } from './geometry/devParser.js';
 import { parseCbmDocument } from '@gim/gim-sdk/parser';
-import { normalizeEntityName } from '@gim/powerline-core/entityName.js';
-import { PARSER_LIMITS, parseBoundedCount } from '@gim/powerline-core/parserLimits.js';
+import { normalizeEntityName } from '@gim/gim-primitives/entityName.js';
+import { PARSER_LIMITS, parseBoundedCount } from '@gim/gim-primitives/parserLimits.js';
 import { getFileByPath } from './fileLookup.js';
 import {
   getFirstNonEmptyKv,

@@ -1,5 +1,5 @@
-import type { GimRuntimeOpenContext } from '../../services/gimOpenCore.js';
-import type { GimRuntimeType } from '../../services/gimSourceService.js';
+import type { GimRuntimeOpenContext } from '../../services/project/gimOpenCore.js';
+import type { GimRuntimeType } from '../../services/project/gimSourceService.js';
 import { openPowerlineProject } from '../../features/powerline/application/openPowerlineProject.js';
 import { openSubstationProject } from '../../features/substation/application/substationRuntime.js';
 

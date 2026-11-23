@@ -6,7 +6,7 @@
  * OBJECTMODELPOINTER). Display-name selection, recursive tree building and DEV
  * expansion remain source/tree-builder responsibilities.
  */
-import { normalizeEntityName } from "@gim/powerline-core/entityName.js";
+import { normalizeEntityName } from "@gim/gim-primitives/entityName.js";
 import type { ParseResult } from "./types.js";
 import { fromSourceDiagnostic, parseStatus } from "./diagnostics.js";
 import {
@@ -16,7 +16,7 @@ import {
   type SourceDiagnostic,
   type SourceDocument,
   type SourceField,
-} from "@gim/powerline-core/sourceDocument.js";
+} from "@gim/gim-primitives/sourceDocument.js";
 
 export interface CbmDocumentRecord {
   path: string;

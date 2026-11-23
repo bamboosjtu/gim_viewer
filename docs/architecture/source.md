@@ -17,4 +17,4 @@ Source Core 在 Parser 的无损字段之上建立来源文档、引用、组成
 
 缓存单元测试验证并发请求、失败和会话重试。来源图测试验证跨遍历的读取次数、延迟物化、引用顺序、歧义、物理 occurrence 身份及共享预算。验证入口及消费者测试范围见[测试组织](../validation.md#测试组织)。
 
-桌面工程 Worker 从 SDK Source 能力入口建图。物理目录和来源图在同一提取会话共享 `SourceDocuments` 和条目索引，完成提取后释放临时文档。宿主导航的 IFC 发现与 CBM 树共用 `cbmDocument` 的文件级文档缓存。主线程导航和工程 Worker 各持有自己的解析结果。[Worker 读取次数测试](../../desktop/src/services/__tests__/engineeringSourceBatches.test.ts)
+桌面工程 Worker 从 SDK Source 能力入口建图。物理目录和来源图在同一提取会话共享 `SourceDocuments` 和条目索引，完成提取后释放临时文档。宿主导航的 IFC 发现与 CBM 树共用 `cbmDocument` 的文件级文档缓存。主线程导航和工程 Worker 各持有自己的解析结果。[Worker 读取次数测试](../../desktop/src/services/engineering/__tests__/engineeringSourceBatches.test.ts)

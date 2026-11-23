@@ -16,7 +16,7 @@ Parser 不处理：
 - 文件读取、归档解压、缓存、Tree Builder、Worker 或运行时调度。
 - DOM、Tauri、Three、web-ifc 或第三方几何解码器的适配。
 
-因此 `parser/` 只能依赖 `parser/`、`shared/` 和格式工具（`powerline-core` 的纯格式入口）；不得反向导入 `source/`、`semantic/`、`geometry/`、`engineering/`、`projection/` 或 `adapters/`。五个 Core 可以依赖 Parser，反向依赖由 `verify-capabilities.mjs` 拒绝。
+因此 `parser/` 只能依赖 `parser/`、`shared/` 和 `gim-primitives` 的格式入口。五个 Core 可以依赖 Parser，反向依赖由 `verify-capabilities.mjs` 拒绝。
 
 ## 契约
 
@@ -52,7 +52,7 @@ interface ParseResult<T> {
 - `parser/dev.ts`：DEV 的 SOLIDMODEL/SUBDEVICE 槽位、块内矩阵与来源诊断。
 - `parser/phm.ts`：PHM 的 SOLIDS/SOLIDMODELS 槽位、矩阵和颜色。
 - `parser/substationMod.ts`：变电 XML MOD 的 Device/Entities/Entity 语法；primitive 标签/属性由 Parser 读取，别名/几何近似映射由宿主 `xmlModPrimitiveAdapter` 提供；缺失矩阵与无效矩阵分开记录，无效矩阵保留原始值并给出 `invalid-source-matrix` 诊断。
-- `parser/mod.ts`：MOD 格式族入口，明确区分变电 XML 与线路文本模式；线路实现仍由 `powerline-core` 共享格式源提供。
+- `parser/mod.ts` 区分变电 XML 与线路文本 MOD。线路文本实现由 `gim-primitives` 的共享格式入口提供。
 - `parser/ifcStep.ts`：IFC STEP 实体边界、引号/括号/注释扫描、参数拆分；字符串内的伪造实体头不会被识别，空间归属、坐标解释和空间索引仍在桌面 Geometry。
 - `parser/fileDevRelation.ts`：FileDevRelation 三种厂商写法的纯文本声明和诊断；文件发现、IFC 路径/重复 basename 与 modelId 生成留在桌面适配层。
 - `parser/sch.ts`：SCH 索引语法和 STD/SLD 条目分类；文件发现仍归桌面。

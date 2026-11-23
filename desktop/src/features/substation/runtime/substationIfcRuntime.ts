@@ -17,8 +17,8 @@ import {
   perfMarkProductMoment,
   perfGeometryTracksEnabled,
 } from '../../../utils/perfTimings.js';
-import { startSubstationResourceMonitor } from '../../../services/projectResourceTelemetry.js';
-import { showLoading, hideLoading } from '../../../services/gimOpenCore.js';
+import { startSubstationResourceMonitor } from '../../../services/project/projectResourceTelemetry.js';
+import { showLoading, hideLoading } from '../../../services/project/gimOpenCore.js';
 import { autoLoadModStlPostIfc } from './substationDevRuntime.js';
 
 import {
@@ -27,10 +27,11 @@ import {
 } from '../presentation/substationPresentation.js';
 import { sampleSubstationMemory } from './substationRuntimeTelemetry.js';
 import { stationViewPolicy } from './stationViewPolicy.js';
-import { observeFirstGeometry } from '../../../services/geometryPresentationService.js';
+import { observeFirstGeometry } from '../../../services/presentation/geometryPresentationService.js';
 import { createSubstationIfcLoadProgress } from './substationIfcLoadProgress.js';
 import type { SubstationIfcUsableModel } from './substationIfcModelLoad.js';
-import { runSubstationIfcQueue } from './substationIfcQueue.js';
+import { loadSubstationIfcQueue } from './substationIfcQueue.js';
+import { createSubstationIfcCompletion } from './substationIfcCompletion.js';
 
 const trackedIfcCanvases = new WeakSet<HTMLCanvasElement>();
 
@@ -127,7 +128,7 @@ export async function loadAllIfcFiles(
   // resetGimState 会清空 projectSourceToViewerMatrix，因此每次打开项目时重新解析。
   try {
     const { loadManualCoordOffsetFromLocalStorage } =
-      await import('../../../services/coordinateAlignmentService.js');
+      await import('../../../services/project/coordinateAlignmentService.js');
     if (!isCurrent()) return;
     loadManualCoordOffsetFromLocalStorage(state);
   } catch {
@@ -148,7 +149,7 @@ export async function loadAllIfcFiles(
   showLoading('正在加载 3D 引擎...');
   const endEngine = perfBegin('3D 引擎创建', undefined, perfSession);
   const [{ getViewerRuntimeWithUI }, { IfcConnectionPreviewRuntime }] = await Promise.all([
-    import('../../../services/viewerUIBinding.js'),
+    import('../../../services/presentation/viewerUIBinding.js'),
     import('../../../viewer/ifcConnectionPreviewRuntime.js'),
   ]).catch((error: unknown) => {
     clearIfcPending();
@@ -205,7 +206,7 @@ export async function loadAllIfcFiles(
   // DEV templates are local, independent of the first IFC's coordinate anchor.
   // Start their bounded worker pool now; the LOD owner delays scene commit.
   if (state.currentProjectType === 'substation' && typeof Worker !== 'undefined') {
-    const { startDeviceLod } = await import('../../../services/devLodRuntime.js');
+    const { startDeviceLod } = await import('../../../services/dev-geometry/devLodRuntime.js');
     if (!isCurrent()) return;
     void startDeviceLod(state, ctx, session, (text, detail) => {
       if (isCurrent())
@@ -276,7 +277,7 @@ export async function loadAllIfcFiles(
     const endCoordinate = perfBegin(label, undefined, perfSession);
     try {
       const { syncProjectSourceToViewerFromFragments } =
-        await import('../../../services/coordinateAlignmentService.js');
+        await import('../../../services/project/coordinateAlignmentService.js');
       if (!isCurrent()) return;
       await syncProjectSourceToViewerFromFragments(state, ctx.fragments, { session });
       if (!isCurrent()) return;
@@ -360,7 +361,7 @@ export async function loadAllIfcFiles(
     const { fitCameraToStationOverview } = await import('../../../viewer/camera.js');
     if (!isCurrent()) return;
     // 变电默认打开为整站远景全景，不再恢复上次相机；层级树展开状态仍恢复。
-    const { restoreTreeState } = await import('../../../services/viewStateStore.js');
+    const { restoreTreeState } = await import('../../../services/project/viewStateStore.js');
     restoreTreeState(state);
     if (!isCurrent()) return;
     if (!state.selection.selectionRequest?.target && !state.viewState.viewerUserInteracted) {
@@ -451,28 +452,34 @@ export async function loadAllIfcFiles(
     loadedCount: () => state.ifc.loadedModels.size,
     skippedCount: () => state.ifcLoading.skippedLargeIfc.length,
   });
-  async function loadIfcQueue(): Promise<number | undefined> {
-    const [{ ensureEngineReady }, { loadIfcEntry }, { shouldSkipLargeIfc }] = await Promise.all([
-      import('../../../viewer/ifcLoader.js'),
-      import('../../../viewer/ifcEntryLoader.js'),
-      import('../../../services/appSettings.js'),
-    ]);
-    if (!isCurrent()) return;
-    const endEngineInit = perfBegin('web-ifc / Fragments engine 初始化', undefined, perfSession);
-    await ensureEngineReady(ctx, state, modelCallbacks);
-    if (!isCurrent()) return;
-    endEngineInit(undefined, { initialized: true });
-    return runSubstationIfcQueue({
+  const completion = createSubstationIfcCompletion({
+    state,
+    ctx,
+    entries,
+    session,
+    perfSession,
+    background,
+    progress,
+    measureGeometryTracks,
+    isCurrent,
+    isInteractive: () => interactiveInitialized,
+    syncCoordinateAnchor,
+    enqueueDevGeometry,
+    startDeferredAfterPaint: () => afterPaintOpportunity(() => startDeferredTasks()),
+    initializeInteractiveAfterFirstIfc,
+  });
+
+  const loadIfcQueue = () =>
+    loadSubstationIfcQueue({
       state,
       ctx,
       scope,
       entries,
       connectionPreview,
-      loadEntry: loadIfcEntry,
       progress,
       perfSession,
       measureGeometryTracks,
-      skipLargeIfc: shouldSkipLargeIfc(),
+      modelCallbacks,
       ifcSourceSizes: options.ifcSourceSizes,
       isInteractive: () => interactiveInitialized,
       onUsable: async (entry, { source, object }) => {
@@ -497,116 +504,13 @@ export async function loadAllIfcFiles(
         ).catch(reportBackgroundError);
       },
     });
-  }
-
-  async function settleIfcQueue(skippedCount: number): Promise<boolean> {
-    progress.finishQueue();
-
-    // A first usable IFC normally establishes the coordinate anchor.  Retry
-    // once after the sequential tail only when that first attempt had no
-    // usable Fragments base; this retry is a diagnostic fallback, not an
-    // interactive barrier.
-    if (!state.projectSourceToViewerMatrix) {
-      await syncCoordinateAnchor('变电 coordinate alignment（all IFC fallback）');
-      if (!isCurrent()) return false;
-    }
-
-    progress.settle();
-    background.completeRemainingIfc();
-    state.ifcLoading.pending = false;
-    enqueueDevGeometry();
-    background.markAllIfcReady();
-    // All IFCs may be empty/hidden. Complete source work independently of
-    // presentation; this does not emit an interactive/visible-frame moment.
-    afterPaintOpportunity(() => startDeferredTasks());
-    if (entries.length > 0 && measureGeometryTracks)
-      perfMarkProductMoment(
-        'ifcBaseSettled',
-        {
-          total: entries.length,
-          loaded: state.ifc.loadedModels.size,
-          failed: progress.failedCount(),
-          skipped: skippedCount,
-        },
-        perfSession,
-      );
-    perfMarkProductMoment(
-      'allIfcReady',
-      {
-        total: entries.length,
-        loaded: state.ifc.loadedModels.size,
-        failed: progress.failedCount(),
-        firstInteractive: interactiveInitialized,
-      },
-      perfSession,
-    );
-    void Promise.resolve(
-      sampleSubstationMemory(
-        state,
-        'allIfcReady',
-        perfSession,
-        {
-          total: entries.length,
-          loaded: state.ifc.loadedModels.size,
-          failed: progress.failedCount(),
-        },
-        ctx,
-      ),
-    ).catch(reportBackgroundError);
-
-    return true;
-  }
-
-  async function finishIfcNavigation(): Promise<boolean> {
-    // buildIfcNameIndex 失败不应阻断 UI 渲染
-    const { buildIfcNameIndex } = await import('../../../services/ifcNameIndex.js');
-    if (!isCurrent()) return false;
-    state.engineering.ifcGeometryFinished = true;
-    state.engineeringGeometryEvidenceChanged?.();
-    const endNameIndex = perfBegin('变电 IFC name index', undefined, perfSession);
-    await buildIfcNameIndex(ctx, state, { session }).catch((err) => {
-      logger.warn('[GIM] buildIfcNameIndex failed', err);
-    });
-    if (!isCurrent()) return false;
-    endNameIndex(undefined, { models: state.ifc.loadedModels.size });
-
-    if (!interactiveInitialized && state.ifc.loadedModels.size > 0) {
-      // Defensive fallback for a loader that populated state without the
-      // usual first-model event.  Normal IFC paths initialize above.
-      for (const entry of entries) {
-        const id = state.ifc.loadedModels.get(entry.modelId)?.runtimeModelId;
-        const object =
-          id && state.ifc.isCurrentRuntimeModel(id)
-            ? ctx.fragments.list.get(id)?.object
-            : undefined;
-        if (!object) continue;
-        await initializeInteractiveAfterFirstIfc(entry, 'unknown', object);
-        break;
-      }
-      if (!isCurrent()) return false;
-    }
-    await renderSubstationCoreUi(
-      state,
-      (text) => showLoadingBeforeInteractive(state, text),
-      session,
-      perfSession,
-      '变电 navigation/UI（all IFC）',
-    );
-    if (!isCurrent()) return false;
-    // Keep the heavy post-IFC lane behind the final name-index/UI pass.  The
-    // allIfcReady product moment is already recorded above, but releasing the
-    // coordinator here avoids DEV geometry or a spatial rebuild competing with
-    // the last mandatory UI bookkeeping.
-    background.markAllIfcReady();
-    return true;
-  }
 
   const lifecycleTask = (async (): Promise<void> => {
     try {
       const skippedCount = await loadIfcQueue();
       if (skippedCount === undefined || !isCurrent()) return;
-      if (!(await settleIfcQueue(skippedCount)) || !isCurrent()) return;
-      if (!(await finishIfcNavigation()) || !isCurrent()) return;
+      if (!(await completion.settle(skippedCount)) || !isCurrent()) return;
+      if (!(await completion.finishNavigation()) || !isCurrent()) return;
     } catch (err) {
       if (!isCurrent()) return;
       clearIfcPending();

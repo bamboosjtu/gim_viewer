@@ -1,4 +1,4 @@
-import type { DiagramPresentation } from '../services/diagramPresentationPort.js';
+import type { DiagramPresentation } from '../services/presentation/diagramPresentationPort.js';
 let active: object | undefined;
 export const diagramPresentation: DiagramPresentation = {
   async render(state, current) {

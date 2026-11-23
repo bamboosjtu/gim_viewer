@@ -4,7 +4,7 @@ import type { AppState } from '../state.js';
 
 function scheduleBaselineBeforeOpen(state: AppState, generation: number): void {
   const perfSession = perfCurrentSession();
-  void import('../../services/projectResourceTelemetry.js')
+  void import('../../services/project/projectResourceTelemetry.js')
     .then(({ sampleSubstationRuntimeResources }) =>
       sampleSubstationRuntimeResources(
         state,

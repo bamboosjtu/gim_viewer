@@ -1,0 +1,116 @@
+import { logger } from '../../utils/logger.js';
+import type { CbmNode } from '../../gim/types.js';
+import type { ViewerContext } from '../../viewer/viewerEngine.js';
+import type { IfcRuntimeState } from '../../shared/ifcRuntimeState.js';
+import type { IfcEntry } from '../../gim/types.js';
+interface IfcNameContext {
+  ifc: Pick<IfcRuntimeState, 'getRuntimeModelId'>;
+  currentIfcEntries: IfcEntry[];
+  ifcGuidIndex: ReadonlyMap<string, CbmNode>;
+  ifcGuidToName: Map<string, string>;
+  captureProjectSession(): ProjectLoadSession;
+  isCurrentSession(session: ProjectLoadSession): boolean;
+}
+import type { ProjectLoadSession } from '../../shared/projectSession.js';
+import { DEBUG_IFC_LOAD } from '../../config/debug.js';
+import { debugLog } from '../../utils/logger.js';
+import { resolveIfcModelId } from '../../gim/modelIdentity.js';
+
+/**
+ * 判断 IFC Name 是否为无意义占位符（不应覆盖 CBM/DEV 名称）。
+ * 与 gimIndexer.ts 的 isPlaceholderName 保持一致。
+ */
+function isPlaceholderIfcName(name: string): boolean {
+  const t = name.trim();
+  if (t === '' || t === '&其他' || t === '其他') return true;
+  const tl = t.toLowerCase();
+  return tl === 'other' || tl === 'others';
+}
+
+const completedModels = new WeakSet<object>();
+const pendingIndexes = new WeakMap<IfcNameContext, Promise<void>>();
+
+/** Serialize enrichment per state; completed runtime models are not rescanned. */
+export async function buildIfcNameIndex(
+  ctx: ViewerContext,
+  state: IfcNameContext,
+  options: { session?: ProjectLoadSession } = {},
+): Promise<void> {
+  const session = options.session ?? state.captureProjectSession();
+  const previous = pendingIndexes.get(state) ?? Promise.resolve();
+  const task = previous.catch(() => {}).then(() => enrichIfcNames(ctx, state, session));
+  pendingIndexes.set(state, task);
+  try {
+    await task;
+  } finally {
+    if (pendingIndexes.get(state) === task) pendingIndexes.delete(state);
+  }
+}
+
+async function enrichIfcNames(
+  ctx: ViewerContext,
+  state: IfcNameContext,
+  session: ProjectLoadSession,
+): Promise<void> {
+  const isCurrent = () => state.isCurrentSession(session);
+  if (!isCurrent()) return;
+
+  // 按 modelId 分组收集 GUID
+  const byModel = new Map<string, { guid: string; node: CbmNode }[]>();
+  for (const [, node] of state.ifcGuidIndex) {
+    const modelId =
+      resolveIfcModelId(node.ifcFile, state.currentIfcEntries) ??
+      (node.ifcFile.startsWith('ifc_') ? node.ifcFile : null);
+    if (!modelId) continue;
+    if (!byModel.has(modelId)) byModel.set(modelId, []);
+    byModel.get(modelId)!.push({ guid: node.ifcGuid, node });
+  }
+
+  for (const [modelId, entries] of byModel) {
+    if (!isCurrent()) return;
+    const runtimeModelId = state.ifc.getRuntimeModelId(modelId, session);
+    const model = ctx.fragments.list.get(runtimeModelId);
+    if (!model || completedModels.has(model)) continue;
+    const guids = entries.map((e) => e.guid);
+    try {
+      const localIds = await model.getLocalIdsByGuids(guids);
+      if (!isCurrent()) return;
+      const validEntries = entries.filter((_, i) => localIds[i] !== null);
+      const validLocalIds = localIds.filter((id): id is number => id !== null);
+      if (validLocalIds.length === 0) {
+        completedModels.add(model);
+        continue;
+      }
+      const itemsData = await model.getItemsData(validLocalIds, {
+        attributesDefault: false,
+        attributes: ['Name'],
+        relationsDefault: { attributes: false, relations: false },
+      });
+      if (!isCurrent()) return;
+      for (let i = 0; i < validEntries.length; i++) {
+        const data = itemsData[i] as unknown as Record<string, unknown>;
+        if (!data) continue;
+        let name: string | null = null;
+        for (const [k, v] of Object.entries(data)) {
+          if (k === 'Name' && v && typeof v === 'object' && 'value' in v) {
+            const val = v.value;
+            if (
+              val &&
+              (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean')
+            )
+              name = String(val);
+            break;
+          }
+        }
+        if (name && !isPlaceholderIfcName(name) && isCurrent()) {
+          state.ifcGuidToName.set(`${modelId}:${validEntries[i].guid}`, name);
+          validEntries[i].node.name = name;
+        }
+      }
+      completedModels.add(model);
+    } catch (err) {
+      logger.warn(`构建名称索引失败 (${modelId}):`, err);
+    }
+  }
+  debugLog(DEBUG_IFC_LOAD, `IFC 名称索引: ${state.ifcGuidToName.size} 条记录`);
+}

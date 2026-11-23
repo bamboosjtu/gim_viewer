@@ -1,7 +1,7 @@
 import { reportBackgroundError } from '../../../utils/backgroundErrors.js';
 import type { IfcEntry } from '../../../gim/types.js';
 import type { AppState, ProjectLoadSession } from '../../../app/state.js';
-import { beginEngineeringBuild } from '../../../services/engineeringService.js';
+import { beginEngineeringBuild } from '../../../services/engineering/engineeringService.js';
 import { isTauri } from '@desktop/runtime.js';
 import { perfCurrentSession } from '../../../utils/perfTimings.js';
 import { buildAndCommitSubstationSpatialSemantic } from '../runtime/substationSpatialRuntime.js';

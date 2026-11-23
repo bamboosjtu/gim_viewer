@@ -1,0 +1,15 @@
+{
+  "name": "@gim/contracts-native",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "files": [
+    "src/**/*.ts",
+    "!src/**/__tests__/**"
+  ],
+  "exports": {
+    ".": "./src/generated/nativeContracts.ts",
+    "./errors.js": "./src/errors.ts"
+  }
+}

@@ -5,38 +5,58 @@
  * Web Worker 中运行。主线程兼容入口仍保留在 lineCbmParser.ts。
  */
 
-import type { GimGraph, GimGraphNode } from './gimGraphTypes.js';
-import {parseKeyValue,keyValueDiagnostics,keyValueListFields} from './kvParser.js';
-import { DEBUG_RUNTIME_LOGS } from './diagnostics.js';
-import { debugLog } from './diagnostics.js';
-import { normalizeEntityName } from './entityName.js';
-import { PARSER_LIMITS, parseBoundedCount } from './parserLimits.js';
-import { LineParserTextCache } from './lineParserCache.js';
-import { normalizeGimPath } from './linePathNormalize.js';
+import type { GimGraph, GimGraphNode } from "./gimGraphTypes.js";
+import {
+  parseKeyValue,
+  keyValueDiagnostics,
+  keyValueListFields,
+} from "@gim/gim-primitives/kvParser.js";
+import { DEBUG_RUNTIME_LOGS } from "@gim/gim-primitives/diagnostics.js";
+import { debugLog } from "@gim/gim-primitives/diagnostics.js";
+import { normalizeEntityName } from "@gim/gim-primitives/entityName.js";
+import {
+  PARSER_LIMITS,
+  parseBoundedCount,
+} from "@gim/gim-primitives/parserLimits.js";
+import { LineParserTextCache } from "./lineParserCache.js";
+import { normalizeGimPath } from "./linePathNormalize.js";
 
-type ArrayRefField = 'cbmFiles' | 'devFiles' | 'famFiles' | 'phmFiles' | 'modFiles' | 'stlFiles' | 'wireFiles' | 'ifcFiles';
+type ArrayRefField =
+  | "cbmFiles"
+  | "devFiles"
+  | "famFiles"
+  | "phmFiles"
+  | "modFiles"
+  | "stlFiles"
+  | "wireFiles"
+  | "ifcFiles";
 
 const REF_SUFFIX_MAP: Record<string, ArrayRefField> = {
-  '.cbm': 'cbmFiles',
-  '.dev': 'devFiles',
-  '.fam': 'famFiles',
-  '.phm': 'phmFiles',
-  '.mod': 'modFiles',
-  '.stl': 'stlFiles',
-  '.wire': 'wireFiles',
-  '.ifc': 'ifcFiles',
+  ".cbm": "cbmFiles",
+  ".dev": "devFiles",
+  ".fam": "famFiles",
+  ".phm": "phmFiles",
+  ".mod": "modFiles",
+  ".stl": "stlFiles",
+  ".wire": "wireFiles",
+  ".ifc": "ifcFiles",
 };
 
-const NON_RECURSIVE_SINGLE_KEYS = ['BACKSTRING', 'FRONTSTRING', 'OBJECTMODELPOINTER', 'BASEFAMILY'] as const;
-const ARRAY_REF_SPECS = [
-  { num: 'SECTIONS.NUM', prefix: 'SECTION', recursive: true },
-  { num: 'STRAINSECTIONS.NUM', prefix: 'STRAINSECTION', recursive: true },
-  { num: 'GROUPS.NUM', prefix: 'GROUP', recursive: true },
-  { num: 'TOWERS.NUM', prefix: 'TOWER', recursive: true },
-  { num: 'BASES.NUM', prefix: 'BASE', recursive: true },
-  { num: 'SUBDEVICES.NUM', prefix: 'SUBDEVICE', recursive: true },
+const NON_RECURSIVE_SINGLE_KEYS = [
+  "BACKSTRING",
+  "FRONTSTRING",
+  "OBJECTMODELPOINTER",
+  "BASEFAMILY",
 ] as const;
-const STRING_NUM_KEY = 'STRINGS.NUM';
+const ARRAY_REF_SPECS = [
+  { num: "SECTIONS.NUM", prefix: "SECTION", recursive: true },
+  { num: "STRAINSECTIONS.NUM", prefix: "STRAINSECTION", recursive: true },
+  { num: "GROUPS.NUM", prefix: "GROUP", recursive: true },
+  { num: "TOWERS.NUM", prefix: "TOWER", recursive: true },
+  { num: "BASES.NUM", prefix: "BASE", recursive: true },
+  { num: "SUBDEVICES.NUM", prefix: "SUBDEVICE", recursive: true },
+] as const;
+const STRING_NUM_KEY = "STRINGS.NUM";
 
 function suffixOf(value: string): string | null {
   const lower = value.toLowerCase();
@@ -46,9 +66,9 @@ function suffixOf(value: string): string | null {
   return null;
 }
 
-function emptyGraph(filesByType: GimGraph['filesByType']): GimGraph {
+function emptyGraph(filesByType: GimGraph["filesByType"]): GimGraph {
   return {
-    projectType: 'transmission_line',
+    projectType: "transmission_line",
     root: null,
     nodesByPath: new Map(),
     filesByType,
@@ -67,27 +87,41 @@ export function buildLineGimGraphFromTexts(
 ): GimGraph {
   const fileList = Array.from(files);
   const cache = sharedCache ?? new LineParserTextCache(fileList);
-  const filesByType: GimGraph['filesByType'] = {
-    cbm: [], dev: [], fam: [], phm: [], mod: [], stl: [], ifc: [], other: [],
+  const filesByType: GimGraph["filesByType"] = {
+    cbm: [],
+    dev: [],
+    fam: [],
+    phm: [],
+    mod: [],
+    stl: [],
+    ifc: [],
+    other: [],
   };
   for (const { path } of fileList) {
-    const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase();
-    if (ext === 'cbm') filesByType.cbm.push(path);
-    else if (ext === 'dev') filesByType.dev.push(path);
-    else if (ext === 'fam') filesByType.fam.push(path);
-    else if (ext === 'phm') filesByType.phm.push(path);
-    else if (ext === 'mod') filesByType.mod.push(path);
-    else if (ext === 'stl') filesByType.stl.push(path);
-    else if (ext === 'ifc') filesByType.ifc.push(path);
+    const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
+    if (ext === "cbm") filesByType.cbm.push(path);
+    else if (ext === "dev") filesByType.dev.push(path);
+    else if (ext === "fam") filesByType.fam.push(path);
+    else if (ext === "phm") filesByType.phm.push(path);
+    else if (ext === "mod") filesByType.mod.push(path);
+    else if (ext === "stl") filesByType.stl.push(path);
+    else if (ext === "ifc") filesByType.ifc.push(path);
     else filesByType.other.push(path);
   }
 
-  let entryPath = cache.resolveOriginalPath('Cbm/project.cbm') ?? cache.resolveOriginalPath('project.cbm');
+  let entryPath =
+    cache.resolveOriginalPath("Cbm/project.cbm") ??
+    cache.resolveOriginalPath("project.cbm");
   if (!entryPath) {
     entryPath = filesByType.cbm[0] ?? null;
-    if (entryPath) console.warn('[GIM] 未找到 project.cbm，回退使用第一个 .cbm 作为入口:', entryPath);
+    if (entryPath)
+      debugLog(
+        true,
+        "[GIM] 未找到 project.cbm，回退使用第一个 .cbm 作为入口:",
+        entryPath,
+      );
     else {
-      console.warn('[GIM] 线路工程未找到任何 .cbm 文件');
+      debugLog(true, "[GIM] 线路工程未找到任何 .cbm 文件");
       return emptyGraph(filesByType);
     }
   }
@@ -96,32 +130,38 @@ export function buildLineGimGraphFromTexts(
   const nodesByPath = new Map<string, GimGraphNode>();
   const stats: Record<string, number> = {
     total: 0,
-    F1System: 0, F2System: 0, F3System: 0, F4System: 0,
-    Tower_Device: 0, Wire_Device: 0, WIRE: 0, CROSS: 0,
+    F1System: 0,
+    F2System: 0,
+    F3System: 0,
+    F4System: 0,
+    Tower_Device: 0,
+    Wire_Device: 0,
+    WIRE: 0,
+    CROSS: 0,
   };
 
   function parseKv(path: string): Record<string, string> | null {
-    return cache.parse('kv',path,text=>parseKeyValue(text,path));
+    return cache.parse("kv", path, (text) => parseKeyValue(text, path));
   }
 
   function resolveCrossCode(ompValue: string, owner: string): string | null {
     try {
       const devPath = cache.resolveOriginalPath(ompValue, owner);
-      if (!devPath?.toLowerCase().endsWith('.dev')) return null;
+      if (!devPath?.toLowerCase().endsWith(".dev")) return null;
       const dev = parseKv(devPath);
-      const phmRaw = dev?.['SOLIDMODEL0'];
-      if (!phmRaw || !phmRaw.toLowerCase().endsWith('.phm')) return null;
+      const phmRaw = dev?.["SOLIDMODEL0"];
+      if (!phmRaw || !phmRaw.toLowerCase().endsWith(".phm")) return null;
       const phmPath = cache.resolveOriginalPath(phmRaw, devPath);
       if (!phmPath) return null;
       const phm = parseKv(phmPath);
-      const modRaw = phm?.['SOLIDMODEL0'];
-      if (!modRaw || !modRaw.toLowerCase().endsWith('.mod')) return null;
+      const modRaw = phm?.["SOLIDMODEL0"];
+      if (!modRaw || !modRaw.toLowerCase().endsWith(".mod")) return null;
       const modPath = cache.resolveOriginalPath(modRaw, phmPath);
       const modText = modPath && cache.getText(modPath);
       if (!modText) return null;
       for (const line of modText.split(/\r?\n/)) {
-        if (line.toUpperCase().startsWith('CODE=')) {
-          return line.split('=').slice(1).join('=').trim() || null;
+        if (line.toUpperCase().startsWith("CODE=")) {
+          return line.split("=").slice(1).join("=").trim() || null;
         }
       }
       return null;
@@ -132,28 +172,46 @@ export function buildLineGimGraphFromTexts(
 
   function build(actualPath: string, depth = 0): GimGraphNode | null {
     if (depth > PARSER_LIMITS.maxRecursionDepth) {
-      throw new Error(`线路 CBM 引用递归深度超过 ${PARSER_LIMITS.maxRecursionDepth}`);
+      throw new Error(
+        `线路 CBM 引用递归深度超过 ${PARSER_LIMITS.maxRecursionDepth}`,
+      );
     }
     if (active.has(actualPath)) return null;
     const existing = nodesByPath.get(actualPath);
     if (existing) return existing;
     if (active.size + nodesByPath.size >= PARSER_LIMITS.maxLineNodes) {
-      throw new Error(`线路 CBM 节点数超过安全上限 ${PARSER_LIMITS.maxLineNodes}`);
+      throw new Error(
+        `线路 CBM 节点数超过安全上限 ${PARSER_LIMITS.maxLineNodes}`,
+      );
     }
     const kv = parseKv(actualPath);
     if (!kv) {
-      console.warn('[GIM] 读取 CBM 文件失败:', actualPath);
+      debugLog(true, "[GIM] 读取 CBM 文件失败:", actualPath);
       return null;
     }
     active.add(actualPath);
 
-    const entityName = normalizeEntityName(kv['ENTITYNAME'] || '');
-    const classifyName = kv['GROUPTYPE'] || kv['WIRETYPE'] || kv['DEVICETYPE'] || kv['SYSCLASSIFYNAME'] || kv['PARTNAME'] || '';
-    const fileName = normalizeGimPath(actualPath).split('/').pop() || actualPath;
+    const entityName = normalizeEntityName(kv["ENTITYNAME"] || "");
+    const classifyName =
+      kv["GROUPTYPE"] ||
+      kv["WIRETYPE"] ||
+      kv["DEVICETYPE"] ||
+      kv["SYSCLASSIFYNAME"] ||
+      kv["PARTNAME"] ||
+      "";
+    const fileName =
+      normalizeGimPath(actualPath).split("/").pop() || actualPath;
     const name = classifyName || entityName || fileName;
-    const refs: GimGraphNode['refs'] = {
-      cbmFiles: [], devFiles: [], famFiles: [], phmFiles: [],
-      modFiles: [], stlFiles: [], wireFiles: [], ifcFiles: [], rawRefs: {},
+    const refs: GimGraphNode["refs"] = {
+      cbmFiles: [],
+      devFiles: [],
+      famFiles: [],
+      phmFiles: [],
+      modFiles: [],
+      stlFiles: [],
+      wireFiles: [],
+      ifcFiles: [],
+      rawRefs: {},
     };
     const children: GimGraphNode[] = [];
     const childPaths = new Set<string>();
@@ -168,10 +226,13 @@ export function buildLineGimGraphFromTexts(
         const resolved = cache.resolveOriginalPath(ref, actualPath);
         if (resolved) {
           if (!refs[field].includes(resolved)) refs[field].push(resolved);
-          if (field === 'cbmFiles' && /^(?:BACKSTRING|FRONTSTRING|STRING\d+\.STRING)$/.test(rawKey)) {
+          if (
+            field === "cbmFiles" &&
+            /^(?:BACKSTRING|FRONTSTRING|STRING\d+\.STRING)$/.test(rawKey)
+          ) {
             (refs.stringTargets ??= {})[rawKey] = resolved;
           }
-          if (recursive && field === 'cbmFiles' && !childPaths.has(resolved)) {
+          if (recursive && field === "cbmFiles" && !childPaths.has(resolved)) {
             childPaths.add(resolved);
             const child = build(resolved, depth + 1);
             if (child) children.push(child);
@@ -180,12 +241,14 @@ export function buildLineGimGraphFromTexts(
           unresolved.add(ref);
         }
       }
-      const raw = refs.rawRefs[rawKey] ??= [];
+      const raw = (refs.rawRefs[rawKey] ??= []);
       if (!raw.includes(value)) raw.push(value);
     }
 
-    for (const field of keyValueListFields(kv)) recordRef(field.value, 'SUBSYSTEM', true);
-    for(const diagnostic of keyValueDiagnostics(kv))refs.rawRefs[diagnostic.field]=[...diagnostic.values];
+    for (const field of keyValueListFields(kv))
+      recordRef(field.value, "SUBSYSTEM", true);
+    for (const diagnostic of keyValueDiagnostics(kv))
+      refs.rawRefs[diagnostic.field] = [...diagnostic.values];
     for (const key of NON_RECURSIVE_SINGLE_KEYS) {
       const v = kv[key];
       if (v) recordRef(v, key);
@@ -204,7 +267,8 @@ export function buildLineGimGraphFromTexts(
       const gpoint = kv[`STRING${i}.GPOINT`];
       if (strVal) recordRef(strVal, `STRING${i}.STRING`, true);
       if (gpoint) {
-        if (!refs.rawRefs[`STRING${i}.GPOINT`]) refs.rawRefs[`STRING${i}.GPOINT`] = [];
+        if (!refs.rawRefs[`STRING${i}.GPOINT`])
+          refs.rawRefs[`STRING${i}.GPOINT`] = [];
         refs.rawRefs[`STRING${i}.GPOINT`].push(gpoint);
       }
     }
@@ -212,15 +276,15 @@ export function buildLineGimGraphFromTexts(
     const arrayPrefixes = ARRAY_REF_SPECS.map((s) => s.prefix);
     for (const [k, v] of Object.entries(kv)) {
       if (!v) continue;
-      if (k === 'SUBSYSTEM' || nonRecursiveKeysList.includes(k)) continue;
+      if (k === "SUBSYSTEM" || nonRecursiveKeysList.includes(k)) continue;
       if (ARRAY_REF_SPECS.some((s) => s.num === k)) continue;
       if (arrayPrefixes.some((p) => k.startsWith(p))) continue;
-      if (k === STRING_NUM_KEY || k.startsWith('STRING')) continue;
+      if (k === STRING_NUM_KEY || k.startsWith("STRING")) continue;
       if (suffixOf(v)) recordRef(v, k);
     }
-    if (entityName === 'CROSS') {
-      const code = resolveCrossCode(kv['OBJECTMODELPOINTER'] || '', actualPath);
-      if (code) kv['CODE'] = code;
+    if (entityName === "CROSS") {
+      const code = resolveCrossCode(kv["OBJECTMODELPOINTER"] || "", actualPath);
+      if (code) kv["CODE"] = code;
     }
     if (unresolved.size) refs.unresolvedFiles = [...unresolved];
 
@@ -232,7 +296,9 @@ export function buildLineGimGraphFromTexts(
       rawProps: kv,
       children,
       refs,
-      ...(keyValueDiagnostics(kv).length?{sourceDiagnostics:[...keyValueDiagnostics(kv)]}:{}),
+      ...(keyValueDiagnostics(kv).length
+        ? { sourceDiagnostics: [...keyValueDiagnostics(kv)] }
+        : {}),
     };
     active.delete(actualPath);
     nodesByPath.set(actualPath, node);
@@ -250,10 +316,16 @@ export function buildLineGimGraphFromTexts(
   stats.STL = filesByType.stl.length;
   stats.IFC = filesByType.ifc.length;
   stats.OTHER = filesByType.other.length;
-  debugLog(DEBUG_RUNTIME_LOGS, '[GIM] line graph built in parser core:', {
+  debugLog(DEBUG_RUNTIME_LOGS, "[GIM] line graph built in parser core:", {
     entry: entryPath,
     totalNodes: stats.total,
     stats,
   });
-  return { projectType: 'transmission_line', root, nodesByPath, filesByType, stats };
+  return {
+    projectType: "transmission_line",
+    root,
+    nodesByPath,
+    filesByType,
+    stats,
+  };
 }

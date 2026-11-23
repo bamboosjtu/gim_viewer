@@ -1,6 +1,10 @@
-import { projectPresentation } from '../../services/projectPresentationPort.js';
-import { projectOpenPresentation } from '../../services/projectOpenPresentationPort.js';
-import { scheduleHideLoading, showLoading, hideLoading } from '../../services/gimOpenCore.js';
+import { projectPresentation } from '../../services/presentation/projectPresentationPort.js';
+import { projectOpenPresentation } from '../../services/presentation/projectOpenPresentationPort.js';
+import {
+  scheduleHideLoading,
+  showLoading,
+  hideLoading,
+} from '../../services/project/gimOpenCore.js';
 import type { AppState } from '../state.js';
 import { isTauri } from '@desktop/runtime.js';
 import { openIfcFilePaths } from '@desktop/fileDialog.js';
@@ -33,7 +37,7 @@ export async function openIfcWithDialog(
       { ensureEngineReady, loadStandaloneIfc },
       { fitCameraToScene },
     ] = await Promise.all([
-      import('../../services/viewerUIBinding.js'),
+      import('../../services/presentation/viewerUIBinding.js'),
       import('../../viewer/ifcLoader.js'),
       import('../../viewer/camera.js'),
     ]);

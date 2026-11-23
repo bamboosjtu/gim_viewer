@@ -10,7 +10,7 @@ import type { AppState, ProjectLoadSession } from '../../../app/state.js';
 import {
   notifyEngineeringIfcEvidence,
   notifyEngineeringIfcFailure,
-} from '../../../services/engineeringService.js';
+} from '../../../services/engineering/engineeringService.js';
 import { buildSubstationSpatialIndexInWorker } from './spatial/substationSpatialWorkerClient.js';
 import { writeSubstationSpatialSemanticCache } from './substationSpatialSemanticCache.js';
 import { perfBegin, perfMarkProductMoment, type PerfSession } from '../../../utils/perfTimings.js';

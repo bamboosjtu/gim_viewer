@@ -1,6 +1,6 @@
 import { buildCbmNodeIndex } from '../../../gim/cbmParser.js';
-import { startGeometryOnlyView } from '../../../services/geometryOnlyRuntime.js';
-import { showLoading, type GimRuntimeOpenContext } from '../../../services/gimOpenCore.js';
+import { startGeometryOnlyView } from '../../../services/dev-geometry/geometryOnlyRuntime.js';
+import { showLoading, type GimRuntimeOpenContext } from '../../../services/project/gimOpenCore.js';
 import { perfCurrentSession, perfMarkProductMoment } from '../../../utils/perfTimings.js';
 import {
   equipmentPresentationFor,

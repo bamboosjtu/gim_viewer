@@ -12,7 +12,7 @@ import {
   type PropertyComponent,
   type PropertyDefinition,
   type PropertyRow,
-} from '../../../services/propertyPresentation.js';
+} from '../../../services/presentation/propertyPresentation.js';
 import type { LineModRuntimeEntry } from './lineModSourcePort.js';
 import type { HNumModFile, RRecord, LineTextModGeometrySource } from '../../../gim/geometry/ir.js';
 import type { LineAttributeIndex } from '@gim/powerline-core/lineAttributeTypes.js';

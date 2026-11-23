@@ -1,3 +1,4 @@
+import { GimError, type NativeErrorCode } from '@gim/contracts-native/errors.js';
 import { releaseOwnedBytes } from '../../shared/ownedBytes.js';
 import { engineeringSourceRecords } from '../../gim/engineering/sourceGraph.js';
 import {
@@ -9,7 +10,7 @@ import { ENGINEERING_RECOGNITION_VERSION as ENGINEERING_RULES_VERSION } from '@g
 import { assertEngineeringPartition } from '../../engineering/validate.js';
 import type { EngineeringSnapshot } from '../../engineering/types.js';
 import { ENGINEERING_NAVIGATION_VERSION } from '../../gim/engineering/navigation.js';
-import { SPATIAL_PROJECTION_POLICY } from '../../services/projections/compositionSpatial.js';
+import { SPATIAL_PROJECTION_POLICY } from '../../services/engineering/compositionSpatial.js';
 import { ENGINEERING_COMPOSITION_VERSION } from '../../engineering/composition.js';
 import {
   INVENTORY_TEMPLATE_VERSION,
@@ -55,8 +56,12 @@ const record = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === 'object' && !Array.isArray(v);
 const strings = (v: unknown): v is string[] =>
   Array.isArray(v) && v.every((s) => typeof s === 'string');
-const requireValid = (ok: unknown, reason: string): void => {
-  if (!ok) throw Error(`工程缓存无效：${reason}`);
+const requireValid = (
+  ok: unknown,
+  reason: string,
+  code: NativeErrorCode = 'INDEX_INVALID',
+): void => {
+  if (!ok) throw new GimError(code, `工程缓存无效：${reason}`);
 };
 const sha = async (bytes: Uint8Array) =>
   [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as BufferSource))]
@@ -96,7 +101,7 @@ async function gzipStream(
       const next = await reader.read();
       if (next.done) break;
       length += next.value.byteLength;
-      if (length > limit) throw Error('工程缓存无效：expanded size');
+      requireValid(length <= limit, 'expanded size', 'RESOURCE_LIMIT');
       chunks.push(next.value);
     }
   } catch (error) {
@@ -182,7 +187,7 @@ async function encode(
     const part = await gzipStream(input);
     parts.push(part);
     bodyLength += part.length;
-    requireValid(bodyLength <= MAX_ENGINEERING_CACHE_BYTES, 'encoded size');
+    requireValid(bodyLength <= MAX_ENGINEERING_CACHE_BYTES, 'encoded size', 'RESOURCE_LIMIT');
   }
   const body = parts.length === 1 ? parts[0] : new Uint8Array(bodyLength);
   if (parts.length > 1) {
@@ -193,7 +198,7 @@ async function encode(
     }
   }
   const partSizes = parts.length > 1 ? parts.map((part) => part.length) : undefined;
-  requireValid(body.length <= MAX_ENGINEERING_CACHE_BYTES, 'encoded size');
+  requireValid(body.length <= MAX_ENGINEERING_CACHE_BYTES, 'encoded size', 'RESOURCE_LIMIT');
   const digest = await sha(body);
   const header = encoder.encode(
     JSON.stringify({

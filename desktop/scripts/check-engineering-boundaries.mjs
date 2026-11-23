@@ -62,7 +62,7 @@ const sdkParserPrimitives = new Set(
     'kvParser.js',
     'parserLimits.js',
     'sourceDocument.js',
-  ].map((name) => '@gim/powerline-core/' + name),
+  ].map((name) => '@gim/gim-primitives/' + name),
 );
 function dependencySpecifier(node) {
   if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) return node.moduleSpecifier;
@@ -100,6 +100,8 @@ for (const path of [
 }
 for (const path of files(resolve(root, 'services'))) {
   const local = relative(root, path).replaceAll('\\', '/');
+  if (local.split('/').length < 3)
+    failures.push(`${local}: service implementations require an owning directory`);
   failures.push(...checkPresentationSource(readFileSync(path, 'utf8'), local));
 }
 // Desktop uses the declared source export; SDK consumers keep the built default entry.
@@ -145,12 +147,15 @@ const viewerBridgeImports = new Map([
   ['viewer/ifcRegionalRuntime.ts:@desktop/ifcLodCache.js', false],
 ]);
 const infrastructurePorts = new Map([
-  ['infrastructure/workers/engineeringWorker.ts', 'services/engineeringWorkerHandler.js'],
+  [
+    'infrastructure/workers/engineeringWorker.ts',
+    'services/engineering/engineeringWorkerHandler.js',
+  ],
   [
     'infrastructure/workers/compositionProjectionWorker.ts',
-    'services/projections/compositionSpatial.js',
+    'services/engineering/compositionSpatial.js',
   ],
-  ['infrastructure/cache/engineeringCacheCodec.ts', 'services/projections/compositionSpatial.js'],
+  ['infrastructure/cache/engineeringCacheCodec.ts', 'services/engineering/compositionSpatial.js'],
   ['infrastructure/native/invokeTimed.ts', '@tauri-apps/api/core'],
 ]);
 const linePresentationReads = new Set(
@@ -249,8 +254,8 @@ for (const [layer, sourceRoot] of [
       'features/powerline/presentation/lineAttributeIndex.ts',
       'features/powerline/presentation/lineWireSemanticService.ts',
       'features/powerline/diagnostics/lineCatenaryAuditExportService.ts',
-      'services/inspectorMarkup.ts',
-      'services/propertyPresentation.ts',
+      'services/presentation/inspectorMarkup.ts',
+      'services/presentation/propertyPresentation.ts',
     ].includes(localPath);
     const resolverFactories = new Set(['createEntryResolver', 'createEntryIndex']);
     for (const statement of ast.statements) {
@@ -278,7 +283,7 @@ for (const [layer, sourceRoot] of [
         );
       if (
         localPath.startsWith('features/equipment/') ||
-        localPath === 'services/geometryOnlyRuntime.ts'
+        localPath === 'services/dev-geometry/geometryOnlyRuntime.ts'
       ) {
         if (ts.isIdentifier(node) && ['document', 'window', 'HTMLElement'].includes(node.text))
           failures.push(`${localPath}: equipment presentation belongs in its UI port`);
@@ -322,14 +327,14 @@ for (const [layer, sourceRoot] of [
         if (
           sourceRoot === sdkRoot &&
           !name.startsWith('.') &&
-          !name.startsWith('@gim/powerline-core/')
+          !name.startsWith('@gim/gim-primitives/')
         )
           failures.push(
             `${localPath}: SDK runtime dependency is not declared portable core: ${name}`,
           );
         const packageError = packageBoundaryError(
           name,
-          sourceRoot === sdkRoot ? { '@gim/powerline-core': true } : sharedDependencies,
+          sourceRoot === sdkRoot ? { '@gim/gim-primitives': true } : sharedDependencies,
         );
         if (packageError) failures.push(`${localPath}: ${packageError}: ${name}`);
         const resolved = name.startsWith('.')
@@ -354,7 +359,7 @@ for (const [layer, sourceRoot] of [
         if (
           sourceRoot === sdkRoot &&
           layer === 'parser' &&
-          ((name.startsWith('@gim/powerline-core/') && !sdkParserPrimitives.has(name)) ||
+          ((name.startsWith('@gim/') && !sdkParserPrimitives.has(name)) ||
             (resolved && target !== 'parser' && target !== 'shared'))
         )
           failures.push(`${localPath}: SDK parser consumes format primitives only (${name})`);
@@ -386,7 +391,7 @@ for (const [layer, sourceRoot] of [
             target === 'ui' ||
             targetPath.startsWith('app/composition/') ||
             targetPath === 'services/presentation/dom.js' ||
-            targetPath === 'services/projectViewerLifecycle.js' ||
+            targetPath === 'services/project/projectViewerLifecycle.js' ||
             (localPath === 'app/session/projectCleanup.ts' && target === 'viewer'))
         )
           failures.push(
@@ -443,12 +448,7 @@ for (const [layer, sourceRoot] of [
           failures.push(
             `${localPath}: Worker infrastructure cannot depend on host composition or rendering (${name})`,
           );
-        if (
-          /^(?:services\/geometryOnlyRuntime|services\/devLod\w+|services\/devGeometryWorker\w*)\.ts$/.test(
-            localPath,
-          ) &&
-          target === 'features'
-        )
+        if (localPath.startsWith('services/dev-geometry/') && target === 'features')
           failures.push(
             `${localPath}: shared DEV geometry must stay independent of features (${name})`,
           );
@@ -700,7 +700,7 @@ const substationRuntimeFiles = [
   resolve(root, 'features/substation/runtime/substationIfcQueue.ts'),
   resolve(root, 'features/substation/runtime/substationIfcModelLoad.ts'),
   resolve(root, 'features/substation/runtime/substationIfcLoadProgress.ts'),
-  resolve(root, 'services/ifcGeometrySource.ts'),
+  resolve(root, 'services/project/ifcGeometrySource.ts'),
   resolve(root, 'features/substation/runtime/substationIndexPublication.ts'),
   resolve(root, 'features/substation/runtime/substationSpatialRuntime.ts'),
   resolve(root, 'features/substation/runtime/substationSpatialSemanticCache.ts'),
@@ -723,7 +723,7 @@ const runtimeFamilies = [
       'engineeringWorkerTransport',
       'workerRequests',
     ].map((name) => resolve(root, 'infrastructure/workers', `${name}.ts`)),
-    resolve(root, 'services/engineeringWorkerHandler.ts'),
+    resolve(root, 'services/engineering/engineeringWorkerHandler.ts'),
   ],
   [
     'application/openEquipmentProject',
@@ -750,7 +750,7 @@ const runtimeFamilies = [
     'devLodReadiness',
     'devLodDiagnostics',
     'devLodTypes',
-  ].map((name) => resolve(root, 'services', `${name}.ts`)),
+  ].map((name) => resolve(root, 'services/dev-geometry', `${name}.ts`)),
 ];
 for (const paths of runtimeFamilies) {
   const graph = new Map(paths.map((path) => [path, new Set()]));

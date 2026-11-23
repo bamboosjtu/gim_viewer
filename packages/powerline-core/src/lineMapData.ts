@@ -17,11 +17,11 @@
  * 仍能生成完整 LineMapData，不抛错、不读原 GIM。
  */
 
-import type { GimGraph, GimGraphNode } from './gimGraphTypes.js';
-import type { LineAttributeIndex } from './lineAttributeTypes.js';
-import { normalizeGimPath, getFileNameLower } from './linePathNormalize.js';
-import { DEBUG_LINE_MAP } from './diagnostics.js';
-import { debugLog } from './diagnostics.js';
+import type { GimGraph, GimGraphNode } from "./gimGraphTypes.js";
+import type { LineAttributeIndex } from "./lineAttributeTypes.js";
+import { normalizeGimPath, getFileNameLower } from "./linePathNormalize.js";
+import { DEBUG_LINE_MAP } from "@gim/gim-primitives/diagnostics.js";
+import { debugLog } from "@gim/gim-primitives/diagnostics.js";
 
 // ---------------------------------------------------------------------------
 // 类型定义
@@ -38,7 +38,7 @@ export interface TowerMarker {
   towerType?: string;
   towerHeight?: string;
   turnAngle?: string;
-  dataQuality: 'full' | 'partial' | 'coords-only';
+  dataQuality: "full" | "partial" | "coords-only";
   /** 命中的 FAM 源标识（用于诊断/UI） */
   famSource?: string;
   /** 命中的 DEV 源标识 */
@@ -65,7 +65,7 @@ export interface WireSegment {
   /** 档距（米，Haversine 公式计算）；无效为 null */
   spanMeters: number | null;
   /** 拓扑分组：'inter-point'（跨塔，真实档距）/ 'same-point'（同塔内部连接）/ 'unknown' */
-  groupKind: 'inter-point' | 'same-point' | 'unknown';
+  groupKind: "inter-point" | "same-point" | "unknown";
 }
 
 /** 跨越点标记 */
@@ -141,7 +141,7 @@ interface BlhaCoord {
  */
 function parseBlha(blha: string | undefined): BlhaCoord | null {
   if (!blha) return null;
-  const parts = blha.split(',').map((s) => s.trim());
+  const parts = blha.split(",").map((s) => s.trim());
   if (parts.length < 2) return null;
   const lat = parseFloat(parts[0]);
   const lng = parseFloat(parts[1]);
@@ -149,12 +149,12 @@ function parseBlha(blha: string | undefined): BlhaCoord | null {
   // 经纬度合理范围校验（中国境内 lat 0~60, lng 70~140），过滤明显错误值
   if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
   let elev: number | null = null;
-  if (parts.length >= 3 && parts[2] !== '') {
+  if (parts.length >= 3 && parts[2] !== "") {
     const e = parseFloat(parts[2]);
     elev = isFinite(e) ? e : null;
   }
   let azimuth: number | null = null;
-  if (parts.length >= 4 && parts[3] !== '') {
+  if (parts.length >= 4 && parts[3] !== "") {
     const a = parseFloat(parts[3]);
     azimuth = isFinite(a) ? a : null;
   }
@@ -178,32 +178,47 @@ function buildLineGraphTopoIndex(graph: GimGraph): LineGraphTopoIndex {
   function walk(node: GimGraphNode, wireGroup?: GimGraphNode): void {
     if (visited.has(node.path)) return;
     visited.add(node.path);
-    const group = node.entityName === 'F4System' && node.rawProps.GROUPTYPE === 'WIRE'
-      ? node : wireGroup;
-    if (node.entityName === 'WIRE' && group) wireGroupByWirePath.set(node.path, group);
+    const group =
+      node.entityName === "F4System" && node.rawProps.GROUPTYPE === "WIRE"
+        ? node
+        : wireGroup;
+    if (node.entityName === "WIRE" && group)
+      wireGroupByWirePath.set(node.path, group);
     for (const child of node.children) walk(child, group);
   }
   if (graph.root) walk(graph.root);
-  return { nodeByPath, wireGroupByWirePath, wireTower: createLineWireTowerResolver(nodeByPath.values()) };
+  return {
+    nodeByPath,
+    wireGroupByWirePath,
+    wireTower: createLineWireTowerResolver(nodeByPath.values()),
+  };
 }
 
 /** Use the archive-resolved CBM target, including when coordinates are absent. */
 export function createLineWireTowerResolver(nodes: Iterable<GimGraphNode>) {
   const towersByTarget = new Map<string, GimGraphNode | null>();
   for (const tower of nodes) {
-    if (tower.entityName !== 'F4System' || tower.rawProps.GROUPTYPE !== 'TOWER') continue;
+    if (tower.entityName !== "F4System" || tower.rawProps.GROUPTYPE !== "TOWER")
+      continue;
     const strings = Object.entries(tower.refs.stringTargets ?? {})
       .filter(([key]) => /^STRING\d+\.STRING$/.test(key))
       .map(([, target]) => target);
     for (const target of [tower.path, ...strings]) {
       const existing = towersByTarget.get(target);
-      towersByTarget.set(target, existing === undefined || existing === tower ? tower : null);
+      towersByTarget.set(
+        target,
+        existing === undefined || existing === tower ? tower : null,
+      );
     }
   }
-  return (node: GimGraphNode, field: 'BACKSTRING' | 'FRONTSTRING', group?: GimGraphNode): GimGraphNode | undefined => {
-    const owner = node.rawProps[field] ? node : group ?? node;
+  return (
+    node: GimGraphNode,
+    field: "BACKSTRING" | "FRONTSTRING",
+    group?: GimGraphNode,
+  ): GimGraphNode | undefined => {
+    const owner = node.rawProps[field] ? node : (group ?? node);
     const target = owner.refs.stringTargets?.[field];
-    return target ? towersByTarget.get(target) ?? undefined : undefined;
+    return target ? (towersByTarget.get(target) ?? undefined) : undefined;
   };
 }
 
@@ -212,18 +227,38 @@ export function createLineWireTowerResolver(nodes: Iterable<GimGraphNode>) {
 // ---------------------------------------------------------------------------
 
 /** 杆塔编号候选键（prop_key，大小写不敏感） */
-const TOWER_NUMBER_KEYS = ['N0', 'TOWERNO', 'TOWERNUMBER', 'TOWERNUM', 'NUM', 'BH'];
+const TOWER_NUMBER_KEYS = [
+  "N0",
+  "TOWERNO",
+  "TOWERNUMBER",
+  "TOWERNUM",
+  "NUM",
+  "BH",
+];
 /** 塔型候选键 */
-const TOWER_TYPE_KEYS = ['TOWERTYPE', 'TOWERMODEL', 'MODEL', 'TOWERKIND', 'TYPE'];
+const TOWER_TYPE_KEYS = [
+  "TOWERTYPE",
+  "TOWERMODEL",
+  "MODEL",
+  "TOWERKIND",
+  "TYPE",
+];
 /** 呼高候选键 */
 // 线路样本中“呼高”和“杆塔高”同时存在，实例 FAM 的 NOMINALHEIGHT
 // 必须优先于总高，避免地图标记把两个概念混为一个字段。
-const TOWER_HEIGHT_KEYS = ['NOMINALHEIGHT', 'CALLHEIGHT', 'HOUGAO', 'TOWERHEIGHT', 'HEIGHT', 'HEIGHTVALUE'];
+const TOWER_HEIGHT_KEYS = [
+  "NOMINALHEIGHT",
+  "CALLHEIGHT",
+  "HOUGAO",
+  "TOWERHEIGHT",
+  "HEIGHT",
+  "HEIGHTVALUE",
+];
 /** 转角候选键 */
-const TURN_ANGLE_KEYS = ['LINEANGLE', 'TURNANGLE', 'ANGLE', 'AZIMUTH'];
+const TURN_ANGLE_KEYS = ["LINEANGLE", "TURNANGLE", "ANGLE", "AZIMUTH"];
 
 /** DEV 设备类型候选键 */
-const DEV_TYPE_KEYS = ['DEVICETYPE', 'TYPE', 'CLASSIFY', 'TOWERTYPE'];
+const DEV_TYPE_KEYS = ["DEVICETYPE", "TYPE", "CLASSIFY", "TOWERTYPE"];
 
 /**
  * 在属性 propMap 中按候选键查找值。
@@ -271,7 +306,7 @@ function gatherFamRefs(towerF4: GimGraphNode): string[] {
   const set = new Set<string>();
   for (const f of towerF4.refs.famFiles) if (f) set.add(f);
   for (const child of towerF4.children) {
-    if (child.entityName.trim().toUpperCase() === 'TOWER_DEVICE') {
+    if (child.entityName.trim().toUpperCase() === "TOWER_DEVICE") {
       for (const f of child.refs.famFiles) if (f) set.add(f);
     }
   }
@@ -283,7 +318,7 @@ function gatherDevRefs(towerF4: GimGraphNode): string[] {
   const set = new Set<string>();
   for (const d of towerF4.refs.devFiles) if (d) set.add(d);
   for (const child of towerF4.children) {
-    if (child.entityName.trim().toUpperCase() === 'TOWER_DEVICE') {
+    if (child.entityName.trim().toUpperCase() === "TOWER_DEVICE") {
       for (const d of child.refs.devFiles) if (d) set.add(d);
     }
   }
@@ -302,12 +337,12 @@ function lookupFamPropMap(refs: string[], attrs: LineAttributeIndex) {
     }
     // 2. 文件名小写 → famByFileNameLower
     const fnl = getFileNameLower(ref);
-    if (fnl && !norm.includes('/')) {
+    if (fnl && !norm.includes("/")) {
       const m = attrs.famByFileNameLower.get(fnl);
       if (m) return { propMap: m, source: fnl };
     }
   }
-  return { propMap: undefined, source: '' };
+  return { propMap: undefined, source: "" };
 }
 
 /** 查找 DEV 属性表并返回 (propMap, source)。返回类型由 attrs 推断，避免强转。 */
@@ -320,12 +355,12 @@ function lookupDevPropMap(refs: string[], attrs: LineAttributeIndex) {
       if (m) return { propMap: m, source: norm };
     }
     const fnl = getFileNameLower(ref);
-    if (fnl && !norm.includes('/')) {
+    if (fnl && !norm.includes("/")) {
       const m = attrs.devByFileNameLower.get(fnl);
       if (m) return { propMap: m, source: fnl };
     }
   }
-  return { propMap: undefined, source: '' };
+  return { propMap: undefined, source: "" };
 }
 
 // ---------------------------------------------------------------------------
@@ -338,11 +373,11 @@ function resolveWireType(
   topo: LineGraphTopoIndex,
   attrs?: LineAttributeIndex,
 ): string {
-  const own = node.rawProps['WIRETYPE'];
+  const own = node.rawProps["WIRETYPE"];
   if (own) return own.toUpperCase();
   const wireF4 = topo.wireGroupByWirePath.get(node.path);
   if (wireF4) {
-    const wt = wireF4.rawProps['WIRETYPE'];
+    const wt = wireF4.rawProps["WIRETYPE"];
     if (wt) return wt.toUpperCase();
   }
   // P2-11（docs/schema/powerline-mod.md）：WIRETYPE 实际存放在 WIRE → DEV → FAM 链中。
@@ -350,16 +385,16 @@ function resolveWireType(
   // FAM 的 WIRETYPE 属性给出具体类型（如 裸导线）。
   if (attrs) {
     const devLookup = lookupDevPropMap(node.refs.devFiles, attrs);
-    const devType = findAttrValue(devLookup.propMap, ['DEVICETYPE']);
+    const devType = findAttrValue(devLookup.propMap, ["DEVICETYPE"]);
     if (devType) return devType.toUpperCase();
-    const baseFamily = findAttrValue(devLookup.propMap, ['BASEFAMILY']);
+    const baseFamily = findAttrValue(devLookup.propMap, ["BASEFAMILY"]);
     if (baseFamily) {
       const famLookup = lookupFamPropMap([baseFamily], attrs);
-      const famType = findAttrValue(famLookup.propMap, ['WIRETYPE']);
+      const famType = findAttrValue(famLookup.propMap, ["WIRETYPE"]);
       if (famType) return famType.toUpperCase();
     }
   }
-  return 'UNKNOWN';
+  return "UNKNOWN";
 }
 
 /**
@@ -368,14 +403,24 @@ function resolveWireType(
 function resolveWireEndpointsFromTowers(
   node: GimGraphNode,
   topo: LineGraphTopoIndex,
-): { startLat: number; startLng: number; endLat: number; endLng: number } | null {
+): {
+  startLat: number;
+  startLng: number;
+  endLat: number;
+  endLng: number;
+} | null {
   const group = topo.wireGroupByWirePath.get(node.path);
-  const startTower = topo.wireTower(node, 'BACKSTRING', group);
-  const endTower = topo.wireTower(node, 'FRONTSTRING', group);
+  const startTower = topo.wireTower(node, "BACKSTRING", group);
+  const endTower = topo.wireTower(node, "FRONTSTRING", group);
   const start = parseBlha(startTower?.rawProps.BLHA);
   const end = parseBlha(endTower?.rawProps.BLHA);
   if (!start || !end) return null;
-  return { startLat: start.lat, startLng: start.lng, endLat: end.lat, endLng: end.lng };
+  return {
+    startLat: start.lat,
+    startLng: start.lng,
+    endLat: end.lat,
+    endLng: end.lng,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -383,13 +428,19 @@ function resolveWireEndpointsFromTowers(
 // ---------------------------------------------------------------------------
 
 /** Haversine 距离（米），地球半径 6371000m（用于档距近似） */
-function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+function haversineMeters(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number,
+): number {
   const R = 6371000;
-  const toRad = (d: number) => d * Math.PI / 180;
+  const toRad = (d: number) => (d * Math.PI) / 180;
   const dLat = toRad(lat2 - lat1);
   const dLng = toRad(lng2 - lng1);
-  const a = Math.sin(dLat / 2) ** 2
-    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
@@ -401,11 +452,20 @@ function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number)
  * 高程缺失（null / 非有限值）时退化为纯 Haversine 平面距离。
  */
 function spanDistanceMeters(
-  lat1: number, lng1: number, elev1: number | null,
-  lat2: number, lng2: number, elev2: number | null,
+  lat1: number,
+  lng1: number,
+  elev1: number | null,
+  lat2: number,
+  lng2: number,
+  elev2: number | null,
 ): number {
   const planar = haversineMeters(lat1, lng1, lat2, lng2);
-  if (elev1 == null || elev2 == null || !Number.isFinite(elev1) || !Number.isFinite(elev2)) {
+  if (
+    elev1 == null ||
+    elev2 == null ||
+    !Number.isFinite(elev1) ||
+    !Number.isFinite(elev2)
+  ) {
     return planar;
   }
   const dElev = elev2 - elev1;
@@ -419,17 +479,25 @@ function spanDistanceMeters(
  * inter-point：跨塔真实档距，需要绘制悬链线。
  */
 function classifyWireGroup(
-  startLat: number, startLng: number,
-  endLat: number, endLng: number,
-): 'same-point' | 'inter-point' {
-  const samePoint = Math.abs(startLat - endLat) < 1e-9
-    && Math.abs(startLng - endLng) < 1e-9;
-  return samePoint ? 'same-point' : 'inter-point';
+  startLat: number,
+  startLng: number,
+  endLat: number,
+  endLng: number,
+): "same-point" | "inter-point" {
+  const samePoint =
+    Math.abs(startLat - endLat) < 1e-9 && Math.abs(startLng - endLng) < 1e-9;
+  return samePoint ? "same-point" : "inter-point";
 }
 
 /** 计算所有塔位 + 跨越点的经纬度包围盒 */
-function computeBbox(towers: TowerMarker[], crosses: CrossMarker[]): LineMapData['bbox'] {
-  let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+function computeBbox(
+  towers: TowerMarker[],
+  crosses: CrossMarker[],
+): LineMapData["bbox"] {
+  let minLat = Infinity,
+    maxLat = -Infinity,
+    minLng = Infinity,
+    maxLng = -Infinity;
   let hasAny = false;
   for (const t of towers) {
     if (t.lat < minLat) minLat = t.lat;
@@ -452,10 +520,12 @@ function computeBbox(towers: TowerMarker[], crosses: CrossMarker[]): LineMapData
 
 /** bbox 是否有效（有可定位数据且范围非零退化） */
 export function isLineMapDataValid(data: LineMapData): boolean {
-  return data.towers.length > 0
-    && isFinite(data.bbox.minLat)
-    && data.bbox.maxLat > data.bbox.minLat
-    && data.bbox.maxLng > data.bbox.minLng;
+  return (
+    data.towers.length > 0 &&
+    isFinite(data.bbox.minLat) &&
+    data.bbox.maxLat > data.bbox.minLat &&
+    data.bbox.maxLng > data.bbox.minLng
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -472,14 +542,21 @@ export function isLineMapDataValid(data: LineMapData): boolean {
  *
  * 属性（杆塔编号/塔型/呼高/转角）从 attrs 查找，缺失不阻断渲染。
  */
-export function extractLineMapData(graph: GimGraph, attrs: LineAttributeIndex): LineMapData {
+export function extractLineMapData(
+  graph: GimGraph,
+  attrs: LineAttributeIndex,
+): LineMapData {
   const topo = buildLineGraphTopoIndex(graph);
   const towers: TowerMarker[] = [];
   const wires: WireSegment[] = [];
   const crosses: CrossMarker[] = [];
   const warnings: string[] = [];
   const unresolved: LineMapUnresolved = {
-    towers: [], wires: [], crosses: [], famSources: [], devSources: [],
+    towers: [],
+    wires: [],
+    crosses: [],
+    famSources: [],
+    devSources: [],
   };
 
   let towerTotal = 0;
@@ -492,9 +569,12 @@ export function extractLineMapData(graph: GimGraph, attrs: LineAttributeIndex): 
 
   for (const [path, node] of topo.nodeByPath) {
     // ---- 塔位 ----
-    if (node.entityName === 'F4System' && node.rawProps['GROUPTYPE'] === 'TOWER') {
+    if (
+      node.entityName === "F4System" &&
+      node.rawProps["GROUPTYPE"] === "TOWER"
+    ) {
       towerTotal++;
-      const blha = parseBlha(node.rawProps['BLHA']);
+      const blha = parseBlha(node.rawProps["BLHA"]);
       if (!blha) {
         unresolved.towers.push(path);
         warnings.push(`塔位 ${path} 缺少 BLHA 坐标`);
@@ -502,7 +582,10 @@ export function extractLineMapData(graph: GimGraph, attrs: LineAttributeIndex): 
       }
       towerWithBlha++;
 
-      for (const source of [node, ...node.children.filter(child => child.entityName === 'Tower_Device')]) {
+      for (const source of [
+        node,
+        ...node.children.filter((child) => child.entityName === "Tower_Device"),
+      ]) {
         for (const ref of source.refs.unresolvedFiles ?? []) {
           if (/\.fam$/i.test(ref)) unresolved.famSources.push(ref);
           else if (/\.dev$/i.test(ref)) unresolved.devSources.push(ref);
@@ -536,10 +619,15 @@ export function extractLineMapData(graph: GimGraph, attrs: LineAttributeIndex): 
       const finalTowerType = towerType || devType;
 
       if (famSource) towerWithFam++;
-      const hasAttr = !!(towerNumber || finalTowerType || towerHeight || turnAngle);
-      let dataQuality: TowerMarker['dataQuality'] = 'coords-only';
-      if (famSource && hasAttr) dataQuality = 'full';
-      else if (famSource || hasAttr) dataQuality = 'partial';
+      const hasAttr = !!(
+        towerNumber ||
+        finalTowerType ||
+        towerHeight ||
+        turnAngle
+      );
+      let dataQuality: TowerMarker["dataQuality"] = "coords-only";
+      if (famSource && hasAttr) dataQuality = "full";
+      else if (famSource || hasAttr) dataQuality = "partial";
 
       towers.push({
         cbmPath: path,
@@ -560,9 +648,12 @@ export function extractLineMapData(graph: GimGraph, attrs: LineAttributeIndex): 
     }
 
     // ---- 跨越点 ----
-    if (node.entityName === 'F4System' && node.rawProps['GROUPTYPE'] === 'CROSS') {
+    if (
+      node.entityName === "F4System" &&
+      node.rawProps["GROUPTYPE"] === "CROSS"
+    ) {
       crossTotal++;
-      const blha = parseBlha(node.rawProps['BLHA']);
+      const blha = parseBlha(node.rawProps["BLHA"]);
       if (blha) {
         crossWithCoord++;
         crosses.push({
@@ -588,24 +679,34 @@ export function extractLineMapData(graph: GimGraph, attrs: LineAttributeIndex): 
     }
 
     // ---- 导线 ----
-    if (node.entityName === 'WIRE') {
+    if (node.entityName === "WIRE") {
       wireTotal++;
-      const p0 = parseBlha(node.rawProps['POINT0.BLHA']);
-      const p1 = parseBlha(node.rawProps['POINT1.BLHA']);
+      const p0 = parseBlha(node.rawProps["POINT0.BLHA"]);
+      const p1 = parseBlha(node.rawProps["POINT1.BLHA"]);
 
       if (p0 && p1) {
         wireWithEndpoints++;
         const wireType = resolveWireType(node, topo, attrs);
         const groupKind = classifyWireGroup(p0.lat, p0.lng, p1.lat, p1.lng);
-        const spanMeters = groupKind === 'inter-point'
-          ? spanDistanceMeters(p0.lat, p0.lng, p0.elev, p1.lat, p1.lng, p1.elev)
-          : 0;
+        const spanMeters =
+          groupKind === "inter-point"
+            ? spanDistanceMeters(
+                p0.lat,
+                p0.lng,
+                p0.elev,
+                p1.lat,
+                p1.lng,
+                p1.elev,
+              )
+            : 0;
         wires.push({
-          startLat: p0.lat, startLng: p0.lng,
-          endLat: p1.lat, endLng: p1.lng,
+          startLat: p0.lat,
+          startLng: p0.lng,
+          endLat: p1.lat,
+          endLng: p1.lng,
           wireType,
-          kValue: node.rawProps['KVALUE'] || undefined,
-          split: node.rawProps['SPLIT'] || undefined,
+          kValue: node.rawProps["KVALUE"] || undefined,
+          split: node.rawProps["SPLIT"] || undefined,
           nodeRef: node,
           startElev: p0.elev,
           endElev: p1.elev,
@@ -622,13 +723,13 @@ export function extractLineMapData(graph: GimGraph, attrs: LineAttributeIndex): 
           wires.push({
             ...fb,
             wireType,
-            kValue: node.rawProps['KVALUE'] || undefined,
-            split: node.rawProps['SPLIT'] || undefined,
+            kValue: node.rawProps["KVALUE"] || undefined,
+            split: node.rawProps["SPLIT"] || undefined,
             nodeRef: node,
             startElev: null,
             endElev: null,
             spanMeters: null,
-            groupKind: 'unknown',
+            groupKind: "unknown",
           });
         } else {
           unresolved.wires.push(path);
@@ -641,16 +742,25 @@ export function extractLineMapData(graph: GimGraph, attrs: LineAttributeIndex): 
   const bbox = computeBbox(towers, crosses);
 
   if (warnings.length > 0) {
-    debugLog(DEBUG_LINE_MAP, '[LineMapData] 提取完成，含', warnings.length, '条警告');
+    debugLog(
+      DEBUG_LINE_MAP,
+      "[LineMapData] 提取完成，含",
+      warnings.length,
+      "条警告",
+    );
   }
-  debugLog(DEBUG_LINE_MAP, '[LineMapData] 提取统计:', {
+  debugLog(DEBUG_LINE_MAP, "[LineMapData] 提取统计:", {
     towers: towers.length,
     wires: wires.length,
     crosses: crosses.length,
     stats: {
-      towerTotal, towerWithBlha, towerWithFam,
-      wireTotal, wireWithEndpoints,
-      crossTotal, crossWithCoord,
+      towerTotal,
+      towerWithBlha,
+      towerWithFam,
+      wireTotal,
+      wireWithEndpoints,
+      crossTotal,
+      crossWithCoord,
     },
     unresolved: {
       towers: unresolved.towers.length,
@@ -669,9 +779,13 @@ export function extractLineMapData(graph: GimGraph, attrs: LineAttributeIndex): 
     bbox,
     warnings,
     stats: {
-      towerTotal, towerWithBlha, towerWithFam,
-      wireTotal, wireWithEndpoints,
-      crossTotal, crossWithCoord,
+      towerTotal,
+      towerWithBlha,
+      towerWithFam,
+      wireTotal,
+      wireWithEndpoints,
+      crossTotal,
+      crossWithCoord,
     },
     unresolved,
   };

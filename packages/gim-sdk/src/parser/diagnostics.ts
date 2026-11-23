@@ -1,4 +1,4 @@
-import type { SourceDiagnostic } from "@gim/powerline-core/geometry/ir.js";
+import type { SourceDiagnostic } from "@gim/gim-primitives/geometry/ir.js";
 import type { ParseDiagnostic, ParseStatus } from "./types.js";
 
 /** Keep legacy SourceDiagnostic payloads, but expose one browser-facing shape. */

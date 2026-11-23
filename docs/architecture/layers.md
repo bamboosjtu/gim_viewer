@@ -8,7 +8,9 @@
 |---|---|---|
 | 桌面 Tauri | `desktop/` | 变电、线路、独立设备；Rust 负责 SQLite、SHA、解压和受权读取 |
 | Android | `app/` | 仅线路；独立 npm、私有 SQLite、SAF 导入 |
-| 共享线路 core | `packages/powerline-core/` | 线路图、领域投影、HNum 预览；同时发布现有共享格式原语和生成的原生 v1 契约 |
+| 共享线路 core | `packages/powerline-core/` | 线路图、领域投影、HNum 预览 |
+| 原生契约 | `packages/contracts-native/` | 生成的 v1 命令、DTO、常量和结构化错误 |
+| 格式原语 | `packages/gim-primitives/` | 来源文档、KV、FAM 物理记录、数量边界和 MOD 格式解析 |
 | 共享原生容器 | `crates/gim-native-core/` | 有界解压、路径与资源配额 |
 | Android 导入插件 | `crates/tauri-plugin-gim-import/` | SAF 流式复制与 SHA |
 | 测量核心 | `packages/measurement-core/` | 无 DOM、Tauri、Three 依赖的事件、阶段、Trace 上下文、统计与内存契约 |
@@ -21,7 +23,7 @@
 | `desktop/src/app/` | 启动、`AppState` 状态聚合 | 会话与组合入口 | 具体 parser 内部 |
 | `desktop/src/app/session/` | 工程身份、打开/切换/关闭、选择与释放 | 服务端口、Viewer 清理、共享会话契约 | 跨 Feature 分派与 DOM |
 | `desktop/src/app/composition/` | Feature 分派、最近工程与 UI/服务端口接线 | Feature 入口、UI、工程会话 | 格式解析和几何计算 |
-| `packages/gim-sdk/` | 五组纯核心；来源、语义、物理目录、表示绑定与投影 | 包内纯模块、powerline-core | desktop/app 宿主、DOM、Tauri、Three/Viewer、DB |
+| `packages/gim-sdk/` | 五组纯核心；来源、语义、物理目录、表示绑定与投影 | 包内纯模块、gim-primitives | 线路领域、原生契约、desktop/app 宿主、DOM、Tauri、Three/Viewer、DB |
 | `desktop/src/engineering/` | 现有消费者的 SDK 出口转发 | 声明的 SDK exports | 核心算法和配置副本 |
 | `desktop/src/gim/engineering/` | 现有来源消费者的 SDK 转发入口；来源适配实现与测试归 SDK | SDK exports | 规则副本、Viewer、UI、DB |
 | `desktop/src/gim/` | 宿主文件发现、CBM Tree Builder、来源树/索引、IFC 空间语义与平台适配；纯格式解析在 `packages/gim-sdk/src/parser/` | SDK parser/source 类型、共享纯库 | services、viewer、ui；不新增纯 Parser |
@@ -33,7 +35,7 @@
 | `desktop/src/infrastructure/workers/` | 工程 Worker 入口、协议、传输与请求释放；共享请求队列供变电 Spatial 与线路 Worker 使用 | Worker 安全的编解码、工程计算处理器和测量端口 | Feature、应用组合或渲染 |
 | `desktop/src/infrastructure/cache/` | 工程来源、实体、导航与物理目录的 v1 编解码及会话持久化 | 领域投影契约、原生缓存端口 | Worker 客户端、Feature、应用组合或渲染 |
 | `desktop/src/infrastructure/native/` | 工程路径授权、源文件与缓存条目读写、原生解压载体、v1 错误映射及会话守卫 | 生成契约、Tauri invoke、宿主路径解析和测量 | UI、Viewer、Worker 客户端、业务 Feature |
-| `desktop/src/services/` | 共享应用运行时、后台业务编排与展示端口 | gim、viewer、bridge、注入的展示端口 | 把领域规则塞回 UI |
+| `desktop/src/services/` | 按 `engineering/`、`dev-geometry/`、`selection/`、`presentation/`、`project/` 划分的宿主服务 | gim、viewer、bridge、注入的展示端口 | 在根目录平铺实现、复制领域识别规则 |
 | `desktop/src/shared/` | 宿主共享类型、状态槽与格式化接口 | 类型、共享纯函数、已登记的 GIM 格式化选择器 | Viewer、Feature 或应用运行时值依赖 |
 | `desktop/src/utils/` | 日志、异步、调度与产品计时工具 | 宿主纯工具；产品计时的测量订阅适配 | 通过通用工具引入其他测量运行时 |
 | `desktop/src/config/` | 功能与调试开关 | 无 | 业务状态 |
@@ -47,11 +49,11 @@ Benchmark 注册表位于根目录 `benchmarks/l0|l1|l2/`，CLI、Trace/Profile 
 
 UI 可消费只读的稳定来源 ID 查找、路径格式化、空值判断及几何诊断文案等展示选择器；允许的模块/符号逐项登记在 `check-engineering-boundaries.mjs`。原始文本解析、FAM 来源与连接归属由 SDK 核心、services 和 gim 按各自契约提供。Powerline Feature 负责线路地图及导航投影。新增纯函数不自动获得 UI 导入权限，不能用“纯函数”放宽整个 parser 或 Viewer 模块。
 
-1. 新增分类规则放在 [SDK Semantic Core](../../packages/gim-sdk/src/semantic/) 及[实体目录](../engineering/catalogs/README.md)。领域分类使用适配后的证据，桌面 `engineering/` 只保留有生产消费者的包出口转发。SDK Parser 对线路包的值依赖限于登记的格式原语。
+1. 新增分类规则放在 [SDK Semantic Core](../../packages/gim-sdk/src/semantic/) 及[实体目录](../engineering/catalogs/README.md)。领域分类使用适配后的证据，桌面 `engineering/` 只保留有生产消费者的包出口转发。SDK Parser 只消费登记的 `@gim/gim-primitives` 格式入口。
 2. `gim/engineering/` 是适配层。它只把来源事实转成 `ObjectEvidence`、`SourceRecord`、`SourceGraph` 和空间上下文；`SourceRecord` 可保留原始字段，但领域层不解析格式。
 3. `services/engineering*` 编排工程计算、快照发布、缓存和表示绑定；Worker 通信与请求释放由 `infrastructure/workers/` 管理。工程类别继续由 SDK 判断。
 4. `viewer/` 只消费 `SourceGeometryOccurrence`、模板和 IFC 对象。几何编译器不接收工程组成分组，也不按实体名称选择 LOD。
-5. `ui/` 不直接访问数据库或原生 IPC；最近工程、缓存管理和工程打开均通过 `services/projectCacheService`、`services/gimOpenCore` 等入口。`engineeringTreeView` 只渲染投影结果并回调选择服务。
+5. `ui/` 不直接访问数据库或原生 IPC；最近工程、缓存管理和工程打开均通过 `services/project/projectCacheService`、`services/project/gimOpenCore` 等入口。`engineeringTreeView` 只渲染投影结果并回调选择服务。
 6. 重依赖按需动态 import：入口和 `openProject` 不静态引入 Three.js、web-ifc、MapLibre；IFC、几何、地图和工程实体 Worker 各自分包。Vite 生产构建从 HTML 入口检查生成块的静态依赖闭包，发现 Three.js、web-ifc 或 MapLibre 即失败。
 7. 读取语义和提交状态必须由会话/请求守卫控制；UI 不能直接改写缓存版本、解析器结果或场景所有权。
 
@@ -59,7 +61,7 @@ UI 可消费只读的稳定来源 ID 查找、路径格式化、空值判断及�
 
 `DevRepresentationHint` 已是纯类型，Viewer 可以共享地址契约。services 将整体成员转换为 `shared/representationSelection.ts` 的渲染范围：DEV root、IFC model/expressId、请求 ID 与有效性守卫；Viewer 不读取实体快照或 `engineeringSelection`，DEV LOD 的根显隐也消费此中立范围。细部可见性由 services 计算并通过回调应用。
 
-自动空间细化放在 `services/projections/`，只接收显式范围与投影证据，输出路径与推断标记；不属于实体归一化。
+自动空间细化位于 `services/engineering/compositionSpatial.ts`，接收显式范围和投影证据，输出路径与推断标记。
 
 既有 IFC loader/runtime 仍直接使用 bridge 的缓存/运行时适配器；`ifcBimLoader.ts` 的 `ifcLodCache`、`ifcRegionalRuntime.ts` 的 `ifcLodCache` 是边界检查中的精确例外，不放宽为整个目录通行。
 
@@ -90,7 +92,7 @@ bootstrap
 
 `AppState.engineering` 持有工程事实与构建状态。`viewState` 持有导航、展开、相机意图和历史，并负责工程导航释放和全站视角命令。`sourceGeometry` 独立持有物理目录、就绪 Promise 与缓存状态，读取由所有者统一做会话前后校验，不等待语义。`ifcLoading` 持有 IFC 尾部 pending 与明确跳过清单，`properties` 直接持有属性 Map 并负责 reset。选择请求、取消、相机意图快照、反馈、IFC 与 MOD/STL 高亮索引均由 `selection` 持有。Viewer 通过窄端口清理高亮并释放材质副本，工程重置清空选择索引。AppState 根字段由工程边界检查核对所有者与释放登记。IFC 会话地址、模型与区域运行时由 `ifc` 注册表持有，登记和迟到删除在注册表内统一校验。新所有者通过窄运行时端口接线。应用组合根仍保留工程源数据与运行面协调状态。工程实体、导航、几何目录的构建由服务层启动，UI 通过订阅和回调刷新。工程切换后，旧 Worker、旧请求和旧投影必须释放或拒绝提交。
 
-共享包通过 package.json 声明依赖和 package exports 访问。纯名称、KV、跨越、线路属性/图类型、资源限制及线路 MOD parser 直接引用包出口，测试属于共享实现。桌面仅保留有实际责任的入口：`lineCbmParserCore` / `lineMapData` 初始化桌面日志 sink，`geometry/ir` / `sourceDocument` 是当前来源与编译契约入口；`powerline-core` 逐项声明共享入口。`@gim/measurement-core/source` 是测量核心的唯一包出口；GIM SDK 的默认入口为构建后的 dist。桌面生产代码仅使用公开能力入口，纯领域转发模块从 projection 具名转发对应领域模块的符号。生产代码不允许用深相对路径绕过包边界。
+共享包通过 package.json 声明依赖和 package exports 访问。名称、KV、资源限制和文本 MOD 解析使用 `gim-primitives` 的入口，线路跨越、属性和图类型使用 `powerline-core` 的入口。桌面 `lineCbmParserCore` 和 `lineMapData` 负责初始化日志接点。GIM SDK 默认入口使用构建后的 dist，独立消费者测试验证其公开能力和闭包。生产代码沿声明的包出口访问。
 
 ## 五组能力入口
 
@@ -144,9 +146,9 @@ desktop/src/
 
 线路导航的数据装配位于 `features/powerline/presentation/lineNavigationProjection.ts`，不依赖 DOM、AppState 或平台 IO；搜索 DTO 位于 `shared/searchTypes.ts`。`ui/lineNavigationTreeView` 负责按需渲染、展开和交互，返回幂等 destroy 句柄。工程会话持有地图与树的展示句柄，释放只作用于对应视图代次。
 
-线路属性分桶、来源关系与 HNum 预览格式化由 `features/powerline/presentation/lineInspectorProjection.ts` 提供；字典与纯字符串格式化在 `services/propertyPresentation.ts`，DOM 引用事件桥保留于 UI。地图唯一坐标工作集、Mercator 计算与导线样式语义由 `features/powerline/presentation/lineMapGeometry.ts` 提供。三者无 DOM、AppState、平台 IO 依赖。线路工程视图返回有代次保护的 `destroy()` 句柄，并由会话登记释放地图、导航、搜索及设置监听；旧句柄不得销毁新视图。
+线路属性分桶、来源关系与 HNum 预览格式化由 `features/powerline/presentation/lineInspectorProjection.ts` 提供；字典与纯字符串格式化在 `services/presentation/propertyPresentation.ts`，DOM 引用事件桥保留于 UI。地图唯一坐标工作集、Mercator 计算与导线样式语义由 `features/powerline/presentation/lineMapGeometry.ts` 提供。三者无 DOM、AppState、平台 IO 依赖。线路工程视图返回有代次保护的 `destroy()` 句柄，并由会话登记释放地图、导航、搜索及设置监听；旧句柄不得销毁新视图。
 
-属性抽屉的页签、FAM、IFC 与概览 HTML 位于 `services/inspectorMarkup.ts`；线路地图的导线路径、命中距离和塔位分类位于 `features/powerline/presentation/lineMapGeometry.ts`，分帧预算位于 `features/powerline/presentation/lineMapStages.ts`。UI 持有 DOM、Canvas 句柄和取消代次，纯模块只接收值与回调。
+属性抽屉的页签、FAM、IFC 与概览 HTML 位于 `services/presentation/inspectorMarkup.ts`；线路地图的导线路径、命中距离和塔位分类位于 `features/powerline/presentation/lineMapGeometry.ts`，分帧预算位于 `features/powerline/presentation/lineMapStages.ts`。UI 持有 DOM、Canvas 句柄和取消代次，纯模块只接收值与回调。
 `ui/lineMapView.ts` 负责线路地图的 DOM、相机和实例释放。`ui/lineMapRenderer.ts` 持有分帧任务和相机投影缓存，`ui/lineMapPainter.ts` 绘制工程覆盖层并保留 Canvas 模式的塔位屏幕快照。`ui/lineMapPointer.ts` 负责选择、光标与塔位提示，Canvas 手势监听仍由 `ui/lineMapCanvasInput.ts` 持有。塔位和导线命中计算位于 `features/powerline/presentation/lineMapHitTesting.ts`，与绘制使用同一条导线屏幕路径。销毁实例后，迟到的绘制、定位和交互回调均被拒绝。
 线路底图按钮和配置状态由 `ui/lineBasemapControls.ts` 渲染；`lineProjectView` 只连接当前地图实例、切换回调和清理代次。
 

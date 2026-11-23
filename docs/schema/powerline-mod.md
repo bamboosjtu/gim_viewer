@@ -1,7 +1,7 @@
 # 线路文本 MOD 与 WIRE 来源
 
 线路 MOD 采用四类内容 grammar。它不是变电 Device XML，也不是所有文件都可用 KEY=VALUE Map 读取。
-分型与类型定义以 [lineModParser](../../packages/powerline-core/src/geometry/lineModParser.ts) 和[IR](../../desktop/src/gim/geometry/ir.ts) 为准。
+分型与类型定义以 [lineModParser](../../packages/gim-primitives/src/geometry/lineModParser.ts) 和[IR](../../desktop/src/gim/geometry/ir.ts) 为准。
 
 ## 内容分型
 

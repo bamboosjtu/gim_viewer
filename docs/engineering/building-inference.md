@@ -78,7 +78,7 @@
 
 - `packages/gim-sdk/src/projection/__tests__/compositionTemplate.test.ts`：占位名回退、房间嵌套、独立小建筑、声明建筑；
 - `packages/gim-sdk/src/projection/__tests__/compositionContexts.test.ts`：IFC 空间证据到组成上下文；
-- `desktop/src/services/__tests__/compositionProjection.test.ts`：建筑/区域投影；
+- `desktop/src/services/engineering/__tests__/compositionProjection.test.ts`：建筑/区域投影；
 - 真实工程回归由开发者通过[本地样本测试](../../desktop/local-tests/README.md)与[Benchmark CLI](../performance/benchmark.md)执行。
 
 重点样本 `substation01`–`substation04` 的建筑范围、空声明隐藏和配电室嵌套由静态导出与单元测试验证；桌面点击仍需单独验收。

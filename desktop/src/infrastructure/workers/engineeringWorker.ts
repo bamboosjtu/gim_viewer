@@ -1,5 +1,5 @@
 import { createWorkerProbe } from '../../measurement/workerProbe.js';
-import { createEngineeringWorkerHandler } from '../../services/engineeringWorkerHandler.js';
+import { createEngineeringWorkerHandler } from '../../services/engineering/engineeringWorkerHandler.js';
 import type {
   EngineeringSourceInput,
   EngineeringWorkerReply,

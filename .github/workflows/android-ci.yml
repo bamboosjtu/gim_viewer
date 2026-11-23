@@ -91,9 +91,15 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: app/package-lock.json
+          cache-dependency-path: |
+            app/package-lock.json
+            packages/powerline-core/package-lock.json
 
       - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install shared line package dependencies
+        working-directory: packages/powerline-core
         run: npm ci
 
       - name: Run frontend unit tests

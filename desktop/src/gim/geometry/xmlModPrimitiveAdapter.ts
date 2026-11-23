@@ -1,6 +1,6 @@
 /** Desktop geometry adapter for substation XML MOD primitives. */
 import { parseXmlModEntityId } from '@gim/gim-sdk/parser';
-import type { XmlModPrimitive } from '@gim/powerline-core/geometry/ir.js';
+import type { XmlModPrimitive } from '@gim/gim-primitives/geometry/ir.js';
 
 function firstNumericAttr(attrs: Record<string, string>, keys: string[], fallback = 1): number {
   for (const key of keys) {

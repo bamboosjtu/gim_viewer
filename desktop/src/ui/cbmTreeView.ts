@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.js';
 import type { CbmNode } from '../gim/types.js';
 import type { AppState } from '../app/state.js';
 import { cbmTreePanel } from './dom.js';
@@ -10,7 +11,11 @@ import { markDeviceBounds } from './deviceBoundsMarker.js';
 import { renderEngineeringTree, syncEngineeringTreeSelection } from './engineeringTreeView.js';
 
 const ENTITY_ICONS: Record<string, string> = {
-  F1System: '◎', F2System: '□', F3System: '≋', F4System: '◆', PARTINDEX: '•',
+  F1System: '◎',
+  F2System: '□',
+  F3System: '≋',
+  F4System: '◆',
+  PARTINDEX: '•',
   // DEV SUBDEVICES 展开的虚拟子设备节点（方向 B）
   DEV_SUBDEVICE: '◇',
 };
@@ -46,12 +51,17 @@ export function renderCbmTreeUI(
   label.textContent = getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries);
   // title 提供详细路径信息（CBM 真实节点显示 CBM 路径，DEV 虚拟节点显示 DEV 路径）
   const tooltipParts: string[] = [node.path];
-  if(node.sourceDiagnostics?.length)tooltipParts.push(`来源待确认：${node.sourceDiagnostics.map(issue=>issue.kind==='read-failed'?'读取失败':issue.kind==='invalid-source-matrix'?'矩阵无效':`字段 ${issue.field} 有歧义`).join('；')}`);
+  if (node.sourceDiagnostics?.length)
+    tooltipParts.push(
+      `来源待确认：${node.sourceDiagnostics.map((issue) => (issue.kind === 'read-failed' ? '读取失败' : issue.kind === 'invalid-source-matrix' ? '矩阵无效' : `字段 ${issue.field} 有歧义`)).join('；')}`,
+    );
   if (node.devSymbolName) tooltipParts.push(`设备名: ${node.devSymbolName}`);
   if (node.devType) tooltipParts.push(`类型: ${node.devType}`);
   if (node.devPath) tooltipParts.push(`DEV: ${node.devPath}`);
   label.title = tooltipParts.join('\n');
-  row.appendChild(toggle); row.appendChild(icon); row.appendChild(label);
+  row.appendChild(toggle);
+  row.appendChild(icon);
+  row.appendChild(label);
   markDeviceBounds(row, state, node.path);
   nodeEl.appendChild(row);
   const childrenEl = document.createElement('div');
@@ -67,27 +77,42 @@ export function renderCbmTreeUI(
     toggle.classList.toggle('expanded', expanded);
     childrenEl.classList.toggle('expanded', expanded);
     if (expanded && !childrenRendered) {
-      for (const child of node.children) renderCbmTreeUI(state, child, childrenEl, onNodeClick, signal);
+      for (const child of node.children)
+        renderCbmTreeUI(state, child, childrenEl, onNodeClick, signal);
       childrenRendered = true;
     }
   };
-  toggle.addEventListener('click', (event) => {
-    // Expanding the tree must not select/load the node.
-    event.stopPropagation();
-    setExpanded(!expanded);
-  }, {signal});
-  row.addEventListener('click', () => {
-    document.querySelectorAll('.tree-row.selected').forEach(r => r.classList.remove('selected'));
-    row.classList.add('selected');
-    onNodeClick(node);
-    if (node.children.length > 0) setExpanded(!expanded);
-  }, {signal});
-  row.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      row.click();
-    }
-  }, {signal});
+  toggle.addEventListener(
+    'click',
+    (event) => {
+      // Expanding the tree must not select/load the node.
+      event.stopPropagation();
+      setExpanded(!expanded);
+    },
+    { signal },
+  );
+  row.addEventListener(
+    'click',
+    () => {
+      document
+        .querySelectorAll('.tree-row.selected')
+        .forEach((r) => r.classList.remove('selected'));
+      row.classList.add('selected');
+      onNodeClick(node);
+      if (node.children.length > 0) setExpanded(!expanded);
+    },
+    { signal },
+  );
+  row.addEventListener(
+    'keydown',
+    (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        row.click();
+      }
+    },
+    { signal },
+  );
   parentEl.appendChild(nodeEl);
 }
 
@@ -121,12 +146,21 @@ function buildCbmSearchIndex(state: AppState, root: CbmNode): SearchItem[] {
  * 统一入口：无论首次打开还是缓存命中，都使用 onNodeClick 回调处理交互。
  */
 export function buildAndRenderCbmTree(state: AppState, onNodeClick: (node: CbmNode) => void): void {
-  if (state.currentProjectType === 'substation') { renderEngineeringTree(state); return; }
+  if (state.currentProjectType === 'substation') {
+    renderEngineeringTree(state);
+    return;
+  }
   cbmTreePanel.replaceChildren();
-  if (!state.currentCbmTree) { cbmTreePanel.innerHTML = '<div class="props-empty">加载 GIM 文件后显示层级树</div>'; return; }
-  renderSearchBox(cbmTreePanel, buildCbmSearchIndex(state, state.currentCbmTree), key => {
+  if (!state.currentCbmTree) {
+    cbmTreePanel.innerHTML = '<div class="props-empty">加载 GIM 文件后显示层级树</div>';
+    return;
+  }
+  renderSearchBox(cbmTreePanel, buildCbmSearchIndex(state, state.currentCbmTree), (key) => {
     const node = findByPath(state.currentCbmTree, key);
-    if (node) { onNodeClick(node); selectCbmTreeRow(key); }
+    if (node) {
+      onNodeClick(node);
+      selectCbmTreeRow(key);
+    }
   });
   renderCbmTreeUI(state, state.currentCbmTree, cbmTreePanel, onNodeClick);
 }
@@ -145,7 +179,8 @@ function findByPath(root: CbmNode | null, path: string): CbmNode | null {
 
 /** 选中指定 path 的树行（未渲染的懒加载节点静默跳过） */
 export function selectCbmTreeRow(path: string): void {
-  const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(path) : path.replace(/"/g, '\\"');
+  const escaped =
+    typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(path) : path.replace(/"/g, '\\"');
   const row = document.querySelector<HTMLElement>(`.tree-row[data-node-path="${escaped}"]`);
   if (!row) return;
   document.querySelectorAll('.tree-row.selected').forEach((r) => r.classList.remove('selected'));
@@ -155,9 +190,14 @@ export function selectCbmTreeRow(path: string): void {
 
 /** Restore the current selection after lazy tree/name refresh, without a new request. */
 export function syncSelectedTreeRow(state: AppState): void {
-  if (state.currentProjectType === 'substation') { syncEngineeringTreeSelection(state); return; }
-  document.querySelectorAll('#cbm-tree-panel .tree-row.selected').forEach((row) => row.classList.remove('selected'));
-  const target=state.selection.selectionRequest?.target;
+  if (state.currentProjectType === 'substation') {
+    syncEngineeringTreeSelection(state);
+    return;
+  }
+  document
+    .querySelectorAll('#cbm-tree-panel .tree-row.selected')
+    .forEach((row) => row.classList.remove('selected'));
+  const target = state.selection.selectionRequest?.target;
   if (!target) return;
   selectCbmTreeRow(target.key);
 }
@@ -174,17 +214,32 @@ export function handleSubstationPropertyReference(
   detail: PropertyReferenceDetail,
   showMessage: (text: string) => void = () => undefined,
 ): boolean {
-  if (state.currentProjectType !== 'substation' && state.currentProjectType !== 'equipment') return false;
+  if (state.currentProjectType !== 'substation' && state.currentProjectType !== 'equipment')
+    return false;
   if (state.currentProjectType === 'substation' && state.engineering.sources) {
     const normalize = (path: string) => path.replace(/\\/g, '/').toLowerCase();
-    const wanted = normalize(detail.path), name = wanted.split('/').pop();
-    const inventory = [...new Set([...state.substationEntryPaths, ...state.engineering.sources.graph.documents.map(doc => doc.path), ...state.engineering.sources.graph.ifcPaths])];
-    const exact = inventory.filter(path => normalize(path) === wanted);
-    const matches = exact.length ? exact : inventory.filter(path => normalize(path).split('/').pop() === name);
-    if (matches.length !== 1) { showMessage(matches.length ? '来源文件有多个候选，请在来源视图核对' : '该来源文件当前不可用'); return true; }
-    state.viewState.mode = 'source'; renderEngineeringTree(state);
-    void import('../services/engineeringSourceInspector.js').then(({ inspectEngineeringDocument }) => inspectEngineeringDocument(state, matches[0]))
-      .catch(error => showMessage(`来源未能打开：${String(error)}`));
+    const wanted = normalize(detail.path),
+      name = wanted.split('/').pop();
+    const inventory = [
+      ...new Set([
+        ...state.substationEntryPaths,
+        ...state.engineering.sources.graph.documents.map((doc) => doc.path),
+        ...state.engineering.sources.graph.ifcPaths,
+      ]),
+    ];
+    const exact = inventory.filter((path) => normalize(path) === wanted);
+    const matches = exact.length
+      ? exact
+      : inventory.filter((path) => normalize(path).split('/').pop() === name);
+    if (matches.length !== 1) {
+      showMessage(matches.length ? '来源文件有多个候选，请在来源视图核对' : '该来源文件当前不可用');
+      return true;
+    }
+    state.viewState.mode = 'source';
+    renderEngineeringTree(state);
+    void import('../services/engineering/engineeringSourceInspector.js')
+      .then(({ inspectEngineeringDocument }) => inspectEngineeringDocument(state, matches[0]))
+      .catch((error) => showMessage(`来源未能打开：${String(error)}`));
     return true;
   }
   const normalized = detail.path.replace(/\\/g, '/').toLowerCase();
@@ -206,16 +261,28 @@ export function handleSubstationPropertyReference(
   if (detail.kind === 'cbm') {
     target = nodes.find((node) => pathMatches(node.path));
   } else if (detail.kind === 'dev') {
-    target = nodes.find((node) => pathMatches(node.devPath) || node.path.toLowerCase().endsWith(fileName));
+    target = nodes.find(
+      (node) => pathMatches(node.devPath) || node.path.toLowerCase().endsWith(fileName),
+    );
   } else if (detail.kind === 'fam') {
     target = nodes.find((node) => pathMatches(node.famPath));
   } else if (detail.kind === 'ifc') {
     target = nodes.find((node) => pathMatches(node.ifcFile));
     if (!target) {
-      const entry = state.currentIfcEntries.find((item) => pathMatches(item.path) || pathMatches(item.name));
-      if (entry) target = nodes.find((node) => resolveIfcModelId(node.ifcFile, state.currentIfcEntries) === entry.modelId);
+      const entry = state.currentIfcEntries.find(
+        (item) => pathMatches(item.path) || pathMatches(item.name),
+      );
+      if (entry)
+        target = nodes.find(
+          (node) => resolveIfcModelId(node.ifcFile, state.currentIfcEntries) === entry.modelId,
+        );
     }
-  } else if (detail.kind === 'phm' || detail.kind === 'mod' || detail.kind === 'gl' || detail.kind === 'stl') {
+  } else if (
+    detail.kind === 'phm' ||
+    detail.kind === 'mod' ||
+    detail.kind === 'gl' ||
+    detail.kind === 'stl'
+  ) {
     // PHM/MOD/GL/STL 不是独立 CBM 节点：优先利用已加载几何实例携带的
     // devPath 回到业务设备。instanceKey 也包含 PHM/MOD/STL 文件名，
     // 因此缓存命中或不同大小写目录下仍可完成定位。
@@ -231,24 +298,29 @@ export function handleSubstationPropertyReference(
         typeof data?.stlPath === 'string' ? data.stlPath : '',
         typeof data?.phmPath === 'string' ? data.phmPath : '',
       ];
-      return candidates.some((value) => value && (pathMatches(value) || value.toLowerCase().includes(fileName)));
+      return candidates.some(
+        (value) => value && (pathMatches(value) || value.toLowerCase().includes(fileName)),
+      );
     });
-    const devPath = matched?.[1].userData?.devPath;
+    const devPath: unknown = matched?.[1].userData?.devPath;
     if (typeof devPath === 'string') {
       const normalizedDevPath = devPath.replace(/\\/g, '/').toLowerCase();
       const devFileName = normalizedDevPath.split('/').pop() || normalizedDevPath;
       target = nodes.find((node) => {
         const candidate = node.devPath.replace(/\\/g, '/').toLowerCase();
-        return candidate === normalizedDevPath || (candidate.split('/').pop() || candidate) === devFileName;
+        return (
+          candidate === normalizedDevPath ||
+          (candidate.split('/').pop() || candidate) === devFileName
+        );
       });
     }
   }
   if (target) {
     selectCbmTreeRow(target.path);
-    const request=state.selection.beginSelection({kind:'cbm',key:target.path});
-    void import('../services/nodeInteractionService.js').then(({ handleNodeClick }) =>
-      handleNodeClick(state,target!,showMessage,request),
-    ).catch((error) => console.warn('[属性引用] 变电节点定位失败:', error));
+    const request = state.selection.beginSelection({ kind: 'cbm', key: target.path });
+    void import('../services/selection/nodeInteractionService.js')
+      .then(({ handleNodeClick }) => handleNodeClick(state, target, showMessage, request))
+      .catch((error) => logger.warn('[属性引用] 变电节点定位失败:', error));
     return true;
   }
   showMessage('该来源文件未映射到可见变电节点');
@@ -256,14 +328,21 @@ export function handleSubstationPropertyReference(
 }
 
 /** Expand every saved ancestor row; unrendered paths are skipped. */
-export async function expandTreeToPaths(paths: readonly string[], current:()=>boolean=()=>true): Promise<void> {
+export async function expandTreeToPaths(
+  paths: readonly string[],
+  current: () => boolean = () => true,
+): Promise<void> {
   for (const path of [...paths].sort((a, b) => a.split('/').length - b.split('/').length)) {
-    if(!current())return;
-    const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(path) : path.replace(/"/g, '\\"');
-    const row = document.querySelector<HTMLElement>(`#cbm-tree-panel .tree-row[data-node-path="${escaped}"]`);
+    if (!current()) return;
+    const escaped =
+      typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(path) : path.replace(/"/g, '\\"');
+    const row = document.querySelector<HTMLElement>(
+      `#cbm-tree-panel .tree-row[data-node-path="${escaped}"]`,
+    );
     if (!row) continue;
     const toggle = row.querySelector<HTMLElement>('.tree-toggle');
-    if (!toggle || toggle.classList.contains('leaf') || toggle.classList.contains('expanded')) continue;
+    if (!toggle || toggle.classList.contains('leaf') || toggle.classList.contains('expanded'))
+      continue;
     toggle.click();
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
   }

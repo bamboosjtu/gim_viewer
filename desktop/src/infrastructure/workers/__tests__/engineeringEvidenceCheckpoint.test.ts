@@ -1,7 +1,7 @@
 // @vitest-environment node
 import {afterEach,expect,it,vi} from 'vitest';
 import {EngineeringWorkerClient,type EngineeringWorkerPort} from '../engineeringWorkerClient.js';
-import {createEngineeringWorkerHandler} from '../../../services/engineeringWorkerHandler.js';
+import {createEngineeringWorkerHandler} from '../../../services/engineering/engineeringWorkerHandler.js';
 import {ModelEvidenceProvider} from '@gim/gim-sdk/source';
 import type {EngineeringWorkerRequest,EngineeringWorkerReply,EngineeringWorkerResponse} from '../engineeringWorkerProtocol.js';
 

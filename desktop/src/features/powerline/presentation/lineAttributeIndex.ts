@@ -1,8 +1,5 @@
-import type { ProjectPropertyCache } from '../../../services/projectPropertyCache.js';
-import type {
-  LineFamPropertyRecord,
-  LineDevPropertyRecord,
-} from '@gim/powerline-core/generated/nativeContracts.js';
+import type { ProjectPropertyCache } from '../../../services/project/projectPropertyCache.js';
+import type { LineFamPropertyRecord, LineDevPropertyRecord } from '@gim/contracts-native';
 import type { LineAttributeIndex } from '@gim/powerline-core/lineAttributeTypes.js';
 
 interface LinePropertyState {

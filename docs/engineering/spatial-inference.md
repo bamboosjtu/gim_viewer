@@ -1,6 +1,6 @@
 # 空间推断
 
-空间推断是**工程组成投影插件**，只补充建筑、房间和区域归属。它不改变工程整体身份、来源成员、目录类别或几何模板，不建立电气连接，也不读取当前显示/隔离状态。算法实现见 [`compositionSpatial.ts`](../../desktop/src/services/projections/compositionSpatial.ts)，策略版本为 `composition-spatial-v1`。
+空间推断是**工程组成投影插件**，只补充建筑、房间和区域归属。它不改变工程整体身份、来源成员、目录类别或几何模板，不建立电气连接，也不读取当前显示/隔离状态。算法实现见 [`compositionSpatial.ts`](../../desktop/src/services/engineering/compositionSpatial.ts)，策略版本为 `composition-spatial-v1`。
 
 建筑名称和空间容器本身如何解析见[建筑推断](building-inference.md)；工程组成模板见[工程组成与三视图](composition.md)。
 
@@ -106,7 +106,7 @@ IFC 的 web-ifc/RegionalIndex 范围是绝对 Y-up 米制；进入投影前统�
 
 ## 验证
 
-- `desktop/src/services/projections/__tests__/compositionSpatial.test.ts`：Y-up→Z-up 转换、建筑轮廓、主变室外区域、房间/区域、防火墙、未分类保持、快照不变；
+- `desktop/src/services/engineering/__tests__/compositionSpatial.test.ts`：Y-up→Z-up 转换、建筑轮廓、主变室外区域、房间/区域、防火墙、未分类保持、快照不变；
 - `compositionProjection.test.ts`：静态/运行时投影一致性；
 - `engineeringService.test.ts`：投影插件接入工程组成；
 - 本地工程回归入口：`npm run test:local -- --build <原生构建清单>`，样本由开发者在私有注册表中登记。

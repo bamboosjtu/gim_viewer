@@ -1,9 +1,9 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { setupViewerShell } from '../shell/viewerShell.js';
-import { showLoading } from '../../services/gimOpenCore.js';
+import { showLoading } from '../../services/project/gimOpenCore.js';
 
 vi.mock('@desktop/runtime.js', () => ({ isTauri: () => false }));
-vi.mock('../../services/gimOpenCore.js', () => ({ showLoading: vi.fn(), hideLoading: vi.fn() }));
+vi.mock('../../services/project/gimOpenCore.js', () => ({ showLoading: vi.fn(), hideLoading: vi.fn() }));
 
 afterEach(() => { vi.restoreAllMocks(); vi.clearAllMocks(); });
 

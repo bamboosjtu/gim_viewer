@@ -7,26 +7,20 @@
     ".": "./src/index.ts",
     "./attributeRecords.js": "./src/attributeRecords.ts",
     "./crossingClassification.js": "./src/crossingClassification.ts",
-    "./diagnostics.js": "./src/diagnostics.ts",
-    "./entityName.js": "./src/entityName.ts",
-    "./errors.js": "./src/errors.ts",
-    "./famRecords.js": "./src/famRecords.ts",
-    "./generated/nativeContracts.js": "./src/generated/nativeContracts.ts",
-    "./geometry/ir.js": "./src/geometry/ir.ts",
-    "./geometry/lineModParser.js": "./src/geometry/lineModParser.ts",
     "./gimGraphTypes.js": "./src/gimGraphTypes.ts",
-    "./kvParser.js": "./src/kvParser.ts",
     "./lineAttributeTypes.js": "./src/lineAttributeTypes.ts",
     "./lineAttrParserCore.js": "./src/lineAttrParserCore.ts",
     "./lineCbmParserCore.js": "./src/lineCbmParserCore.ts",
     "./lineFamParser.js": "./src/lineFamParser.ts",
     "./lineMapData.js": "./src/lineMapData.ts",
-    "./linePathNormalize.js": "./src/linePathNormalize.ts",
-    "./parserLimits.js": "./src/parserLimits.ts",
-    "./sourceDocument.js": "./src/sourceDocument.ts"
+    "./linePathNormalize.js": "./src/linePathNormalize.ts"
   },
   "files": [
     "src/**/*.ts",
     "!src/**/__tests__/**"
-  ]
+  ],
+  "dependencies": {
+    "@gim/contracts-native": "file:../contracts-native",
+    "@gim/gim-primitives": "file:../gim-primitives"
+  }
 }

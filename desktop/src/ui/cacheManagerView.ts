@@ -18,7 +18,7 @@ import {
   readCachedProjectReport,
   removeProjectCache,
   type ProjectCacheSummary,
-} from '../services/projectCacheService.js';
+} from '../services/project/projectCacheService.js';
 import { escapeHtml } from '../shared/html.js';
 
 let modalEl: HTMLElement | null = null;

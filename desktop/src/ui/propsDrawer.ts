@@ -1,7 +1,7 @@
 import {
   readInspectorIfcProperties,
   type InspectorIfcProperties,
-} from '../services/inspectorIfcSelectors.js';
+} from '../services/presentation/inspectorIfcSelectors.js';
 import { logger } from '../utils/logger.js';
 import { bindRefinementControls } from './refinementControls.js';
 import { resolveIfcModelId } from '../gim/modelIdentity.js';
@@ -11,7 +11,7 @@ import {
   findDeviceIfcModel,
   nodeIfcRefinement,
   type IfcRefinementRuntime,
-} from '../services/inspectorIfcSelectors.js';
+} from '../services/presentation/inspectorIfcSelectors.js';
 import {
   renderFamSections,
   renderIfcItemData,
@@ -19,19 +19,22 @@ import {
   renderInspectorSummary,
   isUsefulPropertyValue,
   inspectorTabsHtml,
-} from '../services/inspectorMarkup.js';
-export { sectionHtml } from '../services/inspectorMarkup.js';
+} from '../services/presentation/inspectorMarkup.js';
+export { sectionHtml } from '../services/presentation/inspectorMarkup.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import {
   buildInspectorSummary,
   inspectNodeParameters,
   type InspectorFamilyData,
-} from '../services/inspectorService.js';
+} from '../services/presentation/inspectorService.js';
 import type { FamSourceProperty } from '../gim/famParser.js';
-import { inspectAuxiliarySources, deviceOccurrenceScope } from '../services/inspectorService.js';
+import {
+  inspectAuxiliarySources,
+  deviceOccurrenceScope,
+} from '../services/presentation/inspectorService.js';
 import type { CbmNode } from '../gim/types.js';
 import type { AppState, SelectionRequest } from '../app/state.js';
-import { beginSelectionStage } from '../services/selectionTiming.js';
+import { beginSelectionStage } from '../services/selection/selectionTiming.js';
 import { setSelectionStatus } from './shell/statusBar.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 import type { RegionalObject } from '../viewer/ifcRegionalData.js';
@@ -39,7 +42,7 @@ import {
   inspectRegionalConnectionOwnership,
   connectionOwnershipRows,
   connectionEndpointRows,
-} from '../services/inspectorService.js';
+} from '../services/presentation/inspectorService.js';
 import { escHtml } from '../shared/html.js';
 import { getFirstNonEmptyKv } from '../shared/gimParsing.js';
 import { getNodeDisplayName } from '../shared/displayName.js';

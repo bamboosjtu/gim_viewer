@@ -2,7 +2,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { AppState } from '../../../../app/state.js';
 import {GimError} from '@desktop/contracts.js';
 import { startSubstationExtractionJob, cancelSubstationExtraction, withEarlySemanticCapability, type EarlySemanticEligibility } from '../substationExtractionJob.js';
-import { isSubstationSourceMaterializing } from '../../../../services/projectSourcePreparation.js';
+import { isSubstationSourceMaterializing } from '../../../../services/project/projectSourcePreparation.js';
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), decode: vi.fn(), mark: vi.fn() }));
 vi.mock('../../../../infrastructure/native/projectFiles.js', () => ({ batchReadCachedFiles: async (_id: number, paths: string[]) => new Map(paths.map(p => [p, new TextEncoder().encode('exact')])) }));
 vi.mock("../../../../infrastructure/native/invokeTimed.js", () => ({ invokeTimed: mocks.invoke }));

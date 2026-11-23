@@ -1,16 +1,16 @@
 import { reportBackgroundError } from '../../../utils/backgroundErrors.js';
 import { logger } from '../../../utils/logger.js';
-import { selectionPresentation } from '../../../services/selectionPresentationPort.js';
-import { diagramPresentation } from '../../../services/diagramPresentationPort.js';
+import { selectionPresentation } from '../../../services/presentation/selectionPresentationPort.js';
+import { diagramPresentation } from '../../../services/presentation/diagramPresentationPort.js';
 import { isSubstationViewerInteractive } from '../runtime/substationLoadingState.js';
 /** Substation navigation, selection callbacks and loading presentation. */
 import { setSelectionStatus } from '../../../services/presentation/shell_statusBar.js';
 import type { CbmNode } from '../../../gim/types.js';
 import type { AppState, ProjectLoadSession } from '../../../app/state.js';
-import { projectPresentation } from '../../../services/projectPresentationPort.js';
+import { projectPresentation } from '../../../services/presentation/projectPresentationPort.js';
 
 import { perfBegin, perfMarkProductMoment, type PerfSession } from '../../../utils/perfTimings.js';
-import { showLoading } from '../../../services/gimOpenCore.js';
+import { showLoading } from '../../../services/project/gimOpenCore.js';
 
 export function collectCbmNodeCount(root: CbmNode | null): number {
   if (!root) return 0;
@@ -39,13 +39,13 @@ export function createNodeClickHandler(
         state.selection.selectionMessage = '工程来源正在准备，完成后可定位该对象';
         setSelectionStatus(state.selection.selectionMessage);
         void Promise.resolve(
-          import('../../../services/engineeringSelection.js').then(
+          import('../../../services/engineering/engineeringSelection.js').then(
             ({ clearEngineeringHighlight }) => clearEngineeringHighlight(state, request),
           ),
         ).catch(reportBackgroundError);
         return;
       }
-      void import('../../../services/engineeringCbmSelection.js')
+      void import('../../../services/engineering/engineeringCbmSelection.js')
         .then(async ({ selectEngineeringCbmSource }) => {
           if (
             state.selection.isCurrentSelection(request) &&
@@ -55,7 +55,7 @@ export function createNodeClickHandler(
             state.selection.selectionMessage = '该来源尚不能唯一定位，请在来源视图核对';
             setSelectionStatus(state.selection.selectionMessage);
             void Promise.resolve(
-              import('../../../services/engineeringSelection.js').then(
+              import('../../../services/engineering/engineeringSelection.js').then(
                 ({ clearEngineeringHighlight }) => clearEngineeringHighlight(state, request),
               ),
             ).catch(reportBackgroundError);
@@ -70,7 +70,7 @@ export function createNodeClickHandler(
       return;
     }
     const request = state.selection.beginSelection({ kind: 'cbm', key: node.path });
-    void import('../../../services/nodeInteractionService.js')
+    void import('../../../services/selection/nodeInteractionService.js')
       .then(({ handleNodeClick }) => handleNodeClick(state, node, showMessage, request))
       .catch((error) => logger.warn('[选择] 节点交互失败:', error));
   };
@@ -92,8 +92,8 @@ export function setupSldGridIdInteraction(
       const nodes = getCbmNodesByGridId(state.currentStdSldIndex, gridId);
       if (nodes.length === 0) {
         const [{ clearSelectionHighlight }, { syncSelectionNavigation }] = await Promise.all([
-          import('../../../services/nodeInteractionService.js'),
-          import('../../../services/selectionNavigation.js'),
+          import('../../../services/selection/nodeInteractionService.js'),
+          import('../../../services/selection/selectionNavigation.js'),
         ]);
         if (!state.selection.isCurrentSelection(request)) return;
         await selectionPresentation().unlinkedDiagram(state, gridId, request);
@@ -113,12 +113,12 @@ export function setupSldGridIdInteraction(
         }
         if (nodes.length === 1) {
           const { selectEngineeringCbmSource } =
-            await import('../../../services/engineeringCbmSelection.js');
+            await import('../../../services/engineering/engineeringCbmSelection.js');
           if (state.selection.isCurrentSelection(request))
             await selectEngineeringCbmSource(state, nodes[0].path, request);
         } else {
           const { clearEngineeringHighlight } =
-            await import('../../../services/engineeringSelection.js');
+            await import('../../../services/engineering/engineeringSelection.js');
           await clearEngineeringHighlight(state, request);
           if (state.selection.isCurrentSelection(request))
             await selectionPresentation().chooseSources(
@@ -135,7 +135,8 @@ export function setupSldGridIdInteraction(
         }
         return;
       }
-      const { handleNodeClick } = await import('../../../services/nodeInteractionService.js');
+      const { handleNodeClick } =
+        await import('../../../services/selection/nodeInteractionService.js');
       if (session && !state.isCurrentSession(session)) return;
       request.target = { kind: 'cbm', key: nodes[0].path };
       await handleNodeClick(state, nodes[0], showMessage, request);

@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { CacheResult, ProjectCacheSummary } from '../../services/projectCacheService.js';
+import type { CacheResult, ProjectCacheSummary } from '../../services/project/projectCacheService.js';
 
 const service = vi.hoisted(() => ({ list: vi.fn(), path: vi.fn(), check: vi.fn(), report: vi.fn(), remove: vi.fn() }));
-vi.mock('../../services/projectCacheService.js', () => ({ readProjectCaches: service.list, readCacheDatabasePath: service.path,
+vi.mock('../../services/project/projectCacheService.js', () => ({ readProjectCaches: service.list, readCacheDatabasePath: service.path,
   checkProjectCache: service.check, readCachedProjectReport: service.report, removeProjectCache: service.remove }));
 const project = (id: number): ProjectCacheSummary => ({ id, name: `工程${id}`, path: `C:/source/${id}.gim`, projectType: 'equipment',
   parserVersion: 'current', size: 1, updatedAt: 100, lastOpenedAt: 100 });

@@ -1,3 +1,4 @@
+import { GimError } from '@gim/contracts-native/errors.js';
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
 import {ENGINEERING_RECOGNITION_VERSION} from '@gim/gim-sdk/source-adapter';
@@ -7,7 +8,7 @@ import { extractEngineeringSourceGraph } from '@gim/gim-sdk/source';
 import {buildTestEngineeringSources} from '@tests/sdk-source-fixtures';
 import { decodeEngineeringArtifact,encodeEngineeringArtifact,decodeEngineeringEntities, decodeEngineeringSources, encodeEngineeringEntities, encodeEngineeringSources, engineeringCacheEntry, engineeringSourceCacheMatchesFiles } from '../engineeringCacheCodec.js';
 import {packEngineeringSource} from '../engineeringSourceCodec.js';
-import { markCacheFailure } from '../../../services/engineeringWorkerHandler.js';
+import { markCacheFailure } from '../../../services/engineering/engineeringWorkerCache.js';
 import type { EngineeringBuildResult } from '../../workers/engineeringWorkerProtocol.js';
 import {INVENTORY_TEMPLATE} from '@gim/gim-sdk/projection';
 
@@ -120,6 +121,8 @@ describe('independent source and entity cache contracts', () => {
   it('marks an over-budget cache as explicitly disabled, not an error-only failure', () => {
     const result = {} as EngineeringBuildResult;
     markCacheFailure(result, Error('工程缓存无效：plain size'));
+    expect(result.cacheDisabled).toBeUndefined();
+    markCacheFailure(result, new GimError('RESOURCE_LIMIT', '缓存超限 (plain size)'));
     expect(result.cacheError).toContain('plain size');
     expect(result.cacheDisabled).toContain('384 MiB');
   });

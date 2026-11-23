@@ -8,9 +8,9 @@ import { isTauri } from '@desktop/runtime.js';
 import { DEBUG_FRAGMENTS } from '../config/debug.js';
 import { debugWarn, logger } from '../utils/logger.js';
 import { summarizeDiagnostic } from '../shared/diagnosticSummary.js';
-import { summarizeBasemapStatus } from '../services/basemapStatusService.js';
+import { summarizeBasemapStatus } from '../services/presentation/basemapStatusService.js';
 import { setupPropsDrawerInteractions } from '../ui/propsDrawer.js';
-import { showLoading, hideLoading } from '../services/gimOpenCore.js';
+import { showLoading, hideLoading } from '../services/project/gimOpenCore.js';
 import { setupIfcDetailModeControl } from '../ui/ifcDetailModeControl.js';
 import { bindProjectShell } from './composition/bindProjectShell.js';
 
@@ -45,7 +45,7 @@ async function bootstrapAsync(): Promise<void> {
   // 应用设置（天地图密钥、IFC 大文件跳过等）保存在本地 SQLite；
   // 页面启动时先加载，保证地图/工程打开前拿到当前配置。
   try {
-    const { loadAppSettings } = await import('../services/appSettings.js');
+    const { loadAppSettings } = await import('../services/project/appSettings.js');
     await loadAppSettings();
   } catch (error) {
     logger.warn('[settings] 加载应用设置失败:', error);
@@ -79,7 +79,7 @@ async function bootstrapAsync(): Promise<void> {
   // Persist tree expansion when the window closes; camera is intentionally not
   // restored for substation (default open is the station overview).
   window.addEventListener('beforeunload', () => {
-    void import('../services/viewStateStore.js')
+    void import('../services/project/viewStateStore.js')
       .then(({ saveViewState }) => {
         if (state.currentProjectType !== 'substation') return;
         saveViewState(state);
@@ -106,7 +106,7 @@ async function bootstrapAsync(): Promise<void> {
         try {
           showLoading('正在生成数据库诊断...');
           const { collectProjectDiagnostic } =
-            await import('../services/projectDiagnosticService.js');
+            await import('../services/project/projectDiagnosticService.js');
           const snapshot = await collectProjectDiagnostic(state);
           if (!snapshot || !state.isCurrentSession(diagnosticSession)) return;
           const { diagnostic } = snapshot;

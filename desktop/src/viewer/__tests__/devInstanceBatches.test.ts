@@ -2,7 +2,7 @@ import {expect,it,vi} from 'vitest';
 import * as THREE from 'three';
 import {DevInstanceBatches} from '../devInstanceBatches.js';
 import {highlightModGroups,resetModHighlight} from '../highlight.js';
-import {DevGlbTemplate} from '../../services/devGlbTemplateRuntime.js';
+import {DevGlbTemplate} from '../../services/dev-geometry/devGlbTemplateRuntime.js';
 import {fitCameraToStationOverview} from '../camera.js';
 
 function fixture() {

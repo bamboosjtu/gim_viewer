@@ -6,9 +6,9 @@ import {
 import { logger } from '../../utils/logger.js';
 import type { ProjectLoadSession } from '../../shared/projectSession.js';
 
-import { scheduleHideLoading } from '../../services/gimOpenCore.js';
+import { scheduleHideLoading } from '../../services/project/gimOpenCore.js';
 import type { AppState } from '../state.js';
-import { projectOpenPresentation } from '../../services/projectOpenPresentationPort.js';
+import { projectOpenPresentation } from '../../services/presentation/projectOpenPresentationPort.js';
 import { isTauri } from '@desktop/runtime.js';
 import { openGimFilePath } from '@desktop/fileDialog.js';
 import { perfBegin, perfReset, perfUpdateSessionIdentity } from '../../utils/perfTimings.js';
@@ -17,7 +17,7 @@ import {
   showLoading,
   type ExtractionResult,
   type GimRuntimeOpenContext,
-} from '../../services/gimOpenCore.js';
+} from '../../services/project/gimOpenCore.js';
 import {
   getProjectTypeName,
   inspectGimSourceBuffer,
@@ -25,7 +25,7 @@ import {
   resolveGimRuntimeType,
   type GimRuntimeType,
   type GimSourceDescriptor,
-} from '../../services/gimSourceService.js';
+} from '../../services/project/gimSourceService.js';
 export interface ProjectOpenRouting {
   ownsIntent: () => boolean;
   dispatch: (type: GimRuntimeType, context: GimRuntimeOpenContext) => Promise<void>;
@@ -76,7 +76,7 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
   const cleanedGeneration = state.projectGeneration;
   if (!(await cleanup) || state.projectGeneration !== cleanedGeneration) return;
   // 计时从本次打开重新开始，避免沿用上一工程的已用秒数。
-  const { resetLoadingClock } = await import('../../services/gimOpenCore.js');
+  const { resetLoadingClock } = await import('../../services/project/gimOpenCore.js');
   if (state.projectGeneration !== cleanedGeneration) return;
   resetLoadingClock();
 

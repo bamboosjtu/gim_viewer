@@ -19,6 +19,7 @@
 | `app/` | Android 线路应用、SAF 导入与移动端界面 |
 | `packages/gim-sdk/` | GIM 格式 Parser、来源、领域语义、独立物理目录、表示绑定与只读投影；自有测试和目录配置 |
 | `packages/powerline-core/`、`packages/measurement-core/`、`packages/plugin-api/` | 跨端纯线路核心、无平台依赖的测量协议、插件接口 |
+| `packages/contracts-native/`、`packages/gim-primitives/` | 原生 v1 TypeScript 契约、结构化错误和通用格式原语 |
 | `crates/`、`contracts/` | 原生共享解压与 Android 导入插件；跨语言资源限制契约 |
 | `tools/` | 独立 Python 工具；其 QtWebEngine 页面不属于桌面或 Android 前端 |
 | `docs/`、`research/` | 当前契约与待复核研究；研究结论不能直接充当产品事实 |

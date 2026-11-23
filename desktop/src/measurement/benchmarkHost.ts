@@ -1,4 +1,5 @@
 import { DESKTOP_COMMANDS } from '@desktop/contracts.js';
+import { hasErrorCode } from '@gim/contracts-native/errors.js';
 import measuredWorkerAsset from './capabilityWorker.ts?worker&url';
 import type { AppState } from '../app/state.js';
 import {
@@ -120,7 +121,7 @@ export function installBenchmarkHost(state: AppState): void {
       } catch (error) {
         if (sequence === openSequence) {
           openError = true;
-          openErrorCode = /INPUT_CORRUPT:/.test(String(error)) ? 'INPUT_CORRUPT' : null;
+          openErrorCode = hasErrorCode(error, 'INPUT_CORRUPT') ? 'INPUT_CORRUPT' : null;
         }
         throw error;
       } finally {

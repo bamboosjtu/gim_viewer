@@ -1,6 +1,6 @@
 import { parseDev } from './devParser.js';
 import { parsePhm } from './phmParser.js';
-import { PARSER_LIMITS } from '@gim/powerline-core/parserLimits.js';
+import { PARSER_LIMITS } from '@gim/gim-primitives/parserLimits.js';
 import { getFileByPath } from '../fileLookup.js';
 import { createEntryResolver, type EntryResolver } from '../entryResolver.js';
 
@@ -11,7 +11,7 @@ export async function hydrateSubstationGeometryGraph(
   devPaths: readonly string[],
   readFiles: (paths: string[]) => Promise<ReadonlyMap<string, File>>,
   inventory: Iterable<string> | EntryResolver,
-  references?: Map<string,Promise<readonly string[]>>,
+  references?: Map<string, Promise<readonly string[]>>,
 ): Promise<Map<string, File>> {
   const files = new Map<string, File>();
   const seen = new Set<string>();
@@ -21,12 +21,14 @@ export async function hydrateSubstationGeometryGraph(
     const batch = pending.filter(({ path }) => {
       const key = path.toLowerCase();
       if (seen.has(key)) return false;
-      seen.add(key); return true;
+      seen.add(key);
+      return true;
     });
     pending = [];
     if (seen.size > PARSER_LIMITS.maxGeometryQueue) throw new Error('缓存几何引用队列超过安全上限');
     if (!batch.length) break;
-    if (batch.some(({ depth }) => depth > PARSER_LIMITS.maxRecursionDepth)) throw new Error('缓存几何递归深度超过安全上限');
+    if (batch.some(({ depth }) => depth > PARSER_LIMITS.maxRecursionDepth))
+      throw new Error('缓存几何递归深度超过安全上限');
     const loaded = new Map<string, File>();
     for (let start = 0; start < batch.length; start += 256) {
       const chunk = await readFiles(batch.slice(start, start + 256).map(({ path }) => path));
@@ -36,24 +38,32 @@ export async function hydrateSubstationGeometryGraph(
     for (const { path, depth } of batch) {
       const file = getFileByPath(loaded, path);
       if (!file) continue;
-      if(!/\.(dev|phm)$/i.test(path))continue;
+      if (!/\.(dev|phm)$/i.test(path)) continue;
       try {
-        let pendingTargets=references?.get(path);
-        if(!pendingTargets){
-          pendingTargets=(async()=>{
-            if(/\.dev$/i.test(path)){
-              const doc=parseDev(await file.text(),path);
-              return [...doc.solidModels.map(s=>s.solidModelPath),...doc.subDevices.map(s=>s.devPath)];
+        let pendingTargets = references?.get(path);
+        if (!pendingTargets) {
+          pendingTargets = (async () => {
+            if (/\.dev$/i.test(path)) {
+              const doc = parseDev(await file.text(), path);
+              return [
+                ...doc.solidModels.map((s) => s.solidModelPath),
+                ...doc.subDevices.map((s) => s.devPath),
+              ];
             }
-            return /\.phm$/i.test(path)?parsePhm(await file.text(),path).solidModels.map(s=>s.solidModelPath):[];
+            return /\.phm$/i.test(path)
+              ? parsePhm(await file.text(), path).solidModels.map((s) => s.solidModelPath)
+              : [];
           })();
-          if(/\.(dev|phm)$/i.test(path))references?.set(path,pendingTargets);
+          if (/\.(dev|phm)$/i.test(path)) references?.set(path, pendingTargets);
         }
-        const targets=await pendingTargets;
+        const targets = await pendingTargets;
         for (const target of targets) {
-          if (/\.(dev|phm|mod|stl|gl)$/i.test(target)) pending.push({ path: resolve(target, path) ?? target, depth: depth + 1 });
+          if (/\.(dev|phm|mod|stl|gl)$/i.test(target))
+            pending.push({ path: resolve(target, path) ?? target, depth: depth + 1 });
         }
-      } catch { /* This source is diagnosed by strict compilation/discovery, siblings remain available. */ }
+      } catch {
+        /* This source is diagnosed by strict compilation/discovery, siblings remain available. */
+      }
     }
   }
   return files;

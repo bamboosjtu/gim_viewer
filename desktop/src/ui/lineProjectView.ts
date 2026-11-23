@@ -63,8 +63,11 @@ import {
 } from '../config/features.js';
 import type { LineBasemapMode } from '../config/features.js';
 import { isTiandituKeyAvailable } from '../config/tianditu.js';
-import { setBasemapStatus, resetBasemapStatus } from '../services/basemapStatusService.js';
-import type { BasemapStatus } from '../services/basemapStatusService.js';
+import {
+  setBasemapStatus,
+  resetBasemapStatus,
+} from '../services/presentation/basemapStatusService.js';
+import type { BasemapStatus } from '../services/presentation/basemapStatusService.js';
 import { debugLog, debugWarn, logger } from '../utils/logger.js';
 import { renderSearchBox } from './searchBox.js';
 import { setStatusRight } from './shell/statusBar.js';

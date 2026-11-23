@@ -24,4 +24,4 @@
 
 本地观察唯一模板数、每 LOD hit/miss/compile、来源读取、分部/合并次数、排队/执行/导出/解码/提交及内存，区别字节不同与渲染等价。几何等价的离线验收不能变成每次普通浏览的顶点审计。
 
-代码：[编译](../../desktop/src/services/glbCacheService.ts)、[Worker 池](../../desktop/src/services/devGeometryWorkerClient.ts)、[模板](../../desktop/src/services/devGlbTemplateRuntime.ts)。检查：[编译与兜底](../../desktop/src/services/__tests__/glbCacheService.test.ts)、[多实例](../../desktop/src/services/__tests__/devGlbTemplateRuntime.test.ts)、[物理地址](../../desktop/src/services/__tests__/sourceGeometryService.test.ts)。
+代码：[编译](../../desktop/src/services/dev-geometry/glbCacheService.ts)、[Worker 池](../../desktop/src/services/dev-geometry/devGeometryWorkerClient.ts)、[模板](../../desktop/src/services/dev-geometry/devGlbTemplateRuntime.ts)。检查：[编译与兜底](../../desktop/src/services/dev-geometry/__tests__/glbCacheService.test.ts)、[多实例](../../desktop/src/services/dev-geometry/__tests__/devGlbTemplateRuntime.test.ts)、[物理地址](../../desktop/src/services/dev-geometry/__tests__/sourceGeometryService.test.ts)。

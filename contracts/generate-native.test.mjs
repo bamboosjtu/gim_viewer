@@ -19,7 +19,7 @@ test('check mode rejects drift without rewriting files',()=>{
   const work=mkdtempSync(resolve(parent,'drift-'));
   mkdirSync(resolve(work,'contracts'),{recursive:true});writeFileSync(resolve(work,'contracts/native-v1.json'),JSON.stringify(schema));
   generateNativeContract({workspace:work});
-  const output=resolve(work,'packages/powerline-core/src/generated/nativeContracts.ts');
+  const output=resolve(work,'packages/contracts-native/src/generated/nativeContracts.ts');
   writeFileSync(output,readFileSync(output,'utf8')+'// drift\n');
   assert.throws(()=>generateNativeContract({workspace:work,check:true}),/stale/);
   assert.match(readFileSync(output,'utf8'),/drift/);

@@ -4,7 +4,7 @@ import { btnCacheManager, btnClear, btnLoadGim, btnLoadLocal } from '../../ui/do
 import { setupViewerShell } from '../../ui/shell/viewerShell.js';
 import { setStatusRight } from '../../ui/shell/statusBar.js';
 import { registerPropertyReferenceHandler } from '../../ui/propertyDictionary.js';
-import { scheduleHideLoading, showLoading } from '../../services/gimOpenCore.js';
+import { scheduleHideLoading, showLoading } from '../../services/project/gimOpenCore.js';
 import { logger } from '../../utils/logger.js';
 import { reportBackgroundError } from '../../utils/backgroundErrors.js';
 import { closeProject, openGimProjectFromId, openGimWithDialog } from './projectActions.js';

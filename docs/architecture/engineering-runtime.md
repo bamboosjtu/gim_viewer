@@ -15,7 +15,7 @@
 
 引入 IFC 时，装配消费内存中的空间和外露对象索引，几何与缓存写入各自推进。来源不完整时发布可浏览的部分结果并标注缺口。归一化失败时仍可查看有效来源，单个投影失败也只影响对应视图。切换或关闭工程后，宿主按会话、构建和修订拒绝迟到结果。
 
-[工程 Worker 入口](../../desktop/src/infrastructure/workers/engineeringWorker.ts)将协议请求交给[工程处理器](../../desktop/src/services/engineeringWorkerHandler.ts)，由处理器执行来源抽取、归一化、投影和编码。[工程服务](../../desktop/src/services/engineeringService.ts)协调构建和发布，会话取消由 [Worker 客户端](../../desktop/src/infrastructure/workers/engineeringWorkerClient.ts)接收，取消时拒绝待处理请求并释放句柄、监听和临时数据。来源图修订相同时，后续模型结果引用已发布的图，修订变化时传递完整图。
+[工程 Worker 入口](../../desktop/src/infrastructure/workers/engineeringWorker.ts)将协议请求交给[工程处理器](../../desktop/src/services/engineering/engineeringWorkerHandler.ts)，由处理器执行来源抽取、归一化、投影和编码。[工程服务](../../desktop/src/services/engineering/engineeringService.ts)协调构建和发布，会话取消由 [Worker 客户端](../../desktop/src/infrastructure/workers/engineeringWorkerClient.ts)接收，取消时拒绝待处理请求并释放句柄、监听和临时数据。来源图修订相同时，后续模型结果引用已发布的图，修订变化时传递完整图。
 
 [来源引用解析](../../packages/gim-sdk/src/source/sourceReferenceResolver.ts)复用来源图的条目索引，按遍历次序登记引用，并且每份文档的同一歧义字段只报告一次。CBM/DEV 的遍历和预读继续由来源图负责，文档读取继续由共享的 `SourceDocumentReader` 管理。
 

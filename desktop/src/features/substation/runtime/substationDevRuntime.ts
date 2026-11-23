@@ -6,8 +6,8 @@ import { reportBackgroundError } from '../../../utils/backgroundErrors.js';
 import type { AppState, ProjectLoadSession } from '../../../app/state.js';
 import type { ViewerContext } from '../../../viewer/viewerEngine.js';
 import { perfCurrentSession, perfBegin } from '../../../utils/perfTimings.js';
-import { hideLoading } from '../../../services/gimOpenCore.js';
-import { observeFirstGeometry } from '../../../services/geometryPresentationService.js';
+import { hideLoading } from '../../../services/project/gimOpenCore.js';
+import { observeFirstGeometry } from '../../../services/presentation/geometryPresentationService.js';
 
 export async function autoLoadModStlPostIfc(
   state: AppState,
@@ -30,7 +30,8 @@ export async function autoLoadModStlPostIfc(
 
     let resourceCtx: ViewerContext | null = existingCtx ?? null;
     if (!resourceCtx) {
-      const { getViewerRuntimeWithUI } = await import('../../../services/viewerUIBinding.js');
+      const { getViewerRuntimeWithUI } =
+        await import('../../../services/presentation/viewerUIBinding.js');
       if (!state.isCurrentSession(session)) return;
       const runtime = await getViewerRuntimeWithUI(state, showMessage);
       if (!state.isCurrentSession(session)) return;
@@ -43,7 +44,7 @@ export async function autoLoadModStlPostIfc(
       return;
     }
 
-    const { startDeviceLod } = await import('../../../services/devLodRuntime.js');
+    const { startDeviceLod } = await import('../../../services/dev-geometry/devLodRuntime.js');
     if (!state.isCurrentSession(session)) return;
     if (!state.currentIfcEntries.length && !state.projectSourceToViewerMatrix) {
       const THREE = await import('three');

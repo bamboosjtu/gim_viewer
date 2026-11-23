@@ -1,6 +1,7 @@
+import { logger } from '../utils/logger.js';
 /** DOM event bridge; property formatting is a pure service. */
-export * from '../services/propertyPresentation.js';
-import type { PropertyReferenceDetail } from '../services/propertyPresentation.js';
+export * from '../services/presentation/propertyPresentation.js';
+import type { PropertyReferenceDetail } from '../services/presentation/propertyPresentation.js';
 
 type PropertyReferenceHandler = (detail: PropertyReferenceDetail) => boolean | void;
 const propertyReferenceHandlers = new Set<PropertyReferenceHandler>();
@@ -17,7 +18,7 @@ export function ensurePropertyReferenceEvents(): void {
       try {
         if (handler(detail) === true) break;
       } catch (error) {
-        console.warn('[属性引用] 跳转处理失败:', error);
+        logger.warn('[属性引用] 跳转处理失败:', error);
       }
     }
   });

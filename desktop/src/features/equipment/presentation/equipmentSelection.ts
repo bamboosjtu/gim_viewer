@@ -12,7 +12,7 @@ export function createEquipmentSelection(
     if (!scope.isCurrent()) return;
     const request = state.selection.beginSelection({ kind: 'cbm', key: node.path });
     const current = () => scope.isCurrent() && state.selection.isCurrentSelection(request);
-    void import('../../../services/nodeInteractionService.js')
+    void import('../../../services/selection/nodeInteractionService.js')
       .then(({ handleNodeClick }) => {
         if (current()) return handleNodeClick(state, node, showMessage, request);
       })

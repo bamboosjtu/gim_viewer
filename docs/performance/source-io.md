@@ -30,4 +30,4 @@
 
 独立实体盘点工具只消费语义来源，容器路径在内存中接收所需文件，避免全量几何解包和语义小文件落盘后重开。不得为了共享实现而导入 Viewer；两种独立算法通过相同来源 DTO 对照。解析数量、文件打开次数与真实处理耗时分别报告。
 
-代码：[共享索引](../../packages/gim-sdk/src/source/entryResolver.ts)、[按需输入](../../desktop/src/services/engineeringSourceInput.ts)、[来源供给](../../desktop/src/services/devLodSourceWorkset.ts)。检查：[索引](../../packages/gim-sdk/src/source/__tests__/entryResolver.test.ts)、[递归读取](../../desktop/src/gim/__tests__/cbmParser.test.ts)、[根并发/共享依赖](../../desktop/src/services/__tests__/devSourcePipeline.test.ts)、[独立来源构建](../../desktop/src/services/__tests__/engineeringService.test.ts)。
+代码：[共享索引](../../packages/gim-sdk/src/source/entryResolver.ts)、[按需输入](../../desktop/src/services/engineering/engineeringSourceInput.ts)、[来源供给](../../desktop/src/services/dev-geometry/devLodSourceWorkset.ts)。检查：[索引](../../packages/gim-sdk/src/source/__tests__/entryResolver.test.ts)、[递归读取](../../desktop/src/gim/__tests__/cbmParser.test.ts)、[根并发/共享依赖](../../desktop/src/services/dev-geometry/__tests__/devSourcePipeline.test.ts)、[独立来源构建](../../desktop/src/services/engineering/__tests__/engineeringService.test.ts)。

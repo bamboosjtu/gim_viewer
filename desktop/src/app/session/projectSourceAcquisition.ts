@@ -14,7 +14,7 @@ import {
   type ExtractedGimSource,
   type ExtractionResult,
   type GimRuntimeOpenContext,
-} from '../../services/gimOpenCore.js';
+} from '../../services/project/gimOpenCore.js';
 import {
   assertGimSourceMagicStable,
   detectGimProjectType,
@@ -24,7 +24,7 @@ import {
   resolveGimRuntimeType,
   type GimContentProjectType,
   type GimSourceDescriptor,
-} from '../../services/gimSourceService.js';
+} from '../../services/project/gimSourceService.js';
 
 export interface EarlyProjectSource {
   inspectEarlySemanticEligibility(
@@ -349,7 +349,8 @@ export async function acquireProjectSource(
   // independent fast path and hydrate only completed native sources here.
   if (nativeFilePath && extracted.cacheProjectId != null && !extracted.earlySemantic) {
     const endHydrate = perfBegin('工程类型判定前小文件批量物化', undefined, perfSession);
-    const { hydrateNativeSmallFiles } = await import('../../services/nativeSmallFileHydration.js');
+    const { hydrateNativeSmallFiles } =
+      await import('../../services/project/nativeSmallFileHydration.js');
     const hydrated = await hydrateNativeSmallFiles(extracted.files, extracted.cacheProjectId, {
       isCurrent: () => state.isCurrentSession(session),
       parseCopy: extracted.parseCopy,

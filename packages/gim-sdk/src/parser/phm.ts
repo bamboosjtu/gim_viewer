@@ -9,14 +9,14 @@ import type {
   PhmDocument,
   PhmSolidModelEntry,
   XmlModColor,
-} from "@gim/powerline-core/geometry/ir.js";
-import { parseBoundedCount } from "@gim/powerline-core/parserLimits.js";
+} from "@gim/gim-primitives/geometry/ir.js";
+import { parseBoundedCount } from "@gim/gim-primitives/parserLimits.js";
 import {
   parseSourceDocument,
   sourceConflicts,
   sourceDiagnostic,
   sourceScalar,
-} from "@gim/powerline-core/sourceDocument.js";
+} from "@gim/gim-primitives/sourceDocument.js";
 import { isUsableAffineMatrix } from "./affineMatrix.js";
 import { isGimEmptyValue } from "./values.js";
 

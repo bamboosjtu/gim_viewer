@@ -7,7 +7,7 @@ import { renderVirtualOutline, type OutlineElement, type OutlineNode } from './v
 import {
   getEngineeringNavigation,
   type EngineeringNavigationData,
-} from '../services/engineeringViewService.js';
+} from '../services/engineering/engineeringViewService.js';
 import { setEngineeringDeviceCount } from './shell/statusBar.js';
 import { downloadEngineeringTree, copyEngineeringTree } from './engineeringTreeExport.js';
 
@@ -289,7 +289,8 @@ export function renderEngineeringTree(state: AppState): void {
           : { kind: 'engineering-group' as const, key };
         const request = state.selection.beginSelection(target);
         syncEngineeringTreeSelection(state);
-        const { selectEngineeringTarget } = await import('../services/engineeringSelection.js');
+        const { selectEngineeringTarget } =
+          await import('../services/engineering/engineeringSelection.js');
         if (state.selection.isCurrentSelection(request))
           await selectEngineeringTarget(state, target, request);
       } else {
@@ -303,7 +304,7 @@ export function renderEngineeringTree(state: AppState): void {
           });
           syncEngineeringTreeSelection(state);
           const { inspectEngineeringContext } =
-            await import('../services/engineeringSourceInspector.js');
+            await import('../services/engineering/engineeringSourceInspector.js');
           if (state.selection.isCurrentSelection(request))
             await inspectEngineeringContext(state, contextKey, request);
         } else if (node.sourceId) {
@@ -312,7 +313,8 @@ export function renderEngineeringTree(state: AppState): void {
             key: node.sourceId,
           });
           syncEngineeringTreeSelection(state);
-          const { selectEngineeringTarget } = await import('../services/engineeringSelection.js');
+          const { selectEngineeringTarget } =
+            await import('../services/engineering/engineeringSelection.js');
           if (state.selection.isCurrentSelection(request))
             await selectEngineeringTarget(
               state,
@@ -327,7 +329,7 @@ export function renderEngineeringTree(state: AppState): void {
           });
           syncEngineeringTreeSelection(state);
           const { inspectEngineeringDocument } =
-            await import('../services/engineeringSourceInspector.js');
+            await import('../services/engineering/engineeringSourceInspector.js');
           if (state.selection.isCurrentSelection(request))
             await inspectEngineeringDocument(state, node.documentPath, occurrence, request);
         }

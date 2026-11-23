@@ -2,13 +2,13 @@ import { logger } from '../../utils/logger.js';
 import { reportBackgroundError } from '../../utils/backgroundErrors.js';
 import type { AppState } from '../../app/state.js';
 import { btnCacheManager, btnLoadGim, btnLoadLocal, gimFileInput } from '../dom.js';
-import { isTauri } from '../../services/platformService.js';
+import { isTauri } from '../../services/project/platformService.js';
 import { escapeHtml } from '../../shared/html.js';
 import { setSelectionStatus } from './statusBar.js';
 import {
   readRecentProjects,
   type ProjectCacheSummary,
-} from '../../services/projectCacheService.js';
+} from '../../services/project/projectCacheService.js';
 import { setupSelectionToolbar } from '../selectionToolbar.js';
 
 const AUTO_OPEN_LAST_KEY = 'gim-auto-open-last';

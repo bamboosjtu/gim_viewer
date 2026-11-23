@@ -3,7 +3,7 @@ import {AppState} from '../../state.js';
 vi.mock('@desktop/runtime.js', () => ({ isTauri: () => false }));
 vi.mock('../../../features/substation/application/substationRuntime.js', () => ({ openSubstationProject: vi.fn(), onGimExtracted: vi.fn(), loadAllIfcFiles: vi.fn() }));
 vi.mock('../../../features/powerline/application/openPowerlineProject.js', () => ({ openPowerlineProject: vi.fn() }));
-vi.mock('../../../services/gimOpenCore.js', async () => ({ ...await vi.importActual('../../../services/gimOpenCore.js'), showLoading: vi.fn(), hideLoading: vi.fn() }));
+vi.mock('../../../services/project/gimOpenCore.js', async () => ({ ...await vi.importActual('../../../services/project/gimOpenCore.js'), showLoading: vi.fn(), hideLoading: vi.fn() }));
 vi.mock('../../../ui/dom.js', async () => ({ ...await vi.importActual('../../../ui/dom.js'),
   gimFileInput: document.createElement('input'), btnLoadGim: document.createElement('button') }));
 afterEach(()=>{vi.clearAllTimers();vi.useRealTimers();vi.restoreAllMocks();});

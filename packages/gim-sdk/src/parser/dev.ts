@@ -3,8 +3,8 @@ import type {
   DevDocument,
   DevSolidModelEntry,
   DevSubDeviceEntry,
-} from "@gim/powerline-core/geometry/ir.js";
-import { parseBoundedCount } from "@gim/powerline-core/parserLimits.js";
+} from "@gim/gim-primitives/geometry/ir.js";
+import { parseBoundedCount } from "@gim/gim-primitives/parserLimits.js";
 import {
   parseSourceDocument,
   sourceDiagnostic,
@@ -13,7 +13,7 @@ import {
   type SourceDiagnostic,
   type SourceDocument,
   type SourceField,
-} from "@gim/powerline-core/sourceDocument.js";
+} from "@gim/gim-primitives/sourceDocument.js";
 import { isUsableAffineMatrix } from "./affineMatrix.js";
 import type { ParseResult } from "./types.js";
 import { fromSourceDiagnostic, parseStatus } from "./diagnostics.js";

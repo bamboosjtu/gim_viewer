@@ -1,5 +1,5 @@
-import type { SelectionPresentation } from '../services/selectionPresentationPort.js';
-import { beginSelectionStage } from '../services/selectionTiming.js';
+import type { SelectionPresentation } from '../services/presentation/selectionPresentationPort.js';
+import { beginSelectionStage } from '../services/selection/selectionTiming.js';
 let navigation:
   Promise<[typeof import('./cbmTreeView.js'), typeof import('./sldView.js')]> | undefined;
 export const selectionPresentation: SelectionPresentation = {
@@ -60,7 +60,8 @@ export const selectionPresentation: SelectionPresentation = {
   },
   async unlinkedDiagram(state, gridId, request) {
     const props = await import('./propsDrawer.js');
-    if (state.selection.isCurrentSelection(request)) props.showUnlinkedSldProperties(state, gridId, request);
+    if (state.selection.isCurrentSelection(request))
+      props.showUnlinkedSldProperties(state, gridId, request);
   },
   async sourceTree(state, current) {
     const tree = await import('./engineeringTreeView.js');

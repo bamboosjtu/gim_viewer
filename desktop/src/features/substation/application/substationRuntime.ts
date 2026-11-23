@@ -1,9 +1,9 @@
 import { logger } from '../../../utils/logger.js';
 import { isTauri } from '@desktop/runtime.js';
-import type { GimRuntimeOpenContext } from '../../../services/gimOpenCore.js';
+import type { GimRuntimeOpenContext } from '../../../services/project/gimOpenCore.js';
 import { validateGimCache } from '@desktop/database.js';
 import { perfCurrentSession, perfBegin } from '../../../utils/perfTimings.js';
-import { showLoading } from '../../../services/gimOpenCore.js';
+import { showLoading } from '../../../services/project/gimOpenCore.js';
 import { openSubstationCold, tryOpenSubstationWarm } from './substationOpenStages.js';
 export {
   createNodeClickHandler,

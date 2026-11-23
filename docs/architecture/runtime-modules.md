@@ -9,8 +9,8 @@
 | `features/substation/application/substationRuntime.ts` | 工程冷/暖打开、核心语义发布、各后台阶段接线 | `features/substation/runtime/*`、`features/substation/presentation/substationPresentation.ts` |
 | `features/powerline/application/openPowerlineProject.ts` | 线路冷暖打开与会话视图交接 | `features/powerline/runtime/`、`features/powerline/presentation/` |
 | `features/equipment/application/openEquipmentProject.ts` | 独立设备来源准备、导航发布与节点选择 | `features/equipment/runtime/`、`features/equipment/presentation/` |
-| `services/geometryOnlyRuntime.ts` | 基于已发布来源树启动纯 DEV 场景、相机与首帧观察 | 独立设备和纯 DEV 变电共同使用 |
-| `services/devLodRuntime.ts` | 相机/选择、occurrence、场景提交、坐标锚点和会话关闭 | `devLodTemplateStore.ts`、`devLodArtifactWriter.ts`、`devLodSourceWorkset.ts`、`devLodReadiness.ts` |
+| `services/dev-geometry/geometryOnlyRuntime.ts` | 基于已发布来源树启动纯 DEV 场景、相机与首帧观察 | 独立设备和纯 DEV 变电共同使用 |
+| `services/dev-geometry/devLodRuntime.ts` | 相机/选择、occurrence、场景提交、坐标锚点和会话关闭 | `devLodTemplateStore.ts`、`devLodArtifactWriter.ts`、`devLodSourceWorkset.ts`、`devLodReadiness.ts` |
 | `src-tauri/src/db.rs` | 数据库连接、共享版本和基础查询、命令/DTO 导出 | `src-tauri/src/db/*.rs` |
 
 调用方可以继续从既有入口导入公开函数和类型；内部模块直接引用实际实现和小型契约，不反向依赖入口文件。Tauri 命令名、IPC 数据结构、缓存键和版本不因文件拆分而改变。
@@ -51,7 +51,7 @@
 | IFC Spatial | 导航记录筛选、CBM 资产关联、覆盖和诊断汇总 |
 | `serializeDevToGlbDetailed` | MOD 实例和 STL 实例分别装配，轮廓兜底、GLB 导出与统一释放 |
 | `beginEngineeringBuild` | 独立物理目录发布、暖语义缓存恢复、冷构建 |
-| 工程 Worker 处理器 | 来源抽取、逐域缓存编码、暖恢复和来源装配分别处理 |
+| 工程 Worker 处理器 | `engineeringWorkerHandler` 分派构建与证据命令，`engineeringWorkerSources` 持有来源载体及在途队列，`engineeringWorkerCache` 处理逐域编码与暖恢复 |
 | `buildLineNavigationIndex` | 区段及耐张段投影、未分段对象、跨越关联与索引发布 |
 | `buildCbmTree` | 单节点名称和 DEV/FAM 展示数据、来源树递归及装配展开 |
 | `renderLineMap` | DOM 和事件生命周期、Canvas 相机和底图视角转发 |
@@ -79,6 +79,7 @@ flowchart TD
 - `runtime/spatial/substationSpatialWorkflow` 负责暖开恢复或重建的共享启动，以及后台准入。`substationSpatialRuntime` 发布 Spatial 索引，并在来源发布屏障后写缓存。
 - `runtime/spatial/substationSpatialWorkerClient` 将专用 Worker 登记到当前 `SessionScope`，由会话失效或任务完成释放。Worker 仍复用共享请求协议和 Spatial 编码器。
 - `substationIfcQueue` 负责 IFC 顺序准入、连接预览批次和交接已登记模型。`substationIfcModelLoad` 管理单条目的源读取、进度、会话取消和装载失败清理。`substationIfcRuntime` 接收场景对象，独立处理首个可用模型、首帧观察和后台阶段。
+- `substationIfcQueue` 准备引擎并按来源顺序调度模型，`substationIfcModelLoad` 提交单个模型，`substationIfcCompletion` 收尾并刷新名称索引和导航。
 - `substationDevRuntime` 负责 IFC 后的 DEV LOD 启动。
 - `substationDocumentRuntime` 负责可选 STD/SLD 的解析与缓存恢复。
 - `substationPresentation` 协调导航、选择回调和加载提示，DOM 由 UI 实现。与 IFC 阶段共享的提示标志放在 `substationLoadingState`，IFC 加载开始时重置。
@@ -99,6 +100,7 @@ flowchart TD
 | `devLodArtifactWriter` | 缓存准备、写入准入、并发槽和写入诊断 | 取消未准入写入；已开始的原生写入继续持有预算，完成后释放 |
 | `devLodSourceWorkset` | 有界预取、部分缓存缺失后的来源恢复 | 使用当前会话及压力回调；不抢占几何计算槽 |
 | `devLodReadiness` | occurrence 状态增量计数和可选审计 | 无 IO、场景创建或 DOM 依赖 |
+| `devLodSceneCommits`、`devLodPlacement` | 场景提交队列、放置范围和高亮交接 | 会话取消拒绝排队提交，保持同优先级顺序 |
 | `devLodDiagnostics` / `devLodTypes` | 诊断形状和内部共享类型 | 诊断实例由会话共享；类型模块只使用类型导入 |
 
 `DevLodRuntime` 组合这些组件，向它们提供会话有效性、Worker、来源准备、诊断发布和就绪刷新回调。组件不接收整个运行时实例，也不通过类型断言访问其私有状态。普通选择、自动 LOD 和显式 L2 的策略仍由运行时协调。

@@ -1,20 +1,20 @@
 import {beforeEach,it,expect,vi} from 'vitest';
 import {AppState} from '../../../../app/state.js';
 import {openEquipmentProject} from '../openEquipmentProject.js';
-import {startGeometryOnlyView} from '../../../../services/geometryOnlyRuntime.js';
-import type {GimRuntimeOpenContext,ExtractionResult} from '../../../../services/gimOpenCore.js';
+import {startGeometryOnlyView} from '../../../../services/dev-geometry/geometryOnlyRuntime.js';
+import type {GimRuntimeOpenContext,ExtractionResult} from '../../../../services/project/gimOpenCore.js';
 import type {EquipmentPresentationPort} from '../../presentation/equipmentPresentationPort.js';
 
 const runtime=vi.hoisted(()=>({viewer:vi.fn(),lod:vi.fn(),fit:vi.fn(),hide:vi.fn(),show:vi.fn(),status:vi.fn(),select:vi.fn()}));
-vi.mock('../../../../services/viewerUIBinding.js',()=>({getViewerRuntimeWithUI:runtime.viewer}));
-vi.mock('../../../../services/devLodRuntime.js',()=>({startDeviceLod:runtime.lod}));
+vi.mock('../../../../services/presentation/viewerUIBinding.js',()=>({getViewerRuntimeWithUI:runtime.viewer}));
+vi.mock('../../../../services/dev-geometry/devLodRuntime.js',()=>({startDeviceLod:runtime.lod}));
 vi.mock('../../../../viewer/camera.js',()=>({fitCameraToScene:runtime.fit}));
-vi.mock('../../../../services/nodeInteractionService.js',()=>({handleNodeClick:runtime.select}));
+vi.mock('../../../../services/selection/nodeInteractionService.js',()=>({handleNodeClick:runtime.select}));
 vi.mock('../../../../services/presentation/shell_statusBar.js', async (original) => ({
   ...(await original<typeof import('../../../../services/presentation/shell_statusBar.js')>()),
   setDeviceStatus: runtime.status,
 }));
-vi.mock('../../../../services/gimOpenCore.js',()=>({showLoading:runtime.show,hideLoading:runtime.hide}));
+vi.mock('../../../../services/project/gimOpenCore.js',()=>({showLoading:runtime.show,hideLoading:runtime.hide}));
 
 function deferred<T>() {
   let resolve!:(value:T)=>void;
@@ -90,7 +90,7 @@ it('cancellation before extraction completion leaves navigation unpublished',asy
 it('rejects a device selection whose handler becomes available after replacing the project', async () => {
   const { state, context, presentation } = fixture();
   await openEquipmentProject(context, presentation);
-  await import('../../../../services/nodeInteractionService.js');
+  await import('../../../../services/selection/nodeInteractionService.js');
   const { onSelect, tree } = presentation.navigation.mock.calls[0][0];
   onSelect(tree);
   state.activateProject(2, 'b');

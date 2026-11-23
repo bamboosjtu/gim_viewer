@@ -1,5 +1,5 @@
 import { logger } from '../../../utils/logger.js';
-import type { GimRuntimeOpenContext } from '../../../services/gimOpenCore.js';
+import type { GimRuntimeOpenContext } from '../../../services/project/gimOpenCore.js';
 import { validateGimCache } from '@desktop/database.js';
 import type { GimIndexResult } from '@desktop/contracts.js';
 import type { CbmNode, FileDevEntry, IfcEntry } from '../../../gim/types.js';
@@ -13,7 +13,7 @@ import {
 } from '../../../services/presentation/shell_projectBar.js';
 import { perfBegin } from '../../../utils/perfTimings.js';
 import type { PerfSession } from '../../../utils/perfTimings.js';
-import { showLoading } from '../../../services/gimOpenCore.js';
+import { showLoading } from '../../../services/project/gimOpenCore.js';
 import { sampleSubstationMemory } from './substationRuntimeTelemetry.js';
 import {
   collectCbmNodeCount,
@@ -52,8 +52,8 @@ export async function publishSubstationWarmCore(
     // This is a confirmed IFC-backed open. Start module loading while
     // the native index is being read; no Viewer or session state is created.
     void Promise.all([
-      import('../../../services/viewerUIBinding.js').then(({ prepareViewerBindingModules }) =>
-        prepareViewerBindingModules(),
+      import('../../../services/presentation/viewerUIBinding.js').then(
+        ({ prepareViewerBindingModules }) => prepareViewerBindingModules(),
       ),
       import('../../../viewer/modelPresentation.js'),
     ]).catch((error) => {

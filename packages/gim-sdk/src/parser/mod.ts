@@ -17,4 +17,4 @@ export {
   parseLineMod,
   parsePointLine,
   parseSectionKvRecord,
-} from "@gim/powerline-core/geometry/lineModParser.js";
+} from "@gim/gim-primitives/geometry/lineModParser.js";

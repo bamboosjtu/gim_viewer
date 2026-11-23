@@ -229,7 +229,7 @@ describe('engineering composition and provenance navigation', () => {
   it('reads all raw source lines by pages and rejects stale document page actions', async () => {
     const f = await fixture(), doc = f.graph.documents.find(d => d.path === 'unit.cbm')!;
     for (let i = 0; i < 450; i++) doc.rawLines.push(`原始字段${i}=值${i}`);
-    const { inspectEngineeringDocument } = await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../services/engineeringSourceInspector.js'); });
+    const { inspectEngineeringDocument } = await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../services/engineering/engineeringSourceInspector.js'); });
     await inspectEngineeringDocument(f.state, doc.path);
     document.querySelector<HTMLButtonElement>('[data-itab="source"]')?.click();
     expect(document.querySelector('[data-itab-pane="source"]')?.textContent).toContain('原始字段0');
@@ -266,7 +266,7 @@ describe('engineering composition and provenance navigation', () => {
     let resolve!: (value: unknown) => void;
     const properties = vi.fn(() => new Promise<any>(done => { resolve = done; }));
     f.state.ifc.regionalRuntimes.set('m', { properties } as any);
-    const { selectEngineeringTarget } = await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../services/engineeringSelection.js'); });
+    const { selectEngineeringTarget } = await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../services/engineering/engineeringSelection.js'); });
     await selectEngineeringTarget(f.state, { kind: 'engineering-source', key: built.sources.ifcRecords[0].id });
     expect(properties).not.toHaveBeenCalled(); document.getElementById('engineering-details')!.click();
     expect(properties).toHaveBeenCalledWith(2);

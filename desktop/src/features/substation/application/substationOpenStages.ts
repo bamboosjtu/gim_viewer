@@ -1,6 +1,6 @@
 import { logger } from '../../../utils/logger.js';
 import { reportBackgroundError } from '../../../utils/backgroundErrors.js';
-import { beginEngineeringBuild } from '../../../services/engineeringService.js';
+import { beginEngineeringBuild } from '../../../services/engineering/engineeringService.js';
 import { isTauri } from '@desktop/runtime.js';
 import { DEBUG_GIM_CACHE } from '../../../config/debug.js';
 import { debugLog } from '../../../utils/logger.js';
@@ -8,15 +8,15 @@ import {
   setProjectIdentity,
   refreshNavigatorTitle,
 } from '../../../services/presentation/shell_projectBar.js';
-import type { GimRuntimeOpenContext } from '../../../services/gimOpenCore.js';
+import type { GimRuntimeOpenContext } from '../../../services/project/gimOpenCore.js';
 import type { validateGimCache } from '@desktop/database.js';
-import { hydrateNativeSmallFiles } from '../../../services/nativeSmallFileHydration.js';
+import { hydrateNativeSmallFiles } from '../../../services/project/nativeSmallFileHydration.js';
 import {
   SubstationBackgroundCoordinator,
   type SubstationBackgroundGate,
 } from '../runtime/substationBackgroundRuntime.js';
 import { perfBegin, perfMark } from '../../../utils/perfTimings.js';
-import { showLoading, hideLoading } from '../../../services/gimOpenCore.js';
+import { showLoading, hideLoading } from '../../../services/project/gimOpenCore.js';
 import {
   createWarmSpatialSemanticStarter,
   scheduleSubstationSpatialSemantic,
@@ -193,7 +193,7 @@ export async function openSubstationCold(
       state.ifcLoading.pending = false;
     });
     const { startGeometryOnlyView } = await scope.read(
-      async () => import('../../../services/geometryOnlyRuntime.js'),
+      async () => import('../../../services/dev-geometry/geometryOnlyRuntime.js'),
     );
 
     await scope.read(async () => startGeometryOnlyView(context));
@@ -311,7 +311,7 @@ export async function tryOpenSubstationWarm(
         state.ifcLoading.pending = false;
       });
       const { startGeometryOnlyView } = await scope.read(
-        async () => import('../../../services/geometryOnlyRuntime.js'),
+        async () => import('../../../services/dev-geometry/geometryOnlyRuntime.js'),
       );
 
       await scope.read(async () => startGeometryOnlyView(context));
@@ -342,7 +342,7 @@ export async function tryOpenSubstationWarm(
             async () => import('@desktop/database.js'),
           );
           const { createCachePublishStatus } = await scope.read(
-            async () => import('../../../services/cachePublishStatus.js'),
+            async () => import('../../../services/project/cachePublishStatus.js'),
           );
           const publication = createCachePublishStatus(() => scope.isCurrent());
           scope.own(publication.resetCachePublishStatus);

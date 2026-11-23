@@ -38,4 +38,4 @@
 - 来源计数、旧结果拒绝、坏条目隔离和 WASM 索引边界由对应现有测试守护；不能为了“少校验”破坏它们。
 - 计数检查不推导毫秒收益；改变边界后仍由开发者选择本地复核。禁止为检查“有没有多 hash”在产品运行中再 hash 一遍。
 
-代码：[暖模板](../../desktop/src/services/devLodTemplateStore.ts)、[一次检查](../../desktop/src/services/devGlbTemplateRuntime.ts)。检查：[暖命中门禁](../../desktop/src/services/__tests__/devLodRuntime.test.ts)、[bounds/遍历门禁](../../desktop/src/services/__tests__/devGlbTemplateRuntime.test.ts)。
+代码：[暖模板](../../desktop/src/services/dev-geometry/devLodTemplateStore.ts)、[一次检查](../../desktop/src/services/dev-geometry/devGlbTemplateRuntime.ts)。检查：[暖命中门禁](../../desktop/src/services/dev-geometry/__tests__/devLodRuntime.test.ts)、[bounds/遍历门禁](../../desktop/src/services/dev-geometry/__tests__/devGlbTemplateRuntime.test.ts)。

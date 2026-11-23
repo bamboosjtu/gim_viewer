@@ -1,5 +1,5 @@
-import { parseFamPhysicalRecords } from './famRecords.js';
-export { parseFamPhysicalRecords } from './famRecords.js';
+import { parseFamPhysicalRecords } from "@gim/gim-primitives/famRecords.js";
+export { parseFamPhysicalRecords } from "@gim/gim-primitives/famRecords.js";
 /**
  * 线路工程 FAM 文件解析器（v5）。
  *
@@ -44,14 +44,17 @@ export interface LineFamProperty {
  * SQLite 的线路属性表要求 prop_key 非空，因此用稳定、可诊断的保底键
  * 保存该行，display_key/raw_line 仍保留原始业务语义。正常英文键不变。
  */
-function normalizePropertyKey(propKey: string, displayKey: string | null, lineNumber: number): string {
+function normalizePropertyKey(
+  propKey: string,
+  displayKey: string | null,
+  lineNumber: number,
+): string {
   const key = propKey.trim();
   if (key) return key;
   const display = displayKey?.trim();
   if (display) return `__display__${display}`;
   return `__line_fam_${lineNumber}`;
 }
-
 
 /**
  * 解析线路 FAM 文件文本。
@@ -64,22 +67,26 @@ export function parseLineFam(text: string): LineFamProperty[] {
   if (!text) return result;
 
   // 清理 BOM（全文）
-  const cleaned = text.replace(BOM_RE, '');
+  const cleaned = text.replace(BOM_RE, "");
   const records = parseFamPhysicalRecords(cleaned);
 
-  for (const {sourceLine,rawLine:raw} of records) {
-    const lineIndex=sourceLine-1;
+  for (const { sourceLine, rawLine: raw } of records) {
+    const lineIndex = sourceLine - 1;
     // 清理不可见控制字符，保留可见内容
-    const line = raw.replace(CTRL_RE, '').trim();
+    const line = raw.replace(CTRL_RE, "").trim();
     if (!line) continue;
 
     // 按 `=` 分段（不限制段数，第三段及以后重新拼回）
-    const parts = line.split('=');
+    const parts = line.split("=");
     if (parts.length >= 3) {
       // 三段式：中文展示键=ENGLISH_KEY=值（值可能含 =）
       const display_key = parts[0].trim();
-      const prop_key = normalizePropertyKey(parts[1], display_key || null, lineIndex + 1);
-      const prop_value = parts.slice(2).join('=').trim();
+      const prop_key = normalizePropertyKey(
+        parts[1],
+        display_key || null,
+        lineIndex + 1,
+      );
+      const prop_value = parts.slice(2).join("=").trim();
       result.push({
         display_key: display_key || null,
         prop_key,

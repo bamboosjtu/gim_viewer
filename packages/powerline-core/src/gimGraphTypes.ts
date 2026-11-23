@@ -7,11 +7,11 @@
  * 依据 docs/software-spec.md：线路工程无 IFC，使用 Cbm/Dev/Mod/Phm 目录。
  */
 
-type GimProjectType = 'substation' | 'transmission_line' | 'hybrid' | 'unknown';
+type GimProjectType = "substation" | "transmission_line" | "hybrid" | "unknown";
 
 /** 线路图节点：对应一个 CBM 文件，递归引用子节点 */
 export interface GimGraphNode {
-  sourceDiagnostics?:import('./sourceDocument.js').SourceDiagnostic[];
+  sourceDiagnostics?: import("@gim/gim-primitives/sourceDocument.js").SourceDiagnostic[];
   /** 节点对应文件路径，如 Cbm/xxx.cbm */
   path: string;
   /** 节点显示名称（默认取 BASEFAMILY 同名或文件名，UI 可覆盖） */

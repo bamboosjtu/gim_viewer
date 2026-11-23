@@ -3,14 +3,14 @@ import type { EarlySemanticEligibility, JobSnapshot as JobStatus } from '@deskto
 export type { EarlySemanticEligibility } from '@desktop/contracts.js';
 import { GimError, nativeError, hasErrorCode } from '@desktop/contracts.js';
 import type { AppState, ProjectLoadSession } from '../../../app/state.js';
-import type { ExtractedGimSource } from '../../../services/gimOpenCore.js';
+import type { ExtractedGimSource } from '../../../services/project/gimOpenCore.js';
 import { invokeTimed } from '../../../infrastructure/native/invokeTimed.js';
 import { decodeSubstationParseCopy } from '@desktop/substationParseCopy.js';
 import { perfCurrentSession, perfMark } from '../../../utils/perfTimings.js';
 import {
   setProjectSourcePreparation,
   type ProjectSourcePreparation,
-} from '../../../services/projectSourcePreparation.js';
+} from '../../../services/project/projectSourcePreparation.js';
 
 export async function inspectEarlySemanticEligibility(
   filePath: string,
@@ -128,7 +128,7 @@ export async function startSubstationExtractionJob(
             perfSession,
           );
           const hydrated = await (
-            await import('../../../services/nativeSmallFileHydration.js')
+            await import('../../../services/project/nativeSmallFileHydration.js')
           ).hydrateNativeSmallFiles(files, projectId, { isCurrent: current });
           if (hydrated.cancelled || !current())
             throw new GimError('CANCELLED', 'extraction session cancelled');

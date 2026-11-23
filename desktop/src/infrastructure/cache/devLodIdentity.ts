@@ -1,4 +1,4 @@
-import { GEOMETRY_CACHE_VERSION } from '@gim/powerline-core/generated/nativeContracts.js';
+import { GEOMETRY_CACHE_VERSION } from '@gim/contracts-native';
 export function deviceTemplateCacheKey(
   sourceIdentity: string,
   devPath: string,

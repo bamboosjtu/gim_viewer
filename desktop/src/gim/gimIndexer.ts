@@ -2,7 +2,7 @@ import type { IfcEntry, CbmNode } from './types.js';
 import { readCbmSourceDocument } from './cbmDocument.js';
 import { getFileEntryIndex } from './entryResolver.js';
 import { sourceScalarProperties, sourceReferenceFields } from './sourceDocument.js';
-import { PARSER_LIMITS, parseBoundedCount } from '@gim/powerline-core/parserLimits.js';
+import { PARSER_LIMITS, parseBoundedCount } from '@gim/gim-primitives/parserLimits.js';
 import { logger } from '../utils/logger.js';
 
 import {

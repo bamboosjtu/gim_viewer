@@ -9,7 +9,8 @@ let statusTextEl: HTMLElement | null = null;
 let statusDotEl: HTMLElement | null = null;
 const busyTasks = new Map<string, string>();
 let engineeringDeviceCount: number | null = null;
-let deviceProgress = '', deviceDetail = '';
+let deviceProgress = '',
+  deviceDetail = '';
 
 /** 空工程时右侧状态栏的稳定默认文案。 */
 export const DEFAULT_STATUS_RIGHT = 'GIM BIM 浏览器';
@@ -33,7 +34,9 @@ export function setStatus(text: string, kind: StatusKind = 'ok'): void {
 
 /** Idempotent updates to a named loading task. */
 export function pushBusy(text: string, key = 'project'): void {
-  busyTasks.delete(key); busyTasks.set(key,text); setStatus(text,'loading');
+  busyTasks.delete(key);
+  busyTasks.set(key, text);
+  setStatus(text, 'loading');
 }
 export function popBusy(idleText = '就绪', key = 'project'): void {
   busyTasks.delete(key);
@@ -45,19 +48,35 @@ export function setIfcStatus(text: string): void {
   let el = document.getElementById('status-ifc');
   if (!el && text) {
     const sibling = document.getElementById('status-devices');
-    if (sibling?.parentElement) { el = document.createElement('span'); el.id = 'status-ifc'; sibling.before(el); }
+    if (sibling?.parentElement) {
+      el = document.createElement('span');
+      el.id = 'status-ifc';
+      sibling.before(el);
+    }
   }
-  if (el) { el.textContent = text; el.hidden = !text; }
+  if (el) {
+    el.textContent = text;
+    el.hidden = !text;
+  }
 }
 
 /** Incremental IFC connection status is independent from device and IFC file progress. */
 export function setConnectionStatus(text: string): void {
   let el = document.getElementById('status-connections');
   if (!el && text) {
-    const sibling = document.getElementById('status-ifc') ?? document.getElementById('status-devices');
-    if (sibling?.parentElement) { el = document.createElement('span'); el.id = 'status-connections'; sibling.after(el); }
+    const sibling =
+      document.getElementById('status-ifc') ?? document.getElementById('status-devices');
+    if (sibling?.parentElement) {
+      el = document.createElement('span');
+      el.id = 'status-connections';
+      sibling.after(el);
+    }
   }
-  if (el) { el.textContent = text; el.hidden = !text; el.title = text; }
+  if (el) {
+    el.textContent = text;
+    el.hidden = !text;
+    el.title = text;
+  }
 }
 
 /** 更新右侧统计文本（工程统计 / 版本等） */
@@ -68,34 +87,52 @@ export function setStatusRight(text: string): void {
 
 /** Independent device progress survives concurrent IFC/loading messages. */
 export function setDeviceStatus(text: string, detail?: string): void {
-  deviceProgress = text; deviceDetail = detail ?? '';
+  deviceProgress = text;
+  deviceDetail = detail ?? '';
   const el = document.getElementById('status-devices');
-  const display = engineeringDeviceCount === null ? text : `设备整体候选 ${engineeringDeviceCount}${text ? ` · ${text}` : ''}`;
-  const explanation = engineeringDeviceCount === null ? '' : '设备整体候选来自工程实体识别，不代表已确认台套；几何实例按来源放置统计，两者不是一一对应。';
-  if (el) { el.textContent = display; el.title = [display,explanation,detail].filter(Boolean).join('\n'); el.hidden = !display; }
+  const display =
+    engineeringDeviceCount === null
+      ? text
+      : `设备整体候选 ${engineeringDeviceCount}${text ? ` · ${text}` : ''}`;
+  const explanation =
+    engineeringDeviceCount === null
+      ? ''
+      : '设备整体候选来自工程实体识别，不代表已确认台套；几何实例按来源放置统计，两者不是一一对应。';
+  if (el) {
+    el.textContent = display;
+    el.title = [display, explanation, detail].filter(Boolean).join('\n');
+    el.hidden = !display;
+  }
   let pause = document.getElementById('status-device-pause') as HTMLButtonElement | null;
   if (!pause && el?.parentElement) {
-    pause = document.createElement('button'); pause.id = 'status-device-pause'; pause.type = 'button';
-    pause.className = 'status-device-pause'; pause.addEventListener('click', () => window.dispatchEvent(new Event('gim-toggle-background-detail')));
+    pause = document.createElement('button');
+    pause.id = 'status-device-pause';
+    pause.type = 'button';
+    pause.className = 'status-device-pause';
+    pause.addEventListener('click', () =>
+      window.dispatchEvent(new Event('gim-toggle-background-detail')),
+    );
     el.after(pause);
   }
   if (pause) {
     pause.hidden = !display;
     const paused = display.includes('已暂停后台细化');
     pause.textContent = paused ? '继续后台细化' : '暂停后台细化';
-    pause.title = paused ? '继续自动 L1 细化；基础表示仍保持可浏览' : '暂停自动 L1 细化；基础表示和连接线继续加载';
+    pause.title = paused
+      ? '继续自动 L1 细化；基础表示仍保持可浏览'
+      : '暂停自动 L1 细化；基础表示和连接线继续加载';
   }
 }
 
 /** Semantic equipment count is independent from renderable occurrences. */
 export function setEngineeringDeviceCount(count: number | null): void {
   engineeringDeviceCount = count;
-  setDeviceStatus(deviceProgress,deviceDetail);
+  setDeviceStatus(deviceProgress, deviceDetail);
 }
 
 /** 清理工程时恢复共性状态栏，避免线路统计泄漏到下一工程。 */
 export function resetStatusRight(): void {
-  renderCachePublication({phase:'idle',text:'',detail:''});
+  renderCachePublication({ phase: 'idle', text: '', detail: '' });
   busyTasks.clear();
   engineeringDeviceCount = null;
   setIfcStatus('');
@@ -108,13 +145,19 @@ export function resetStatusRight(): void {
 
 /** Current semantic selection, including objects without displayable geometry. */
 export function setSelectionStatus(label: string | null): void {
-  const element=document.getElementById('status-selection');
-  if (element) element.textContent=label ?? '未选中';
+  const element = document.getElementById('status-selection');
+  if (element) element.textContent = label ?? '未选中';
 }
 
-export function renderCachePublication(view:import('../../services/cachePublishStatus.js').PublicationView):void {
-  const el=document.getElementById('status-publish');if(!el)return;
-  el.hidden=view.phase==='idle';el.textContent=view.text;
-  if(view.phase==='idle')el.removeAttribute('data-phase');else el.dataset.phase=view.phase;
-  if(view.detail)el.title=view.detail;else el.removeAttribute('title');
+export function renderCachePublication(
+  view: import('../../services/project/cachePublishStatus.js').PublicationView,
+): void {
+  const el = document.getElementById('status-publish');
+  if (!el) return;
+  el.hidden = view.phase === 'idle';
+  el.textContent = view.text;
+  if (view.phase === 'idle') el.removeAttribute('data-phase');
+  else el.dataset.phase = view.phase;
+  if (view.detail) el.title = view.detail;
+  else el.removeAttribute('title');
 }

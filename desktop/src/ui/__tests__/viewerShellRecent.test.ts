@@ -1,11 +1,11 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { AppState } from '../../app/state.js';
-import type { CacheResult, ProjectCacheSummary } from '../../services/projectCacheService.js';
+import type { CacheResult, ProjectCacheSummary } from '../../services/project/projectCacheService.js';
 const service = vi.hoisted(() => ({ recent: vi.fn(), open: vi.fn() }));
 vi.mock('@desktop/runtime.js', () => ({ isTauri: () => true }));
-vi.mock('../../services/projectCacheService.js', () => ({ readRecentProjects: service.recent }));
+vi.mock('../../services/project/projectCacheService.js', () => ({ readRecentProjects: service.recent }));
 
-vi.mock('../../services/gimOpenCore.js', () => ({ showLoading: vi.fn(), hideLoading: vi.fn() }));
+vi.mock('../../services/project/gimOpenCore.js', () => ({ showLoading: vi.fn(), hideLoading: vi.fn() }));
 const project = (id: number): ProjectCacheSummary => ({ id, name: `工程${id}`, path: `C:/source/${id}.gim`, projectType: 'substation',
   parserVersion: 'current', size: 1, updatedAt: 100, lastOpenedAt: 100 });
 const success = (id: number): CacheResult<ProjectCacheSummary[]> => ({ ok: true, value: [project(id)] });

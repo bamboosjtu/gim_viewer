@@ -28,7 +28,7 @@ SQLite 共享 `gim_project`；变电表使用 `substation_*`，线路表使用 `
 |---|---|---|---|
 | 线路语义 | `gim-line-parser-v1` | [db.rs](../../desktop/src-tauri/src/db.rs) | 源 SHA、完整事务、graph/属性 |
 | 变电语义 | `gim-substation-parser-v1` | [db.rs](../../desktop/src-tauri/src/db.rs) | 原始属性、CBM/DEV/IFC 引用、索引 receipt |
-| DEV LOD 派生 | `geometry-cache-v1-source-bound-stl` 与 `dev-spatial-catalog-v1`；浏览器使用 IndexedDB `gim-dev-lod-v1` | [DEV 目录](../../desktop/src/services/devSpatialCatalog.ts)、[LOD 缓存](../../desktop/bridge/devLodCache.ts) | 源 SHA、DEV 路径、几何版本与 LOD。L0 持久化、仅热点 L1 选择性持久化、L2 默认内存。模板和目录逐条原子提交并按需检查，节点点击复用同一 L0 键。 |
+| DEV LOD 派生 | `geometry-cache-v1-source-bound-stl` 与 `dev-spatial-catalog-v1`；浏览器使用 IndexedDB `gim-dev-lod-v1` | [DEV 目录](../../desktop/src/services/dev-geometry/devSpatialCatalog.ts)、[LOD 缓存](../../desktop/bridge/devLodCache.ts) | 源 SHA、DEV 路径、几何版本与 LOD。L0 持久化、仅热点 L1 选择性持久化、L2 默认内存。模板和目录逐条原子提交并按需检查，节点点击复用同一 L0 键。 |
 | 变电 Spatial | `substation-spatial-semantic-v1` | [Spatial codec](../../desktop/src/infrastructure/cache/substationSpatialCodec.ts)、[缓存 I/O](../../desktop/src/features/substation/runtime/substationSpatialSemanticCache.ts) | 精确大小写身份、宿主链、原始 IFC Name；缺失/损坏重建 |
 | IFC Spatial parser | `gim-substation-parser-v1` | [Spatial codec](../../desktop/src/infrastructure/cache/substationSpatialCodec.ts) | 独立于变电语义域 |
 | 来源物理目录 | `source-geometry-v1` | [独立物理遍历](../../packages/gim-sdk/src/geometry/physicalOccurrences.ts)、[物理目录缓存](../../desktop/src/infrastructure/cache/sourceGeometryCache.ts) | 源 SHA、契约与载荷长度、实际 entry 路径及有效矩阵；字符串表复用身份/上下文/路径，按实际 UTF-8 字节判断 32 MiB 可选缓存上限；独立于分类/实体/导航，命中后不读完整语义图 |
@@ -39,7 +39,7 @@ SQLite 共享 `gim_project`；变电表使用 `substation_*`，线路表使用 `
 | IFC 区域模板 | `near-templates-v1`，附加于浏览 LOD 键 | [features](../../desktop/src/config/features.ts) | 模板几何与逐对象放置；不重建有效远景 |
 | Android 线路语义 | `mobile-powerline-v1` | [移动存储](../../app/src-tauri/src/storage.rs)、[领域投影](../../packages/powerline-core/src/domain.ts) | 私有源 SHA/大小、对象与属性范围、FAM 分类 |
 | Android HNum | `hnum-xz-v1` | [领域定义](../../packages/powerline-core/src/domain.ts) | 源 SHA、MOD 路径；跨 Body 唯一点号 |
-| 视图状态 | `gim-view-state-v1`（localStorage） | [viewStateStore](../../desktop/src/services/viewStateStore.ts) | 工程 SHA/路径；相机、树展开、选择路径；不参与工程事实 |
+| 视图状态 | `gim-view-state-v1`（localStorage） | [viewStateStore](../../desktop/src/services/project/viewStateStore.ts) | 工程 SHA/路径；相机、树展开、选择路径；不参与工程事实 |
 
 暖开 catalog 命中率只要求可成功表示的来源；有原始范围或引用证据的失败来源未产出目录缓存时，报告单列其未命中集合并与全部 DEV 来源数核对。其他 miss、读取错误和无证据失败不能被样本级白名单掩盖。
 
@@ -116,7 +116,7 @@ Engineering 输入载体限制为每批 8 MiB / 256 文件，批次数不是会�
 
 缓存状态至少区分：`none`、`miss`、`hit`、`partial`、`saving`、`saved`、`error`。诊断需包含域版本、源 SHA、条目/节点计数和失败原因，不能用一个布尔值代表全部恢复。
 
-相关实现：[projectCacheService](../../desktop/src/services/projectCacheService.ts)、[engineeringCacheCodec](../../desktop/src/infrastructure/cache/engineeringCacheCodec.ts)、[substationSpatialSemanticCache](../../desktop/src/features/substation/runtime/substationSpatialSemanticCache.ts)、[devSpatialCatalog](../../desktop/src/services/devSpatialCatalog.ts)。
+相关实现：[projectCacheService](../../desktop/src/services/project/projectCacheService.ts)、[engineeringCacheCodec](../../desktop/src/infrastructure/cache/engineeringCacheCodec.ts)、[substationSpatialSemanticCache](../../desktop/src/features/substation/runtime/substationSpatialSemanticCache.ts)、[devSpatialCatalog](../../desktop/src/services/dev-geometry/devSpatialCatalog.ts)。
 
 工程组成投影只持久化路径、归属引用与推断状态，不包含 `evidence` 投影依据数组。导航 JSON 位于工程导航派生文件，SQLite 提供工程身份授权，没有独立的投影依据列；原始来源证据与实体识别字段保持各自契约。
 

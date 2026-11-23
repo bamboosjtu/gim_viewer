@@ -3,7 +3,7 @@ import type {
   XmlModColor,
   XmlModEntity,
   XmlModPrimitive,
-} from "@gim/powerline-core/geometry/ir.js";
+} from "@gim/gim-primitives/geometry/ir.js";
 import type { ParseDiagnostic, ParseStatus } from "./types.js";
 import { isUsableAffineMatrix } from "./affineMatrix.js";
 

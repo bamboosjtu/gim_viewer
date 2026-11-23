@@ -11,13 +11,14 @@ import { GIM_LIMITS } from '../shared/gimLimits.js';
  * （如 WIREWEIGHT 包含 WIRE、CROSSSECTION 包含 CROSS）。
  */
 
-import { parseKeyValue } from '@gim/powerline-core/kvParser.js';
+import { parseKeyValue } from '@gim/gim-primitives/kvParser.js';
 import { DEBUG_RUNTIME_LOGS } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import { findEquipmentEntry } from './equipmentModel.js';
 
 /** GIM 工程类型 */
-export type GimProjectType = 'substation' | 'transmission_line' | 'equipment' | 'hybrid' | 'unknown';
+export type GimProjectType =
+  'substation' | 'transmission_line' | 'equipment' | 'hybrid' | 'unknown';
 
 /** 识别细节，便于日志输出和调试 */
 export interface GimProjectTypeDetails {
@@ -71,12 +72,7 @@ const EXACT_KEY_SIGNALS: readonly string[] = [
  * 实体值型信号：检查 ENTITYNAME / GROUPTYPE / DEVICETYPE 的值是否等于信号。
  * 避免裸子串匹配（WIREWEIGHT 包含 WIRE、CROSSSECTION 包含 CROSS）。
  */
-const ENTITY_VALUE_SIGNALS: readonly string[] = [
-  'Tower_Device',
-  'Wire_Device',
-  'WIRE',
-  'CROSS',
-];
+const ENTITY_VALUE_SIGNALS: readonly string[] = ['Tower_Device', 'Wire_Device', 'WIRE', 'CROSS'];
 
 /** 全部线路信号总数（用于提前终止判断） */
 const TOTAL_LINE_SIGNALS = EXACT_KEY_SIGNALS.length + ENTITY_VALUE_SIGNALS.length;
@@ -181,18 +177,19 @@ export async function detectGimProjectType(
     else if (ext === 'mod') {
       modCount++;
       if (lineDir) lineModCount++;
-    }
-    else if (ext === 'stl') {
+    } else if (ext === 'stl') {
       stlCount++;
       if (lineDir) lineStlCount++;
-    }
-    else if (ext === 'ifc') {
+    } else if (ext === 'ifc') {
       ifcCount++;
       continue;
     }
 
     // 文本文件收集起来做关键字扫描：仅 CBM/DEV/FAM（这些文件通常很小）
-    if ((ext === 'cbm' || ext === 'dev' || ext === 'fam') && file.size < GIM_LIMITS.smallTextBytes) {
+    if (
+      (ext === 'cbm' || ext === 'dev' || ext === 'fam') &&
+      file.size < GIM_LIMITS.smallTextBytes
+    ) {
       textFilesToScan.push({ path, file });
     }
   }
@@ -202,7 +199,10 @@ export async function detectGimProjectType(
   const scannedText = new Map<File, Promise<string>>();
   const readText = (file: File): Promise<string> => {
     let text = scannedText.get(file);
-    if (!text) { text = file.text(); scannedText.set(file, text); }
+    if (!text) {
+      text = file.text();
+      scannedText.set(file, text);
+    }
     return text;
   };
   const equipmentEntry = !hasIfc ? await findEquipmentEntry(files, readText) : null;
@@ -219,10 +219,8 @@ export async function detectGimProjectType(
   // 且同时具备 Cbm/Dev/Mod 三类 PascalCase 目录的标准线路包，目录布局本身
   // 已是充分的线路信号；直接采用它，后续统一由 lineParserInput 批量读取。
   // 仍保留非标准布局的文本扫描路径，避免改变旧样本/兼容格式的识别能力。
-  const canonicalLineLayout = !hasIfc
-    && lineCbmDirCount > 0
-    && lineDevDirCount > 0
-    && lineModDirCount > 0;
+  const canonicalLineLayout =
+    !hasIfc && lineCbmDirCount > 0 && lineDevDirCount > 0 && lineModDirCount > 0;
   if (!equipmentEntry && !hasIfc && (hasLineArtifacts || canonicalLineLayout)) {
     hasLineArtifacts = true;
     lineSignals.add('PascalCaseLayout:Cbm/Dev/Mod');
@@ -234,11 +232,12 @@ export async function detectGimProjectType(
   // read_cached_entry IPC。已有 IFC 且没有 PascalCase 线路目录时，IFC
   // 本身已经是充分的变电信号，跳过这些低价值文本读取。保留带线路目录
   // 的 hybrid 走原有信号扫描，避免误把混合工程判成纯变电。
-  const canonicalSubstationLayout = hasIfc
-    && lineCbmDirCount === 0
-    && lineDevDirCount === 0
-    && lineModDirCount === 0
-    && linePhmDirCount === 0;
+  const canonicalSubstationLayout =
+    hasIfc &&
+    lineCbmDirCount === 0 &&
+    lineDevDirCount === 0 &&
+    lineModDirCount === 0 &&
+    linePhmDirCount === 0;
   if (canonicalSubstationLayout) {
     textFilesToScan.length = 0;
   }
@@ -304,16 +303,23 @@ export async function detectGimProjectType(
   // 兜底：即使文本信号未命中（如 .cbm 文件超 256KB 未扫描、或 KEY 未覆盖），
   // 只要存在 PascalCase 布局（Cbm/Dev/Mod 三类目录均有文件）且无 IFC，
   // 即判定为线路工程，避免误走变电流程污染 project_type=substation。
-  if (!equipmentEntry && !hasIfc && !hasLineArtifacts
-    && lineCbmDirCount > 0 && lineDevDirCount > 0 && lineModDirCount > 0) {
+  if (
+    !equipmentEntry &&
+    !hasIfc &&
+    !hasLineArtifacts &&
+    lineCbmDirCount > 0 &&
+    lineDevDirCount > 0 &&
+    lineModDirCount > 0
+  ) {
     hasLineArtifacts = true;
     lineSignals.add('PascalCaseLayout:Cbm/Dev/Mod');
   }
 
   // 只有真实线路语义字段才允许 IFC 工程进入 hybrid。PascalCase 目录本身
   // 不能覆盖 IFC 事实，避免 Cbm/Dev/Mod + IFC 的变电样本被误判。
-  const hasSemanticLineSignals = Array.from(lineSignals)
-    .some((signal) => signal !== 'PascalCaseLayout:Cbm/Dev/Mod');
+  const hasSemanticLineSignals = Array.from(lineSignals).some(
+    (signal) => signal !== 'PascalCaseLayout:Cbm/Dev/Mod',
+  );
   let type: GimProjectType;
   if (equipmentEntry) type = 'equipment';
   else if (hasIfc && hasSemanticLineSignals) type = 'hybrid';

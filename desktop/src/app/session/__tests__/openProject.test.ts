@@ -16,8 +16,8 @@ vi.mock('../../../features/powerline/application/openPowerlineProject.js',()=>({
 vi.mock('../../../features/equipment/application/openEquipmentProject.js',()=>({openEquipmentProject:m.equipment}));
 vi.mock('../../../gim/projectType.js',()=>({detectGimProjectType:m.detect}));
 vi.mock('../../../gim/gimExtractor.js',async original=>({...await original<typeof import('../../../gim/gimExtractor.js')>(),extractGimFile:m.extract}));
-vi.mock('../../../services/projectResourceTelemetry.js',()=>({sampleSubstationRuntimeResources:async()=>{}}));
-vi.mock('../../../services/gimOpenCore.js',async original=>({...await original<typeof import('../../../services/gimOpenCore.js')>(),showLoading:m.show,hideLoading:m.hide,scheduleHideLoading:m.scheduleHide}));
+vi.mock('../../../services/project/projectResourceTelemetry.js',()=>({sampleSubstationRuntimeResources:async()=>{}}));
+vi.mock('../../../services/project/gimOpenCore.js',async original=>({...await original<typeof import('../../../services/project/gimOpenCore.js')>(),showLoading:m.show,hideLoading:m.hide,scheduleHideLoading:m.scheduleHide}));
 function deferred<T>() {let resolve!:(value:T)=>void;const promise=new Promise<T>(r=>{resolve=r;});return {promise,resolve};}
 let loadButton:HTMLButtonElement;
 const bytes=(magic='GIMPKGS')=>new TextEncoder().encode(magic).buffer;
@@ -26,7 +26,7 @@ beforeEach(async()=>{
   vi.clearAllMocks();m.native=true;
   m.authorize.mockResolvedValue('tmp/open.gim');
   loadButton=document.createElement('button');
-  const {bindProjectOpenPresentation}=await import('../../../services/projectOpenPresentationPort.js');
+  const {bindProjectOpenPresentation}=await import('../../../services/presentation/projectOpenPresentationPort.js');
   bindProjectOpenPresentation({chooseGim:()=>m.choose(),chooseIfc:async()=>[],setBusy:(kind,busy)=>{if(kind==='gim')loadButton.disabled=busy;},resetInput:vi.fn()});
   m.info.mockResolvedValue({name:'open.gim',path:'tmp/open.gim',size:7,modified_ms:1,sha256:'source-a'});
   m.head.mockResolvedValue(bytes());m.register.mockResolvedValue({id:1,sha256:'source-a'});

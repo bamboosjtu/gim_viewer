@@ -3,9 +3,9 @@ import { cleanupProject as coordinateCleanup } from '../session/projectCleanup.j
 import { markMeasurementCancellation } from '../../measurement/runtime.js';
 import { reportBackgroundError } from '../../utils/backgroundErrors.js';
 import { perfCurrentSession } from '../../utils/perfTimings.js';
-import { projectPresentation } from '../../services/projectPresentationPort.js';
-import { releaseProjectViewer } from '../../services/projectViewerLifecycle.js';
-import { sampleSubstationRuntimeResources } from '../../services/projectResourceTelemetry.js';
+import { projectPresentation } from '../../services/presentation/projectPresentationPort.js';
+import { releaseProjectViewer } from '../../services/project/projectViewerLifecycle.js';
+import { sampleSubstationRuntimeResources } from '../../services/project/projectResourceTelemetry.js';
 import { cancelSubstationExtraction } from '../../features/substation/runtime/substationExtractionJob.js';
 import { cancelIfcConversions } from '../../viewer/ifcConversion.js';
 import { resetStatusRight } from '../../services/presentation/shell_statusBar.js';
@@ -34,7 +34,7 @@ export function cleanupProject(state: AppState, expectedGeneration?: number): Pr
         if (!current()) return;
         resetIfcWorkCompletion();
         const { cancelDevGeometryPreprocessing } =
-          await import('../../services/devGeometryWorkerClient.js');
+          await import('../../services/dev-geometry/devGeometryWorkerClient.js');
         if (current()) cancelDevGeometryPreprocessing(state);
       },
       viewer: {
@@ -100,7 +100,7 @@ export function cleanupProject(state: AppState, expectedGeneration?: number): Pr
         clearProjectViews: (current) => projectPresentation().clearProjectViews(current),
         async closed(current) {
           try {
-            const { hideLoading } = await import('../../services/gimOpenCore.js');
+            const { hideLoading } = await import('../../services/project/gimOpenCore.js');
             if (current()) hideLoading();
           } catch {
             /* best effort */

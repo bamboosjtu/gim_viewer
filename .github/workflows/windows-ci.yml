@@ -73,6 +73,7 @@ jobs:
           cache-dependency-path: |
             desktop/package-lock.json
             packages/gim-sdk/package-lock.json
+            packages/powerline-core/package-lock.json
             app/package-lock.json
 
       - name: Prepare workspace temporary directory
@@ -87,6 +88,10 @@ jobs:
 
       - name: Install SDK dependencies
         run: npm ci --prefix ../packages/gim-sdk
+
+      - name: Install shared line package dependencies
+        working-directory: packages/powerline-core
+        run: npm ci
 
       - name: Install Android frontend dependencies for typed lint
         run: npm ci --prefix ../app

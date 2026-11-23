@@ -6,7 +6,7 @@ import {openPowerlineProject} from '../openPowerlineProject.js';
 const mocks=vi.hoisted(()=>({load:vi.fn(),worker:vi.fn(),hide:vi.fn(),schedule:vi.fn(),
   native: false, validate: vi.fn(), getGraph: vi.fn(), getAttributes: vi.fn()}));
 vi.mock('../../presentation/linePresentationPort.js',()=>({linePresentation:()=>({present:mocks.load}),bindLinePresentation:vi.fn()}));
-vi.mock('../../../../services/gimOpenCore.js',()=>({showLoading:vi.fn(),hideLoading:mocks.hide,scheduleHideLoading:mocks.schedule,currentPerfSession:()=>undefined}));
+vi.mock('../../../../services/project/gimOpenCore.js',()=>({showLoading:vi.fn(),hideLoading:mocks.hide,scheduleHideLoading:mocks.schedule,currentPerfSession:()=>undefined}));
 vi.mock('../../../../services/presentation/shell_projectBar.js',()=>({setProjectIdentity:vi.fn(),refreshNavigatorTitle:vi.fn(),bind:vi.fn()}));
 vi.mock('@desktop/runtime.js',()=>({isTauri:()=>mocks.native}));
 vi.mock('@desktop/database.js',()=>({

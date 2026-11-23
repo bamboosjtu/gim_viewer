@@ -1,4 +1,4 @@
-import type { GimRuntimeOpenContext } from '../../../services/gimOpenCore.js';
+import type { GimRuntimeOpenContext } from '../../../services/project/gimOpenCore.js';
 import type { SessionScope } from '../../../shared/sessionScope.js';
 import type { PerfSession } from '../../../utils/perfTimings.js';
 import type { LineParserWorkerResult } from './lineParserWorkerClient.js';
@@ -8,7 +8,7 @@ import { DEBUG_GIM_CACHE } from '../../../config/debug.js';
 import { perfBegin, perfMark, perfMarkProductMoment } from '../../../utils/perfTimings.js';
 import { debugLog, logger } from '../../../utils/logger.js';
 import { reportBackgroundError } from '../../../utils/backgroundErrors.js';
-import { showLoading } from '../../../services/gimOpenCore.js';
+import { showLoading } from '../../../services/project/gimOpenCore.js';
 
 function getDevLineBatchOptions(): { maxFiles?: number; maxBytes?: number } {
   if (!import.meta.env.DEV) return {};

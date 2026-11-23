@@ -1,7 +1,7 @@
 /** Resolve and load the line MOD sources of an inspector object. */
 import type { AppState } from '../../../app/state.js';
 import type { GimGraphNode } from '@gim/powerline-core/gimGraphTypes.js';
-import { parseLineMod } from '@gim/powerline-core/geometry/lineModParser.js';
+import { parseLineMod } from '@gim/gim-primitives/geometry/lineModParser.js';
 import {
   resolveLineReference,
   type LineEntryLookup,

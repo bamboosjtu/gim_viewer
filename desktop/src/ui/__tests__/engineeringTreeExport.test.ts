@@ -5,7 +5,7 @@ vi.mock('@desktop/runtime.js',()=>({isTauri:mocks.native}));
 vi.mock('@desktop/treeExport.js',()=>({saveEngineeringTreeJson:mocks.save}));
 vi.mock('../../shared/csv.js',()=>({downloadTextFile:mocks.download}));
 afterEach(()=>{vi.clearAllMocks();mocks.native.mockReturnValue(false);vi.unstubAllGlobals();});
-import type { EngineeringNavigationData } from '../../services/engineeringViewService.js';
+import type { EngineeringNavigationData } from '../../services/engineering/engineeringViewService.js';
 
 const data: EngineeringNavigationData = {
   version: 'test',

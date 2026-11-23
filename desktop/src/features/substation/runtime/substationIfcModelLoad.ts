@@ -2,8 +2,8 @@ import type { AppState } from '../../../app/state.js';
 import type { SessionScope } from '../../../shared/sessionScope.js';
 import type { Object3D } from 'three';
 import type { IfcEntry } from '../../../gim/types.js';
-import { showLoading } from '../../../services/gimOpenCore.js';
-import { projectPresentation } from '../../../services/projectPresentationPort.js';
+import { showLoading } from '../../../services/project/gimOpenCore.js';
+import { projectPresentation } from '../../../services/presentation/projectPresentationPort.js';
 import { reportBackgroundError } from '../../../utils/backgroundErrors.js';
 import { logger } from '../../../utils/logger.js';
 import {
@@ -15,7 +15,7 @@ import {
 import type { loadIfcEntry, IfcLoadSource } from '../../../viewer/ifcEntryLoader.js';
 import type { ViewerContext } from '../../../viewer/viewerEngine.js';
 import type { SubstationIfcLoadProgress } from './substationIfcLoadProgress.js';
-import { getIfcBufferForEntry } from '../../../services/ifcGeometrySource.js';
+import { getIfcBufferForEntry } from '../../../services/project/ifcGeometrySource.js';
 
 type EntryOptions = NonNullable<Parameters<typeof loadIfcEntry>[5]>;
 

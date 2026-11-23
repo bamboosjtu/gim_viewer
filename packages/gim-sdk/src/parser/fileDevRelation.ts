@@ -9,9 +9,9 @@
 import {
   keyValueDiagnostics,
   parseKeyValue,
-} from "@gim/powerline-core/kvParser.js";
-import { parseBoundedCount } from "@gim/powerline-core/parserLimits.js";
-import type { SourceDiagnostic } from "@gim/powerline-core/sourceDocument.js";
+} from "@gim/gim-primitives/kvParser.js";
+import { parseBoundedCount } from "@gim/gim-primitives/parserLimits.js";
+import type { SourceDiagnostic } from "@gim/gim-primitives/sourceDocument.js";
 import type { ParseDiagnostic, ParseResult, ParseStatus } from "./types.js";
 import { isGimEmptyValue } from "./values.js";
 

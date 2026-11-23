@@ -1,3 +1,4 @@
+import type { ModelEventCallbacks } from '../../../viewer/ifcLoader.js';
 import type { AppState } from '../../../app/state.js';
 import type { IfcEntry } from '../../../gim/types.js';
 import { planSubstationIfcLoad } from './ifcLoadOrder.js';
@@ -6,6 +7,7 @@ import type { SessionScope } from '../../../shared/sessionScope.js';
 import { logger } from '../../../utils/logger.js';
 import {
   perfMark,
+  perfBegin,
   perfMarkProductMoment,
   perfRecordTaskPhase,
   type PerfSession,
@@ -30,6 +32,30 @@ interface SubstationIfcQueueInput {
   ifcSourceSizes?: ReadonlyMap<string, number>;
   isInteractive: () => boolean;
   onUsable(entry: IfcEntry, model: SubstationIfcUsableModel): Promise<void>;
+}
+
+export async function loadSubstationIfcQueue({
+  modelCallbacks,
+  ...options
+}: Omit<SubstationIfcQueueInput, 'loadEntry' | 'skipLargeIfc'> & {
+  modelCallbacks: ModelEventCallbacks;
+}): Promise<number | undefined> {
+  const { scope, ctx, state, perfSession } = options;
+  const [{ ensureEngineReady }, { loadIfcEntry }, { shouldSkipLargeIfc }] = await Promise.all([
+    import('../../../viewer/ifcLoader.js'),
+    import('../../../viewer/ifcEntryLoader.js'),
+    import('../../../services/project/appSettings.js'),
+  ]);
+  if (!scope.isCurrent()) return;
+  const endEngineInit = perfBegin('web-ifc / Fragments engine 初始化', undefined, perfSession);
+  await ensureEngineReady(ctx, state, modelCallbacks);
+  if (!scope.isCurrent()) return;
+  endEngineInit(undefined, { initialized: true });
+  return runSubstationIfcQueue({
+    ...options,
+    loadEntry: loadIfcEntry,
+    skipLargeIfc: shouldSkipLargeIfc(),
+  });
 }
 
 /** Preserve ordered admission and hand committed models back to presentation. */

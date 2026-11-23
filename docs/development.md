@@ -22,7 +22,9 @@
 - 首次运行：
 
 ```powershell
-cd desktop
+cd packages/powerline-core
+npm ci
+cd ../../desktop
 npm ci
 npm run tauri:dev     # Tauri 开发窗口
 ```
@@ -55,7 +57,7 @@ npm run tauri:dev     # Tauri 开发窗口
 
 桌面 Vite / TypeScript / Vitest 用 gim-source 条件连接包源码，构建默认 ESM 的行为由 SDK 独立消费者验证。模块测试可选择 `../packages/gim-sdk/src/semantic` 等原转发模块；test:module 会扩展 SDK 转发目标，并选择所属与依赖消费者测试。lint 从工作区根配置检查桌面与 SDK，并在两边测试中检查异步 Promise 使用。SDK 自带测试类型检查。
 
-新增、修改或重命名的生产 TypeScript 和 JavaScript 文件须加入 `format-architecture.mjs` 清单。范围包括桌面和 Android 前端、GIM SDK、Measurement Core、Powerline Core，以及清单脚本中列出的开发、契约和 CI 脚本目录。生成的原生契约由生成一致性检查覆盖。未接入的历史生产文件随修改增量接入。
+新增、修改或重命名的生产 TypeScript 和 JavaScript 文件须加入 `format-architecture.mjs` 清单。范围包括桌面与 Android 前端、共享包，以及清单脚本中列出的开发、契约与 CI 脚本目录。生成的原生 v1 契约由生成一致性检查覆盖。未接入的历史生产文件随修改增量接入。
 
 格式与 Rust 门禁共用 `GIM_FORMAT_BASE`。本地默认为 HEAD 并包含未跟踪文件。Windows CI 使用 PR 基线或推送前的提交，首次推送分支用默认分支共同祖先，手工触发用当前提交的上一提交。签出缺少推送前的提交时，CI 按原 SHA 获取并验证它，再进行差异检查。Clippy 使用锁定依赖并检查各原生包的所有目标和特性，correctness 与 suspicious 诊断按错误处理。历史文档注释和属性的两项空行诊断保留为警告，修改的 Rust 文件受 Rustfmt 检查。
 

@@ -24,4 +24,4 @@
 
 代码：[原生入口](../../desktop/src-tauri/src/gim_extract_command.rs)、[共享解码器](../../crates/gim-native-core/src/lib.rs)、[7z 流式路径](../../desktop/src-tauri/src/seven_zip_cli.rs)、[来源 pack](../../desktop/src-tauri/src/db/semantic_pack.rs)。
 
-检查：[批读协议](../../desktop/src/infrastructure/native/__tests__/projectFileEnvelope.test.ts)、[来源载体](../../desktop/src/services/__tests__/engineeringSourceBatches.test.ts)及原生库现有值/路径测试。真实容器、磁盘和吞吐只由开发者本地复核，不默认全矩阵。
+检查：[批读协议](../../desktop/src/infrastructure/native/__tests__/projectFileEnvelope.test.ts)、[来源载体](../../desktop/src/services/engineering/__tests__/engineeringSourceBatches.test.ts)及原生库现有值/路径测试。真实容器、磁盘和吞吐只由开发者本地复核，不默认全矩阵。

@@ -7,9 +7,9 @@
 import {
   parseKeyValue,
   keyValueDiagnostics,
-} from "@gim/powerline-core/kvParser.js";
-import { parseBoundedCount } from "@gim/powerline-core/parserLimits.js";
-import { SourceConflictError } from "@gim/powerline-core/sourceDocument.js";
+} from "@gim/gim-primitives/kvParser.js";
+import { parseBoundedCount } from "@gim/gim-primitives/parserLimits.js";
+import { SourceConflictError } from "@gim/gim-primitives/sourceDocument.js";
 
 export type SchEntryType = "std" | "sld" | "unknown";
 

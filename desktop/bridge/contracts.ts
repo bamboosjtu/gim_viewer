@@ -1,2 +1,2 @@
-export * from '@gim/powerline-core/generated/nativeContracts.js';
-export {GimError, nativeError, hasErrorCode} from '@gim/powerline-core/errors.js';
+export * from '@gim/contracts-native';
+export { GimError, nativeError, hasErrorCode } from '@gim/contracts-native/errors.js';

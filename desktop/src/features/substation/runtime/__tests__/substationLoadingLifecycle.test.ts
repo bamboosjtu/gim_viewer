@@ -22,7 +22,7 @@ const mocks = vi.hoisted(() => ({
   hideLoading: vi.fn(),
   setIfcStatus: vi.fn(),
 }));
-vi.mock('../../../../services/geometryPresentationService.js',()=>({observeFirstGeometry:vi.fn(async(_state,_ctx,_root,_session,onPresented,perf)=>{
+vi.mock('../../../../services/presentation/geometryPresentationService.js',()=>({observeFirstGeometry:vi.fn(async(_state,_ctx,_root,_session,onPresented,perf)=>{
   mocks.frames.push(()=>{perfMarkProductMoment('firstVisibleGeometryReady',{test:true},perf);perfMarkProductMoment('firstGeometryReady',{test:true},perf);perfMarkProductMoment('interactive',{test:true},perf);onPresented?.();});
 })}));
 
@@ -30,19 +30,19 @@ vi.mock('../../../../services/presentation/shell_statusBar.js',async importOrigi
 
 vi.mock('../../../../viewer/ifcLoader.js', () => ({ ensureEngineReady: mocks.ensureEngineReady }));
 vi.mock('../../../../viewer/ifcEntryLoader.js', () => ({ loadIfcEntry: mocks.loadIfcEntry }));
-vi.mock('../../../../services/ifcNameIndex.js', () => ({ buildIfcNameIndex: mocks.buildIfcNameIndex }));
+vi.mock('../../../../services/engineering/ifcNameIndex.js', () => ({ buildIfcNameIndex: mocks.buildIfcNameIndex }));
 vi.mock('../../../../viewer/camera.js', () => ({
   fitCameraToScene: mocks.fitCameraToScene,
   fitCameraToStationOverview: mocks.fitCameraToStationOverview,
 }));
-vi.mock('../../../../services/viewerUIBinding.js', () => ({ getViewerRuntimeWithUI: mocks.getViewerRuntimeWithUI }));
-vi.mock('../../../../services/coordinateAlignmentService.js', () => ({
+vi.mock('../../../../services/presentation/viewerUIBinding.js', () => ({ getViewerRuntimeWithUI: mocks.getViewerRuntimeWithUI }));
+vi.mock('../../../../services/project/coordinateAlignmentService.js', () => ({
   syncProjectSourceToViewerFromFragments: mocks.syncProjectSourceToViewerFromFragments,
   loadManualCoordOffsetFromLocalStorage: mocks.loadManualCoordOffsetFromLocalStorage,
 }));
 vi.mock('../../../../ui/cbmTreeView.js', () => ({ buildAndRenderCbmTree: mocks.buildAndRenderCbmTree }));
 vi.mock('../../../../ui/fileDevView.js', () => ({ renderFileDevPanel: mocks.renderFileDevPanel }));
-vi.mock('../../../../services/gimOpenCore.js', () => ({
+vi.mock('../../../../services/project/gimOpenCore.js', () => ({
   showLoading: mocks.showLoading,
   hideLoading: mocks.hideLoading,
   recordNativeExtractionStages: vi.fn(),

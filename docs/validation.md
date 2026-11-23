@@ -89,7 +89,7 @@
 | 桌面 TS 模块 | `desktop/src/<模块>/__tests__/*.test.ts`；子模块有自己的 `__tests__`，例如 `services/projections/`、`ui/shell/` |
 | GIM SDK | `packages/gim-sdk/src/<模块>/__tests__/` 持有 DTO 与纯能力测试，桌面仅保留真实消费者测试 |
 | 平台桥接 | `desktop/bridge/__tests__/`；SQLite 仍使用独立配置，不进入默认单测 |
-| 共享线路核心 | `packages/powerline-core/src/__tests__/`，由 desktop/app 的 Vitest 自动发现；不再放在 Android 应用的顶层测试目录 |
+| 共享线路核心及基础包 | `packages/powerline-core/`、`packages/gim-primitives/`、`packages/contracts-native/` 的模块邻近 `__tests__/`，由 Desktop 和 Android 的 Vitest 发现 |
 | Android 自身模块 | `app/src/<模块>/__tests__/`；真实样本在 `app/tests/local/`，只由显式本地配置发现 |
 | Node 开发脚本 | 与脚本同目录的 `*.test.mjs`；Browser Worker 夹具仍在 `desktop/tests/<模块>/` |
 | 独立 Python 工具 | 各工具 `tests/unit/test_<模块>.py` 与 `tests/local/test_<模块>.py`；CI 自动发现整个 `unit/`，不靠固定文件名白名单 |
@@ -288,7 +288,7 @@ cargo test --manifest-path app/src-tauri/Cargo.toml six_native_imports -- --igno
 | `gim/`（桌面按归属检查） | 90% | 90% | 80% |
 | `app/session/{openProject,projectSourceAcquisition}.ts` | 70% | 80% | 50% |
 | `features/substation/application/{substationRuntime,substationOpenStages,substationColdPersistence,substationColdSource}.ts`（合并计算） | 70% | 45% | 70% |
-| `services/viewerUIBinding.ts` | 80% | 50% | 70% |
+| `services/presentation/viewerUIBinding.ts` | 80% | 50% | 70% |
 | `ui/lineProjectView.ts` | 70% | 60% | 65% |
 | `ui/{lineMapView,lineMapPainter,lineMapPointer,lineMapRenderer}.ts`（合并计算） | 65% | 65% | 60% |
 

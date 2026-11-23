@@ -1,6 +1,6 @@
 import { logger } from '../../../utils/logger.js';
 import { reportBackgroundError } from '../../../utils/backgroundErrors.js';
-import { diagramPresentation } from '../../../services/diagramPresentationPort.js';
+import { diagramPresentation } from '../../../services/presentation/diagramPresentationPort.js';
 /** Optional STD/SLD parsing and cache restore. */
 import type { AppState, ProjectLoadSession } from '../../../app/state.js';
 import { perfBegin, perfMarkProductMoment, type PerfSession } from '../../../utils/perfTimings.js';

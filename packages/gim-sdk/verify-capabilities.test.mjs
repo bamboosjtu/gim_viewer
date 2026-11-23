@@ -25,3 +25,11 @@ test('new intermediary modules inherit their directory role and unknown paths fa
   assert.throws(()=>assertCapabilityInputs('parser',['src/geometry/affineMatrix.ts']),/affineMatrix/);
   assert.doesNotThrow(()=>assertCapabilityInputs('geometry',['src/parser/affineMatrix.ts']));
 });
+
+test('SDK format closures allow primitives and reject line domain and native IPC packages', () => {
+  assert.doesNotThrow(() => assertCapabilityInputs('parser', ['../gim-primitives/src/geometry/lineModParser.ts']));
+  for (const dependency of ['../powerline-core/src/domain.ts', '../contracts-native/src/generated/nativeContracts.ts']) {
+    assert.throws(() => assertCapabilityInputs('parser', [dependency]), /closure imports/);
+    assert.throws(() => assertCapabilityInputs('source', [dependency], 'type'), /closure imports/);
+  }
+});

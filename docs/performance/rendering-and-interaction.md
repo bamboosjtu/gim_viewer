@@ -23,4 +23,4 @@
 
 分别看主线程采样、Draw Calls、三角数、无变化帧数、矩阵更新、提交队列、输入到高亮下一帧，以及材质/纹理释放。Profile 栈采样权重不是墙钟或精确 CPU 秒数。按需绘制的加载收益不能掩盖峰值内存增加或冷场景可见性变化。
 
-代码：[按需绘制](../../desktop/src/viewer/demandRendering.ts)、[DEV 视域](../../desktop/src/services/devLodRuntime.ts)、[可见拾取](../../desktop/src/viewer/ifcVisibleRaycast.ts)、[树](../../desktop/src/ui/engineeringTreeView.ts)。检查：[绘制](../../desktop/src/viewer/__tests__/demandRendering.test.ts)、[静态矩阵](../../desktop/src/viewer/__tests__/staticContainer.test.ts)、[拾取](../../desktop/src/viewer/__tests__/ifcVisibleRaycast.test.ts)、[相机/提交](../../desktop/src/services/__tests__/devLodRuntime.test.ts)。
+代码：[按需绘制](../../desktop/src/viewer/demandRendering.ts)、[DEV 视域](../../desktop/src/services/dev-geometry/devLodRuntime.ts)、[可见拾取](../../desktop/src/viewer/ifcVisibleRaycast.ts)、[树](../../desktop/src/ui/engineeringTreeView.ts)。检查：[绘制](../../desktop/src/viewer/__tests__/demandRendering.test.ts)、[静态矩阵](../../desktop/src/viewer/__tests__/staticContainer.test.ts)、[拾取](../../desktop/src/viewer/__tests__/ifcVisibleRaycast.test.ts)、[相机/提交](../../desktop/src/services/dev-geometry/__tests__/devLodRuntime.test.ts)。

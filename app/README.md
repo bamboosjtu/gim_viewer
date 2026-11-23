@@ -6,7 +6,9 @@
 ## 开发与构建
 
 ```powershell
-cd app
+cd packages/powerline-core
+npm ci
+cd ../../app
 npm ci
 npm run dev
 npm run build

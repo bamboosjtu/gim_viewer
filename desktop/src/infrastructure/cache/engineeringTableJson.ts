@@ -1,3 +1,4 @@
+import { GimError } from '@gim/contracts-native/errors.js';
 import { releaseOwnedBytes } from '../../shared/ownedBytes.js';
 import type { PackedEngineeringSource } from './engineeringSourceCodec.js';
 
@@ -43,7 +44,8 @@ export async function* engineeringTableChunks(
   const bytes = (text: string) => {
     const chunk = encoder.encode(text);
     total += chunk.byteLength;
-    if (total > maxBytes) throw Error('工程来源表 JSON 超过容量上限 (plain size)');
+    if (total > maxBytes)
+      throw new GimError('RESOURCE_LIMIT', '工程来源表 JSON 超过容量上限 (plain size)');
     return chunk;
   };
   check(current);

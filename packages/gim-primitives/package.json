@@ -1,0 +1,21 @@
+{
+  "name": "@gim/gim-primitives",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "files": [
+    "src/**/*.ts",
+    "!src/**/__tests__/**"
+  ],
+  "exports": {
+    "./entityName.js": "./src/entityName.ts",
+    "./kvParser.js": "./src/kvParser.ts",
+    "./famRecords.js": "./src/famRecords.ts",
+    "./parserLimits.js": "./src/parserLimits.ts",
+    "./sourceDocument.js": "./src/sourceDocument.ts",
+    "./diagnostics.js": "./src/diagnostics.ts",
+    "./geometry/ir.js": "./src/geometry/ir.ts",
+    "./geometry/lineModParser.js": "./src/geometry/lineModParser.ts"
+  }
+}

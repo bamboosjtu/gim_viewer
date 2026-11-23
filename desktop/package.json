@@ -65,7 +65,9 @@
     "three": "^0.184.0",
     "three-bvh-csg": "^0.0.18",
     "web-ifc": "0.0.78",
-    "@gim/gim-sdk": "file:../packages/gim-sdk"
+    "@gim/gim-sdk": "file:../packages/gim-sdk",
+    "@gim/contracts-native": "file:../packages/contracts-native",
+    "@gim/gim-primitives": "file:../packages/gim-primitives"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.3",

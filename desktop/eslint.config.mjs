@@ -14,7 +14,7 @@ export default tseslint.config({
     'src/**/*.{ts,mts,cts}', 'bridge/**/*.{ts,mts,cts}',
     '../app/src/**/*.{test,spec}.{ts,mts,cts}', '../app/src/**/__tests__/**/*.{ts,mts,cts}',
     '../app/tests/**/*.{ts,mts,cts}',
-    '../packages/{gim-sdk,measurement-core,powerline-core}/src/**/*.{ts,mts,cts}',
+    '../packages/{gim-sdk,measurement-core,powerline-core,contracts-native,gim-primitives}/src/**/*.{ts,mts,cts}',
     ...adoptedTypescript,
   ],
   languageOptions: { parser: tseslint.parser, parserOptions: {

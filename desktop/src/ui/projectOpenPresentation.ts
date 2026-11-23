@@ -1,4 +1,4 @@
-import type { ProjectOpenPresentation } from '../services/projectOpenPresentationPort.js';
+import type { ProjectOpenPresentation } from '../services/presentation/projectOpenPresentationPort.js';
 import { btnLoadGim, btnLoadLocal, gimFileInput, fileInput } from './dom.js';
 import { chooseBrowserGimFile, chooseBrowserFiles } from './browserGimChooser.js';
 export const projectOpenPresentation: ProjectOpenPresentation = {

@@ -12,7 +12,7 @@ import {
   getSetting,
   isSettingEnabled,
   updateSetting,
-} from '../services/appSettings.js';
+} from '../services/project/appSettings.js';
 
 let modal: HTMLElement | null = null;
 
@@ -85,7 +85,9 @@ export function openSettingsPanel(): void {
       await updateSetting(SETTING_TIANDITU_KEY, keyInput.value.trim());
       await updateSetting(SETTING_SKIP_LARGE_IFC, skipInput.checked ? '1' : '0');
       setStatus('已保存');
-      setTimeout(() => { if (modal) close(); }, 400);
+      setTimeout(() => {
+        if (modal) close();
+      }, 400);
     } catch (error) {
       setStatus(`保存失败: ${error instanceof Error ? error.message : String(error)}`, true);
     } finally {
@@ -93,7 +95,9 @@ export function openSettingsPanel(): void {
     }
   };
 
-  modal.querySelector('#settings-save')?.addEventListener('click', () => { void Promise.resolve(save()).catch(reportBackgroundError); });
+  modal.querySelector('#settings-save')?.addEventListener('click', () => {
+    void Promise.resolve(save()).catch(reportBackgroundError);
+  });
   modal.querySelector('#settings-clear')?.addEventListener('click', () => {
     keyInput.value = '';
     setStatus('Key 已清空，点击“保存”生效');

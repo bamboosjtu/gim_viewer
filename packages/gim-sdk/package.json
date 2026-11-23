@@ -61,7 +61,7 @@
     "test:consumer": "node test-consumer.mjs"
   },
   "dependencies": {
-    "@gim/powerline-core": "file:../powerline-core"
+    "@gim/gim-primitives": "file:../gim-primitives"
   },
   "devDependencies": {
     "esbuild": "0.21.5",
@@ -73,6 +73,6 @@
     "node": ">=22"
   },
   "bundledDependencies": [
-    "@gim/powerline-core"
+    "@gim/gim-primitives"
   ]
 }

@@ -10,7 +10,7 @@ import{writeSubstationSpatialSemanticCache}from'../substationSpatialSemanticCach
 import type{PerfSession}from'../../../../utils/perfTimings.js';
 vi.mock('../spatial/substationSpatialWorkerClient.js',()=>({buildSubstationSpatialIndexInWorker:vi.fn()}));
 vi.mock('../substationSpatialSemanticCache.js',()=>({readSubstationSpatialSemanticCache:vi.fn(),writeSubstationSpatialSemanticCache:vi.fn()}));
-vi.mock('../../../../services/engineeringService.js',()=>({notifyEngineeringIfcEvidence:vi.fn(),notifyEngineeringIfcFailure:vi.fn()}));
+vi.mock('../../../../services/engineering/engineeringService.js',()=>({notifyEngineeringIfcEvidence:vi.fn(),notifyEngineeringIfcFailure:vi.fn()}));
 vi.mock('../substationRuntimeTelemetry.js',()=>({createSubstationSpatialObserver:vi.fn(),sampleSubstationMemory:vi.fn()}));
 vi.mock('../../presentation/substationPresentation.js',()=>({renderSubstationCoreUi:vi.fn()}));
 vi.mock('../../../../utils/perfTimings.js',()=>({perfBegin:()=>()=>{},perfMarkProductMoment:vi.fn()}));

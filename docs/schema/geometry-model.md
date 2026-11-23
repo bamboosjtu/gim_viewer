@@ -98,7 +98,7 @@ translation = array[12], array[13], array[14]
 不能再次旋转已经处于 viewer 坐标的 IFC，也不能重复缩放缓存 GLB。
 
 共享模板 placement 不修改共享 geometry；局部 raw fallback 的顶点烘焙有独立所有权。
-源单位与轴转换的具体实现见[xmlModLoader](../../desktop/src/viewer/xmlModLoader.ts)、[坐标对齐](../../desktop/src/services/coordinateAlignmentService.ts)。
+源单位与轴转换的具体实现见[xmlModLoader](../../desktop/src/viewer/xmlModLoader.ts)、[坐标对齐](../../desktop/src/services/project/coordinateAlignmentService.ts)。
 
 ## 颜色
 

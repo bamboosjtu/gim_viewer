@@ -1,15 +1,15 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { AppState } from '../../state.js';
 import { openIfcWithDialog } from '../openIfc.js';
-import { bindProjectOpenPresentation } from '../../../services/projectOpenPresentationPort.js';
+import { bindProjectOpenPresentation } from '../../../services/presentation/projectOpenPresentationPort.js';
 
 const deps = vi.hoisted(() => ({ viewer: vi.fn(), ensureEngine: vi.fn(), load: vi.fn() }));
 vi.mock('@desktop/runtime.js', () => ({ isTauri: () => false }));
-vi.mock('../../../services/viewerUIBinding.js', () => ({ getViewerRuntimeWithUI: deps.viewer }));
+vi.mock('../../../services/presentation/viewerUIBinding.js', () => ({ getViewerRuntimeWithUI: deps.viewer }));
 vi.mock('../../../viewer/ifcLoader.js', () => ({ ensureEngineReady: deps.ensureEngine, loadStandaloneIfc: deps.load }));
 vi.mock('../../../viewer/camera.js', () => ({ fitCameraToScene: vi.fn() }));
-vi.mock('../../../services/gimOpenCore.js', async (original) => ({
-  ...await original<typeof import('../../../services/gimOpenCore.js')>(),
+vi.mock('../../../services/project/gimOpenCore.js', async (original) => ({
+  ...await original<typeof import('../../../services/project/gimOpenCore.js')>(),
   showLoading: vi.fn(),
   hideLoading: vi.fn(),
 }));

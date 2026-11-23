@@ -3,7 +3,7 @@ import { hasErrorCode } from '@desktop/contracts.js';
 import type { validateGimCache } from '@desktop/database.js';
 import type { SessionScope } from '../../../shared/sessionScope.js';
 import { perfBegin, type PerfSession } from '../../../utils/perfTimings.js';
-import { showLoading } from '../../../services/gimOpenCore.js';
+import { showLoading } from '../../../services/project/gimOpenCore.js';
 import { logger } from '../../../utils/logger.js';
 import { buildLineSemanticWarmFiles, commitLineParserResult } from './lineSourceState.js';
 

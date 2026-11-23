@@ -1,4 +1,4 @@
-import { SUBSTATION_PARSER_VERSION } from '@gim/powerline-core/generated/nativeContracts.js';
+import { SUBSTATION_PARSER_VERSION } from '@gim/contracts-native';
 import { RECOGNITION_FIELDS_FINGERPRINT } from '../../gim/engineering/recognitionFieldPolicy.js';
 import type {
   IfcSpatialNode,

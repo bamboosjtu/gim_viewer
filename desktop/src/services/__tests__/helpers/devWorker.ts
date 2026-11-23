@@ -1,5 +1,5 @@
 import {vi} from 'vitest';
-import type {DevGeometryPreprocessor} from '../../devGeometryWorkerClient.js';
+import type {DevGeometryPreprocessor} from '../../dev-geometry/devGeometryWorkerClient.js';
 
 // Pick retains every public member while excluding class-private state. A new
 // production member must be handled here before any consumer fixture can compile.

@@ -11,7 +11,9 @@
     "../packages/gim-sdk/*.js",
     "../packages/gim-sdk/*.cjs",
     "../packages/measurement-core",
-    "../packages/powerline-core"
+    "../packages/powerline-core",
+    "../packages/contracts-native",
+    "../packages/gim-primitives"
   ],
   "exclude": ["../contracts/generated"]
 }

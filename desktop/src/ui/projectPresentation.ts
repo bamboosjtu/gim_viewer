@@ -1,4 +1,4 @@
-import type { ProjectPresentation } from '../services/projectPresentationPort.js';
+import type { ProjectPresentation } from '../services/presentation/projectPresentationPort.js';
 import { setSelectionStatus } from './shell/statusBar.js';
 import { escHtml } from '../shared/html.js';
 
