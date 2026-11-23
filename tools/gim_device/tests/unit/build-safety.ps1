@@ -9,6 +9,13 @@ function Assert-Rejected {
     if (-not $rejected) { throw "Expected rejection: $Message" }
 }
 
+function Read-ZipEntries {
+    param([string]$Path)
+    $archive = [IO.Compression.ZipFile]::OpenRead($Path)
+    try { $archive.Entries | ForEach-Object { $_.FullName.Replace('\', '/') } }
+    finally { $archive.Dispose() }
+}
+
 $tempParent = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../../../tmp/tests/gim_device-build-safety'))
 New-Item -ItemType Directory -Path $tempParent -Force | Out-Null
 $env:TEMP = $tempParent; $env:TMP = $tempParent; $env:TMPDIR = $tempParent
@@ -42,6 +49,30 @@ try {
     New-Item -ItemType Junction -Path (Join-Path $nested 'nested-link') -Target $outside | Out-Null
     Assert-Rejected { Assert-GimBuildTree -Path $nested } 'nested link in old output'
     Write-Output 'PASS: path boundaries, linked outputs and previous-artifact preservation'
+
+    $bundle = Join-Path $dist 'zip fixture'
+    $runtime = Join-Path $bundle '_internal'
+    $temp = Join-Path $bundle 'tmp'
+    $zip = Join-Path $dist 'zip fixture.zip'
+    New-Item -ItemType Directory -Path $runtime, $temp | Out-Null
+    Set-Content -LiteralPath (Join-Path $bundle 'test.exe') -Value 'test executable'
+    Set-Content -LiteralPath (Join-Path $runtime 'catalog.json') -Value '{}'
+
+    Publish-GimDeviceZip -Bundle $bundle -Zip $zip
+    $entries = @(Read-ZipEntries -Path $zip)
+    if ($entries -contains 'zip fixture/tmp/' -or
+        $entries -notcontains 'zip fixture/test.exe' -or
+        $entries -notcontains 'zip fixture/_internal/catalog.json' -or
+        -not (Test-Path -LiteralPath $temp -PathType Container)) {
+        throw 'Expected only the empty tmp ZIP entry to be omitted'
+    }
+
+    Set-Content -LiteralPath (Join-Path $temp 'keep.txt') -Value 'existing file'
+    Publish-GimDeviceZip -Bundle $bundle -Zip $zip
+    if ((Read-ZipEntries -Path $zip) -notcontains 'zip fixture/tmp/keep.txt') {
+        throw 'Publishing omitted a file from nonempty tmp'
+    }
+    Write-Output 'PASS: publishing omits only the empty tmp entry'
 } finally {
     # Remove links themselves before recursive cleanup, including on Windows PS 5.1.
     foreach ($link in @((Join-Path $root 'tool with spaces/_build'), (Join-Path $root 'tool with spaces/dist/old-bundle/nested-link'))) {
