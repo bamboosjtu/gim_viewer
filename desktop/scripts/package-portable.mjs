@@ -3,31 +3,38 @@
  * portable 不是单文件：WebView2 Runtime 目录必须和 exe 保持相对位置。
  */
 import { createHash } from 'node:crypto';
-import { createReadStream, cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  createReadStream,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sevenZip from '7zip-min';
 import { checkDesktopVersion, validateDesktopVersions } from './check-desktop-version.mjs';
-import {prepareFixedRuntimeSecurity} from './fixed-runtime-security.mjs';
+import { prepareFixedRuntimeSecurity } from './fixed-runtime-security.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = dirname(scriptDir);
 const appVersion = checkDesktopVersion(projectRoot);
 const releaseDir = resolve(projectRoot, 'src-tauri', 'target', 'release');
 const sourceExe = join(releaseDir, 'gim-viewer.exe');
-const sourceRuntime = join(releaseDir, 'webview2-fixed-runtime');
+// The prep hook stages the runtime for NSIS in src-tauri.
+const sourceRuntime = join(projectRoot, 'src-tauri', 'webview2-fixed-runtime');
 const portableRoot = join(releaseDir, 'bundle', 'portable');
 const folderName = `GIM-Reader_${appVersion}_x64_portable`;
 const outputDir = join(portableRoot, folderName);
 const outputZip = join(portableRoot, `${folderName}.zip`);
-const buildCommit = [
-  process.env.GIM_BUILD_COMMIT,
-  process.env.GITHUB_SHA,
-  process.env.VITE_GIM_COMMIT,
-]
-  .map((value) => String(value ?? '').trim())
-  .find(Boolean) ?? null;
+const buildCommit =
+  [process.env.GIM_BUILD_COMMIT, process.env.GITHUB_SHA, process.env.VITE_GIM_COMMIT]
+    .map((value) => String(value ?? '').trim())
+    .find(Boolean) ?? null;
 const buildMode = String(process.env.GIM_BUILD_MODE ?? 'portable').trim() || 'portable';
 
 function assertInsideWorkspace(target) {
@@ -36,8 +43,9 @@ function assertInsideWorkspace(target) {
 }
 
 function validateRuntime(dir) {
-  return ['msedgewebview2.exe', 'msedge.dll', 'icudtl.dat', 'resources.pak']
-    .every((name) => existsSync(join(dir, name)));
+  return ['msedgewebview2.exe', 'msedge.dll', 'icudtl.dat', 'resources.pak'].every((name) =>
+    existsSync(join(dir, name)),
+  );
 }
 
 function walkStats(root) {
@@ -72,7 +80,9 @@ function runArchiveTool(args, label) {
     windowsHide: true,
   });
   if (result.error || result.status !== 0) {
-    throw new Error(`${label}失败，7-Zip 退出码 ${result.status}，signal=${result.signal ?? 'none'}${result.error ? `: ${result.error.message}` : ''}`);
+    throw new Error(
+      `${label}失败，7-Zip 退出码 ${result.status}，signal=${result.signal ?? 'none'}${result.error ? `: ${result.error.message}` : ''}`,
+    );
   }
 }
 
@@ -81,17 +91,33 @@ async function main() {
   if (process.platform === 'win32') {
     // Read the real PE resource. Renaming/repackaging an old EXE must not
     // produce a ZIP whose manifest claims the new source version.
-    const metadata = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-      '[System.Diagnostics.FileVersionInfo]::GetVersionInfo($env:GIM_PACKAGING_EXE).ProductVersion'], {
-      env: { ...process.env, GIM_PACKAGING_EXE: sourceExe }, encoding: 'utf8', windowsHide: true,
-    });
-    if (metadata.error || metadata.status !== 0) throw Error(`无法读取 EXE 版本：${metadata.error?.message ?? metadata.stderr}`);
+    const metadata = spawnSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        '[System.Diagnostics.FileVersionInfo]::GetVersionInfo($env:GIM_PACKAGING_EXE).ProductVersion',
+      ],
+      {
+        env: { ...process.env, GIM_PACKAGING_EXE: sourceExe },
+        encoding: 'utf8',
+        windowsHide: true,
+      },
+    );
+    if (metadata.error || metadata.status !== 0)
+      throw Error(`无法读取 EXE 版本：${metadata.error?.message ?? metadata.stderr}`);
     const executableVersion = metadata.stdout.trim();
-    validateDesktopVersions({ 'package.json': appVersion, 'gim-viewer.exe ProductVersion': executableVersion });
+    validateDesktopVersions({
+      'package.json': appVersion,
+      'gim-viewer.exe ProductVersion': executableVersion,
+    });
     console.log(`[portable] EXE ProductVersion 已核对：${executableVersion}`);
   }
   if (!validateRuntime(sourceRuntime)) {
-    throw new Error(`release 目录未包含完整 WebView2 Fixed Runtime，拒绝生成伪 portable 包: ${sourceRuntime}`);
+    throw new Error(
+      `构建输入目录未包含完整 WebView2 Fixed Runtime，拒绝生成伪 portable 包: ${sourceRuntime}`,
+    );
   }
 
   assertInsideWorkspace(outputDir);
@@ -103,7 +129,7 @@ async function main() {
   cpSync(sourceExe, join(outputDir, 'GIM-Reader.exe'));
   cpSync(join(projectRoot, '..', 'LICENSE'), join(outputDir, 'LICENSE'));
   cpSync(sourceRuntime, join(outputDir, 'webview2-fixed-runtime'), { recursive: true });
-  prepareFixedRuntimeSecurity(projectRoot,join(outputDir,'webview2-fixed-runtime'));
+  prepareFixedRuntimeSecurity(projectRoot, join(outputDir, 'webview2-fixed-runtime'));
 
   const runtimeStats = walkStats(join(outputDir, 'webview2-fixed-runtime'));
   const manifest = {
@@ -122,26 +148,32 @@ async function main() {
     },
   };
   writeFileSync(join(outputDir, 'portable-manifest.json'), JSON.stringify(manifest, null, 2));
-  writeFileSync(join(outputDir, '使用说明.txt'), [
-    'GIM 阅读器 portable 版',
-    '',
-    '1. 请完整解压 ZIP，不能只复制 GIM-Reader.exe。',
-    '2. 双击 GIM-Reader.exe 运行，无需安装 WebView2 Runtime。',
-    '3. webview2-fixed-runtime 文件夹必须和 exe 位于同一目录。',
-    '4. 首次启动会初始化随包运行时的读取权限，可能比后续启动稍慢。',
-    '5. 不支持直接从网络共享/UNC 路径运行，请先复制到本机磁盘。',
-    '6. IFC 默认先加载远景表示；近景设置只恢复当前视域内的 L1 浏览表示，不会自动进入 L2。',
-    '7. 首次打开大型 IFC 需要转换，后续有效缓存可加速恢复；属性集、类型与材料在选择后读取。',
-    '8. 三维表示用于 BIM 浏览，小孔和部分开洞会简化，不能用于加工或检修级几何量测。',
-    '9. 设备默认显示基础表示；选择只提升当前浏览表示，属性面板的“查看精细模型”才会请求 L2，状态栏显示设备准备、缓存与失败进度。',
-    '10. XML 参数化设备仍有未支持的图元，部分表示会明确标注，不能视为全类型精确重建。',
-    '',
-  ].join('\r\n'));
+  writeFileSync(
+    join(outputDir, '使用说明.txt'),
+    [
+      'GIM 阅读器 portable 版',
+      '',
+      '1. 请完整解压 ZIP，不能只复制 GIM-Reader.exe。',
+      '2. 双击 GIM-Reader.exe 运行，无需安装 WebView2 Runtime。',
+      '3. webview2-fixed-runtime 文件夹必须和 exe 位于同一目录。',
+      '4. 首次启动会初始化随包运行时的读取权限，可能比后续启动稍慢。',
+      '5. 不支持直接从网络共享/UNC 路径运行，请先复制到本机磁盘。',
+      '6. IFC 默认先加载远景表示；近景设置只恢复当前视域内的 L1 浏览表示，不会自动进入 L2。',
+      '7. 首次打开大型 IFC 需要转换，后续有效缓存可加速恢复；属性集、类型与材料在选择后读取。',
+      '8. 三维表示用于 BIM 浏览，小孔和部分开洞会简化，不能用于加工或检修级几何量测。',
+      '9. 设备默认显示基础表示；选择只提升当前浏览表示，属性面板的“查看精细模型”才会请求 L2，状态栏显示设备准备、缓存与失败进度。',
+      '10. XML 参数化设备仍有未支持的图元，部分表示会明确标注，不能视为全类型精确重建。',
+      '',
+    ].join('\r\n'),
+  );
 
   console.log(`[portable] 正在压缩 ${folderName}.zip...`);
   try {
     // Force UTF-8 names so 使用说明.txt does not depend on the host code page.
-    runArchiveTool(['a', '-tzip', '-mx=5', '-mcu=on', '-y', outputZip, folderName], 'portable ZIP 生成');
+    runArchiveTool(
+      ['a', '-tzip', '-mx=5', '-mcu=on', '-y', outputZip, folderName],
+      'portable ZIP 生成',
+    );
     runArchiveTool(['t', outputZip], 'portable ZIP 完整性检查');
   } catch (error) {
     rmSync(outputZip, { force: true });

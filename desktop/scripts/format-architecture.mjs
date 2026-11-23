@@ -421,6 +421,7 @@ export const architectureModules = [
   '../packages/powerline-core/src/lineMapData.ts',
   '../packages/powerline-core/src/preview.ts',
   'scripts/format-architecture.mjs',
+  'scripts/package-portable.mjs',
   'scripts/lint.mjs',
   'scripts/check-rust.mjs',
   'scripts/check-engineering-boundaries.mjs',
