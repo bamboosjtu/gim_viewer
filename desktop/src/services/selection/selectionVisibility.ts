@@ -43,6 +43,9 @@ export function setSourceLayerVisibility(
   else setRenderVisibility(model.object, visible);
   const entry = state.ifc.loadedModels.get(id);
   if (entry) entry.visible = visible;
+  const option = state.viewerCommands.snapshot.options.models.find((item) => item.id === id);
+  if (option) option.visible = visible;
+  state.viewerCommands.notify();
 }
 
 /** The service owns one selection scope across all IFC representations.

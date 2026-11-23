@@ -1,7 +1,7 @@
 # 线路 GIM Android 应用
 
 基于 Tauri 2、TypeScript、MapLibre 的本地线路查看应用。当前能力、边界和验收见
-[移动端规格](../docs/mobile-spec.md)，布局参考[响应式设计](输电线路GIM地图应用响应式设计展示.png)。
+[移动端规格](../docs/mobile-spec.md)，界面与响应式布局见[移动端 UI 规范](../docs/mobile-ui.md)。
 
 ## 开发与构建
 

@@ -22,6 +22,7 @@ interface SelectionHost {
   runtimes(): Iterable<IfcRegionalRuntime>;
   applyGeometryFilter(): void;
   recordVisibility(): void;
+  selectionChanged?(): void;
 }
 /** User selection owns cancellation and feedback independently of project source data. */
 export class ProjectSelectionState implements ViewerSelectionState {
@@ -41,7 +42,15 @@ export class ProjectSelectionState implements ViewerSelectionState {
     this.highlightedModState = null;
   }
 
-  engineeringSelection: EngineeringSelectionScope | null = null;
+  private engineeringScope: EngineeringSelectionScope | null = null;
+  get engineeringSelection() {
+    return this.engineeringScope;
+  }
+  set engineeringSelection(scope: EngineeringSelectionScope | null) {
+    if (scope === this.engineeringScope) return;
+    this.engineeringScope = scope;
+    this.host.selectionChanged?.();
+  }
   representationSelection:
     import('../../shared/representationSelection.js').RepresentationSelectionScope | null = null;
   engineeringSelectionCleanup: (() => void) | null = null;
@@ -96,6 +105,7 @@ export class ProjectSelectionState implements ViewerSelectionState {
     }
     this.selectionGeometry = null;
     this.selectionMessage = '';
+    this.host.selectionChanged?.();
     return request;
   }
   isCurrentSelection(request: SelectionRequest): boolean {
@@ -125,6 +135,7 @@ export class ProjectSelectionState implements ViewerSelectionState {
     this.selectionAbort = null;
     const sequence = ++this.selectionSequence;
     this.selectionRequest = null;
+    this.host.selectionChanged?.();
     this.engineeringSelection = null;
     this.representationSelection = null;
     this.selectionGeometry = null;
@@ -168,6 +179,7 @@ export class ProjectSelectionState implements ViewerSelectionState {
         .catch((error) => logger.warn('[Selection visibility]', error)),
     ).catch(reportBackgroundError);
     this.host.recordVisibility();
+    this.host.selectionChanged?.();
   }
   releaseDecorations(current: () => boolean): void {
     for (const key of [

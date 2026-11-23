@@ -305,7 +305,13 @@ export class IfcConnectionPreviewRuntime {
   setVisible(visible: boolean): void {
     setRenderVisibility(this.root, visible);
   }
+  private browsePredicate: ((model: string, id: number, guid: string) => boolean) | null = null;
+  setBrowsePredicate(predicate: typeof this.browsePredicate) {
+    this.browsePredicate = predicate;
+    this.setSelectionScope(this.onlySelected, this.selectionScopes);
+  }
   private inSelection(modelId: string, expressId: number, globalId: string): boolean {
+    if (this.browsePredicate && !this.browsePredicate(modelId, expressId, globalId)) return false;
     if (!this.onlySelected) return true;
     const scope = this.selectionScopes.get(modelId);
     return !!scope && (scope.expressIds.has(expressId) || scope.globalIds.has(globalId));

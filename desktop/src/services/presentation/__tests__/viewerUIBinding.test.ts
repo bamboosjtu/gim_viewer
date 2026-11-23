@@ -1,6 +1,7 @@
 import {beforeEach,it,expect,vi} from 'vitest';
 import {AppState} from '../../../app/state.js';
 const mocks=vi.hoisted(()=>({get:vi.fn(),selection:vi.fn(),drawer:vi.fn(),disposeDrawer:vi.fn(),disposeSelection:vi.fn(),historyDispose:vi.fn(),resetVisibility:vi.fn(),sync:vi.fn(),fragmentPick:vi.fn(async()=>true),regionalPick:vi.fn(async()=>true)}));
+vi.mock('../viewerToolBinding.js',()=>({bindViewerToolCommands:()=>({dispose:vi.fn()})}));
 vi.mock('../../../viewer/viewerRuntime.js',()=>({getViewerRuntime:mocks.get}));
 vi.mock('../../../viewer/viewerEngine.js',()=>({createViewerEngine:vi.fn()}));
 vi.mock('../../../viewer/selection.js',()=>({setupSelection:mocks.selection}));

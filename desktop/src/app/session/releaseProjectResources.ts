@@ -5,6 +5,7 @@ import { reportProjectReleaseError } from './projectSessionState.js';
  * synchronously trigger another project transition during its disposer. */
 export function releaseProjectResources(state: AppState, stillClosing: () => boolean): void {
   const steps = [
+    () => state.viewerCommands.reset(),
     () => state.selection.releaseDecorations(stillClosing),
     () => state.viewState.releaseNavigation(),
     () => state.engineering.release(),

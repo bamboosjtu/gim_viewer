@@ -1,4 +1,5 @@
-import {observeFragmentVisualChanges} from './demandRendering.js';
+import { logger } from '../utils/logger.js';
+import { observeFragmentVisualChanges } from './demandRendering.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import fragmentsWorkerUrl from '@thatopen/fragments/worker?url';
 import type { ViewerContext } from './viewerEngine.js';
@@ -19,8 +20,9 @@ export function getOutstandingFragmentsUpdateCount(): number {
 }
 
 // 本地 acceptance harness 读取该计数；不改变 update 调度或错误处理。
-(globalThis as { __GIM_GET_OUTSTANDING_FRAGMENTS_UPDATES__?: () => number })
-  .__GIM_GET_OUTSTANDING_FRAGMENTS_UPDATES__ = getOutstandingFragmentsUpdateCount;
+(
+  globalThis as { __GIM_GET_OUTSTANDING_FRAGMENTS_UPDATES__?: () => number }
+).__GIM_GET_OUTSTANDING_FRAGMENTS_UPDATES__ = getOutstandingFragmentsUpdateCount;
 
 export type ModelEventCallbacks = {
   /** 回调使用 logical modelId；Fragments 实际 key 通过第二参数传递。 */
@@ -54,14 +56,14 @@ function safeFragmentsUpdate(
 ): void {
   const endUpdate = diagnostic
     ? perfBegin(
-      `变电 Fragments cache core.update(true) · ${diagnostic.entryPath}`,
-      {
-        entryPath: diagnostic.entryPath,
-        phase: 'fragments.core.update(true)',
-        source: diagnostic.source,
-      },
-      { id: diagnostic.sessionId },
-    )
+        `变电 Fragments cache core.update(true) · ${diagnostic.entryPath}`,
+        {
+          entryPath: diagnostic.entryPath,
+          phase: 'fragments.core.update(true)',
+          source: diagnostic.source,
+        },
+        { id: diagnostic.sessionId },
+      )
     : undefined;
   const finishUpdate = (failed = false) => {
     endUpdate?.(undefined, {
@@ -114,14 +116,15 @@ export async function initEngine(ctx: ViewerContext, state: AppState): Promise<v
   if (!initialization) {
     initialization = initializeIfcEngine(ctx);
     engineInitializations.set(ctx, initialization);
-    void initialization.catch(() => { engineInitializations.delete(ctx); });
+    void initialization.catch(() => {
+      engineInitializations.delete(ctx);
+    });
   }
   await initialization;
   state.initialized = true;
 }
 
 async function initializeIfcEngine(ctx: ViewerContext): Promise<void> {
-
   debugLog(DEBUG_IFC_LOAD, '[IFC Engine] init start', {
     href: window.location.href,
     origin: window.location.origin,
@@ -138,7 +141,7 @@ async function initializeIfcEngine(ctx: ViewerContext): Promise<void> {
     await ctx.ifcLoader.setup({ autoSetWasm: false, wasm: { path: wasmBase, absolute: true } });
     debugLog(DEBUG_IFC_LOAD, '[IFC Engine] after ifcLoader.setup');
   } catch (err) {
-    console.error('[IFC Engine] ifcLoader.setup failed', { wasmBase, error: err });
+    logger.error('[IFC Engine] ifcLoader.setup failed', { wasmBase, error: err });
     throw err;
   }
 
@@ -148,7 +151,7 @@ async function initializeIfcEngine(ctx: ViewerContext): Promise<void> {
     ctx.fragments.init(fragmentsWorkerUrl);
     debugLog(DEBUG_IFC_LOAD, '[IFC Engine] after fragments.init');
   } catch (err) {
-    console.error('[IFC Engine] fragments worker init failed', { error: err });
+    logger.error('[IFC Engine] fragments worker init failed', { error: err });
     throw err;
   }
 
@@ -171,14 +174,14 @@ export function registerModelEvents(
     const loadDiagnostic = takeIfcLoadDiagnostic(runtimeModelId);
     const endModelAdded = loadDiagnostic
       ? perfBegin(
-        `变电 Fragments model-added callback · ${loadDiagnostic.entryPath}`,
-        {
-          entryPath: loadDiagnostic.entryPath,
-          phase: 'fragments.model-added callback',
-          source: loadDiagnostic.source,
-        },
-        { id: loadDiagnostic.sessionId },
-      )
+          `变电 Fragments model-added callback · ${loadDiagnostic.entryPath}`,
+          {
+            entryPath: loadDiagnostic.entryPath,
+            phase: 'fragments.model-added callback',
+            source: loadDiagnostic.source,
+          },
+          { id: loadDiagnostic.sessionId },
+        )
       : undefined;
     const finishModelAdded = (failed = false) => {
       endModelAdded?.(undefined, {
@@ -194,7 +197,13 @@ export function registerModelEvents(
     if (!state.ifc.isCurrentRuntimeModel(runtimeModelId)) {
       debugWarn(DEBUG_FRAGMENTS, `[Fragments] 拒绝过期/未知模型: ${runtimeModelId}`);
       queueMicrotask(() => {
-        try { void Promise.resolve(ctx.fragments.core.disposeModel(runtimeModelId)).catch(reportBackgroundError); } catch { /* 模型可能尚未完全登记 */ }
+        try {
+          void Promise.resolve(ctx.fragments.core.disposeModel(runtimeModelId)).catch(
+            reportBackgroundError,
+          );
+        } catch {
+          /* 模型可能尚未完全登记 */
+        }
       });
       finishModelAdded(true);
       return;
@@ -204,9 +213,13 @@ export function registerModelEvents(
     // 即使 update 报错（如 "Malformed tile"），模型生命周期状态也要可见，便于后续清理
     // 不让 state 与 ctx.fragments.list 继续不同步
     try {
-      if(model.onViewUpdated&&model.tiles)observeFragmentVisualChanges(model);
-      model.useCamera((ctx.world.camera as any).three);
-      (ctx.world.scene as any).three.add(model.object);
+      if (model.onViewUpdated && model.tiles) observeFragmentVisualChanges(model);
+      model.getClippingPlanesEvent = () => ctx.world.renderer?.clippingPlanes ?? [];
+      model.useCamera(
+        ctx.world.camera.three as
+          import('three').PerspectiveCamera | import('three').OrthographicCamera,
+      );
+      ctx.world.scene.three.add(model.object);
 
       state.ifc.loadedModels.set(logicalModelId, {
         modelId: logicalModelId,
@@ -219,14 +232,14 @@ export function registerModelEvents(
       // warn 中带 modelId，方便定位是哪一个 IFC 出问题
       safeFragmentsUpdate(ctx, `model-added:${model.modelId}`, true, loadDiagnostic);
     } catch (err) {
-      console.error(`[IFC Loader] onItemSet failed: ${runtimeModelId}`, err);
+      logger.error(`[IFC Loader] onItemSet failed: ${runtimeModelId}`, err);
       finishModelAdded(true);
       return;
     }
     finishModelAdded();
   });
   ctx.fragments.list.onBeforeDelete.add(({ value: model }) => {
-    (ctx.world.scene as any).three.remove(model.object);
+    ctx.world.scene.three.remove(model.object);
   });
   ctx.fragments.list.onItemDeleted.add((runtimeModelId) => {
     const { logicalModelId, removed } = state.ifc.remove(runtimeModelId);
@@ -234,7 +247,9 @@ export function registerModelEvents(
   });
   ctx.fragments.core.models.materials.list.onItemSet.add(({ value: material }) => {
     if (!('isLodMaterial' in material && material.isLodMaterial)) {
-      material.polygonOffset = true; material.polygonOffsetUnits = 1; material.polygonOffsetFactor = Math.random();
+      material.polygonOffset = true;
+      material.polygonOffsetUnits = 1;
+      material.polygonOffsetFactor = Math.random();
     }
   });
 }
@@ -284,11 +299,26 @@ export async function loadStandaloneIfc(
   const reportProgress = (progress: number) => {
     if (isCurrent()) onProgress?.(progress);
   };
-  const {loadBimIfc}=await import('./ifcBimLoader.js');
-  await loadBimIfc(ctx,state,session,runtimeModelId,modelId,identityPath||name,
-    readBytes,reportProgress,{standaloneSource:true});
+  const { loadBimIfc } = await import('./ifcBimLoader.js');
+  await loadBimIfc(
+    ctx,
+    state,
+    session,
+    runtimeModelId,
+    modelId,
+    identityPath || name,
+    readBytes,
+    reportProgress,
+    { standaloneSource: true },
+  );
   if (!isCurrent()) {
-    try { void Promise.resolve(ctx.fragments.core.disposeModel(runtimeModelId)).catch(reportBackgroundError); } catch { /* 事件尚未登记时无需清理 */ }
+    try {
+      void Promise.resolve(ctx.fragments.core.disposeModel(runtimeModelId)).catch(
+        reportBackgroundError,
+      );
+    } catch {
+      /* 事件尚未登记时无需清理 */
+    }
     return;
   }
   // onItemSet 事件已更新 state.loadedModels

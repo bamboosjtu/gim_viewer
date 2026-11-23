@@ -160,15 +160,17 @@ export function setupViewerShell(
         const onlyItem = document.getElementById('menu-only-selected');
         if (onlyItem)
           onlyItem.hidden =
-            !['substation', 'equipment'].includes(state.currentProjectType ?? '') ||
+            (!['substation', 'equipment'].includes(state.currentProjectType ?? '') &&
+              !state.ifc.loadedModels.size) ||
             !state.selection.selectionRequest?.target ||
             state.selection.onlySelected ||
             !state.selection.canIsolateSelection;
         const allItem = document.getElementById('menu-show-all');
         if (allItem)
           allItem.hidden =
-            !['substation', 'equipment'].includes(state.currentProjectType ?? '') ||
-            !state.selection.onlySelected;
+            (!['substation', 'equipment'].includes(state.currentProjectType ?? '') &&
+              !state.ifc.loadedModels.size) ||
+            (!state.selection.onlySelected && !state.viewerCommands.snapshot.hasMask);
         const overviewItem = document.getElementById('menu-station-overview');
         if (overviewItem)
           overviewItem.hidden =
@@ -216,11 +218,13 @@ export function setupViewerShell(
   });
   document.getElementById('menu-only-selected')?.addEventListener('click', () => {
     closeMenu();
-    state.selection.setOnlySelected(true);
+    if (state.viewerCommands.execute) state.viewerCommands.dispatch({ kind: 'isolate' });
+    else state.selection.setOnlySelected(true);
   });
   document.getElementById('menu-show-all')?.addEventListener('click', () => {
     closeMenu();
-    state.selection.setOnlySelected(false);
+    if (state.viewerCommands.execute) state.viewerCommands.dispatch({ kind: 'restore' });
+    else state.selection.setOnlySelected(false);
   });
   document.getElementById('menu-station-overview')?.addEventListener('click', () => {
     closeMenu();

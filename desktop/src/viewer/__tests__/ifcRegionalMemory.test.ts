@@ -7,7 +7,7 @@ it('memory pressure retains visible/selected detail, restores the far representa
   camera.lookAt(0,0,-1); camera.updateProjectionMatrix(); camera.updateMatrixWorld(true);
   const object = (expressId:number,bounds:number[])=>({expressId,globalId:String(expressId),name:'member',ifcType:'IFCMEMBER',bounds});
   const visible=object(1,[-1,-1,-5,1,1,-4]),offscreen=object(2,[99,99,99,101,101,101]),selected=object(3,[99,99,99,101,101,101]);
-  const model={modelId:'m',object:new THREE.Group(),setVisible:vi.fn(async()=>{}),getItemsIdsWithGeometry:vi.fn(async()=>[])};
+  const model={modelId:'m',object:new THREE.Group(),setVisible:vi.fn(async()=>{}),getGuidsByLocalIds:vi.fn(async()=>[]),getItemsIdsWithGeometry:vi.fn(async()=>[])};
   const runtime=new IfcRegionalRuntime('m','CBM/m.ifc',{objects:[visible,offscreen,selected],unitScale:1,openingRelations:[]},{
     ctx:{world:{scene:{three:new THREE.Scene()},camera:{three:camera,controls:{addEventListener:vi.fn(),removeEventListener:vi.fn()}}},
       fragments:{list:{onBeforeDelete:{add:vi.fn(),remove:vi.fn()}}}} as any,

@@ -17,6 +17,13 @@ import {
   clearHoverOutline,
 } from './selectionOutline.js';
 
+export interface PickTools {
+  clipTest(): ((p: THREE.Vector3) => boolean) | undefined;
+  measuring(): boolean;
+  revision(): number;
+  point(p: THREE.Vector3, source: string, lod: string): void;
+  miss(): void;
+}
 export type OnElementSelected = (
   modelId: string,
   localId: number,
@@ -41,6 +48,7 @@ export function setupSelection(
     request: SelectionRequest,
     hint?: import('../engineering/representations.js').DevRepresentationHint,
   ) => void,
+  tools?: PickTools,
 ): () => void {
   const abort = new AbortController();
   const signal = abort.signal;
@@ -81,6 +89,7 @@ export function setupSelection(
     const runHover = async () => {
       if (hoverBusy || pointer || !hoverPoint || !state.initialized) return;
       hoverBusy = true;
+      const revision = tools?.revision();
       const serial = hoverSerial,
         point = hoverPoint,
         session = state.captureProjectSession(),
@@ -88,6 +97,7 @@ export function setupSelection(
       const current = () =>
         !signal.aborted &&
         serial === hoverSerial &&
+        revision === tools?.revision() &&
         state.isCurrentSession(session) &&
         state.selection.selectionRequest === selection;
       try {
@@ -112,18 +122,22 @@ export function setupSelection(
           ),
           ctx.world.camera.three,
         );
-        const dev = state.deviceLodRuntime?.pick?.(ray),
+        const dev = state.deviceLodRuntime?.pick?.(ray, tools?.clipTest()),
           near = [...state.ifc.regionalRuntimes.values()]
             .flatMap((runtime) => {
-              const hit = runtime.pick(ray);
+              const hit = runtime.pick(ray, tools?.clipTest());
               return hit ? [{ runtime, ...hit }] : [];
             })
             .sort((a, b) => a.distance - b.distance)[0];
-        const far = await raycastVisibleIfc(ctx, {
-          camera: ctx.world.camera.three as THREE.PerspectiveCamera | THREE.OrthographicCamera,
-          mouse: new THREE.Vector2(point.x, point.y),
-          dom: dom as HTMLCanvasElement,
-        });
+        const far = await raycastVisibleIfc(
+          ctx,
+          {
+            camera: ctx.world.camera.three as THREE.PerspectiveCamera | THREE.OrthographicCamera,
+            mouse: new THREE.Vector2(point.x, point.y),
+            dom: dom as HTMLCanvasElement,
+          },
+          tools?.clipTest(),
+        );
         if (!current()) return;
         const farDistance = far?.rayDistance ?? far?.distance ?? Infinity;
         if (dev && dev.distance < Math.min(near?.distance ?? Infinity, farDistance)) {
@@ -242,11 +256,14 @@ export function setupSelection(
         const serial = ++pickSerial,
           session = state.captureProjectSession(),
           previous = state.selection.selectionRequest;
+        const revision = tools?.revision();
         try {
           const regional: Array<{
             runtime: IfcRegionalRuntime;
             object: RegionalObject;
             distance: number;
+            point?: THREE.Vector3;
+            lod?: number;
           }> = [];
           let devHit: ReturnType<NonNullable<NonNullable<AppState['deviceLodRuntime']>['pick']>> =
             null;
@@ -261,9 +278,9 @@ export function setupSelection(
                 ),
                 ctx.world.camera.three,
               );
-              devHit = state.deviceLodRuntime?.pick?.(ray) ?? null;
+              devHit = state.deviceLodRuntime?.pick?.(ray, tools?.clipTest()) ?? null;
               for (const runtime of state.ifc.regionalRuntimes.values()) {
-                const hit = runtime.pick(ray);
+                const hit = runtime.pick(ray, tools?.clipTest());
                 if (hit) regional.push({ runtime, ...hit });
               }
               regional.sort((a, b) => a.distance - b.distance);
@@ -272,20 +289,55 @@ export function setupSelection(
           // Pick the visible browser representation before beginSelection clears
           // the previous visibility filter or releases its fine representation.
           // The new request still owns every asynchronous result below.
-          const picking = raycastVisibleIfc(ctx, {
-            camera: ctx.world.camera.three as THREE.PerspectiveCamera | THREE.OrthographicCamera,
-            mouse: new THREE.Vector2(e.clientX, e.clientY),
-            dom: (canvas as HTMLCanvasElement) || container,
-          });
+          const picking = raycastVisibleIfc(
+            ctx,
+            {
+              camera: ctx.world.camera.three as THREE.PerspectiveCamera | THREE.OrthographicCamera,
+              mouse: new THREE.Vector2(e.clientX, e.clientY),
+              dom: (canvas as HTMLCanvasElement) || container,
+            },
+            tools?.clipTest(),
+            tools?.measuring(),
+          );
           const result = await picking;
           if (
             signal.aborted ||
             serial !== pickSerial ||
+            revision !== tools?.revision() ||
             !state.isCurrentSession(session) ||
             state.selection.selectionRequest !== previous
           )
             return;
           const near = regional[0];
+          if (tools?.measuring()) {
+            const farDistance = result?.rayDistance ?? result?.distance ?? Infinity;
+            if (
+              devHit?.point &&
+              devHit.distance < Math.min(near?.distance ?? Infinity, farDistance)
+            ) {
+              const root = state.deviceLodRuntime?.getLoadedRoot?.(devHit.rootOccurrence);
+              tools.point(
+                devHit.point,
+                devHit.hint?.devPath || devHit.rootOccurrence,
+                root?.userData.deviceLod == null ? '浏览表示' : 'L' + root.userData.deviceLod,
+              );
+            } else if (near?.point && near.distance < farDistance)
+              tools.point(
+                near.point,
+                near.runtime.modelId + ' #' + near.object.expressId,
+                'L' + near.lod,
+              );
+            else if (result?.point)
+              tools.point(
+                result.point,
+                result.fragments.modelId + ' #' + result.localId,
+                result.fragments.object.userData.ifcOpeningPolicy === 'bim-lod'
+                  ? 'IFC L0'
+                  : 'IFC 浏览表示（LOD 未提供）',
+              );
+            else tools.miss();
+            return;
+          }
           // A miss during isolation preserves the logical selection and its filter.
           // Camera gestures never start a request or clear a fine representation.
           if (!result && !near && !devHit && state.selection.onlySelected) return;

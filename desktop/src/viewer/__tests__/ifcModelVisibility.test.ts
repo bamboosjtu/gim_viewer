@@ -61,3 +61,18 @@ it('reports corrupt visibility results and keeps the source hidden until a succe
   await f.runtime.setScope(new Set([2]));
   expect([...f.visible.values()]).toEqual([false,true,false]);
 });
+
+it('composes persistent hide, floor, isolation and layer masks across detail replacement',async()=>{
+ const f=fixture();
+ await f.runtime.setBrowseMask(new Set([1,2]),new Set([1]));
+ await f.runtime.setScope(new Set([1,2]));
+ expect([...f.visible.values()]).toEqual([false,true,false]);
+ await f.runtime.setDetailVisible([2],false);await f.runtime.setScope(null);
+ expect([...f.visible.values()]).toEqual([false,false,false]);
+ await f.runtime.setDetailVisible([2],true);
+ expect([...f.visible.values()]).toEqual([false,true,false]);
+ f.runtime.setLayerVisible(false);
+ await f.runtime.setBrowseMask(null,new Set());
+ expect([...f.visible.values()]).toEqual([true,true,false]);
+ expect(f.model.object.visible).toBe(false);
+});

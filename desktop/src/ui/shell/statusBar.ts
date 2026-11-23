@@ -28,6 +28,7 @@ export function setStatus(text: string, kind: StatusKind = 'ok'): void {
   ensureEls();
   if (!statusTextEl || !statusDotEl) return;
   statusTextEl.textContent = text;
+  statusTextEl.title = text;
   statusDotEl.classList.toggle('loading', kind === 'loading');
   statusDotEl.classList.toggle('error', kind === 'error');
 }
@@ -82,7 +83,10 @@ export function setConnectionStatus(text: string): void {
 /** 更新右侧统计文本（工程统计 / 版本等） */
 export function setStatusRight(text: string): void {
   const el = document.getElementById('status-right');
-  if (el) el.textContent = text;
+  if (el) {
+    el.textContent = text;
+    el.title = text;
+  }
 }
 
 /** Independent device progress survives concurrent IFC/loading messages. */

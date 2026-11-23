@@ -24,7 +24,7 @@ export async function readInspectorIfcProperties(
   runtime: Pick<IfcRegionalRuntime, 'properties'>,
   expressId: number,
 ): Promise<InspectorIfcProperties> {
-  return (await runtime.properties(expressId)) as InspectorIfcProperties;
+  return await runtime.properties(expressId);
 }
 
 export function buildSpatialPath(

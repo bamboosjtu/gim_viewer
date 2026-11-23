@@ -8,6 +8,7 @@ export interface OutlineElement extends HTMLElement {
   __gimRevealOutline?: (key: string) => boolean;
 }
 export interface OutlineOptions {
+  scroller?: HTMLElement;
   expanded?: Set<string>;
   selectedKey?: () => string;
 }
@@ -110,7 +111,7 @@ export function renderVirtualOutline(
       (row) => row.dataset.nodePath === key,
     );
     if (focus) row?.focus({ preventScroll: true });
-    const panel = row?.closest<HTMLElement>('.tab-panel');
+    const panel = options.scroller ?? row?.closest<HTMLElement>('.tab-panel');
     if (row && panel) {
       const bounds = row.getBoundingClientRect();
       const top = panel.getBoundingClientRect().top + panel.clientTop;
@@ -174,7 +175,7 @@ export function renderVirtualOutline(
   // removal so repeated project switches leave no scroll/observer owners.
   queueMicrotask(() => {
     if (!element.isConnected) return;
-    const scroller = element.closest<HTMLElement>('.tab-panel');
+    const scroller = options.scroller ?? element.closest<HTMLElement>('.tab-panel');
     if (!scroller) return;
     const onScroll = (): void => {
       if (frame) return;

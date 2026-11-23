@@ -14,7 +14,7 @@ function group(id=7) {
 }
 function fixture() {
   const state = new AppState();
-  const model = {modelId:'runtime',object:new THREE.Group(),setVisible:vi.fn(async()=>{}),getItemsGeometry:vi.fn(async()=>[[{positions:new Float32Array([0,0,0,1,0,0,0,1,0]),indices:new Uint32Array([0,1,2]),transform:new THREE.Matrix4()}]])};
+  const model = {getItemsIdsWithGeometry:vi.fn(async()=>[]),getGuidsByLocalIds:vi.fn(async()=>[]),modelId:'runtime',object:new THREE.Group(),setVisible:vi.fn(async()=>{}),getItemsGeometry:vi.fn(async()=>[[{positions:new Float32Array([0,0,0,1,0,0,0,1,0]),indices:new Uint32Array([0,1,2]),transform:new THREE.Matrix4()}]])};
   const ctx:any={fragments:{list:new Map([['runtime',model]]),highlight:vi.fn(async()=>{}),resetHighlight:vi.fn(async()=>{})}};
   const migrate = (value:THREE.Group|undefined,local=17,current=()=>true,prepare?:()=>void) =>
     syncIfcRepresentationHighlight(ctx,state,'runtime','source',object,value,local,current,prepare);

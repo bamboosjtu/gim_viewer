@@ -1383,14 +1383,17 @@ export class DevLodRuntime {
       sharedTextureCount: textures.size,
     };
   }
-  pick(ray: THREE.Raycaster): ReturnType<DevInstanceBatches['pick']> {
+  pick(
+    ray: THREE.Raycaster,
+    accepts?: (point: THREE.Vector3) => boolean,
+  ): ReturnType<DevInstanceBatches['pick']> {
     // Instancing batches own picking when enabled; ordinary placements still
     // need a fallback so clicking a visible DEV cabinet selects that cabinet
     // instead of the IFC surface behind it.
-    const batched = this.instances?.pick(ray);
+    const batched = this.instances?.pick(ray, accepts);
     if (batched) return batched;
     if (!this.current()) return null;
-    return pickVisibleDevRoot(ray, this.rows.values());
+    return pickVisibleDevRoot(ray, this.rows.values(), accepts);
   }
   /** Read the current placement directly; never retain a second root index. */
   getLoadedRoot(rootOccurrence: string): THREE.Group | undefined {

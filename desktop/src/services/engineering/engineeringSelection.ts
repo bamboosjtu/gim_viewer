@@ -143,12 +143,18 @@ function context(state: AppState): Context {
   return value;
 }
 
+export function refreshToolGeometryFilter(state: AppState): void {
+  context(state);
+  if (state.deviceLodRuntime?.setOnlySelected)
+    state.deviceLodRuntime.setOnlySelected(state.selection.onlySelected);
+  else applyGeometryFilter(state);
+}
 export function applyGeometryFilter(state: AppState, onlyRoot?: THREE.Object3D): void {
   const owned = contexts.get(state);
   if (!owned) return;
   const selection = state.selection.engineeringSelection;
   const representation = getEngineeringRepresentations(state);
-  if (!state.selection.onlySelected) {
+  if (!state.selection.onlySelected && !state.toolGeometryFilter) {
     for (const [mesh, baseline] of owned.meshBaseline) setRenderVisibility(mesh, baseline);
     for (const [root, baseline] of owned.rootBaseline) setRenderVisibility(root, baseline);
     owned.meshBaseline.clear();
@@ -158,7 +164,11 @@ export function applyGeometryFilter(state: AppState, onlyRoot?: THREE.Object3D):
   const current = selection?.snapshot === state.engineering.snapshot && !!representation;
   for (const root of onlyRoot ? [onlyRoot] : roots(state)) {
     const occurrence = root.userData.rootOccurrence as string;
-    if (!state.deviceLodRuntime) {
+    if (!state.selection.onlySelected && owned.rootBaseline.has(root)) {
+      setRenderVisibility(root, owned.rootBaseline.get(root)!);
+      owned.rootBaseline.delete(root);
+    }
+    if (!state.deviceLodRuntime && state.selection.onlySelected) {
       if (!owned.rootBaseline.has(root)) owned.rootBaseline.set(root, root.visible);
       setRenderVisibility(
         root,
@@ -173,15 +183,17 @@ export function applyGeometryFilter(state: AppState, onlyRoot?: THREE.Object3D):
       setRenderVisibility(
         mesh,
         owned.meshBaseline.get(mesh)! &&
-          !!(
-            current &&
-            selection &&
-            representation?.index.includesDev(
-              occurrence,
-              devRepresentationHint(mesh, root),
-              selection.sourceIds,
-            )
-          ),
+          (state.toolGeometryFilter?.(occurrence, mesh, root) ?? true) &&
+          (!state.selection.onlySelected ||
+            !!(
+              current &&
+              selection &&
+              representation?.index.includesDev(
+                occurrence,
+                devRepresentationHint(mesh, root),
+                selection.sourceIds,
+              )
+            )),
         !onlyRoot,
       );
     });
@@ -527,10 +539,10 @@ export async function selectEngineeringTarget(
           );
       },
       onIsolate: () => {
-        if (guard.isCurrent()) state.selection.setOnlySelected(true);
+        if (guard.isCurrent()) state.viewerCommands.dispatch({ kind: 'isolate' });
       },
       onRestore: () => {
-        if (guard.isCurrent()) state.selection.setOnlySelected(false);
+        if (guard.isCurrent()) state.viewerCommands.dispatch({ kind: 'restore' });
       },
       onSource: (sourceId) => {
         if (guard.isCurrent())

@@ -95,7 +95,7 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, NativeError>
 }
 
 /// 当前时间戳（毫秒，UNIX_EPOCH 起）
-fn now_ms() -> u64 {
+pub(crate) fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)

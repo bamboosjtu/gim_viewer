@@ -39,3 +39,11 @@ it('isolates a failed source while picking the closest remaining visible source'
     expect(warning).toHaveBeenCalledOnce();
   } finally {warning.mockRestore();}
 });
+
+it('picks the visible surface behind the cut',async()=>{
+ const f=fixture();f.b.object.visible=false;
+ const front={localId:1,distance:1,point:new THREE.Vector3(3,0,0),fragments:{modelId:'A'}};
+ const back={...front,localId:2,distance:3,point:new THREE.Vector3(-1,0,0)};
+ f.a.raycast.mockResolvedValue(front);f.a.raycastAll.mockResolvedValue([front,back]);
+ expect(await raycastVisibleIfc(f.ctx,f.data,p=>p.x<=0)).toEqual(back);
+});

@@ -18,3 +18,10 @@ it.each(['button','escape'])('explicit %s clearing exits isolation instead of hi
   await vi.waitFor(()=>expect(state.selection.selectionRequest?.target).toBeNull());expect(state.selection.onlySelected).toBe(false);expect(state.selection.canIsolateSelection).toBe(false);
   await vi.waitFor(()=>expect(document.getElementById('props-drawer-body')?.textContent).toBe('尚未选择对象'));await vi.dynamicImportSettled();
 });
+
+it('enables visible ribbon actions as soon as selection changes in the default tool',()=>{
+ const state=new AppState();state.currentProjectType='equipment';state.viewerCommands.execute=vi.fn(async()=>{});
+ dispose=setupSelectionToolbar(state);const hide=document.querySelector<HTMLButtonElement>('[aria-label="隐藏对象"]')!;
+ expect(hide.disabled).toBe(true);state.selection.beginSelection({kind:'cbm',key:'part'});expect(hide.disabled).toBe(false);
+ state.selection.invalidateSelection();expect(hide.disabled).toBe(true);
+});

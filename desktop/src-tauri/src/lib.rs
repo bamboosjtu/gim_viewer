@@ -14,6 +14,7 @@ mod substation_extraction_job;
 mod substation_extraction_profile;
 mod substation_parse_copy;
 mod tree_export;
+mod window_placement;
 
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
@@ -504,6 +505,7 @@ pub fn run() {
     ensure_fixed_webview2_acl();
     tauri::Builder::default()
         .on_window_event(|window, event| {
+            window_placement::observe(window, event);
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if substation_extraction_job::has_running_job() {
                     api.prevent_close();
@@ -522,6 +524,7 @@ pub fn run() {
         .setup(|app| {
             let conn = db::init_db(app.handle())
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            window_placement::restore(app, &conn);
             app.manage(db::DbState(std::sync::Mutex::new(conn)));
             app.manage(AuthorizedFilePaths(std::sync::Mutex::new(HashSet::new())));
             Ok(())

@@ -1,6 +1,6 @@
 # GIM Viewer 文档
 
-本目录是 GIM Viewer 的长期文档：只描述当前实现、当前契约和当前验收状态，不保存研究过程、历史方案或未复核推断。桌面版本 `0.2.4`，Android 线路版 `0.1.6 Preview`；版本以 `desktop/package.json` 和 `app/package.json` 为准。
+本目录是 GIM Viewer 的长期文档：只描述当前实现、当前契约和当前验收状态，不保存研究过程、历史方案或未复核推断。桌面版本 `0.2.5`，Android 线路版 `0.1.6 Preview`；版本以 `desktop/package.json` 和 `app/package.json` 为准。
 
 文档以源码、测试和实际运行证据为准。研究材料在 `research/`，未关闭缺陷在[问题与限制](open-issues.md)，工程样本放在 `demo/`（不随仓库分发），性能输入登记在 [`benchmarks/`](../benchmarks/README.md)。
 
@@ -10,6 +10,7 @@
 |---|---|---|
 | 了解桌面端能力与限制 | [桌面软件规格](software-spec.md) | [问题与限制](open-issues.md) |
 | 了解 Android 线路端 | [移动端规格](mobile-spec.md) | [线路与移动端](architecture/line-mobile.md) |
+| 调整布局、控件或界面反馈 | [桌面端 UI 规范](desktop-ui.md) / [移动端 UI 规范](mobile-ui.md) | [验证](validation.md) |
 | 第一次接触代码库 | [系统架构](architecture.md) | [分层与依赖](architecture/layers.md) → [开发指南](development.md) |
 | 改工程实体、目录或三视图 | [工程实体模型](engineering/README.md) | [实体与来源](engineering/entities.md) → [工程组成](engineering/composition.md) → [目录](engineering/catalogs/README.md) |
 | 改 Parser 或格式契约 | [Parser](architecture/parser.md) | [Schema](schema/README.md) → [验证](validation.md) |
@@ -31,6 +32,8 @@
 |---|---|
 | [桌面软件规格](software-spec.md) | 用户可见的打开、三视图、三维、属性、地图与能力限制 |
 | [移动端规格](mobile-spec.md) | Android 导入、树/地图、杆塔预览、隐私与验收口径 |
+| [桌面端 UI 规范](desktop-ui.md) | Windows 工作台、三种工程模式、布局断点与 UI 复核 |
+| [移动端 UI 规范](mobile-ui.md) | Android 地图工作区、响应式面板、安全区与沉浸地图 |
 | [问题与限制](open-issues.md) | 唯一权威的未关闭缺陷与已接受限制 |
 | [术语表](glossary.md) | 跨文档固定术语 |
 
@@ -114,6 +117,7 @@
 | 缓存域版本与失效范围 | [缓存域](architecture/caches.md) |
 | 样本身份、SHA 与统计 | [样本台账](schema/sample-corpus.md) |
 | 未关闭缺陷与已接受限制 | [问题与限制](open-issues.md) |
+| 界面结构、视觉样式与响应式布局 | [桌面端 UI 规范](desktop-ui.md)、[移动端 UI 规范](mobile-ui.md) |
 | 性能测量方法与 CLI | [性能测试指南](performance/guide.md)、[Benchmark CLI](performance/benchmark.md) |
 | 性能接受与基线批准 | 开发者本地 `tmp/gim-bench/` 报告；Agent 不自动批准 |
 | 命令与工作区约定 | [开发指南](development.md) |

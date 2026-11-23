@@ -5,6 +5,7 @@ import type * as THREE from 'three';
 import type { ProjectLoadSession } from './projectSession.js';
 
 export interface ViewerState {
+  toolModelChanged?: (id?: string) => void;
   selection: ViewerSelectionState;
   ifc: Pick<
     IfcRuntimeState,
@@ -38,7 +39,11 @@ export interface ViewerState {
     notifyCoordinateAnchor?(): void;
     getLoadedRoot?(rootOccurrence: string): THREE.Group | undefined;
     setBackgroundPaused?(paused: boolean): void;
-    pick?(ray: THREE.Raycaster): {
+    pick?(
+      ray: THREE.Raycaster,
+      accepts?: (point: THREE.Vector3) => boolean,
+    ): {
+      point?: THREE.Vector3;
       rootOccurrence: string;
       instanceKey: string;
       distance: number;

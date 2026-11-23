@@ -16,6 +16,7 @@ export interface DevViewportPick {
   rootOccurrence: string;
   instanceKey: string;
   distance: number;
+  point: THREE.Vector3;
   hint: import('../engineering/representations.js').DevRepresentationHint;
 }
 
@@ -26,6 +27,7 @@ export interface DevViewportPick {
 export function pickVisibleDevRoot(
   ray: THREE.Raycaster,
   rows: Iterable<PickableDevRoot>,
+  accepts?: (point: THREE.Vector3) => boolean,
 ): DevViewportPick | null {
   let nearest: DevViewportPick | null = null;
   const hits: THREE.Intersection[] = [];
@@ -36,9 +38,17 @@ export function pickVisibleDevRoot(
     if ((object as THREE.Mesh).isMesh && ray.layers.test(object.layers)) {
       hits.length = 0;
       object.raycast(ray, hits);
-      for (const hit of hits) if (!nearest || hit.distance < nearest.distance) {
-        nearest = { rootOccurrence: identity.rootOccurrence, instanceKey: identity.instanceKey, distance: hit.distance, object: hit.object, hint: devRepresentationHint(hit.object, placement) };
-      }
+      for (const hit of hits)
+        if ((!accepts || accepts(hit.point)) && (!nearest || hit.distance < nearest.distance)) {
+          nearest = {
+            rootOccurrence: identity.rootOccurrence,
+            instanceKey: identity.instanceKey,
+            distance: hit.distance,
+            point: hit.point,
+            object: hit.object,
+            hint: devRepresentationHint(hit.object, placement),
+          };
+        }
     }
     for (const child of object.children) visit(child);
   };
@@ -48,7 +58,10 @@ export function pickVisibleDevRoot(
     if (!group || !identity.rootOccurrence || !identity.instanceKey) continue;
     let visible = true;
     for (let node: THREE.Object3D | null = group; node; node = node.parent) {
-      if (!node.visible) { visible = false; break; }
+      if (!node.visible) {
+        visible = false;
+        break;
+      }
     }
     if (!visible) continue;
     // Unknown bounds remain eligible; no per-click geometry traversal to build them.

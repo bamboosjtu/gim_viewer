@@ -1,3 +1,5 @@
+import { toolGlyph } from './viewerToolIcons.js';
+import { mountViewerToolbox } from './viewerToolbox.js';
 import { logger } from '../utils/logger.js';
 import type { AppState } from '../app/state.js';
 
@@ -17,10 +19,11 @@ export function setupSelectionToolbar(state: AppState): () => void {
   locate.type = 'button';
   locate.id = 'btn-auto-locate';
   const refresh = () => {
-    locate.textContent = `自动定位：${state.selection.autoLocate ? '开' : '关'}`;
+    const label = `自动定位：${state.selection.autoLocate ? '开' : '关'}`;
+    toolGlyph(locate, 'locate', label, label + ' · 从模型树或搜索定位');
     locate.setAttribute('aria-pressed', String(state.selection.autoLocate));
   };
-  locate.title = '控制在模型树或搜索中选择对象时是否定位；三维单击始终只选择。';
+
   locate.addEventListener('click', () => {
     state.selection.autoLocate = !state.selection.autoLocate;
     try {
@@ -35,22 +38,37 @@ export function setupSelectionToolbar(state: AppState): () => void {
   clear.type = 'button';
   clear.id = 'btn-clear-selection';
   clear.textContent = '清除选择';
-  clear.title = '清除选择并恢复隔离显示（Esc）';
+  toolGlyph(clear, 'clear', '清除选择', '清除选择并退出当前隔离（Esc）');
   const clearSelection = () => {
     void import('../services/selection/selectionCommands.js')
       .then(({ clearCurrentSelection }) => clearCurrentSelection(state))
       .catch((error) => logger.warn('[清除选择]', error));
   };
   clear.addEventListener('click', clearSelection);
-  bar.append(locate, clear);
+  const toolbox = mountViewerToolbox(state, bar, viewport, [locate, clear]);
   viewport.append(bar);
   const refreshVisibility = () => {
-    bar.style.display = state.currentProjectType === 'transmission_line' ? 'none' : 'flex';
+    viewport.classList.toggle(
+      'has-3d-tools',
+      state.currentProjectType !== 'transmission_line' &&
+        (!!state.currentProjectType || state.ifc.loadedModels.size > 0),
+    );
+    bar.style.display =
+      state.currentProjectType === 'transmission_line' ||
+      (!state.currentProjectType && !state.ifc.loadedModels.size)
+        ? 'none'
+        : 'flex';
   };
   const observer = new MutationObserver(refreshVisibility);
   observer.observe(viewport, { childList: true });
   const badge = document.getElementById('project-type-badge');
   if (badge) observer.observe(badge, { childList: true, subtree: true });
+  state.viewerCommands.addEventListener('change', refreshVisibility);
+  const selectionStatus = document.getElementById('status-selection');
+  const statusObserver = new MutationObserver(() => {
+    toolbox.refreshSelection();
+  });
+  if (selectionStatus) statusObserver.observe(selectionStatus, { childList: true, subtree: true });
   refreshVisibility();
   const escape = (event: KeyboardEvent) => {
     const target = event.target as HTMLElement | null;
@@ -62,6 +80,11 @@ export function setupSelectionToolbar(state: AppState): () => void {
       return;
     const menu = document.getElementById('more-menu');
     if (menu && !menu.hidden) return;
+    if (state.viewerCommands.snapshot.tool === 'distance') {
+      event.preventDefault();
+      state.viewerCommands.dispatch({ kind: 'cancelPoint' });
+      return;
+    }
     if (state.selection.selectionRequest?.target || state.selection.onlySelected) {
       event.preventDefault();
       clearSelection();
@@ -70,6 +93,9 @@ export function setupSelectionToolbar(state: AppState): () => void {
   document.addEventListener('keydown', escape);
   return () => {
     observer.disconnect();
+    statusObserver.disconnect();
+    toolbox.dispose();
+    state.viewerCommands.removeEventListener('change', refreshVisibility);
     document.removeEventListener('keydown', escape);
     bar.remove();
   };

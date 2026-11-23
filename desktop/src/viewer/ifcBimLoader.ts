@@ -319,6 +319,7 @@ export async function loadBimIfc(
   runtime.setMemoryPressure?.(state.substationMemoryPressure);
   runtime.setOnlySelected?.(state.selection.onlySelected);
   state.ifc.regionalRuntimes.set(logicalId, runtime);
+  state.toolModelChanged?.(logicalId);
   state.engineeringGeometryEvidenceChanged?.();
   void Promise.resolve(
     state.selection.selectionVisibility

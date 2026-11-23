@@ -37,6 +37,9 @@ export interface SubstationConnectionPreview {
     objects: readonly import('../viewer/ifcRegionalData.js').RegionalObject[];
   }>;
   setTransform?(matrix: THREE.Matrix4): void;
+  setBrowsePredicate?(
+    predicate: ((model: string, id: number, guid: string) => boolean) | null,
+  ): void;
   setSelectionScope?(
     only: boolean,
     scopes: ReadonlyMap<string, import('../viewer/ifcModelVisibility.js').IfcSelectionScope>,
@@ -45,6 +48,7 @@ export interface SubstationConnectionPreview {
   release(): void;
 }
 
+import { ViewerCommands } from '../shared/viewerCommands.js';
 import type { ProjectLoadSession } from '../shared/projectSession.js';
 import type { SessionScope } from '../shared/sessionScope.js';
 import { ProjectSessionState } from './session/projectSessionState.js';
@@ -59,6 +63,11 @@ export type {
 
 /** 应用全局状态（由 bootstrap.ts 创建唯一实例，通过参数注入各模块） */
 export class AppState {
+  toolGeometryFilter:
+    | ((root: string, mesh: import('three').Mesh, group: import('three').Object3D) => boolean)
+    | null = null;
+  toolModelChanged?: (id?: string) => void;
+  readonly viewerCommands = new ViewerCommands();
   readonly ifc = new IfcRuntimeState({
     captureSession: () => this.captureProjectSession(),
     isCurrentSession: (session) => this.isCurrentSession(session),
@@ -73,6 +82,7 @@ export class AppState {
     runtimes: () => this.ifc.regionalRuntimes.values(),
     applyGeometryFilter: () => this.engineeringGeometryFilter?.(),
     recordVisibility: () => this.viewState.viewHistory?.recordVisibility(),
+    selectionChanged: () => this.viewerCommands.dispatchEvent(new Event('selectionchange')),
   });
   readonly properties = new ProjectPropertyCache();
   readonly sourceGeometry = new SourceGeometryState();

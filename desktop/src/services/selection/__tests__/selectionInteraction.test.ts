@@ -32,10 +32,10 @@ beforeEach(() => {
   vi.resetModules();
   HTMLElement.prototype.scrollIntoView=vi.fn();
   document.body.innerHTML='<div id="viewport"><canvas></canvas></div><button id="btn-toggle-props"></button><button id="btn-close-props"></button><button id="btn-export-props"></button><aside id="props-drawer"><div id="props-drawer-body"></div></aside><div id="cbm-tree-panel"></div><div id="file-dev-panel"></div><div id="sld-panel"></div><span id="status-selection">未选中</span>';
-  const camera={ target:new THREE.Vector3(),position:new THREE.Vector3(),
+  const camera={ mouseButtons:{left:1},target:new THREE.Vector3(),position:new THREE.Vector3(),
     setLookAt:vi.fn(async (x:number,y:number,z:number,tx:number,ty:number,tz:number) => { camera.position.set(x,y,z);camera.target.set(tx,ty,tz); }),
     stop:vi.fn(),getPosition:(v:THREE.Vector3) => v.copy(camera.position),getTarget:(v:THREE.Vector3) => v.copy(camera.target) };
-  runtime.ctx={ world:{ scene:{three:new THREE.Scene()},camera:{controls:camera} },
+  runtime.ctx={ world:{ scene:{three:new THREE.Scene()},camera:{three:new THREE.PerspectiveCamera(45,1),controls:camera} },
     fragments:{list:new Map(),resetHighlight:vi.fn(async () => {}),highlight:vi.fn(async () => {}),core:{update:vi.fn()} } };
 });
 

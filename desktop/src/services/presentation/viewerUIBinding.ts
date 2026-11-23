@@ -110,6 +110,9 @@ export async function getViewerRuntimeWithUI(
       rollback.push(() => disposeDrawer?.());
 
       // 装配 3D 点击拾取 → 显示 IFC 构件属性
+      const { bindViewerToolCommands } = await import('./viewerToolBinding.js');
+      const tools = bindViewerToolCommands(state, ctx, container);
+      rollback.push(() => tools.dispose());
       const disposeSelection = setupSelection(
         ctx,
         state,
@@ -173,6 +176,7 @@ export async function getViewerRuntimeWithUI(
             )
             .catch((error) => logger.warn('[DEV selection]', error));
         },
+        tools,
       );
 
       rollback.push(() => disposeSelection?.());
@@ -197,12 +201,14 @@ export async function getViewerRuntimeWithUI(
           }
           if (model) state.selection.selectionVisibility?.registerModel(modelId, model);
           presentation.addModel(ctx, state, modelId, runtimeModelId);
+          state.toolModelChanged?.(modelId);
           if (state.selection.engineeringSelection?.ifc.some((ref) => ref.modelId === modelId))
             state.engineeringRepresentationChanged?.();
         },
         onModelRemoved: (modelId, runtimeModelId) => {
           state.selection.selectionVisibility?.removeModel(modelId, runtimeModelId);
           presentation.removeModel(modelId);
+          state.toolModelChanged?.(modelId);
         },
       };
 

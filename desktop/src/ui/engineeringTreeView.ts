@@ -185,7 +185,8 @@ export function renderEngineeringTree(state: AppState): void {
   if (cbmTreePanel.contains(nav.bar)) {
     nav.query[nav.mode] =
       cbmTreePanel.querySelector<HTMLInputElement>('.search-box-wrap input')?.value ?? '';
-    nav.scroll[nav.mode] = cbmTreePanel.scrollTop;
+    nav.scroll[nav.mode] =
+      cbmTreePanel.querySelector<HTMLElement>('.tree-view-host')?.scrollTop ?? 0;
   }
   nav.data = data;
   nav.mode = mode;
@@ -421,6 +422,7 @@ export function renderEngineeringTree(state: AppState): void {
   };
   nav.outline = renderVirtualOutline(host, [outlineNode(root)], {
     expanded,
+    scroller: host,
     selectedKey: () => rowKey(state, data),
   });
   renderSearchBox(
@@ -449,7 +451,7 @@ export function renderEngineeringTree(state: AppState): void {
     input.value = nav.query[mode];
     input.dispatchEvent(new Event('input'));
   }
-  cbmTreePanel.scrollTop = nav.scroll[mode];
+  host.scrollTop = nav.scroll[mode];
   if (state.selection.selectionRequest?.target) syncEngineeringTreeSelection(state);
 }
 
