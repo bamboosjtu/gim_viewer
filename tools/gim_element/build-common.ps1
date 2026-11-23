@@ -30,6 +30,23 @@ function Assert-GimBuildTree {
     }
 }
 
+function Publish-GimElementZip {
+    param([string]$Bundle, [string]$Zip)
+    Compress-Archive -LiteralPath $Bundle -DestinationPath $Zip -CompressionLevel Optimal -Force
+
+    # The startup check creates tmp beside the EXE. Omit its empty ZIP entry.
+    $tempPrefix = (Split-Path -Leaf $Bundle) + '/tmp/'
+    $archive = [IO.Compression.ZipFile]::Open($Zip, [IO.Compression.ZipArchiveMode]::Update)
+    try {
+        $tempEntries = @($archive.Entries | Where-Object {
+            $_.FullName.Replace('\', '/').StartsWith($tempPrefix, [StringComparison]::Ordinal)
+        })
+        if ($tempEntries.Count -eq 1 -and $tempEntries[0].FullName.Replace('\', '/') -ceq $tempPrefix) {
+            $tempEntries[0].Delete()
+        }
+    } finally { $archive.Dispose() }
+}
+
 function Invoke-GimToolBuild {
     [CmdletBinding()]
     param(
@@ -152,7 +169,7 @@ function Invoke-GimToolBuild {
             if ($LASTEXITCODE -ne 0) { throw "Frozen --smoke failed: $SmokeDir" }
         }
         if ($Publish) {
-            Compress-Archive -LiteralPath $bundle -DestinationPath $zip -CompressionLevel Optimal -Force
+            Publish-GimElementZip -Bundle $bundle -Zip $zip
             Write-Output "Published: $zip"
         }
     } catch {
