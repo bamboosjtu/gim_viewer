@@ -13,8 +13,6 @@ export function setupSelectionToolbar(state: AppState): () => void {
   bar.id = 'selection-toolbar';
   bar.setAttribute('role', 'toolbar');
   bar.setAttribute('aria-label', '模型浏览工具');
-  bar.style.cssText =
-    'position:absolute;left:12px;top:12px;z-index:5;display:flex;gap:6px;padding:6px;border:1px solid #475569;border-radius:6px;background:#0f172aeb;color:#e2e8f0';
   const locate = document.createElement('button');
   locate.type = 'button';
   locate.id = 'btn-auto-locate';
@@ -44,9 +42,6 @@ export function setupSelectionToolbar(state: AppState): () => void {
       .catch((error) => logger.warn('[清除选择]', error));
   };
   clear.addEventListener('click', clearSelection);
-  for (const button of [locate, clear])
-    button.style.cssText =
-      'padding:5px 9px;color:inherit;background:#1e293b;border:1px solid #64748b;border-radius:4px;cursor:pointer';
   bar.append(locate, clear);
   viewport.append(bar);
   const refreshVisibility = () => {

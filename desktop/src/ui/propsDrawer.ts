@@ -113,9 +113,16 @@ export function setupPropsDrawerInteractions(ctx?: ViewerContext): void {
   if (propsDrawerInteractionsReady) return;
   propsDrawerInteractionsReady = true;
   ensurePropertyReferenceEvents();
+  const reopen = document.getElementById('btn-toggle-props');
+  reopen?.addEventListener('click', () => {
+    if (propsDrawerViewerContext) openPropsDrawer(propsDrawerViewerContext, true);
+    else openPropsDrawerUI(true);
+    btnCloseProps.focus();
+  });
   btnCloseProps.addEventListener('click', () => {
     if (propsDrawerViewerContext) closePropsDrawer(propsDrawerViewerContext);
     else closePropsDrawerUI();
+    reopen?.focus();
   });
   // 导出当前属性面板为 CSV：
   // 直接从已渲染 DOM 抓取分节标题 + 键值行，导出内容与用户所见一致

@@ -21,7 +21,6 @@ export const LAYER_ITEMS: { key: keyof LayerState; label: string; color: string 
   { key: 'label', label: '标签', color: '#334155' },
 ];
 
-
 export function mountLineMapControls(container: HTMLElement, overlayMode: boolean) {
   // ---- DOM：canvas + tooltip + fit 按钮 + 图层面板 ----
   const canvas = document.createElement('canvas');
@@ -47,8 +46,8 @@ export function mountLineMapControls(container: HTMLElement, overlayMode: boolea
   tooltip.style.maxWidth = '280px';
   tooltip.style.padding = '8px 10px';
   tooltip.style.borderRadius = '6px';
-  tooltip.style.background = 'rgba(15,23,42,0.92)';
-  tooltip.style.color = '#e2e8f0';
+  tooltip.style.background = 'var(--surface-1)';
+  tooltip.style.color = 'var(--text-1)';
   tooltip.style.fontSize = '12px';
   tooltip.style.lineHeight = '1.5';
   tooltip.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';

@@ -8,9 +8,9 @@
 
 ### Windows 桌面版
 
-![Windows 桌面版显示 110 kV 通用设计变电站及工程导航](docs/screenshots/desktop-substation.png)
+![Windows 桌面版显示 110-B1-2 户外变电站，清册与对象属性中选中油浸式变压器](docs/screenshots/desktop-substation.png)
 
-*110 kV 通用设计模型。工程导航提供设备材料清册、工程组成和来源视图。*
+*110 kV 户外变电站通用设计 110-B1-2 方案。左侧清册选中一台油浸式变压器，三维视图同步高亮，右侧显示对象属性。*
 
 ### Android 线路版
 

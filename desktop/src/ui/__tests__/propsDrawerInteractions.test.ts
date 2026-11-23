@@ -17,6 +17,21 @@ describe('属性检查器纯 DOM 交互', () => {
     `;
   });
 
+  it('手动收放保留当前页签和属性内容', async () => {
+    const drawer = await import('../propsDrawer.js');
+    drawer.setupPropsDrawerInteractions();
+    const panel = document.getElementById('props-drawer')!;
+    const body = document.getElementById('props-drawer-body')!;
+    body.innerHTML = '<div class="itab active" data-itab="source">来源</div>';
+    const tab = body.firstElementChild;
+    document.getElementById('btn-toggle-props')!.click();
+    document.getElementById('btn-close-props')!.click();
+    expect(panel.classList.contains('collapsed')).toBe(true);
+    document.getElementById('btn-toggle-props')!.click();
+    expect(panel.classList.contains('collapsed')).toBe(false);
+    expect(body.querySelector('.active')).toBe(tab);
+  });
+
   it('FAM duplicate source rows and conflicts remain visible cold and warm', async () => {
     const drawer = await import('../../app/composition/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../propsDrawer.js'); });
     const state = new AppState();

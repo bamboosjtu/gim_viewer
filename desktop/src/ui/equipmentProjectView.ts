@@ -4,6 +4,7 @@ import { cbmTreePanel, emptyTipEl } from './dom.js';
 import { renderCbmTreeUI, selectCbmTreeRow } from './cbmTreeView.js';
 import { renderSearchBox } from './searchBox.js';
 import { setProjectIdentity, refreshNavigatorTitle } from './shell/projectBar.js';
+import { showModelTabOnly } from './tabs.js';
 import { setIfcStatus } from './shell/statusBar.js';
 import { getNodeDisplayName } from '../shared/displayName.js';
 
@@ -11,6 +12,7 @@ export function createEquipmentProjectPresentation(state: AppState): EquipmentPr
   return {
     navigation({ name, tree, onSelect, signal }) {
       if (signal.aborted) return () => {};
+      showModelTabOnly();
       setProjectIdentity(name, 'equipment');
       refreshNavigatorTitle();
       setIfcStatus('');

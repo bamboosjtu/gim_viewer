@@ -13,7 +13,7 @@ let deviceProgress = '',
   deviceDetail = '';
 
 /** 空工程时右侧状态栏的稳定默认文案。 */
-export const DEFAULT_STATUS_RIGHT = 'GIM BIM 浏览器';
+export const DEFAULT_STATUS_RIGHT = '';
 
 function ensureEls(): void {
   if (statusTextEl && statusDotEl) return;

@@ -3,17 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GIM BIM 浏览器</title>
+    <title>GIM 阅读器</title>
     <link rel="stylesheet" href="/src/ui/app.css">
   </head>
   <body>
     <div id="app">
       <!-- 顶部项目栏 -->
       <header id="topbar">
-        <div class="brand"><span class="brand-mark"></span><span>GIM BIM 浏览器</span></div>
         <div class="project-select">
           <span id="project-title">未打开工程</span>
-          <span class="caret">⌄</span>
         </div>
         <span id="project-type-badge" class="badge hidden"></span>
         <div class="top-spacer"></div>
@@ -50,16 +48,16 @@
         <!-- 工作区导航轨 -->
         <nav id="workspace-rail" aria-label="工作区">
           <button class="rail-item active" data-tab="tab-tree" title="模型层级">
-            <span class="rail-icon">▦</span><span>模型</span>
+            <svg class="rail-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 7l9-5 9 5v10l-9 5-9-5z M3 7l9 5 9-5 M12 12v10"/></svg><span>模型</span>
           </button>
           <button class="rail-item" data-tab="tab-filedev" title="文件与设备">
-            <span class="rail-icon">⚙</span><span>设备</span>
+            <svg class="rail-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 6h16v13H4z M8 3v3m4-3v3m4-3v3M8 10v5m4-5v5m4-5v5"/></svg><span>设备</span>
           </button>
           <button class="rail-item" data-tab="tab-models" title="模型列表与图层">
-            <span class="rail-icon">▤</span><span>图层</span>
+            <svg class="rail-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M2 8l10-5 10 5-10 5z M3 13l9 5 9-5 M3 18l9 5 9-5"/></svg><span>图层</span>
           </button>
           <button class="rail-item" data-tab="tab-sld" title="电气单线图">
-            <span class="rail-icon">⚡</span><span>图纸</span>
+            <svg class="rail-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 4h18v16H3z M6 15l4-5 3 3 5-6"/></svg><span>图纸</span>
           </button>
         </nav>
 
@@ -82,6 +80,7 @@
 
         <!-- 中央视口 -->
         <div id="center">
+          <button id="btn-toggle-props" aria-controls="props-drawer" title="展开对象属性">展开对象属性</button>
           <div id="viewport">
             <div id="loading">
               <div class="loading-line">
@@ -118,10 +117,10 @@
         <!-- 右侧对象检查器 -->
         <aside id="props-drawer" class="collapsed">
           <div id="props-drawer-header">
-            <h3>属性</h3>
+            <h3>对象属性</h3>
             <div class="header-actions">
-              <button id="btn-export-props" class="icon-btn" title="导出属性 CSV">⇩</button>
-              <button id="btn-close-props" class="icon-btn" title="收起">✕</button>
+              <button id="btn-export-props" class="icon-btn" title="导出属性 CSV">导出 CSV</button>
+              <button id="btn-close-props" class="icon-btn" aria-label="收起对象属性" title="收起对象属性">×</button>
             </div>
           </div>
           <div id="props-drawer-body">
@@ -134,7 +133,7 @@
       <footer id="status-bar">
         <div class="status-left"><span id="status-dot" class="status-dot"></span><span id="status-text" role="status" aria-live="polite">就绪</span></div>
         <div class="status-mid"><span id="status-devices" hidden></span><span id="status-ifc" hidden></span><span id="status-connections" hidden></span><span id="status-publish" class="status-publish" hidden></span><span id="status-selection">未选中</span></div>
-        <div class="status-right" id="status-right">GIM BIM 浏览器</div>
+        <div class="status-right" id="status-right"></div>
       </footer>
     </div>
 

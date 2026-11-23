@@ -103,7 +103,7 @@ describe('cleanupProject（P1 竞态修复）', () => {
     expect(document.getElementById('project-title')?.textContent).toBe('未打开工程');
     expect(document.getElementById('project-type-badge')?.classList.contains('hidden')).toBe(true);
     expect(document.getElementById('navigator-title')?.textContent).toBe('模型导航');
-    expect(document.getElementById('status-right')?.textContent).toBe('GIM BIM 浏览器');
+    expect(document.getElementById('status-right')?.textContent).toBe('');
   });
 
   it('清理开始即递增 geometryLoadToken（在任何异步操作前）', async () => {

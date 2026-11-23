@@ -1,4 +1,6 @@
 fn main() {
+    // The Windows resource compiler reads the ICO when this build script runs.
+    println!("cargo:rerun-if-changed=icons/icon.ico");
     // Workaround for Rust 1.96.0 std::process::Command::output() bug on Windows
     // that causes tauri_winres (which calls rustc_version) to panic.
     match std::panic::catch_unwind(|| tauri_build::build()) {

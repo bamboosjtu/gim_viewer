@@ -15,7 +15,6 @@ import { escapeHtml } from '../shared/html.js';
 import type { SearchItem } from '../shared/searchTypes.js';
 export type { SearchItem } from '../shared/searchTypes.js';
 
-
 /** 下拉最多展示的条数（超出时显示提示） */
 const MAX_HITS = 50;
 let searchInstanceId = 0;
@@ -27,8 +26,12 @@ export function renderSearchBox(
 ): { destroy(): void } {
   let blurTimer: number | undefined;
   let destroyed = false;
-  const index = items.map(item => ({ item, title: item.title.toLowerCase(), subtitle: item.subtitle?.toLowerCase() ?? '',
-    text: item.searchText ?? [item.title, item.subtitle ?? '', item.key].join('\n').toLowerCase() }));
+  const index = items.map((item) => ({
+    item,
+    title: item.title.toLowerCase(),
+    subtitle: item.subtitle?.toLowerCase() ?? '',
+    text: item.searchText ?? [item.title, item.subtitle ?? '', item.key].join('\n').toLowerCase(),
+  }));
   const wrap = document.createElement('div');
   wrap.className = 'search-box-wrap';
   wrap.style.cssText = 'position:relative;padding:6px 8px 2px;';
@@ -41,9 +44,15 @@ export function renderSearchBox(
   input.setAttribute('aria-autocomplete', 'list');
   input.setAttribute('aria-expanded', 'false');
   input.style.cssText = [
-    'width:100%', 'box-sizing:border-box', 'padding:5px 8px',
-    'border:1px solid #334155', 'border-radius:4px',
-    'background:#0f172a', 'color:#e2e8f0', 'font-size:12px', 'outline:none',
+    'width:100%',
+    'box-sizing:border-box',
+    'padding:5px 8px',
+    'height:35px',
+    'border:1px solid var(--ui-control-border, #8794a4)',
+    'border-radius:4px',
+    'background:var(--surface-1)',
+    'color:var(--text-1)',
+    'font-size:12px',
   ].join(';');
 
   const list = document.createElement('div');
@@ -51,10 +60,19 @@ export function renderSearchBox(
   list.setAttribute('role', 'listbox');
   input.setAttribute('aria-controls', list.id);
   list.style.cssText = [
-    'display:none', 'position:absolute', 'left:8px', 'right:8px', 'top:100%',
-    'margin-top:-2px', 'max-height:260px', 'overflow-y:auto',
-    'background:#1e293b', 'border:1px solid #334155', 'border-radius:4px',
-    'z-index:60', 'box-shadow:0 4px 12px rgba(0,0,0,0.4)',
+    'display:none',
+    'position:absolute',
+    'left:8px',
+    'right:8px',
+    'top:100%',
+    'margin-top:-2px',
+    'max-height:260px',
+    'overflow-y:auto',
+    'background:var(--surface-2)',
+    'border:1px solid var(--ui-control-border, #8794a4)',
+    'border-radius:4px',
+    'z-index:60',
+    'box-shadow:0 4px 12px rgba(0,0,0,0.4)',
   ].join(';');
 
   function hideList(): void {
@@ -77,7 +95,16 @@ export function renderSearchBox(
         // Keep a named whole or its category ahead of matches found only in
         // system context/internal sources. Otherwise the result cap can hide
         // the very equipment being searched among hundreds of its neighbours.
-        const rank = title === q ? 0 : title.startsWith(q) ? 1 : subtitle.startsWith(q) ? 2 : title.includes(q) ? 3 : 4;
+        const rank =
+          title === q
+            ? 0
+            : title.startsWith(q)
+              ? 1
+              : subtitle.startsWith(q)
+                ? 2
+                : title.includes(q)
+                  ? 3
+                  : 4;
         if (ranked[rank].length < MAX_HITS) ranked[rank].push(e);
       }
     }
@@ -94,11 +121,13 @@ export function renderSearchBox(
         rowEl.setAttribute('role', 'option');
         rowEl.tabIndex = -1;
         rowEl.setAttribute('aria-selected', 'false');
-        rowEl.style.cssText = 'padding:6px 10px;cursor:pointer;font-size:12px;color:#e2e8f0;line-height:1.5;';
-        rowEl.innerHTML = `<div>${escapeHtml(e.title)}</div>`
-          + (e.subtitle ? `<div class="search-result-subtitle">${escapeHtml(e.subtitle)}</div>` : '');
+        rowEl.style.cssText =
+          'padding:6px 10px;cursor:pointer;font-size:12px;color:var(--text-1);line-height:1.5;';
+        rowEl.innerHTML =
+          `<div>${escapeHtml(e.title)}</div>` +
+          (e.subtitle ? `<div class="search-result-subtitle">${escapeHtml(e.subtitle)}</div>` : '');
         rowEl.addEventListener('mouseenter', () => {
-          rowEl.style.background = '#334155';
+          rowEl.style.background = 'var(--surface-3)';
         });
         rowEl.addEventListener('mouseleave', () => {
           rowEl.style.background = 'transparent';
@@ -112,7 +141,8 @@ export function renderSearchBox(
       }
       if (total > MAX_HITS) {
         const more = document.createElement('div');
-        more.style.cssText = 'padding:6px 10px;color:#64748b;font-size:11px;border-top:1px solid #334155;';
+        more.style.cssText =
+          'padding:6px 10px;color:#64748b;font-size:11px;border-top:1px solid var(--ui-control-border, #8794a4);';
         more.textContent = `共 ${total} 条匹配，仅显示前 ${MAX_HITS} 条，请细化关键字`;
         list.appendChild(more);
       }
@@ -125,14 +155,19 @@ export function renderSearchBox(
     if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
       const options = Array.from(list.querySelectorAll<HTMLElement>('[role="option"]'));
       if (options.length === 0) return;
-      const current = options.findIndex((option) => option.getAttribute('aria-selected') === 'true');
-      const next = ev.key === 'ArrowDown'
-        ? (current + 1) % options.length
-        : (current <= 0 ? options.length - 1 : current - 1);
+      const current = options.findIndex(
+        (option) => option.getAttribute('aria-selected') === 'true',
+      );
+      const next =
+        ev.key === 'ArrowDown'
+          ? (current + 1) % options.length
+          : current <= 0
+            ? options.length - 1
+            : current - 1;
       options.forEach((option, index) => {
         const active = index === next;
         option.setAttribute('aria-selected', String(active));
-        option.style.background = active ? '#334155' : 'transparent';
+        option.style.background = active ? 'var(--surface-3)' : 'transparent';
       });
       ev.preventDefault();
       ev.stopPropagation();
@@ -159,7 +194,10 @@ export function renderSearchBox(
   input.addEventListener('blur', () => {
     if (destroyed) return;
     if (blurTimer !== undefined) window.clearTimeout(blurTimer);
-    blurTimer = window.setTimeout(() => { blurTimer = undefined; hideList(); }, 150);
+    blurTimer = window.setTimeout(() => {
+      blurTimer = undefined;
+      hideList();
+    }, 150);
   });
   input.addEventListener('focus', () => {
     if (list.childElementCount > 0) list.style.display = 'block';
@@ -168,10 +206,12 @@ export function renderSearchBox(
   wrap.appendChild(input);
   wrap.appendChild(list);
   host.prepend(wrap);
-  return { destroy() {
-    if (destroyed) return;
-    destroyed = true;
-    if (blurTimer !== undefined) window.clearTimeout(blurTimer);
-    wrap.remove();
-  } };
+  return {
+    destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      if (blurTimer !== undefined) window.clearTimeout(blurTimer);
+      wrap.remove();
+    },
+  };
 }

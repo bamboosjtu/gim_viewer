@@ -220,12 +220,14 @@ export function renderEngineeringTree(state: AppState): void {
   quality.textContent = qualityText(state);
   quality.title = qualityDetail(state);
   nav.quality = quality;
-  bar.append(quality);
+  const footer = document.createElement('div');
+  footer.className = 'engineering-nav-footer';
+  footer.append(quality);
   const generationForExport = state.projectGeneration;
   const feedback = document.createElement('span');
   feedback.id = 'engineering-tree-feedback';
   feedback.setAttribute('role', 'status');
-  feedback.style.cssText = 'flex-basis:100%;font-size:11px;color:#94a3b8';
+  feedback.style.cssText = 'flex-basis:100%;font-size:11px;color:var(--text-3)';
   const message = (text: string) => {
     if (state.projectGeneration === generationForExport) {
       const target = cbmTreePanel.querySelector<HTMLElement>('#engineering-tree-feedback');
@@ -240,7 +242,7 @@ export function renderEngineeringTree(state: AppState): void {
     button.setAttribute('aria-label', copy ? '复制当前模型树为 JSON' : '导出当前模型树为 JSON');
     button.disabled = !data;
     button.style.cssText =
-      'padding:3px 7px;font-size:12px;background:#1e293b;color:#e2e8f0;border:1px solid #475569;border-radius:4px';
+      'padding:3px 7px;font-size:12px;background:var(--surface-2);color:var(--text-1);border:1px solid var(--border);border-radius:4px';
     button.addEventListener('click', () => {
       if (!data) return;
       button.disabled = true;
@@ -262,13 +264,13 @@ export function renderEngineeringTree(state: AppState): void {
           button.disabled = false;
         });
     });
-    bar.append(button);
+    footer.append(button);
   }
-  bar.append(feedback);
+  footer.append(feedback);
   const host = document.createElement('div');
   host.className = 'tree-view-host';
   host.setAttribute('role', 'tree');
-  cbmTreePanel.append(bar, host);
+  cbmTreePanel.append(bar, host, footer);
   if (!data) {
     const empty = document.createElement('div');
     empty.className = 'props-empty';

@@ -44,7 +44,7 @@ import {
   emptyTipEl,
   container,
 } from './dom.js';
-import { hideTabs } from './tabs.js';
+import { showModelTabOnly } from './tabs.js';
 import type { LineMapRenderPhase, LineMapViewHandle } from './lineMapView.js';
 import type { LineMapBaseLayerHandle } from './lineMapBaseLayer.js';
 import type { LineMapProjection, GeoBBox } from './lineMapProjection.js';
@@ -749,7 +749,7 @@ export function renderLineProjectPanels(
   const { graph, map: mapProjection, navigation, searchItems } = projection;
 
   // 0. 线路工程只保留模型树与地图视口；隐藏变电专用的设备、图层和图纸 tab。
-  hideTabs(['tab-models', 'tab-filedev', 'tab-sld']);
+  showModelTabOnly();
 
   // 清理旧地图及其监听，再接收本次线路的投影与展示回调。
   destroyLineMapView();
