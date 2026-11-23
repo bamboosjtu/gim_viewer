@@ -1,4 +1,6 @@
 import {expect,it} from 'vitest';
+import {createHash} from 'node:crypto';
+import {BoxGeometry,Group,Mesh,MeshBasicMaterial} from 'three';
 import {AppState} from '../../app/state.js';
 import {perfMarkProductMoment,perfReset} from '../../utils/perfTimings.js';
 import {benchmarkEvidence,benchmarkProgress} from '../modelEvidence.js';
@@ -59,4 +61,59 @@ it('reports failure reasons without exporting private DEV paths or raw diagnosti
   expect(JSON.stringify(evidence)).not.toContain('private-model');
   expect(JSON.stringify(evidence)).not.toContain('private source information');
   perfReset();
+});
+
+it('keeps the original geometry digest when roots have overlapping sort prefixes', async () => {
+  const state = new AppState();
+  const geometry = new BoxGeometry(2, 2, 2);
+  const material = new MeshBasicMaterial();
+  geometry.computeBoundingBox();
+  const rows = [
+    { id: 'root,0,9', lod: 1, root: new Group() },
+    { id: 'root', lod: 0, root: new Group() },
+    { id: 'aaa', lod: 0, root: new Group() },
+  ];
+  const matrices = rows.map(({root}, i) => {
+    const mesh = new Mesh(geometry, material);
+    mesh.position.x = i;
+    root.add(mesh);
+    root.updateMatrixWorld(true);
+    return mesh.matrixWorld.toArray();
+  });
+  state.deviceLodRuntime = {
+    diagnostics: { shown: rows.length },
+    forEachLoadedRoot(visit: (occurrence: string, root: Group, lod: number) => void) {
+      for (const {id, root, lod} of rows) visit(id, root, lod);
+    },
+    release() {},
+  } as unknown as typeof state.deviceLodRuntime;
+
+  const canonical = rows.map(({id, lod}, i) => [
+    id, lod, [[24, 36, [-1,-1,-1,1,1,1], matrices[i]]],
+  ]).sort();
+  const digest = createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
+  const evidence = await benchmarkEvidence(state);
+  expect(evidence.geometry).toMatchObject({ roots: 3, meshes: 3, geometries: 1, materials: 1 });
+  expect(evidence.geometryStructuralFingerprint).toBe(digest);
+  geometry.dispose();
+  material.dispose();
+});
+
+it('preserves canonical semantic evidence bytes across serialization pages', async () => {
+  const state = new AppState();
+  const memberships = Array.from({length: 300}, (_, i) => ({
+    sourceId: `来源 "${300 - i}"`,
+    ownerId: null,
+    disposition: 'source_only',
+    interpretation: {category: 'U-OBJECT', meaning: 'source_only'},
+  }));
+  state.engineering.snapshot = {
+    entities: [], pending: [], relationships: [], memberships,
+  } as unknown as typeof state.engineering.snapshot;
+  const membershipRows = memberships.map(({sourceId, ownerId, disposition, interpretation}) =>
+    [sourceId, ownerId, disposition, interpretation.category, interpretation.meaning, null],
+  ).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  const canonical = {entities: [], pending: [], memberships: membershipRows, relationships: []};
+  const digest = createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
+  expect((await benchmarkEvidence(state)).semanticDigest).toBe(digest);
 });

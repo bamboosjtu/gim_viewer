@@ -753,7 +753,8 @@ export class DevGeometryPreprocessor {
     split.fallbackTried = true;
     this.diagnostics.splitFallbacks++;
     this.releaseSplitBuffers(split);
-    for (const child of this.childrenOf(parent.key)) this.cancelTaskTree(child, reason, true);
+    const superseded = new DOMException(reason.message, 'AbortError');
+    for (const child of this.childrenOf(parent.key)) this.cancelTaskTree(child, superseded, true);
     const fallback = this.createSlot(
       'compile',
       parent.path,

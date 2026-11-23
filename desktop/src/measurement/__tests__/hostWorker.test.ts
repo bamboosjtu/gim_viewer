@@ -17,6 +17,17 @@ it('source input replies remain control messages rather than uncompleted tasks',
   expect(callback).toHaveBeenCalledOnce();expect(measurementSnapshot()?.activeTasks).toEqual([]);
   worker.terminate();
 });
+it.each(['init', 'sources'])('DEV %s remains a control message even if the idle worker retires immediately', kind => {
+  const {port, worker} = start();
+  const message = {kind, files: []};
+  worker.postMessage(message);
+  expect(port.messages[port.messages.length - 1]).toEqual(message);
+  expect(measurementSnapshot()?.activeTasks).toEqual([]);
+  worker.terminate();
+  expect(measurementSnapshot()).toMatchObject({
+    lifecycleComplete: true, loss: {interruptedTasks: 0, unexpectedWorkerTerminations: 0},
+  });
+});
 afterEach(()=>{delete (globalThis as any).__GIM_MEASUREMENT_CONFIG__;resetMeasurementRun({});vi.restoreAllMocks();});
 it('preserves transfer identity, seals queued failures and terminates once',()=>{
   const {port,worker}=start(),buffer=new ArrayBuffer(8),transfer=[buffer];worker.postMessage({kind:'compile',id:1,bytes:buffer},transfer);

@@ -67,6 +67,12 @@ it('attributes production engineering and composition tasks to distinct Worker f
     const workers=measurementSnapshot()!.workers;
     expect(workers[mainTask.workerId].family).toBe(mainTask.family);
     expect(workers[projectionTask.workerId].family).toBe(projectionTask.family);
+    f.state.engineeringGeometryEvidenceChanged?.();
+    expect(measurementSnapshot()!.workers[projectionTask.workerId].state).toBe('terminated');
+    expect(measurementSnapshot()).toMatchObject({
+      taskOutcomes: {cancelled: 1},
+      loss: {interruptedTasks: 0, unexpectedWorkerTerminations: 0},
+    });
   } finally {engineering.close();f.dispose();await pending;}
 });
 

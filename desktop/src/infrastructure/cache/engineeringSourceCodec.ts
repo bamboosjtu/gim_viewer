@@ -9,20 +9,48 @@ export interface PackedEngineeringSource {
   nodes: Array<Array<number | string>>;
   root: number;
 }
+
+function sameReferences(row: readonly number[], previous: readonly (number | string)[]): boolean {
+  if (row.length !== previous.length) return false;
+  for (let i = 0; i < row.length; i++) if (row[i] !== previous[i]) return false;
+  return true;
+}
+
+type PackedRow = PackedEngineeringSource['nodes'][number];
+
+/** Build postordered IDs without retaining all serialized rows in the Worker. */
+export function streamEngineeringSource(
+  value: unknown,
+  emit: (row: PackedRow) => void,
+): Pick<PackedEngineeringSource, 'root' | 'shapes'> {
+  return buildSourceTable(value, emit);
+}
+
 export function packEngineeringSource(value: unknown): PackedEngineeringSource {
-  const nodes: PackedEngineeringSource['nodes'] = [],
-    shapes: string[][] = [];
+  const nodes: PackedRow[] = [];
+  const { shapes, root } = buildSourceTable(value, (row) => nodes.push(row), nodes);
+  return { encoding: 'engineering-source-table-v1', shapes, nodes, root };
+}
+
+function buildSourceTable(
+  value: unknown,
+  emit: (row: PackedRow) => void,
+  retainedNodes?: PackedRow[],
+): Pick<PackedEngineeringSource, 'root' | 'shapes'> {
+  const rowsById = retainedNodes ? undefined : new Map<number, number[]>();
+  const rowAt = (id: number) => retainedNodes?.[id] ?? rowsById!.get(id)!;
+  const shapes: string[][] = [];
   const texts = new Map<string, number>(),
     numbers = new Map<number, number>(),
     shapesByKey = new Map<string, number>();
   const objects = new WeakMap<object, number>(),
     active = new WeakSet<object>(),
-    structures = new Map<string, number>();
+    structures = new Map<number, number | number[]>();
   let nullId: number | undefined, trueId: number | undefined, falseId: number | undefined;
-  const add = (node: Array<number | string>): number => {
-    const id = nodes.length;
-    nodes.push(node);
-    return id;
+  let nextId = 0;
+  const add = (row: PackedRow): number => {
+    emit(row);
+    return nextId++;
   };
   function visit(item: unknown): number {
     if (
@@ -72,38 +100,47 @@ export function packEngineeringSource(value: unknown): PackedEngineeringSource {
       row = [5, shape];
       for (const key of keys) row.push(visit((item as Record<string, unknown>)[key]));
     }
-    // Equal immutable property rows are common even where the parser had to
-    // create separate objects for references to the same source family.
-    const key = row.join(',');
-    let id = structures.get(key);
+    // Keep the interning index numeric: a second textual copy of every
+    // reference row dominates transient storage on large source graphs.
+    let key = row.length;
+    for (const reference of row) key = Math.imul(key ^ reference, 16777619);
+    const previous = structures.get(key);
+    let id =
+      typeof previous === 'number'
+        ? sameReferences(row, rowAt(previous))
+          ? previous
+          : undefined
+        : previous?.find((candidate) => sameReferences(row, rowAt(candidate)));
     if (id === undefined) {
       id = add(row);
-      structures.set(key, id);
+      // The streaming transport retains a bounded index of small reusable
+      // rows. Object identities still share across the full result.
+      if (!rowsById || (row.length <= 64 && rowsById.size < 65_536)) {
+        rowsById?.set(id, row);
+        if (Array.isArray(previous)) previous.push(id);
+        else structures.set(key, previous === undefined ? id : [previous, id]);
+      }
     }
     active.delete(item);
     objects.set(item, id);
     return id;
   }
   const root = visit(value);
-  return { encoding: 'engineering-source-table-v1', shapes, nodes, root };
+  return { shapes, root };
 }
 
-function* unpackSourceNodes(value: unknown, consume = false): Generator<void, unknown> {
+function* unpackSourceNodes(
+  shapes: unknown,
+  root: unknown,
+  pages: Iterable<unknown>,
+  consume: boolean,
+): Generator<void, unknown> {
   const fail = (): never => {
     throw Error('工程来源表编码无效');
   };
-  if (!value || typeof value !== 'object') return fail();
-  const packed = value as PackedEngineeringSource;
-  if (
-    packed.encoding !== 'engineering-source-table-v1' ||
-    !Array.isArray(packed.shapes) ||
-    !Array.isArray(packed.nodes) ||
-    !Number.isSafeInteger(packed.root) ||
-    packed.root < 0 ||
-    packed.root >= packed.nodes.length
-  )
+  if (!Array.isArray(shapes) || typeof root !== 'number' || !Number.isSafeInteger(root) || root < 0)
     return fail();
-  for (const keys of packed.shapes)
+  for (const keys of shapes)
     if (
       !Array.isArray(keys) ||
       keys.some((key) => typeof key !== 'string') ||
@@ -111,68 +148,91 @@ function* unpackSourceNodes(value: unknown, consume = false): Generator<void, un
     )
       return fail();
   const values: unknown[] = [];
-  const objectEntries = new Array<Array<[string, unknown]> | undefined>(packed.shapes.length);
+  const objectEntries = new Array<Array<[string, unknown]> | undefined>(shapes.length);
   let i = 0;
-  const reference = (id: number | string): unknown => {
+  const reference = (id: unknown): unknown => {
     if (typeof id !== 'number' || !Number.isSafeInteger(id) || id < 0 || id >= i) return fail();
     return values[id];
   };
-  for (; i < packed.nodes.length; i++) {
-    const row = packed.nodes[i];
-    if (!Array.isArray(row) || !row.length) return fail();
-    switch (row[0]) {
-      case 0:
-        if (row.length !== 1) return fail();
-        values.push(null);
-        break;
-      case 1:
-        if (row.length !== 2 || typeof row[1] !== 'string') return fail();
-        values.push(row[1]);
-        break;
-      case 2:
-        if (row.length !== 2 || typeof row[1] !== 'number' || !Number.isFinite(row[1]))
+  for (const page of pages) {
+    if (!Array.isArray(page)) return fail();
+    for (let rowIndex = 0; rowIndex < page.length; rowIndex++, i++) {
+      const row = page[rowIndex] as unknown[];
+      if (!Array.isArray(row) || !row.length) return fail();
+      switch (row[0]) {
+        case 0:
+          if (row.length !== 1) return fail();
+          values.push(null);
+          break;
+        case 1:
+          if (row.length !== 2 || typeof row[1] !== 'string') return fail();
+          values.push(row[1]);
+          break;
+        case 2:
+          if (row.length !== 2 || typeof row[1] !== 'number' || !Number.isFinite(row[1]))
+            return fail();
+          values.push(row[1]);
+          break;
+        case 3:
+          if (row.length !== 2 || (row[1] !== 0 && row[1] !== 1)) return fail();
+          values.push(row[1] === 1);
+          break;
+        case 4: {
+          const result = new Array<unknown>(row.length - 1);
+          for (let index = 1; index < row.length; index++)
+            result[index - 1] = reference(row[index]);
+          values.push(result);
+          break;
+        }
+        case 5: {
+          const shape = row[1];
+          if (
+            typeof shape !== 'number' ||
+            !Number.isSafeInteger(shape) ||
+            !shapes[shape] ||
+            row.length !== (shapes[shape] as string[]).length + 2
+          )
+            return fail();
+          const keys = shapes[shape] as string[];
+          // Reuse the synchronous constructor's input, never its output. Native
+          // construction keeps wide records compact and treats __proto__ as
+          // data; per-shape pairs avoid per-record tuple arrays and closures.
+          const entries = (objectEntries[shape] ??= keys.map((key): [string, unknown] => [
+            key,
+            undefined,
+          ]));
+          for (let index = 0; index < keys.length; index++)
+            entries[index][1] = reference(row[index + 2]);
+          values.push(Object.fromEntries(entries));
+          break;
+        }
+        default:
           return fail();
-        values.push(row[1]);
-        break;
-      case 3:
-        if (row.length !== 2 || (row[1] !== 0 && row[1] !== 1)) return fail();
-        values.push(row[1] === 1);
-        break;
-      case 4: {
-        const result = new Array<unknown>(row.length - 1);
-        for (let index = 1; index < row.length; index++) result[index - 1] = reference(row[index]);
-        values.push(result);
-        break;
       }
-      case 5: {
-        const shape = row[1];
-        if (
-          typeof shape !== 'number' ||
-          !Number.isSafeInteger(shape) ||
-          !packed.shapes[shape] ||
-          row.length !== packed.shapes[shape].length + 2
-        )
-          return fail();
-        const keys = packed.shapes[shape];
-        // Reuse the synchronous constructor's input, never its output. Native
-        // construction keeps wide records compact and treats __proto__ as
-        // data; per-shape pairs avoid per-record tuple arrays and closures.
-        const entries = (objectEntries[shape] ??= keys.map((key): [string, unknown] => [
-          key,
-          undefined,
-        ]));
-        for (let index = 0; index < keys.length; index++)
-          entries[index][1] = reference(row[index + 2]);
-        values.push(Object.fromEntries(entries));
-        break;
-      }
-      default:
-        return fail();
+      if (consume) page[rowIndex] = null;
+      if (i > 0 && i % 8192 === 0) yield;
     }
-    if (consume) (packed.nodes as unknown[])[i] = null;
-    if (i > 0 && i % 8192 === 0) yield;
   }
-  return values[packed.root];
+  if (root >= values.length) return fail();
+  return values[root];
+}
+
+/** Reconstruct postordered references across pages while discarding their raw rows. */
+export async function unpackEngineeringSourcePages(
+  shapes: unknown,
+  root: unknown,
+  pages: Iterable<unknown>,
+  isCurrent: () => boolean,
+  yieldToMain: () => Promise<void> = () => new Promise((resolve) => setTimeout(resolve, 0)),
+  consume = false,
+): Promise<unknown> {
+  const nodes = unpackSourceNodes(shapes, root, pages, consume);
+  for (;;) {
+    if (!isCurrent()) throw new DOMException('Engineering hydration cancelled', 'AbortError');
+    const next = nodes.next();
+    if (next.done) return next.value;
+    await yieldToMain();
+  }
 }
 
 /** Hydration shares interned family facts and yields between bounded node
@@ -180,14 +240,24 @@ function* unpackSourceNodes(value: unknown, consume = false): Generator<void, un
 export async function unpackEngineeringSourceAsync(
   value: unknown,
   isCurrent: () => boolean,
-  yieldToMain: () => Promise<void> = () => new Promise((resolve) => setTimeout(resolve, 0)),
+  yieldToMain?: () => Promise<void>,
   consume = false,
 ): Promise<unknown> {
-  const nodes = unpackSourceNodes(value, consume);
-  for (;;) {
-    if (!isCurrent()) throw new DOMException('Engineering hydration cancelled', 'AbortError');
-    const next = nodes.next();
-    if (next.done) return next.value;
-    await yieldToMain();
-  }
+  if (!isCurrent()) throw new DOMException('Engineering hydration cancelled', 'AbortError');
+  const packed = value as PackedEngineeringSource | undefined;
+  if (
+    packed?.encoding !== 'engineering-source-table-v1' ||
+    !Array.isArray(packed.nodes) ||
+    !Number.isSafeInteger(packed.root) ||
+    packed.root >= packed.nodes.length
+  )
+    throw Error('工程来源表编码无效');
+  return unpackEngineeringSourcePages(
+    packed.shapes,
+    packed.root,
+    [packed.nodes],
+    isCurrent,
+    yieldToMain,
+    consume,
+  );
 }

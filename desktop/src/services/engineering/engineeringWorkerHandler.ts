@@ -27,7 +27,7 @@ import {
 } from '../../infrastructure/workers/engineeringWorkerProtocol.js';
 import { extractPhysicalOccurrences } from '../../gim/engineering/geometry.js';
 import {
-  encodeEngineeringWorkerResultAsync,
+  encodeEngineeringWorkerResult,
   type TransportGraphCache,
 } from '../../infrastructure/workers/engineeringWorkerTransport.js';
 import type { EvidenceStatus, EvidenceInventory } from '../../engineering/evidence.js';
@@ -138,13 +138,13 @@ export function createEngineeringWorkerHandler(
       if (parked && !latest && !activeEvidence) parkTimer = setTimeout(compact, 1500);
     }
   }
-  async function publish(
+  function publish(
     result: EngineeringBuildResult,
     started: number,
     identity?: EngineeringCacheIdentity,
     digest?: string,
     plan: EngineeringCacheDomain[] = [],
-  ): Promise<EngineeringWorkerReply> {
+  ): EngineeringWorkerReply {
     result.evidenceRevision = evidence?.getRevision();
     result.buildId = ++sequence;
     result.cachePlan = plan;
@@ -156,10 +156,7 @@ export function createEngineeringWorkerHandler(
     latest = { result, identity, digest, plan: [...plan] };
     return {
       type: 'model',
-      result: await encodeEngineeringWorkerResultAsync(
-        result,
-        graphReferences ? wireGraph : undefined,
-      ),
+      result: encodeEngineeringWorkerResult(result, graphReferences ? wireGraph : undefined),
     };
   }
   type SourceGraphProgress = (

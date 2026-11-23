@@ -9,7 +9,7 @@ import {assertEngineeringNavigation} from '../../../infrastructure/cache/enginee
 import {assertEngineeringPartition} from '@gim/gim-sdk/semantic';
 import {createEngineeringWorkerHandler} from '../engineeringWorkerHandler.js';
 import {ModelEvidenceProvider} from '@gim/gim-sdk/source';
-import {decodeEngineeringWorkerResult,encodeEngineeringWorkerResultAsync,type TransportGraphCache} from '../../../infrastructure/workers/engineeringWorkerTransport.js';
+import {decodeEngineeringWorkerResult,encodeEngineeringWorkerResult,type TransportGraphCache} from '../../../infrastructure/workers/engineeringWorkerTransport.js';
 import type { IfcSpatialObject } from '../../../gim/ifcSpatialParser.js';
 afterEach(()=>{vi.restoreAllMocks();});
 it.each(['composition','source','inventory','inventory-search'] as const)('transfers an explicitly failed %s projection while rejecting it as a complete cache',async failure=>{
@@ -17,7 +17,7 @@ it.each(['composition','source','inventory','inventory-search'] as const)('trans
   const g=await graph();
   failNextProjection(stage);
   const result=assembleEngineeringView('scope',g,[],[]);
-  const restored=await decodeEngineeringWorkerResult(await encodeEngineeringWorkerResultAsync(result),()=>true);
+  const restored=await decodeEngineeringWorkerResult(encodeEngineeringWorkerResult(result),()=>true);
   expect(restored.stageErrors?.[stage]).toContain('projection failure');
   expect(restored.snapshot.entities).toEqual(result.snapshot.entities);
   expect('geometryOccurrences' in restored).toBe(false);
@@ -26,7 +26,7 @@ it.each(['composition','source','inventory','inventory-search'] as const)('trans
   if(failure!=='inventory')expect(restored.navigation.inventory?.rowsBySource.size).toBe(1);
   if(failure==='inventory-search')expect(restored.navigation.inventorySearch).toEqual([]);
   restored.navigation.sourceNodes.get(restored.navigation.sourceRoot)!.children.push('foreign-row');
-  await expect(decodeEngineeringWorkerResult(await encodeEngineeringWorkerResultAsync(restored),()=>true)).rejects.toThrow('child edge');
+  await expect(decodeEngineeringWorkerResult(encodeEngineeringWorkerResult(restored),()=>true)).rejects.toThrow('child edge');
 });
 async function graph(){const files:Record<string,string>={'project.cbm':'OBJECTMODELPOINTER=a.dev','a.dev':'TYPE=GIS'};return extractEngineeringSourceGraph({paths:Object.keys(files),readText:async p=>files[p]});}
 it('publishes the merged capacitor group through the Viewer assembly and inventory',async()=>{
@@ -116,12 +116,13 @@ it('keeps evidence indexing off first geometry and parks reconstructible source 
 
 it('reuses unchanged source facts across model frames and refuses foreign or missing graph references',async()=>{
   const g=await graph(),result=assembleEngineeringView('scope',g,[],[]),sender:TransportGraphCache={},receiver:TransportGraphCache={};
-  const full=await encodeEngineeringWorkerResultAsync(result,sender);await decodeEngineeringWorkerResult(full,()=>true,receiver);
-  const delta=await encodeEngineeringWorkerResultAsync(result,sender);
-  expect(delta.graphFrame?.reference).toBe(true);expect(delta.body.byteLength).toBeLessThan(full.body.byteLength);
+  const full=encodeEngineeringWorkerResult(result,sender);await decodeEngineeringWorkerResult(full,()=>true,receiver);
+  const delta=encodeEngineeringWorkerResult(result,sender);
+  expect(delta.graphFrame?.reference).toBe(true);
+  expect(delta.metrics?.transportBytes).toBeLessThan(full.metrics!.transportBytes);
   expect((await decodeEngineeringWorkerResult(delta,()=>true,receiver)).sources.graph).toBe(receiver.graph);
   await expect(decodeEngineeringWorkerResult(delta,()=>true,{})).rejects.toThrow('graph reference unavailable');
-  g.revision=(g.revision??0)+1;expect((await encodeEngineeringWorkerResultAsync(result,sender)).graphFrame?.reference).toBe(false);
+  g.revision=(g.revision??0)+1;expect((encodeEngineeringWorkerResult(result,sender)).graphFrame?.reference).toBe(false);
 });
 
 it('publishes unaffected equipment and the known boundary of an independently declared object with disputed type',async()=>{

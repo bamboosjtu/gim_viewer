@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { DevGeometryPreprocessor } from '../devGeometryWorkerClient.js';
 import { beginIfcGeometryWork, beginDevGeometryWork, ifcGeometryBusy, resetGeometryWorkGateForTests } from '../../../viewer/geometryWorkGate.js';
 import {perfReset,perfTaskPhaseSnapshot} from '../../../utils/perfTimings.js';
+import * as workerMeasurement from '../../../measurement/hostWorker.js';
 
 class ControlledWorker {
   static instances: ControlledWorker[] = [];
@@ -160,6 +161,7 @@ it('charges each split buffer and merge reservation, then returns the merge SHA 
 it('falls back to one compile when a split part exceeds its reserved transfer budget',async()=>{
   vi.stubGlobal('Worker',SplitWorker);vi.stubGlobal('navigator',{hardwareConcurrency:8,deviceMemory:8});
   const client=new DevGeometryPreprocessor([],new Map(),()=>true),internal=client as any;
+  const cancelled = vi.spyOn(workerMeasurement, 'markMeasuredWorkerTaskCancellation');
   const plan={canonicalDevPath:'DEV/heavy.dev',modCount:2,stlCount:0,estimatedBytes:2,estimatedInstanceWork:2,
     parts:[0,1].map(i=>({key:`solid:${i}`,referencePaths:[`solid:${i}/mod:0`],modCount:1,stlCount:0,
       estimatedBytes:1,estimatedInstanceWork:1,mods:[],stls:[]}))};
@@ -168,10 +170,12 @@ it('falls back to one compile when a split part exceeds its reserved transfer bu
     const root=[...internal.active].find(([,row]:any)=>row.task.key==='heavy') as [SplitWorker,any];
     root[0].complete(root[0].sent.find(row=>row.key==='heavy'),{status:'empty',bytes:null,plan,diagnostics:{status:'empty'}});
     const child=[...internal.active].find(([,row]:any)=>row.task.parent==='heavy') as [SplitWorker,any];
+    const sibling=[...internal.active].find(([worker,row]:any)=>worker!==child[0]&&row.task.parent==='heavy') as [Worker,{task:{traceId:string}}];
     expect(child[0].sent.find(row=>row.key===child[1].task.key).partition.maxBytes).toBe(32*1024*1024);
     child[0].complete(child[0].sent.find(row=>row.key===child[1].task.key),
       {status:'complete',bytes:new Uint8Array(33*1024*1024),diagnostics:{status:'complete'}});
     await Promise.resolve();await Promise.resolve();
+    expect(cancelled).toHaveBeenCalledWith(sibling[0], sibling[1].task.traceId, 'request-superseded');
     const fallback=[...internal.active].find(([,row]:any)=>row.task.key==='heavy::fallback') as [SplitWorker,any];
     expect(fallback).toBeTruthy();
     expect(fallback[0].sent.find(row=>row.key==='heavy::fallback').noSplit).toBe(true);
@@ -180,7 +184,7 @@ it('falls back to one compile when a split part exceeds its reserved transfer bu
       {status:'complete',bytes:new Uint8Array(3),sha256:'fallback-sha',diagnostics:{status:'complete'}});
     expect((await pending).sha256).toBe('fallback-sha');
     expect(client.diagnostics.splitFallbacks).toBe(1);
-  }finally{client.cancel();SplitWorker.instances=[];}
+  }finally{cancelled.mockRestore();client.cancel();SplitWorker.instances=[];}
 });
 it('disables split planning on a high-memory-pressure compile request',async()=>{
   vi.stubGlobal('Worker',SplitWorker);vi.stubGlobal('navigator',{hardwareConcurrency:4,deviceMemory:4});

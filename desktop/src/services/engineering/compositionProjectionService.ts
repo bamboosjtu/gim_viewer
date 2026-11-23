@@ -1,6 +1,11 @@
 import { logger } from '../../utils/logger.js';
 import measuredWorkerAsset from '../../infrastructure/workers/compositionProjectionWorker.ts?worker&url';
-import { createMeasuredWorker, measurementWorkerUrl } from '../../measurement/hostWorker.js';
+import {
+  createMeasuredWorker,
+  markMeasuredWorkerTaskCancellation,
+  measurementWorkerTask,
+  measurementWorkerUrl,
+} from '../../measurement/hostWorker.js';
 import { selectionPresentation } from '../presentation/selectionPresentationPort.js';
 import type { AppState } from '../../app/state.js';
 import type { CompositionBounds } from './compositionSpatial.js';
@@ -59,6 +64,14 @@ export function installCompositionProjection(
   let baseView: EngineeringNavigationData | undefined,
     publishedView: EngineeringNavigationData | undefined;
   const current = () => !disposed && state.isCurrentSession(session);
+  const cancelProjection = () => {
+    const owned = worker;
+    if (!owned) return;
+    worker = undefined;
+    const taskId = measurementWorkerTask(owned)?.taskId;
+    if (taskId) markMeasuredWorkerTaskCancellation(owned, taskId, 'request-superseded');
+    owned.terminate();
+  };
   const reconcile = () => {
     void reconcileProjectionSelection(state).catch((error) => {
       if (current()) logger.warn('[工程投影选择]', error);
@@ -75,8 +88,7 @@ export function installCompositionProjection(
       return;
     }
     revision++;
-    worker?.terminate();
-    worker = undefined;
+    cancelProjection();
     clearTimeout(timer);
     timer = setTimeout(run, 500);
   };
@@ -259,7 +271,7 @@ export function installCompositionProjection(
     disposed = true;
     revision++;
     clearTimeout(timer);
-    worker?.terminate();
+    cancelProjection();
     if (state.engineeringGeometryEvidenceChanged === update)
       state.engineeringGeometryEvidenceChanged = null;
   };
