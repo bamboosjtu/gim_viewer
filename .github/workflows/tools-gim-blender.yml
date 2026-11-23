@@ -1,0 +1,98 @@
+name: Windows gim_blender CI
+
+on:
+  push:
+    paths:
+      - 'tools/gim_blender/**'
+  pull_request:
+    paths:
+      - 'tools/gim_blender/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: gim_blender / folder + startup
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: tools/gim_blender
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: /tools/gim_blender/
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          architecture: x64
+
+      - name: Prepare workspace temporary directory
+        run: |
+          $scratch = Join-Path $env:GITHUB_WORKSPACE 'tmp/ci/gim_blender'
+          New-Item -ItemType Directory -Path $scratch -Force | Out-Null
+          "TEMP=$scratch" >> $env:GITHUB_ENV
+          "TMP=$scratch" >> $env:GITHUB_ENV
+          "TMPDIR=$scratch" >> $env:GITHUB_ENV
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tools/gim_blender/package-lock.json
+
+      - name: Verify the frozen converter snapshot
+        run: python -B verify_snapshot.py
+
+      # Engineering sample tests and frozen sample smoke are developer-local.
+      - name: Install pinned Python build dependencies
+        run: |
+          python -m pip --isolated install --disable-pip-version-check --index-url https://pypi.org/simple --no-cache-dir --only-binary :all: -r requirements-build.txt
+
+      - name: Run pure Python contracts without model samples
+        run: python -B -m unittest discover -s tests/unit -p 'test_*.py' -v
+
+      - name: Reject unsafe build paths
+        run: powershell.exe -NoProfile -File ./tests/unit/build-safety.ps1
+
+      - name: Install pinned Node dependencies
+        run: npm ci
+
+      # The optional portable Blender runtime is developer-supplied.
+      - name: Build, startup-check, and publish the GUI folder
+        run: ./build.ps1 -Python (Get-Command python).Source -NoVenv -SkipInstall -Publish
+
+      - name: Run Blender Node unit tests without model samples
+        run: node --test 'tests/unit/test_*.cjs'
+
+      - name: Verify the published GUI archive
+        run: |
+          $zip = Get-Item -LiteralPath dist/gim_blender.zip
+          $sha = Get-Item -LiteralPath "$($zip.FullName).sha256"
+          if ($zip.Length -le 0 -or $sha.Length -le 0) { throw 'Blender GUI ZIP or checksum is empty' }
+          $expected = ((Get-Content -LiteralPath $sha.FullName -Raw).Trim() -split '\s+')[0]
+          $actual = (Get-FileHash -LiteralPath $zip.FullName -Algorithm SHA256).Hash
+          if ($expected -notmatch '^[0-9a-fA-F]{64}$' -or $expected -ne $actual) { throw 'Blender GUI ZIP checksum mismatch' }
+
+      - name: Upload tested Blender GUI folder
+        uses: actions/upload-artifact@v7
+        with:
+          name: gim-blender-gui-${{ github.sha }}
+          path: |
+            tools/gim_blender/dist/gim_blender.zip
+            tools/gim_blender/dist/gim_blender.zip.sha256
+          overwrite: true
+          retention-days: 7
+          if-no-files-found: error

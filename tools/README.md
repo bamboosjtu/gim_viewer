@@ -37,7 +37,7 @@
 .\tools\gim_info\.venv\Scripts\python.exe .\tools\gim_info\gim_reader.py
 ```
 
-三个 `build.ps1` 都调用 [build-common.ps1](build-common.ps1)，保留整个 `tools` 目录即可重建。构建不依赖当前工作目录；也可在各工具目录运行 `./build.ps1`。
+每个工具目录都包含自己的 `build.ps1`、打包辅助脚本和依赖清单，可单独签出和构建。也可在各工具目录运行 `./build.ps1`。
 
 | 参数 | 适用工具 | 含义 |
 |---|---|---|
@@ -60,9 +60,9 @@
 
 ## 定位与 CI
 
-三个工具独立交付，保留各自的 Python 实现。它们的分类和解析结果限于各自规则，不作为 Viewer、未来 SDK 或 Validator 的权威真值；跨实现一致性仍需开发者本地真实来源复核。工具不依赖主程序或未来的 SDK 抽取，Benchmark 继续由独立的测量契约执行。
+四个工具独立交付，保留各自的实现。它们的分类和解析结果限于各自规则，不作为 Viewer、未来 SDK 或 Validator 的权威真值；跨实现一致性仍需开发者本地真实来源复核。工具不依赖主程序或未来的 SDK 抽取，Benchmark 继续由独立的测量契约执行。
 
-测试按工具及被测模块组织：`tests/unit/test_<模块>.py` 保存普通值/纯 DTO 契约，`tests/local/test_<模块>.py` 保存来源目录、归档与 GUI 检查。CI 自动发现整个 `unit/`，同时执行构建路径安全、目录包构建和启动检查，不依赖固定测试文件名。纯函数检查不构造 GIM 包、不生成工程目录、不读取真实或合成工程样本。矩阵、IFC 文本和编码等普通值测试使用工作区临时目录作为所有子进程 TEMP/TMP/TMPDIR；错误退出即失败。
+测试按工具及被测模块组织：`tests/unit/test_<模块>.py` 保存普通值/纯 DTO 契约，`tests/local/test_<模块>.py` 保存来源目录、归档与 GUI 检查。四个 Windows 工具工作流各自只在本工具目录有变更的 push 或 PR 中触发，签出范围也限于该目录。每个工作流运行本工具的单元测试、构建路径检查、目录包构建和启动自检。纯函数检查不构造 GIM 包、不生成工程目录、不读取真实或合成工程样本。矩阵、IFC 文本和编码等普通值测试使用工作区临时目录作为所有子进程 TEMP/TMP/TMPDIR；错误退出即失败。
 
 `tests/local/` 和冻结版工程 smoke 属于开发者本地任务，不加入远程 CI。它们可用下面命令显式运行。构建成功的完整目录 ZIP 上传；CI 不声称工程正确性或性能验收通过。
 
@@ -72,7 +72,10 @@
 
 ```powershell
 # 构建路径越界、目录联接及失败时保留旧产物的回归
-powershell.exe -NoProfile -File .\tools\tests\build-safety.ps1
+powershell.exe -NoProfile -File .\tools\gim_device\tests\unit\build-safety.ps1
+powershell.exe -NoProfile -File .\tools\gim_element\tests\unit\build-safety.ps1
+powershell.exe -NoProfile -File .\tools\gim_info\tests\unit\build-safety.ps1
+powershell.exe -NoProfile -File .\tools\gim_blender\tests\unit\build-safety.ps1
 
 # CI 同口径的模块单元测试；各工具分别启动 Python，避免同名模块互相覆盖
 python -m unittest discover -s tools/gim_device/tests/unit -p 'test_*.py' -v

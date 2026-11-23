@@ -1,4 +1,4 @@
-# Shared Windows build workflow; dot-source from each tool's build.ps1.
+# Windows build workflow for this standalone tool.
 function Assert-GimBuildChild {
     param([string]$Path, [string]$Parent)
     $fullPath = [IO.Path]::GetFullPath($Path)
@@ -144,7 +144,7 @@ function Invoke-GimToolBuild {
                 throw 'Packaged startup check timed out; check executable directory permissions'
             }
             if ($process.ExitCode -ne 0) {
-                throw "Packaged startup check failed (exit $($process.ExitCode)); see tools/README.md"
+                throw "Packaged startup check failed (exit $($process.ExitCode)); see the tool build documentation"
             }
         } finally { $process.Dispose() }
         if ($SmokeDir -ne '') {

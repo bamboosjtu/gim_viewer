@@ -1,0 +1,72 @@
+name: Windows gim_device CI
+
+on:
+  push:
+    paths:
+      - 'tools/gim_device/**'
+  pull_request:
+    paths:
+      - 'tools/gim_device/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: gim_device / folder + startup
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+      QT_QPA_PLATFORM: offscreen
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: tools/gim_device
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: /tools/gim_device/
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          architecture: x64
+
+      - name: Prepare workspace temporary directory
+        run: |
+          $scratch = Join-Path $env:GITHUB_WORKSPACE 'tmp/ci/gim_device'
+          New-Item -ItemType Directory -Path $scratch -Force | Out-Null
+          "TEMP=$scratch" >> $env:GITHUB_ENV
+          "TMP=$scratch" >> $env:GITHUB_ENV
+          "TMPDIR=$scratch" >> $env:GITHUB_ENV
+
+      # Engineering sample tests and frozen sample smoke are developer-local.
+      - name: Install pinned Python build dependencies
+        run: |
+          python -m pip --isolated install --disable-pip-version-check --index-url https://pypi.org/simple --no-cache-dir --only-binary :all: -r requirements-build.txt
+
+      - name: Run pure Python contracts without model samples
+        run: python -B -m unittest discover -s tests/unit -p 'test_*.py' -v
+
+      - name: Reject unsafe build paths and preserve previous outputs
+        run: powershell.exe -NoProfile -File ./tests/unit/build-safety.ps1 -Python (Get-Command python).Source
+
+      - name: Build and startup-check the actual folder EXE
+        run: ./build.ps1 -Python (Get-Command python).Source -NoVenv -Publish
+
+      - name: Upload tested folder EXE
+        uses: actions/upload-artifact@v7
+        with:
+          name: gim-device-windows-${{ github.sha }}
+          path: tools/gim_device/dist/*.zip
+          overwrite: true
+          retention-days: 7
+          if-no-files-found: error

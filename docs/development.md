@@ -84,7 +84,7 @@ npm run tauri:dev     # Tauri 开发窗口
 
 Windows CI 保持一个串行任务：版本、测量协议、验收工具、本地注册表、分层、类型和 lint 检查在 Rust 编译及覆盖率之前执行；随后运行 Rust 单元测试、前端覆盖率、SQLite 集成、前端构建和 Rust 编译边界。`workflow_dispatch` 才构建、校验和上传便携 Benchmark 发布包。以上步骤均不执行工程性能样本；性能优化须取得可测的明显提升，功能和正确性修正应避免过大回退；实测收益、具体成本与未决项分别报告，没有统一时间、内存或增长比例验收线，是否接受及复核范围由开发者决定。
 
-CI Action 版本由 `.github/action-versions.json` 统一登记。GitHub 维护的 Action 固定于各自的主版本，第三方仓库 Action 固定于完整的提交 SHA。Tools CI 运行 `node .github/scripts/check-action-versions.mjs`，核对所有 workflow 的引用与登记值。
+CI Action 版本由 `.github/action-versions.json` 统一登记。GitHub 维护的 Action 固定于各自的主版本，第三方仓库 Action 固定于完整的提交 SHA。Windows Desktop CI 运行 `node .github/scripts/check-action-versions.mjs`，核对所有工作流的引用与登记值。四个工具 CI 各自只签出本工具目录，并由该目录的变更触发。
 
 单元测试随模块放入 `__tests__/`，共享包持有自己的测试，跨模块编排测试归编排模块；组织规则见[测试组织](validation.md#测试组织)。`test:module` 在 desktop 和 app 下均可使用，会加载各自的 Vitest 配置及排除规则；它不替代独立的原生/样本门禁。
 
@@ -115,7 +115,7 @@ npm test
 
 Python 工具位于 `tools/`，各自维护 `.venv` 与打包配置；构建、参数和排查见 [tools/README.md](../tools/README.md)。工具的目录归属见[项目目录](architecture.md#项目目录与模块归属)。
 
-独立漫游转换工具见 [gim_blender](../tools/gim_blender/README.md)：`tools/gim_blender/build.ps1` 生成目录包，可用 `-BlenderDirectory <便携目录> -Publish` 包含 Blender 并生成 ZIP；导入数据固定在 exe 旁 `data/`。GUI 只调用独立 Node 服务，服务、漫游前端与转换器分别运行；`start_demo.cmd` / `stop_demo.cmd` 可脱离 GUI 启停，命令行和窗口顶部显示实际端口与地址。它自带解析和几何实现副本，构建与运行不读取主程序资源。Tools CI 在 Windows runner 上构建、启动自检并校验精简 GUI 包的 ZIP/SHA-256；可选便携 Blender 运行时仍由开发者本地提供，不在 CI 下载。
+独立漫游转换工具见 [gim_blender](../tools/gim_blender/README.md)：`tools/gim_blender/build.ps1` 生成目录包，可用 `-BlenderDirectory <便携目录> -Publish` 包含 Blender 并生成 ZIP；导入数据固定在 exe 旁 `data/`。GUI 只调用独立 Node 服务，服务、漫游前端与转换器分别运行；`start_demo.cmd` / `stop_demo.cmd` 可脱离 GUI 启停，命令行和窗口顶部显示实际端口与地址。它自带解析和几何实现副本，构建与运行不读取主程序资源。`gim_blender` CI 在 Windows runner 上构建、启动自检并校验精简 GUI 包的 ZIP/SHA-256；可选便携 Blender 运行时仍由开发者本地提供，不在 CI 下载。
 
 ## 工作区与临时目录
 

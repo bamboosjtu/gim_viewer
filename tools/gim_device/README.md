@@ -56,7 +56,7 @@ GIM_SMOKE_MODE=edge python viewer_app.py --smoke a.gim out.png   # 自检线框�
 .\build.ps1
 ```
 
-脚本通过 `../build-common.ps1` 创建工具自己的 `.venv`、安装 `requirements-build.txt` 中的完整 PySide6（含 QtWebEngine）、PyInstaller 和 py7zr，并调用 `viewer.spec`。打包后实际运行 `--self-check` 验证启动，成功后清理旧产物：
+脚本通过 `./build-common.ps1` 创建工具自己的 `.venv`、安装 `requirements-build.txt` 中的完整 PySide6（含 QtWebEngine）、PyInstaller 和 py7zr，并调用 `viewer.spec`。打包后实际运行 `--self-check` 验证启动，成功后清理旧产物：
 
 ```powershell
 .\build.ps1 -SkipInstall   # 已安装项目环境时

@@ -187,7 +187,7 @@ python gim_reader.py --guitest <目录>      # 界面自检：跳转/返回/自�
 | `-SmokeDir` | 打包后对指定解包目录跑一次冻结版 `--smoke`，失败即报错 |
 | `-Publish` | 额外生成 `dist/GIM信息阅读器.zip`，**压缩包内包含 exe 与 _internal** |
 
-脚本通过 `../build-common.ps1` 暂存旧产物，再按工具根目录的 `reader.spec` 打 onedir，
+脚本通过 `./build-common.ps1` 暂存旧产物，再按工具根目录的 `reader.spec` 打 onedir，
 校验 exe 和 `_internal` 均存在，并实际运行 `--self-check`。全部成功后删除旧产物，失败时保留备份。直接依赖版本固定在 `requirements-build.txt`（PyInstaller 6.22.3 / PySide6-Essentials 6.12.0）。
 
 目录包直接加载 `_internal`，无需 `_MEI` 自解包；运行时临时文件创建在 exe 旁的 `tmp/`。

@@ -1,6 +1,6 @@
 param([string]$Python='python',[switch]$SkipInstall,[switch]$NoVenv,[switch]$Publish,[string]$BlenderDirectory='')
 $ErrorActionPreference='Stop'
-. (Join-Path $PSScriptRoot '../build-common.ps1')
+. (Join-Path $PSScriptRoot 'build-paths.ps1')
 $workspace=Split-Path (Split-Path $PSScriptRoot)
 $taskTemp=Join-Path $workspace 'tmp/tool-build/gim-blender'
 New-Item -ItemType Directory -Force -Path $taskTemp | Out-Null

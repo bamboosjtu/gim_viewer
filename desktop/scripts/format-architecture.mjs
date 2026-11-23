@@ -426,6 +426,7 @@ export const architectureModules = [
   'scripts/check-rust.mjs',
   'scripts/check-engineering-boundaries.mjs',
   'scripts/app-state-boundaries.mjs',
+  '../.github/scripts/check-action-versions.mjs',
   'scripts/benchmarks/batch-report.mjs',
   'scripts/benchmarks/cli.mjs',
   'scripts/benchmarks/compare.mjs',

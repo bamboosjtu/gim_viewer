@@ -5,7 +5,6 @@ on:
     paths:
       - 'desktop/**'
       - 'app/**'
-      - 'tools/gim_element/**'
       - 'packages/**'
       - 'crates/**'
       - 'contracts/**'
@@ -13,14 +12,14 @@ on:
       - '.gitattributes'
       - '.editorconfig'
       - 'eslint.config.mjs'
+      - '.github/action-versions.json'
       - '.github/scripts/**'
-      - '.github/workflows/windows-ci.yml'
+      - '.github/workflows/**'
 
   pull_request:
     paths:
       - 'desktop/**'
       - 'app/**'
-      - 'tools/gim_element/**'
       - 'packages/**'
       - 'crates/**'
       - 'contracts/**'
@@ -28,8 +27,9 @@ on:
       - '.gitattributes'
       - '.editorconfig'
       - 'eslint.config.mjs'
+      - '.github/action-versions.json'
       - '.github/scripts/**'
-      - '.github/workflows/windows-ci.yml'
+      - '.github/workflows/**'
   workflow_dispatch:
 
 permissions:
@@ -82,6 +82,13 @@ jobs:
           "TEMP=$((Resolve-Path ../tmp/ci).Path)" >> $env:GITHUB_ENV
           "TMP=$((Resolve-Path ../tmp/ci).Path)" >> $env:GITHUB_ENV
           "TMPDIR=$((Resolve-Path ../tmp/ci).Path)" >> $env:GITHUB_ENV
+
+      - name: Check GitHub Actions workflow contracts
+        working-directory: .
+        run: |
+          node --test .github/scripts/check-action-versions.test.mjs .github/scripts/android-ci.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node .github/scripts/check-action-versions.mjs
 
       - name: Install frontend dependencies
         run: npm ci
@@ -182,16 +189,6 @@ jobs:
 
       - name: Check changed Rust formatting and Clippy
         run: npm run check:rust
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-
-      - name: Run independent Python recognition contracts
-        working-directory: .
-        env:
-          PYTHONDONTWRITEBYTECODE: '1'
-        run: python -m unittest discover -s tools/gim_element/tests/unit -p test_standard_recognition.py -v
 
       - name: Run native library tests
         run: |
