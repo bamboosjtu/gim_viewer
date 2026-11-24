@@ -232,6 +232,39 @@ it('re-evaluates only changed view rows while camera, selection, bounds and expl
   update.mockClear();camera.aspect=2;camera.updateProjectionMatrix();internal.update();expect(update).toHaveBeenCalledTimes(2);
 });
 
+it('keeps a pending placement wanted without registering another continuation on each view update', async () => {
+  const { internal } = fixture();
+  const camera = new THREE.PerspectiveCamera(60, 1, .1, 100);
+  camera.updateMatrixWorld(true);
+  internal.ctx = { world: { camera: { three: camera } } };
+  internal.anchor = new THREE.Matrix4();
+  internal.requestReady = vi.fn();
+  internal.firstModelPresented = false;
+  const row = {
+    ...occurrence(1), key: undefined,
+    entry: { ...occurrence(1).entry, rootOccurrence: 'one' },
+    box: new THREE.Box3(new THREE.Vector3(-1, -1, -5), new THREE.Vector3(1, 1, -4)),
+  };
+  internal.rows.set(row.entry.rootOccurrence, row);
+  internal.viewIndex.set(row.entry.rootOccurrence, row.box);
+
+  let finish!: () => void;
+  const start = vi.spyOn(internal, 'renderOnce').mockReturnValueOnce(
+    new Promise<void>((resolve) => { finish = resolve; }),
+  ).mockResolvedValue(undefined);
+  const render = vi.spyOn(internal, 'render');
+  const key = internal.key(row.entry.devPath, 0);
+  for (let tick = 0; tick < 10; tick++) internal.update();
+  expect(internal.wanted.has(key)).toBe(true);
+  expect(render).toHaveBeenCalledOnce();
+  expect(start).toHaveBeenCalledOnce();
+  const pending = internal.rendering.get(row).get(key);
+  finish();
+  await pending;
+  internal.update();
+  expect(render).toHaveBeenCalledTimes(2);
+});
+
 it('protects the first real model frame, then overlaps automatic L1 with remaining base work without a camera change',()=>{
   const {runtime,internal}=fixture(),camera=new THREE.PerspectiveCamera(60,1,.1,100);camera.updateMatrixWorld(true);
   internal.ctx={world:{camera:{three:camera}}};internal.anchor=new THREE.Matrix4();internal.notifyCoordinateAnchor=vi.fn();

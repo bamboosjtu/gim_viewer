@@ -49,8 +49,6 @@
 
 L0 有 5 个输入错误，对应的 5 个暖开未运行。已运行的有效样本没有 FAIL 或 INCONCLUSIVE。更新基线时按同一样本 SHA、场景和冷暖状态核对结果。新增 INPUT_ERROR、FAIL 或 INCONCLUSIVE 属于状态回退，须解决后再更新。
 
-L1 历史正式批准记录对应 [`c50933d`](https://github.com/bamboosjtu/gim_viewer/commit/c50933db56c6442b136705758c1d13ba22810f6f)。原始结果和批准记录保存在开发者本地工作区。[Benchmark 流程](docs/performance/benchmark.md)
-
 ### L1 线路
 
 | 启动 | 有效/总数 | 首次响应 | 完全结算 | 完全结算合计 |
