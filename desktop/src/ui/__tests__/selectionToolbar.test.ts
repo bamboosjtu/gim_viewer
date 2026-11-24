@@ -25,3 +25,25 @@ it('enables visible ribbon actions as soon as selection changes in the default t
  expect(hide.disabled).toBe(true);state.selection.beginSelection({kind:'cbm',key:'part'});expect(hide.disabled).toBe(false);
  state.selection.invalidateSelection();expect(hide.disabled).toBe(true);
 });
+
+it('updates a dragged section field in place and disposes the controls', () => {
+  const state = new AppState();
+  state.currentProjectType = 'equipment';
+  state.viewerCommands.execute = vi.fn(async () => {});
+  dispose = setupSelectionToolbar(state);
+  const snapshot = state.viewerCommands.snapshot;
+  snapshot.tool = 'section';
+  snapshot.section = {
+    kind: 'horizontal', enabled: true, flipped: false, offset: 2, azimuth: 0,
+    min: [0, 0, 0], max: [1, 1, 3],
+  };
+  state.viewerCommands.notify();
+  const selector = '.viewer-tool-panel input[type=number]';
+  const field = document.querySelector<HTMLInputElement>(selector)!;
+  snapshot.section = { ...snapshot.section, offset: 2.5 };
+  state.viewerCommands.notify();
+  expect(document.querySelector(selector)).toBe(field);
+  expect(field.value).toBe('2.5');
+  dispose();
+  expect(field.isConnected).toBe(false);
+});

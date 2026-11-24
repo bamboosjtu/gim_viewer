@@ -159,6 +159,12 @@ it('private commit alone drives pressure; old IPC cannot alter a new project and
   reply({processTreeAvailable:true,processTreeRssBytes:1024,processTreePrivateBytes:8*1024**3});
   await vi.advanceTimersByTimeAsync(0);expect(dev).toHaveBeenLastCalledWith('critical');expect(ifc).toHaveBeenLastCalledWith('critical');
   expect(perfRuntimeResourceSnapshot()).toHaveLength(0); // no periodic full-scene walk
+  native.read.mockResolvedValueOnce({processTreeAvailable:true,processTreePrivateBytes:4*1024**3});
+  monitor.refreshAfterRelease?.();
+  monitor.refreshAfterRelease?.();
+  await vi.advanceTimersByTimeAsync(249);expect(native.read).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1);expect(native.read).toHaveBeenCalledTimes(2);
+  expect(dev).toHaveBeenLastCalledWith('normal');
   native.read.mockResolvedValue({processTreeAvailable:true,processTreeRssBytes:10*1024**3,processTreePrivateBytes:null});
   await vi.advanceTimersByTimeAsync(5000);expect(dev).toHaveBeenLastCalledWith('unknown');
   native.read.mockImplementationOnce(()=>new Promise(resolve=>{reply=resolve;}));

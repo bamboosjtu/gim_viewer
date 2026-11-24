@@ -17,19 +17,23 @@ export interface IfcVisibilityModel {
   getLocalIdsByGuids(guids: string[]): Promise<(number | null)[]>;
 }
 
+function sameMembers(a: ReadonlySet<number> | null, b: ReadonlySet<number> | null): boolean {
+  return a === b || (!!a && !!b && a.size === b.size && [...a].every((id) => b.has(id)));
+}
+
 export class IfcModelVisibility {
   private scope: Set<number> | null = null;
   private allowed: ReadonlySet<number> | null = null;
   private hidden: ReadonlySet<number> = new Set();
-  private permits(id: number) {
-    return !this.hidden.has(id) && (!this.allowed || this.allowed.has(id));
-  }
   setBrowseMask(allowed: ReadonlySet<number> | null, hidden: ReadonlySet<number>) {
+    const changed = !sameMembers(allowed, this.allowed) || !sameMembers(hidden, this.hidden);
     this.allowed = allowed;
     this.hidden = hidden;
-    return this.setScope(this.scope, true);
+    return this.setScope(this.scope, changed);
   }
-  private baseline: Map<number, boolean> | null = null;
+  private geometryIds: number[] | null = null;
+  private readonly masked = new Map<number, boolean>();
+  private readonly pendingHide = new Set<number>();
   private detailOriginal = new Map<number, boolean>();
   private queue = Promise.resolve();
   private revision = 0;
@@ -61,11 +65,14 @@ export class IfcModelVisibility {
     }
     return result;
   }
+  private async writeIds(ids: number[], visible: boolean): Promise<void> {
+    for (let i = 0; i < ids.length && !this.released; i += 2048)
+      await this.model.setVisible(ids.slice(i, i + 2048), visible);
+  }
   private async write(values: Map<number, boolean>): Promise<void> {
     for (const visible of [false, true]) {
       const ids = [...values].filter(([, value]) => value === visible).map(([id]) => id);
-      for (let i = 0; i < ids.length && !this.released; i += 2048)
-        await this.model.setVisible(ids.slice(i, i + 2048), visible);
+      await this.writeIds(ids, visible);
     }
   }
   setLayerVisible(visible: boolean): void {
@@ -80,15 +87,7 @@ export class IfcModelVisibility {
     );
   }
   setScope(scope: ReadonlySet<number> | null, force = false): Promise<void> {
-    if (
-      !force &&
-      this.committedRevision === this.revision &&
-      ((scope === null && this.scope === null) ||
-        (scope !== null &&
-          this.scope !== null &&
-          scope.size === this.scope.size &&
-          [...scope].every((id) => this.scope!.has(id))))
-    )
+    if (!force && this.committedRevision === this.revision && sameMembers(scope, this.scope))
       return this.queue;
     this.scope = scope === null ? null : new Set(scope);
     const revision = ++this.revision;
@@ -97,25 +96,11 @@ export class IfcModelVisibility {
     setRenderVisibility(this.model.object, false);
     return this.enqueue(async () => {
       if (revision !== this.revision) return;
-      const selected = this.scope;
-      if ((selected?.size || this.allowed?.size || this.hidden.size) && !this.baseline) {
-        this.baseline = await this.read(await this.model.getItemsIdsWithGeometry());
-        for (const [id, visible] of this.detailOriginal) this.baseline.set(id, visible);
-      }
-      if (this.released) return;
-      if (this.baseline) {
-        const values = new Map<number, boolean>();
-        for (const [id, visible] of this.baseline)
-          values.set(
-            id,
-            visible &&
-              this.permits(id) &&
-              !this.detailOriginal.has(id) &&
-              (selected === null || selected.has(id)),
-          );
-        await this.write(values);
-        if (selected === null && !this.allowed && !this.hidden.size) this.baseline = null;
-      }
+      const selected = this.scope,
+        allowed = this.allowed,
+        hidden = this.hidden;
+      if (selected?.size !== 0 && allowed?.size !== 0)
+        await this.updateMask(selected, allowed, hidden, revision);
       if (!this.released && revision === this.revision) {
         this.committedRevision = revision;
         setRenderVisibility(
@@ -127,6 +112,55 @@ export class IfcModelVisibility {
       }
     });
   }
+  private async updateMask(
+    selected: ReadonlySet<number> | null,
+    allowed: ReadonlySet<number> | null,
+    hidden: ReadonlySet<number>,
+    revision: number,
+  ): Promise<void> {
+    // A deny-only filter has exact item addresses already. Allow lists need
+    // the complement, which uses the model's immutable geometry ID list.
+    let denied = hidden;
+    if (selected || allowed) {
+      const ids = this.geometryIds ?? (await this.model.getItemsIdsWithGeometry());
+      if (this.released || revision !== this.revision) return;
+      this.geometryIds = ids;
+      denied = new Set(
+        ids.filter(
+          (id) =>
+            hidden.has(id) || (selected && !selected.has(id)) || (allowed && !allowed.has(id)),
+        ),
+      );
+    }
+    const missing: number[] = [];
+    for (const id of denied)
+      if (!this.masked.has(id) && !this.detailOriginal.has(id)) missing.push(id);
+    const original = await this.read(missing);
+    if (this.released || revision !== this.revision) return;
+    for (const id of denied) {
+      if (this.masked.has(id)) continue;
+      const before = this.detailOriginal.get(id) ?? original.get(id) ?? false;
+      this.masked.set(id, before);
+      if (before && !this.detailOriginal.has(id)) this.pendingHide.add(id);
+    }
+    const hide = [...this.pendingHide].filter((id) => denied.has(id));
+    await this.writeIds(hide, false);
+    if (this.released) return;
+    for (const id of hide) this.pendingHide.delete(id);
+    const unmasked = [...this.masked.keys()].filter((id) => !denied.has(id));
+    const show = unmasked.filter((id) => this.masked.get(id) && !this.detailOriginal.has(id));
+    try {
+      await this.writeIds(show, true);
+    } catch (error) {
+      // A later mask can require these items hidden after a partially successful write.
+      for (const id of show) this.pendingHide.add(id);
+      throw error;
+    }
+    for (const id of unmasked) {
+      this.masked.delete(id);
+      this.pendingHide.delete(id);
+    }
+  }
   /** Hiding a far item remembers its original visibility; returning to far
    * restores that value, subject to the current isolation mask. */
   setDetailVisible(ids: number[], visible: boolean): Promise<void> {
@@ -136,26 +170,26 @@ export class IfcModelVisibility {
       if (visible) ids = ids.filter((id) => this.detailOriginal.has(id));
       if (!visible) {
         const missing = ids.filter((id) => !this.detailOriginal.has(id));
-        const original = this.baseline ?? (await this.read(missing));
+        const original = await this.read(missing.filter((id) => !this.masked.has(id)));
         if (this.released) return;
-        for (const id of missing) this.detailOriginal.set(id, original.get(id) ?? false);
+        for (const id of missing)
+          this.detailOriginal.set(id, this.masked.get(id) ?? original.get(id) ?? false);
       }
       const values = new Map<number, boolean>();
       for (const id of ids) {
-        const original = this.detailOriginal.get(id) ?? this.baseline?.get(id) ?? true;
-        if (visible) this.detailOriginal.delete(id);
-        values.set(
-          id,
-          visible && original && this.permits(id) && (this.scope === null || this.scope.has(id)),
-        );
+        const original = this.detailOriginal.get(id) ?? true;
+        values.set(id, visible && original && !this.masked.has(id));
       }
       await this.write(values);
+      if (visible) for (const id of ids) this.detailOriginal.delete(id);
     });
   }
   release(): void {
     this.released = true;
     this.revision++;
-    this.baseline = null;
+    this.geometryIds = null;
+    this.masked.clear();
+    this.pendingHide.clear();
     this.detailOriginal.clear();
   }
 }

@@ -97,7 +97,7 @@ export class AppState {
   substationConnectionPreview: SubstationConnectionPreview | null = null;
   substationConnectionPorts: import('../gim/glConnectionPorts.js').GlConnectionPortIndex | null =
     null;
-  substationResourceMonitor: { release(): void } | null = null;
+  substationResourceMonitor: { release(): void; refreshAfterRelease?(): void } | null = null;
   substationMemoryPressure: import('../utils/memoryPressure.js').MemoryPressure = 'unknown';
 
   engineeringGeometryFilter: ((root?: THREE.Object3D) => void) | null = null;

@@ -244,7 +244,10 @@ async function finishBuild(
   } finally {
     // Retain metadata/checkpoint; an idle reconstructible Worker can terminate.
     await job.client.releaseModel?.(result.buildId);
-    if (currentBuild(state, job, result)) job.update();
+    if (currentBuild(state, job, result)) {
+      state.substationResourceMonitor?.refreshAfterRelease?.();
+      job.update();
+    }
   }
 }
 

@@ -9,6 +9,7 @@ export class ToolOverlay {
   private handles = document.createElement('div');
   private drag?: AbortController;
   private readonly buttons = new Map<string, HTMLButtonElement>();
+  private readonly annotations = new Map<string, SVGElement>();
   constructor(
     private ctx: ViewerContext,
     private host: HTMLElement,
@@ -27,35 +28,53 @@ export class ToolOverlay {
       visible: v.z >= -1 && v.z <= 1,
     };
   }
-  private svgItem(tag: string, attrs: Record<string, number | string>, label?: string) {
-    const e = document.createElementNS(this.svg.namespaceURI, tag);
-    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
-    if (label) e.textContent = label;
-    this.svg.append(e);
+  private svgItem(id: string, tag: string, attrs: Record<string, number>, label?: string) {
+    let element = this.annotations.get(id);
+    if (!element) {
+      element = document.createElementNS('http://www.w3.org/2000/svg', tag);
+      this.annotations.set(id, element);
+      this.svg.append(element);
+    }
+    for (const [key, value] of Object.entries(attrs)) {
+      const text = String(value);
+      if (element.getAttribute(key) !== text) element.setAttribute(key, text);
+    }
+    if (label && element.textContent !== label) element.textContent = label;
   }
   draw = () => {
     const m = this.anchor();
     const s = this.port.snapshot;
-    this.svg.replaceChildren();
-    if (!m) return;
-    for (const item of s.distances) {
+    const drawn = new Set<string>();
+    const annotate = (id: string, tag: string, attrs: Record<string, number>, label?: string) => {
+      drawn.add(id);
+      this.svgItem(id, tag, attrs, label);
+    };
+    for (const item of m ? s.distances : []) {
+      if (!m) break;
       const a = this.project(item.a.xyz, m),
         b = this.project(item.b.xyz, m);
       if (!a.visible || !b.visible) continue;
-      this.svgItem('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y });
-      for (const p of [a, b]) this.svgItem('circle', { cx: p.x, cy: p.y, r: 4 });
-      this.svgItem(
+      annotate(item.id + ':line', 'line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y });
+      annotate(item.id + ':a', 'circle', { cx: a.x, cy: a.y, r: 4 });
+      annotate(item.id + ':b', 'circle', { cx: b.x, cy: b.y, r: 4 });
+      annotate(
+        item.id + ':label',
         'text',
         { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 - 8 },
         item.metres.toFixed(3) + ' m',
       );
     }
-    if (s.first) {
+    if (s.first && m) {
       const p = this.project(s.first.xyz, m);
-      if (p.visible) this.svgItem('circle', { cx: p.x, cy: p.y, r: 5 });
+      if (p.visible) annotate('first', 'circle', { cx: p.x, cy: p.y, r: 5 });
     }
+    for (const [id, element] of this.annotations)
+      if (!drawn.has(id)) {
+        element.remove();
+        this.annotations.delete(id);
+      }
     if (this.drag) return;
-    const faces = s.tool === 'section' && s.section?.enabled ? sectionFaces(s.section) : [];
+    const faces = m && s.tool === 'section' && s.section?.enabled ? sectionFaces(s.section) : [];
     for (const [id, button] of this.buttons) {
       if (!faces.some((face) => face.id === id)) {
         button.remove();
@@ -63,6 +82,7 @@ export class ToolOverlay {
       }
     }
     for (const { id, origin } of faces) {
+      if (!m) break;
       let button = this.buttons.get(id);
       if (!button) {
         button = document.createElement('button');
@@ -161,6 +181,7 @@ export class ToolOverlay {
     this.drag?.abort();
     this.drag = undefined;
     this.svg.replaceChildren();
+    this.annotations.clear();
     this.handles.replaceChildren();
     this.buttons.clear();
   }

@@ -22,6 +22,21 @@ describe('static viewer redraw policy',()=>{
     now=590;policy.tick();expect(renderer.needsUpdate).toBe(true);
     policy.dispose();renderer.needsUpdate=false;policy.request(true);policy.tick();expect(renderer.needsUpdate).toBe(false);
   });
+  it('coalesces background changes during expensive draws and bounds the next progressive refresh', () => {
+    let now = 0;
+    const renderer = { needsUpdate: false };
+    const policy = new RenderDemand(renderer, () => now);
+    policy.before();
+    now = 560;
+    policy.after();
+    policy.request();
+    now = 1310;
+    policy.tick();
+    expect(renderer.needsUpdate).toBe(false);
+    now = 2060;
+    policy.tick();
+    expect(renderer.needsUpdate).toBe(true);
+  });
   it('observes appended subtrees without walking the full scene on every tick or mutation',()=>{
     const scene=new THREE.Scene(),root=new THREE.Group(),child=new THREE.Group();root.add(child);scene.add(root);
     const request=vi.fn(),release=observeSceneChanges(scene,request),traverse=vi.spyOn(scene,'traverse');
@@ -41,6 +56,18 @@ describe('static viewer redraw policy',()=>{
     b.add(group);ra.mockClear();rb.mockClear();requestObjectRender(leaf);
     expect(ra).not.toHaveBeenCalled();expect(rb).toHaveBeenCalledWith(true);
     da();db();
+  });
+  it('observes empty model containers without redrawing the station when they attach', () => {
+    const scene = new THREE.Scene();
+    const root = new THREE.Group();
+    root.add(new THREE.Group());
+    const request = vi.fn();
+    const stop = observeSceneChanges(scene, request);
+    scene.add(root);
+    expect(request).not.toHaveBeenCalled();
+    root.add(new THREE.Mesh());
+    expect(request).toHaveBeenCalledWith(false);
+    stop();
   });
   it('ignores Fragments heartbeat completions and redraws actual public tile changes',()=>{
     const listeners=new Set<()=>void>(),event={add:(f:()=>void)=>listeners.add(f),remove:(f:()=>void)=>listeners.delete(f)};

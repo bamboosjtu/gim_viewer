@@ -444,15 +444,26 @@ export function startSubstationResourceMonitor(
   state: AppState,
   ctx: ViewerContext,
   intervalMs = 5000,
-): { release(): void } {
+): NonNullable<AppState['substationResourceMonitor']> {
   state.substationResourceMonitor?.release();
   const project = state.captureProjectSession(),
     perf = perfCurrentSession();
   let released = false,
+    sampling = false,
+    refreshRequested = false,
     timer: ReturnType<typeof setTimeout> | null = null;
   const current = () => !released && state.isCurrentSession(project) && perfIsCurrentSession(perf);
+  const schedule = (delay: number) => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      void sample().catch(reportBackgroundError);
+    }, delay);
+  };
   const sample = async (): Promise<void> => {
     if (!current()) return;
+    sampling = true;
+    refreshRequested = false;
     try {
       await sampleSubstationRuntimeResources(state, 'periodicPrivateMemory', perf, ctx, undefined, {
         isCurrent: current,
@@ -461,16 +472,25 @@ export function startSubstationResourceMonitor(
     } catch (error) {
       logger.warn('[Memory sample]', error);
     } finally {
-      if (current())
-        timer = setTimeout(
-          () => {
-            void Promise.resolve(sample()).catch(reportBackgroundError);
-          },
-          Math.max(1000, intervalMs),
-        );
+      sampling = false;
+      if (current()) schedule(refreshRequested ? 250 : Math.max(1000, intervalMs));
     }
   };
   const owner = {
+    refreshAfterRelease(): void {
+      // An engineering Worker can release substantial private commit after its
+      // last cache domain. Recheck promptly before leaving eligible L1 work
+      // blocked on a stale high-pressure sample until the next periodic tick.
+      if (
+        !current() ||
+        refreshRequested ||
+        state.substationMemoryPressure === 'normal' ||
+        state.substationMemoryPressure === 'unknown'
+      )
+        return;
+      refreshRequested = true;
+      if (!sampling) schedule(250);
+    },
     release(): void {
       released = true;
       if (timer) clearTimeout(timer);
@@ -478,6 +498,6 @@ export function startSubstationResourceMonitor(
     },
   };
   state.substationResourceMonitor = owner;
-  void Promise.resolve(sample()).catch(reportBackgroundError);
+  void sample().catch(reportBackgroundError);
   return owner;
 }

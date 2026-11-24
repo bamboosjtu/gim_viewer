@@ -46,4 +46,5 @@ it('picks the visible surface behind the cut',async()=>{
  const back={...front,localId:2,distance:3,point:new THREE.Vector3(-1,0,0)};
  f.a.raycast.mockResolvedValue(front);f.a.raycastAll.mockResolvedValue([front,back]);
  expect(await raycastVisibleIfc(f.ctx,f.data,p=>p.x<=0)).toEqual(back);
+ expect(f.a.getVisible.mock.calls).toEqual([[[2]]]);
 });

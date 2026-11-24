@@ -11,6 +11,8 @@ export const architectureModules = [
   'src/ui/viewerToolIcons.ts',
   'src/ui/distanceResults.ts',
   'src/viewer/orientationAxes.ts',
+  'src/viewer/demandRendering.ts',
+  'src/viewer/viewHistory.ts',
   'src/viewer/camera.ts',
   'src/viewer/devInstanceBatches.ts',
   'src/viewer/devViewportPick.ts',

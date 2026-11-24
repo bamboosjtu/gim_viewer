@@ -12,7 +12,6 @@ import type { DeviceRuntime } from '../../shared/deviceRuntime.js';
 import type { IfcRegionalRuntime } from '../../viewer/ifcRegionalRuntime.js';
 import type { EngineeringSnapshot } from '../../engineering/types.js';
 import { logger } from '../../utils/logger.js';
-import { reportBackgroundError } from '../../utils/backgroundErrors.js';
 interface SelectionHost {
   captureSession(): ProjectLoadSession;
   isCurrentSession(session: ProjectLoadSession): boolean;
@@ -167,19 +166,21 @@ export class ProjectSelectionState implements ViewerSelectionState {
       scope.sourceIds.size > 0
     );
   }
-  setOnlySelected(only: boolean): void {
-    if (only && !this.canIsolateSelection) return;
+  setOnlySelected(only: boolean): void;
+  setOnlySelected(only: boolean, record: false): Promise<void>;
+  setOnlySelected(only: boolean, record = true): Promise<void> | void {
+    if (only && !this.canIsolateSelection) return Promise.resolve();
     this.onlySelected = only;
     this.host.applyGeometryFilter();
     this.host.deviceRuntime()?.setOnlySelected?.(only);
     for (const runtime of this.host.runtimes()) runtime.setOnlySelected?.(only);
-    void Promise.resolve(
-      this.selectionVisibility
-        ?.sync()
-        .catch((error) => logger.warn('[Selection visibility]', error)),
-    ).catch(reportBackgroundError);
-    this.host.recordVisibility();
+    const pending = this.selectionVisibility?.sync() ?? Promise.resolve();
+    if (record) {
+      void pending.catch((error) => logger.warn('[Selection visibility]', error));
+      this.host.recordVisibility();
+    }
     this.host.selectionChanged?.();
+    return pending;
   }
   releaseDecorations(current: () => boolean): void {
     for (const key of [

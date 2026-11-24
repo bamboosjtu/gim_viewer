@@ -46,6 +46,7 @@ export function mountViewerToolbox(
     cb.onchange = () => change(cb.checked);
     l.append(cb, text);
     host.append(l);
+    return cb;
   }
   function select(
     host: HTMLElement,
@@ -73,6 +74,7 @@ export function mountViewerToolbox(
     };
     l.append(label, input);
     panel.append(l);
+    return input;
   }
   const tools: readonly [Tool, string][] = [
     ['select', '选择'],
@@ -176,27 +178,70 @@ export function mountViewerToolbox(
   feedback.setAttribute('role', 'status');
   feedback.className = 'tool-feedback';
   bar.append(feedback);
+  let sectionKind: Section['kind'] | undefined;
+  let updateSectionFields: ((value: ReadonlyToolState<Section>) => void) | undefined;
   function editSection(s: ReadonlyToolState<Section>) {
-    const update = (patch: Partial<Section>) =>
-      send({ kind: 'section', value: { ...s, min: [...s.min], max: [...s.max], ...patch } });
-    check(panel, '启用剖切', s.enabled, (enabled) => update({ enabled }));
+    const update = (patch: Partial<Section>) => {
+      const current = port.snapshot.section;
+      if (current?.kind === s.kind)
+        send({
+          kind: 'section',
+          value: { ...current, min: [...current.min], max: [...current.max], ...patch },
+        });
+    };
+    const enabled = check(panel, '启用剖切', s.enabled, (enabled) => update({ enabled }));
+    const sync: Array<(value: ReadonlyToolState<Section>) => void> = [
+      (value) => {
+        enabled.checked = value.enabled;
+      },
+    ];
+    const number = (
+      label: string,
+      get: (value: ReadonlyToolState<Section>) => number,
+      change: (n: number) => void,
+    ) => {
+      const input = field(label, get(s), change);
+      sync.push((value) => {
+        const text = String(Number(get(value).toFixed(4)));
+        if (input.value !== text) input.value = text;
+      });
+    };
     if (s.kind === 'box') {
       for (const side of ['min', 'max'] as const)
         for (const [index, axis] of ['X', 'Y', 'Z'].entries()) {
-          field(axis + (side === 'min' ? ' 下限' : ' 上限') + ' (m)', s[side][index], (v) => {
-            const values: Vec3 = [...s[side]];
-            values[index] = v;
-            update({ [side]: values });
-          });
+          number(
+            axis + (side === 'min' ? ' 下限' : ' 上限') + ' (m)',
+            (value) => value[side][index],
+            (v) => {
+              const current = port.snapshot.section;
+              if (current?.kind !== 'box') return;
+              const values: Vec3 = [...current[side]];
+              values[index] = v;
+              update({ [side]: values });
+            },
+          );
         }
     } else {
-      field(s.kind === 'horizontal' ? '工程高度 (m)' : '偏移 (m)', s.offset, (offset) =>
-        update({ offset }),
+      number(
+        s.kind === 'horizontal' ? '工程高度 (m)' : '偏移 (m)',
+        (value) => value.offset,
+        (offset) => update({ offset }),
       );
-      if (s.kind === 'vertical') field('方位角 (°)', s.azimuth, (azimuth) => update({ azimuth }));
-      check(panel, '翻转方向', s.flipped, (flipped) => update({ flipped }));
+      if (s.kind === 'vertical')
+        number(
+          '方位角 (°)',
+          (value) => value.azimuth,
+          (azimuth) => update({ azimuth }),
+        );
+      const flipped = check(panel, '翻转方向', s.flipped, (flipped) => update({ flipped }));
+      sync.push((value) => {
+        flipped.checked = value.flipped;
+      });
     }
     button(panel, '清除剖切', () => send({ kind: 'clearSection' }));
+    return (value: ReadonlyToolState<Section>) => {
+      for (const field of sync) field(value);
+    };
   }
   function refreshSelection() {
     hide.disabled = !port.available || !state.selection.canIsolateSelection;
@@ -221,7 +266,13 @@ export function mountViewerToolbox(
       tab.setAttribute('aria-pressed', String(s.tool === tools[i][0]));
     }
     feedback.textContent = s.message;
-    panel.replaceChildren();
+    const section = s.tool === 'section' ? s.section : undefined;
+    const reuseSection = section && section.kind === sectionKind && updateSectionFields;
+    if (!reuseSection) {
+      panel.replaceChildren();
+      sectionKind = section?.kind;
+      updateSectionFields = section ? editSection(section) : undefined;
+    } else reuseSection(section);
     results.render(s);
     bar.dataset.tool = s.tool;
     for (const b of [home, views, ...cameraButtons]) b.disabled = !available;
@@ -282,9 +333,6 @@ export function mountViewerToolbox(
           send({ kind: 'floor', id: s.floor, inferred: v }),
         );
       }
-    }
-    if (s.tool === 'section') {
-      if (s.section) editSection(s.section);
     }
     if (s.tool === 'distance') {
       panel.append(s.first ? '请选择第二个表面点' : '请选择第一个表面点');

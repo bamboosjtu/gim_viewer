@@ -37,15 +37,20 @@ export function setSourceLayerVisibility(
   id: string,
   model: IfcVisibilityModel,
   visible: boolean,
+  record = true,
 ): void {
+  const entry = state.ifc.loadedModels.get(id);
+  if (record && entry?.visible !== visible) state.viewState.viewHistory?.interruptRestore();
   if (state.selection.selectionVisibility)
     state.selection.selectionVisibility.setModelVisible(id, visible);
   else setRenderVisibility(model.object, visible);
-  const entry = state.ifc.loadedModels.get(id);
   if (entry) entry.visible = visible;
   const option = state.viewerCommands.snapshot.options.models.find((item) => item.id === id);
   if (option) option.visible = visible;
-  state.viewerCommands.notify();
+  if (record) {
+    state.viewState.viewHistory?.recordVisibility();
+    state.viewerCommands.notify();
+  }
 }
 
 /** The service owns one selection scope across all IFC representations.

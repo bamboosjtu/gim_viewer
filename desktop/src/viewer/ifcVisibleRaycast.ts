@@ -10,6 +10,8 @@ function visible(object: THREE.Object3D): boolean {
   return true;
 }
 
+const distance = (hit: RaycastResult) => hit.rayDistance ?? hit.distance;
+
 /** FragmentsManager.raycast queries hidden model roots too. Pick only sources
  * visible when the click began and reject hidden items using the public API. */
 export async function raycastVisibleIfc(
@@ -29,28 +31,37 @@ export async function raycastVisibleIfc(
     models.map(async (model) => {
       const hit = await model.raycast(data);
       if (!hit || !visible(model.object)) return null;
-      if (permitted(hit) && (await model.getVisible([hit.localId]))[0])
+      const firstPermitted = permitted(hit);
+      if (firstPermitted && (await model.getVisible([hit.localId]))[0])
         return visible(model.object) ? hit : null;
+      if (!visible(model.object)) return null;
       // Some versions return an invisible nearest item. Keep a visible item
       // behind it selectable without querying hidden sources or private tiles.
-      const candidates = (await model.raycastAll(data)) ?? [];
-      const ids = [...new Set(candidates.map((candidate) => candidate.localId))];
-      const values = await model.getVisible(ids),
-        allowed = new Set(ids.filter((_, i) => values[i]));
+      const closestByItem = new Map<number, RaycastResult>();
+      for (const candidate of (await model.raycastAll(data)) ?? []) {
+        if ((firstPermitted && candidate.localId === hit.localId) || !permitted(candidate))
+          continue;
+        const previous = closestByItem.get(candidate.localId);
+        if (!previous || distance(candidate) < distance(previous))
+          closestByItem.set(candidate.localId, candidate);
+      }
       if (!visible(model.object)) return null;
-      return (
-        candidates
-          .filter((candidate) => allowed.has(candidate.localId) && permitted(candidate))
-          .sort((a, b) => (a.rayDistance ?? a.distance) - (b.rayDistance ?? b.distance))[0] ?? null
-      );
+      let best: RaycastResult | null = null;
+      const candidates = [...closestByItem.values()];
+      for (let i = 0; i < candidates.length && visible(model.object); i += 2048) {
+        const batch = candidates.slice(i, i + 2048);
+        const values = await model.getVisible(batch.map((candidate) => candidate.localId));
+        for (const [index, candidate] of batch.entries())
+          if (values[index] && (!best || distance(candidate) < distance(best))) best = candidate;
+      }
+      return visible(model.object) ? best : null;
     }),
   );
-  const results: RaycastResult[] = [];
+  let best: RaycastResult | null = null;
   for (const result of hits) {
     if (result.status === 'rejected') logger.warn('[IFC selection]', result.reason);
-    else if (result.value) results.push(result.value);
+    else if (result.value && (!best || distance(result.value) < distance(best)))
+      best = result.value;
   }
-  return (
-    results.sort((a, b) => (a.rayDistance ?? a.distance) - (b.rayDistance ?? b.distance))[0] ?? null
-  );
+  return best;
 }

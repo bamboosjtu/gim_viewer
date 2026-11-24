@@ -100,11 +100,6 @@ export async function getViewerRuntimeWithUI(
           state.viewState.viewHistory = null;
         }
       });
-      state.viewState.viewHistory ??= new ViewerViewHistory(ctx, 20, {
-        getVisibility: () => (state.selection.onlySelected ? 'only-selected' : 'all'),
-        setVisibility: (value) => state.selection.setOnlySelected(value === 'only-selected'),
-      });
-
       // 装配属性抽屉按钮事件
       const disposeDrawer = presentation.bindProperties(ctx);
       rollback.push(() => disposeDrawer?.());
@@ -113,6 +108,10 @@ export async function getViewerRuntimeWithUI(
       const { bindViewerToolCommands } = await import('./viewerToolBinding.js');
       const tools = bindViewerToolCommands(state, ctx, container);
       rollback.push(() => tools.dispose());
+      state.viewState.viewHistory ??= new ViewerViewHistory(ctx, 20, {
+        ...tools.visibility,
+        onChange: () => state.viewerCommands.notify(),
+      });
       const disposeSelection = setupSelection(
         ctx,
         state,

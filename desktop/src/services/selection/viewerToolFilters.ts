@@ -19,6 +19,51 @@ interface Mask {
   express: Set<number>;
   allowedExpress: Set<number> | null;
 }
+
+function emptyFilters() {
+  return {
+    roots: new Set<string>(),
+    sources: new Set<string>(),
+    locals: new Map<string, Set<number>>(),
+    express: new Map<string, Set<number>>(),
+    guids: new Map<string, Set<string>>(),
+    types: [] as readonly string[],
+    floor: '',
+    inferred: false,
+  };
+}
+type BrowseFilters = ReturnType<typeof emptyFilters>;
+
+export interface ToolVisibilitySnapshot {
+  filters: BrowseFilters;
+  hiddenLayers: readonly string[];
+  isolatedSelection: number | null;
+}
+
+export function sameToolVisibility(a: ToolVisibilitySnapshot, b: ToolVisibilitySnapshot): boolean {
+  return (
+    a.filters === b.filters &&
+    a.isolatedSelection === b.isolatedSelection &&
+    a.hiddenLayers.length === b.hiddenLayers.length &&
+    a.hiddenLayers.every((id, i) => id === b.hiddenLayers[i])
+  );
+}
+
+function hasMask(filters: BrowseFilters): boolean {
+  return !!(
+    filters.roots.size ||
+    filters.sources.size ||
+    filters.locals.size ||
+    filters.express.size ||
+    filters.types.length ||
+    filters.floor
+  );
+}
+
+function copyMembers<T>(members: Map<string, Set<T>>): Map<string, Set<T>> {
+  return new Map([...members].map(([id, values]) => [id, new Set(values)]));
+}
+
 function collectStoreys(tree: SpatialTreeItem) {
   const floors = new Map<number, Set<number>>();
   function visit(node: SpatialTreeItem, members?: Set<number>, parentCategory?: string | null) {
@@ -36,11 +81,8 @@ function collectStoreys(tree: SpatialTreeItem) {
   return floors;
 }
 export class ViewerToolFilters {
-  private hiddenRoots = new Set<string>();
-  private hiddenSources = new Set<string>();
-  private hiddenLocals = new Map<FragmentsModel, Set<number>>();
-  private hiddenExpress = new Map<string, Set<number>>();
-  private hiddenGuids = new Map<string, Set<string>>();
+  private filters = emptyFilters();
+  private applied = this.filters;
   private floors = new Map<string, Floor>();
   private byModel = new WeakMap<
     FragmentsModel,
@@ -73,24 +115,53 @@ export class ViewerToolFilters {
     return this.state.viewerCommands.snapshot;
   }
   get active() {
-    return !!(
-      this.hiddenRoots.size ||
-      this.hiddenSources.size ||
-      this.hiddenLocals.size ||
-      this.hiddenExpress.size ||
-      this.snap.hiddenTypes.length ||
-      this.snap.floor
-    );
+    return hasMask(this.filters) || hasMask(this.applied);
   }
-  reset(release = true) {
+
+  captureVisibility(): ToolVisibilitySnapshot {
+    const { selection, ifc } = this.state;
+    return {
+      filters: this.applied,
+      hiddenLayers: [...ifc.loadedModels]
+        .filter(([, entry]) => !entry.visible)
+        .map(([id]) => id)
+        .sort(),
+      isolatedSelection: selection.onlySelected ? (selection.selectionRequest?.id ?? null) : null,
+    };
+  }
+
+  async restoreVisibility(
+    snapshot: ToolVisibilitySnapshot,
+    restoring: () => boolean,
+  ): Promise<boolean> {
+    const session = this.state.captureProjectSession();
+    const current = () => restoring() && this.state.isCurrentSession(session);
+    if (!current()) return false;
+    const next =
+      snapshot.filters.floor && !this.floors.has(snapshot.filters.floor)
+        ? { ...snapshot.filters, floor: '', inferred: false }
+        : snapshot.filters;
+    if ((next !== this.applied || next !== this.filters) && !(await this.apply(next, current)))
+      return false;
+    if (!current()) return false;
+    const hidden = new Set(snapshot.hiddenLayers);
+    for (const { id, model } of this.models()) {
+      if (this.state.ifc.loadedModels.get(id)?.visible === hidden.has(id))
+        setSourceLayerVisibility(this.state, id, model, !hidden.has(id), false);
+    }
+    const selection = this.state.selection;
+    const only =
+      snapshot.isolatedSelection !== null &&
+      snapshot.isolatedSelection === selection.selectionRequest?.id;
+    if (selection.onlySelected !== only) await selection.setOnlySelected(only, false);
+    return current();
+  }
+
+  reset() {
     this.optionRevision++;
     this.revision++;
-    this.hiddenRoots.clear();
-    this.hiddenSources.clear();
-    this.hiddenLocals.clear();
-    this.hiddenExpress.clear();
-    this.hiddenGuids.clear();
-    if (release) this.floors.clear();
+    this.filters = this.applied = emptyFilters();
+    this.floors.clear();
     this.state.toolGeometryFilter = null;
   }
   private models() {
@@ -98,6 +169,13 @@ export class ViewerToolFilters {
       model,
       id: this.state.ifc.resolveLogicalModelId(model.modelId) ?? model.modelId,
     }));
+  }
+  async modelsChanged() {
+    const floor = this.floors.get(this.filters.floor);
+    if (floor && !this.state.ifc.loadedModels.has(floor.model)) {
+      this.snap.message = '原楼层来源已移除';
+      await this.apply({ ...this.filters, floor: '', inferred: false });
+    } else if (this.active) await this.apply();
   }
   async options() {
     const session = this.state.captureProjectSession(),
@@ -141,9 +219,21 @@ export class ViewerToolFilters {
             floorNames.set(identifier.value, field.value);
         }
         const guids = localFloors.length ? await model.getGuidsByLocalIds(localFloors) : [];
+        const counts = new Map<string, number>();
+        for (const guid of guids) if (guid) counts.set(guid, (counts.get(guid) ?? 0) + 1);
+        const spatialByGuid = new Map<string, (typeof nodes)[number] | null>();
+        for (const node of nodes) {
+          if (node.globalId)
+            spatialByGuid.set(node.globalId, spatialByGuid.has(node.globalId) ? null : node);
+        }
+        const represented = new Set<string>();
         for (const [i, local] of localFloors.entries()) {
-          const node = guids[i] ? nodes.find((n) => n.globalId === guids[i]) : undefined;
-          floors.set(JSON.stringify([id, local]), {
+          const guid = guids[i];
+          const unique = guid && counts.get(guid) === 1;
+          const node = unique ? spatialByGuid.get(guid) : undefined;
+          if (node) represented.add(node.key);
+          const key = unique ? ['guid', guid] : ['local', local];
+          floors.set(JSON.stringify([id, ...key]), {
             model: id,
             local: info.floors.get(local)!,
             spatialKey: node?.key,
@@ -151,8 +241,8 @@ export class ViewerToolFilters {
           });
         }
         for (const node of nodes) {
-          if ([...floors.values()].some((f) => f.spatialKey === node.key)) continue;
-          floors.set(JSON.stringify([id, node.key]), {
+          if (represented.has(node.key)) continue;
+          floors.set(JSON.stringify([id, 'spatial', node.key]), {
             model: id,
             spatialKey: node.key,
             local: new Set(),
@@ -170,14 +260,12 @@ export class ViewerToolFilters {
       }),
     );
     if (seq !== this.optionRevision || !this.state.isCurrentSession(session)) return;
-    const removedFloor = this.snap.floor && !floors.has(this.snap.floor);
+    const removedFloor = this.filters.floor && !floors.has(this.filters.floor);
     this.floors = floors;
     if (removedFloor) {
-      this.snap.floor = '';
-      this.snap.hasMask = this.active;
       this.snap.message = '原楼层来源已移除';
-      await this.apply();
-      if (!this.state.isCurrentSession(session)) return;
+      await this.apply({ ...this.filters, floor: '', inferred: false });
+      if (seq !== this.optionRevision || !this.state.isCurrentSession(session)) return;
     }
     this.snap.options = {
       models: options,
@@ -191,7 +279,16 @@ export class ViewerToolFilters {
     for (const id of ids) values.add(id);
     if (values.size) map.set(model, values);
   }
-  private hide() {
+  private hide(): BrowseFilters {
+    // Copy only for a new hide. Camera history retains the immutable filter value.
+    const next = {
+      ...this.filters,
+      roots: new Set(this.filters.roots),
+      sources: new Set(this.filters.sources),
+      locals: copyMembers(this.filters.locals),
+      express: copyMembers(this.filters.express),
+      guids: copyMembers(this.filters.guids),
+    };
     const selection = this.state.selection,
       scope = selection.engineeringSelection,
       target = selection.selectionRequest?.target;
@@ -200,20 +297,15 @@ export class ViewerToolFilters {
       if (
         scope.ifc.some((ref) => !ref.globalId) ||
         selection.selectionGeometry?.status === 'ambiguous'
-      )
-        this.snap.message = '范围待确认，仅隐藏已绑定的几何表示';
-      if (
-        scope.ifc.some((ref) => !ref.globalId) ||
-        selection.selectionGeometry?.status === 'ambiguous'
       ) {
         this.snap.message = '粗略或多义表示保留，仅隐藏已绑定的范围';
       }
-      for (const source of scope.sourceIds) this.hiddenSources.add(source);
+      for (const source of scope.sourceIds) next.sources.add(source);
       for (const ref of scope.ifc) {
-        this.add(this.hiddenExpress, ref.modelId, [ref.expressId]);
-        if (ref.globalId) this.add(this.hiddenGuids, ref.modelId, [ref.globalId]);
+        this.add(next.express, ref.modelId, [ref.expressId]);
+        if (ref.globalId) this.add(next.guids, ref.modelId, [ref.globalId]);
       }
-    } else if (target.kind === 'cbm') this.hiddenRoots.add(target.key);
+    } else if (target.kind === 'cbm') next.roots.add(target.key);
     else if (target.kind === 'ifc-object') {
       const match = /^ifc:(.*):object:(\d+)$/.exec(target.key);
       const model = this.models().find(
@@ -221,11 +313,11 @@ export class ViewerToolFilters {
       );
       if (!match || !model) throw Error('当前 IFC 来源未就绪');
       const id = Number(match[2]);
-      this.add(this.hiddenExpress, model.id, [id]);
+      this.add(next.express, model.id, [id]);
       const guid = this.state.ifc.regionalRuntimes
         .get(model.id)
         ?.index.objects.find((o) => o.expressId === id)?.globalId;
-      if (guid) this.add(this.hiddenGuids, model.id, [guid]);
+      if (guid) this.add(next.guids, model.id, [guid]);
     } else if (target.kind === 'ifc-element') {
       const split = target.key.lastIndexOf(':'),
         id = target.key.slice(0, split),
@@ -233,8 +325,9 @@ export class ViewerToolFilters {
       if (split < 0 || !Number.isInteger(local)) throw Error('IFC 对象身份不可用');
       const model = this.ctx.fragments.list.get(id);
       if (!model) throw Error('IFC 模型已移除');
-      this.add(this.hiddenLocals, model, [local]);
+      this.add(next.locals, this.state.ifc.resolveLogicalModelId(id) ?? id, [local]);
     } else throw Error('当前选择缺少可隐藏的范围');
+    return next;
   }
   async command(c: ViewerCommand) {
     if (c.kind === 'refreshOptions') {
@@ -246,34 +339,42 @@ export class ViewerToolFilters {
       if (row) setSourceLayerVisibility(this.state, row.id, row.model, c.visible);
       return;
     }
+    const session = this.state.captureProjectSession();
+    const history = this.state.viewState.viewHistory;
+    history?.interruptRestore();
+    let next = this.filters;
     if (c.kind === 'restore') {
-      this.reset(false);
-      this.snap.floor = '';
-      this.snap.inferred = false;
-      this.snap.hiddenTypes = [];
-      this.state.selection.setOnlySelected(false);
+      next = hasMask(next) || next.inferred ? emptyFilters() : next;
     } else if (c.kind === 'isolate') {
-      this.state.selection.setOnlySelected(true);
-      return;
-    } else if (c.kind === 'hide') this.hide();
+      await this.state.selection.setOnlySelected(true, false);
+    } else if (c.kind === 'hide') next = this.hide();
     else if (c.kind === 'type') {
-      const types = new Set(this.snap.hiddenTypes);
-      if (c.visible) types.delete(c.id);
-      else types.add(c.id);
-      this.snap.hiddenTypes = [...types];
+      if (next.types.includes(c.id) === c.visible) {
+        next = {
+          ...next,
+          types: c.visible ? next.types.filter((type) => type !== c.id) : [...next.types, c.id],
+        };
+      }
     } else if (c.kind === 'floor') {
       if (c.id && !this.floors.has(c.id)) throw Error('楼层尚未就绪');
-      this.snap.floor = c.id;
-      this.snap.inferred = c.inferred;
+      if (c.id !== next.floor || c.inferred !== next.inferred)
+        next = { ...next, floor: c.id, inferred: c.inferred };
     }
-    this.snap.hasMask = this.active;
-    await this.apply();
+    if (!this.state.isCurrentSession(session)) return;
+    if (c.kind !== 'isolate' && (next !== this.applied || next !== this.filters)) {
+      if (!(await this.apply(next))) return;
+    }
+    if (c.kind === 'restore' && this.state.selection.onlySelected)
+      await this.state.selection.setOnlySelected(false, false);
+    if (this.state.isCurrentSession(session)) history?.recordVisibility();
   }
-  async apply() {
+  async apply(next = this.filters, guard?: () => boolean): Promise<boolean> {
+    if (!guard) this.filters = next;
     const seq = ++this.revision,
       session = this.state.captureProjectSession(),
-      current = () => seq === this.revision && this.state.isCurrentSession(session);
-    const floor = this.floors.get(this.snap.floor);
+      owned = () => seq === this.revision && this.state.isCurrentSession(session),
+      current = () => owned() && (!guard || guard());
+    const floor = this.floors.get(next.floor);
     const index = getEngineeringRepresentations(this.state)?.index;
     const owners = new Set<string>(),
       cbms = new Set<string>();
@@ -284,10 +385,10 @@ export class ViewerToolFilters {
       const stack = [node],
         seen = new Set<string>();
       while (stack.length) {
-        const next = stack.pop()!;
-        if (seen.has(next.key)) continue;
-        seen.add(next.key);
-        for (const objKey of next.objectKeys) {
+        const node = stack.pop()!;
+        if (seen.has(node.key)) continue;
+        seen.add(node.key);
+        for (const objKey of node.objectKeys) {
           const obj = spatial.objectByKey.get(objKey);
           if (!obj) continue;
           spatialObjects.set(obj.expressId, obj.globalId);
@@ -296,18 +397,15 @@ export class ViewerToolFilters {
             if (owner) owners.add(owner);
           }
         }
-        for (const link of spatial.linksBySpatialKey.get(next.key) ?? [])
-          if (
-            link.confidence === 'confirmed' ||
-            (this.snap.inferred && link.confidence === 'inferred')
-          )
+        for (const link of spatial.linksBySpatialKey.get(node.key) ?? [])
+          if (link.confidence === 'confirmed' || (next.inferred && link.confidence === 'inferred'))
             cbms.add(link.cbmPath);
-        for (const k of next.childKeys) {
+        for (const k of node.childKeys) {
           const child = spatial.nodeByKey.get(k);
           if (child && child.kind !== 'storey') stack.push(child);
         }
       }
-      if (this.snap.inferred) {
+      if (next.inferred) {
         const suffix =
           '/storey:' + encodeURIComponent('floor:' + node.sourcePath + '#' + node.expressId);
         const composition = this.state.engineering.navigation?.composition;
@@ -326,13 +424,12 @@ export class ViewerToolFilters {
     }
     const masks = new Map<string, Mask>();
     for (const { model, id } of this.models()) {
-      const deny = new Set(this.hiddenLocals.get(model)),
-        express = new Set(this.hiddenExpress.get(id));
-      const guids = new Set(this.hiddenGuids.get(id));
+      const deny = new Set(next.locals.get(id)),
+        express = new Set(next.express.get(id));
+      const guids = new Set(next.guids.get(id));
       for (const g of deny.size ? await model.getGuidsByLocalIds([...deny]) : [])
         if (g) guids.add(g);
-      if (!current()) return;
-      if (guids.size) this.add(this.hiddenGuids, id, guids);
+      if (!current()) break;
       for (const l of guids.size ? await model.getLocalIdsByGuids([...guids]) : [])
         if (l !== null) deny.add(l);
       const allow = floor ? new Set(floor.model === id ? floor.local : []) : null;
@@ -344,9 +441,9 @@ export class ViewerToolFilters {
       const allowedExpress = floor
         ? new Set<number>(floor.model === id ? spatialObjects.keys() : [])
         : null;
-      if (floor || guids.size || this.snap.hiddenTypes.length)
+      if (floor || guids.size || next.types.length)
         for (const obj of this.state.ifc.regionalRuntimes.get(id)?.index.objects ?? []) {
-          if (guids.has(obj.globalId) || this.snap.hiddenTypes.includes(obj.ifcType))
+          if (guids.has(obj.globalId) || next.types.includes(obj.ifcType))
             express.add(obj.expressId);
           if (floorGuids.has(obj.globalId)) {
             allowedExpress?.add(obj.expressId);
@@ -356,12 +453,12 @@ export class ViewerToolFilters {
             }
           }
         }
-      for (const type of this.snap.hiddenTypes) {
+      for (const type of next.types) {
         for (const local of await this.membersOfType(model, type)) deny.add(local);
       }
       masks.set(id, { allow, deny, express, allowedExpress });
     }
-    if (!current()) return;
+    if (!current()) return false;
     const allowedSources = index?.sourcesForOwners(owners) ?? new Set<string>();
     if (floor && index && allowedSources.size) {
       const guids = new Map<string, Set<string>>();
@@ -378,13 +475,14 @@ export class ViewerToolFilters {
             if (n !== null) masks.get(id)?.allow?.add(n);
       }
     }
-    if (!current()) return;
+    if (!current()) return false;
+    this.filters = next;
     this.state.toolGeometryFilter =
-      floor || this.hiddenSources.size || this.hiddenRoots.size
+      floor || next.sources.size || next.roots.size
         ? (root, mesh, group) => {
-            if (this.hiddenRoots.has(root)) return false;
+            if (next.roots.has(root)) return false;
             const hint = devRepresentationHint(mesh, group);
-            if (index?.includesDev(root, hint, this.hiddenSources)) return false;
+            if (index?.includesDev(root, hint, next.sources)) return false;
             return !floor || cbms.has(root) || !!index?.includesDev(root, hint, allowedSources);
           }
         : null;
@@ -398,7 +496,7 @@ export class ViewerToolFilters {
       this.state.ifc.regionalRuntimes.get(id)?.setBrowseMask(mask.allowedExpress, mask.express);
     }
     this.state.substationConnectionPreview?.setBrowsePredicate?.(
-      this.active
+      hasMask(next)
         ? (id, n) => {
             const mask = masks.get(id);
             return (
@@ -408,6 +506,15 @@ export class ViewerToolFilters {
         : null,
     );
     await Promise.all(pending);
-    if (current()) await this.ctx.fragments.core.update(true);
+    if (!owned()) return false;
+    await this.ctx.fragments.core.update(true);
+    if (!owned()) return false;
+    this.applied = next;
+    this.snap.floor = next.floor;
+    this.snap.inferred = next.inferred;
+    this.snap.hiddenTypes = next.types;
+    this.snap.hasMask = hasMask(next);
+    if (guard && !guard()) this.state.viewState.viewHistory?.recordVisibility();
+    return current();
   }
 }

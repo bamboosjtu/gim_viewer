@@ -1,5 +1,10 @@
+import type { ViewerViewHistory } from '../viewer/viewHistory.js';
+
 export class ProjectViewState {
-  viewHistory: import('../viewer/viewHistory.js').ViewerViewHistory | null = null;
+  viewHistory: Pick<
+    ViewerViewHistory,
+    'back' | 'canGoBack' | 'clear' | 'dispose' | 'interruptRestore' | 'recordVisibility'
+  > | null = null;
   stationOverview: (() => void) | null = null;
   engineeringNavigationCleanup: (() => void) | null = null;
 

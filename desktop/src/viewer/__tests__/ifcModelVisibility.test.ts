@@ -76,3 +76,15 @@ it('composes persistent hide, floor, isolation and layer masks across detail rep
  expect([...f.visible.values()]).toEqual([true,true,false]);
  expect(f.model.object.visible).toBe(false);
 });
+
+it('reads and writes only the changed items for deny-only browse masks', async () => {
+  const f = fixture();
+  await f.runtime.setBrowseMask(null, new Set([1, 3]));
+  await f.runtime.setBrowseMask(null, new Set([1, 2, 3]));
+  await f.runtime.setBrowseMask(null, new Set([2]));
+  await f.runtime.setBrowseMask(null, new Set());
+  expect(f.model.getItemsIdsWithGeometry).not.toHaveBeenCalled();
+  expect(f.model.getVisible.mock.calls).toEqual([[[1, 3]], [[2]]]);
+  expect(f.model.setVisible.mock.calls).toEqual([[[1], false], [[2], false], [[1], true], [[2], true]]);
+  expect([...f.visible.values()]).toEqual([true, true, false]);
+});

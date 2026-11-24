@@ -32,6 +32,7 @@ export function bindViewerTools(
   const removeAxes = orientationAxes(ctx, host, matrix);
   const overlay = new ToolOverlay(ctx, host, port, matrix);
   const applied = new THREE.Matrix4();
+  let overlayActive = false;
   function applySection(s: ToolSnapshot) {
     const m = matrix();
     if (m) applied.copy(m);
@@ -46,13 +47,14 @@ export function bindViewerTools(
   };
   const draw = () => {
     const s = port.snapshot;
-    if (s.section || s.distances.length || s.first) overlay.draw();
+    const active = !!(s.section || s.distances.length || s.first);
+    if (active || overlayActive) overlay.draw();
+    overlayActive = active;
   };
   ctx.world.renderer?.onAfterUpdate?.add(draw);
   ctx.world.onBeforeUpdate?.add(updateAnchor);
   const notify = () => {
     port.notify();
-    overlay.draw();
     requestViewerRender(ctx);
   };
   port.cleanup = () => {
@@ -61,6 +63,7 @@ export function bindViewerTools(
     anchor = null;
     clip.apply();
     overlay.clear();
+    overlayActive = false;
     if (controls && originalLeft !== undefined) controls.mouseButtons.left = originalLeft;
     bindings.reset();
   };

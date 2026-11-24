@@ -4,7 +4,7 @@ import type { ViewerContext } from '../../viewer/viewerEngine.js';
 import { bindViewerTools } from '../../viewer/viewerToolRuntime.js';
 import { sceneMeshBounds, fitCameraToScene } from '../../viewer/camera.js';
 import { readIfcCoordinateAnchor } from '../../viewer/ifcCoordinateAnchor.js';
-import { ViewerToolFilters } from '../selection/viewerToolFilters.js';
+import { sameToolVisibility, ViewerToolFilters } from '../selection/viewerToolFilters.js';
 export function bindViewerToolCommands(
   state: AppState,
   ctx: ViewerContext,
@@ -28,7 +28,7 @@ export function bindViewerToolCommands(
       state.ifc.regionalRuntimes.get(added)?.setBrowseMask(new Set(), new Set());
     }
     if (filters.active)
-      void filters.apply().catch((e) => {
+      void filters.modelsChanged().catch((e) => {
         if (!state.isCurrentSession(owner)) return;
         state.viewerCommands.snapshot.message = String(e);
         state.viewerCommands.notify();
@@ -75,6 +75,14 @@ export function bindViewerToolCommands(
   });
   return {
     ...runtime,
+    visibility: {
+      getVisibility: () => filters.captureVisibility(),
+      sameVisibility: sameToolVisibility,
+      setVisibility: (
+        snapshot: ReturnType<typeof filters.captureVisibility>,
+        current: () => boolean,
+      ) => filters.restoreVisibility(snapshot, current),
+    },
     dispose() {
       state.toolModelChanged = undefined;
       runtime.dispose();

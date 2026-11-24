@@ -64,11 +64,6 @@ export function setupSelectionToolbar(state: AppState): () => void {
   const badge = document.getElementById('project-type-badge');
   if (badge) observer.observe(badge, { childList: true, subtree: true });
   state.viewerCommands.addEventListener('change', refreshVisibility);
-  const selectionStatus = document.getElementById('status-selection');
-  const statusObserver = new MutationObserver(() => {
-    toolbox.refreshSelection();
-  });
-  if (selectionStatus) statusObserver.observe(selectionStatus, { childList: true, subtree: true });
   refreshVisibility();
   const escape = (event: KeyboardEvent) => {
     const target = event.target as HTMLElement | null;
@@ -93,7 +88,6 @@ export function setupSelectionToolbar(state: AppState): () => void {
   document.addEventListener('keydown', escape);
   return () => {
     observer.disconnect();
-    statusObserver.disconnect();
     toolbox.dispose();
     state.viewerCommands.removeEventListener('change', refreshVisibility);
     document.removeEventListener('keydown', escape);

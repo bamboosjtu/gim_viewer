@@ -39,7 +39,7 @@
 
 ## 性能基线
 
-最新本地测量绑定源码提交 [`f157349`](https://github.com/bamboosjtu/gim_viewer/commit/f157349943e0f1aab7e788d47bbf63f5c5376ce1)，于 2026-11-23 在 Windows x64 固定 WebView2 下完成。每个来源计划一组冷暖配对，时间单位为秒。
+当前性能对照基线为源码提交 [`f157349`](https://github.com/bamboosjtu/gim_viewer/commit/f157349943e0f1aab7e788d47bbf63f5c5376ce1)，于 2026-11-23 在 Windows x64 固定 WebView2 下完成。每个来源计划一组冷暖配对，时间单位为秒。
 
 | 测量范围 | 记录数 | 结果 |
 | --- | ---: | --- |
@@ -47,7 +47,9 @@
 | L1 变电，4 个工程 | 8 | 6 PASS、2 PARTIAL |
 | L0 通用设计，48 个输入 | 96 | 78 PASS、8 PARTIAL、5 INPUT_ERROR、5 SKIPPED |
 
-L1 的正式批准记录对应 [`c50933d`](https://github.com/bamboosjtu/gim_viewer/commit/c50933db56c6442b136705758c1d13ba22810f6f)。本页列出 `f157349` 的最新测量记录。原始结果和批准记录保存在开发者本地工作区。[Benchmark 流程](docs/performance/benchmark.md)
+L0 有 5 个输入错误，对应的 5 个暖开未运行。已运行的有效样本没有 FAIL 或 INCONCLUSIVE。更新基线时按同一样本 SHA、场景和冷暖状态核对结果。新增 INPUT_ERROR、FAIL 或 INCONCLUSIVE 属于状态回退，须解决后再更新。
+
+L1 历史正式批准记录对应 [`c50933d`](https://github.com/bamboosjtu/gim_viewer/commit/c50933db56c6442b136705758c1d13ba22810f6f)。原始结果和批准记录保存在开发者本地工作区。[Benchmark 流程](docs/performance/benchmark.md)
 
 ### L1 线路
 
