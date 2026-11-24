@@ -839,12 +839,9 @@ export class DevLodRuntime {
     this.diagnostics.viewIndex = { ...this.viewIndex.diagnostics };
     const wanted = new Set<string>();
     this.wanted = wanted;
-    const requests: Array<Array<{ row: Occurrence; lod: DeviceLod; priority: number }>> = [
-      [],
-      [],
-      [],
-      [],
-    ];
+    const requests: Array<
+      Array<{ row: Occurrence; key: string; lod: DeviceLod; priority: number }>
+    > = [[], [], [], []];
     for (const row of this.rows.values()) {
       const selected = row.entry.rootOccurrence === this.selected;
       const terminal =
@@ -898,18 +895,19 @@ export class DevLodRuntime {
       const lod = row.desired!;
       const key = this.key(row.entry.devPath, lod);
       wanted.add(key);
+      // Keep active placements wanted for cancellation, but leave their
+      // continuation and failure handling with the scheduling turn that owns them.
+      if (row.key === key || row.failedKey === key || this.rendering.get(row)?.has(key)) continue;
       // Visible L0 outranks offscreen L0; offscreen still remains wanted and
       // is reached later (aged priority prevents permanent starvation).
       const priority = selected ? 0 : lod === 0 ? (row.inView ? 1 : 3) : 2;
-      if (row.key !== key && row.failedKey !== key) requests[priority].push({ row, lod, priority });
+      requests[priority].push({ row, key, lod, priority });
     }
     // Admit visible base work before offscreen templates can occupy the host
     // slots. Preserve source order inside each priority bucket.
     for (const bucket of requests)
-      for (const { row, lod, priority } of bucket) {
-        const key = this.key(row.entry.devPath, lod);
+      for (const { row, key, lod, priority } of bucket)
         void this.render(row, lod, priority).catch((e) => this.failed(row, e, key));
-      }
     this.worker?.cancelQueued(wanted);
     this.templateStore.templates.trim(this.pinned());
     for (const [key, waiter] of this.templateStore.templateWaiters)
