@@ -4,7 +4,7 @@
 <p>Isolated functional check of actual Workers, source extraction and cache transport.</p>
 <script type="module">
 import {EngineeringWorkerClient} from '../../src/infrastructure/workers/engineeringWorkerClient.ts';
-import {beginEngineeringBuild} from '../../src/services/engineeringService.ts';
+import {beginEngineeringBuild} from '../../src/services/engineering/engineeringService.ts';
 import {AppState} from '../../src/app/state.ts';
 
 globalThis.runEngineeringWorkerCheck = async () => {
@@ -104,7 +104,7 @@ globalThis.runEngineeringWorkerCheck = async () => {
 };
 
 globalThis.runEngineeringSourceInputCheck=async()=>{
-  const {readEngineeringSourceInput}=await import('../../src/services/engineeringSourceInput.ts');
+  const {readEngineeringSourceInput}=await import('../../src/services/engineering/engineeringSourceInput.ts');
   const {resetMeasurementRun,measurementSnapshot}=await import('../../src/measurement/runtime.ts');
   const {drainMeasuredWorker}=await import('../../src/measurement/hostWorker.ts');
   globalThis.__GIM_MEASUREMENT_CONFIG__={mode:'benchmark'};resetMeasurementRun({});
