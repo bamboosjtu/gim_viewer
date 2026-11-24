@@ -1,3 +1,4 @@
+import { cameraPoseHub } from './cameraPoseHub.js';
 import { logger } from '../utils/logger.js';
 import { observeFragmentVisualChanges } from './demandRendering.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
@@ -53,7 +54,7 @@ function safeFragmentsUpdate(
   label: string,
   force = false,
   diagnostic?: { entryPath: string; source: string; sessionId: number },
-): void {
+): Promise<void> | void {
   const endUpdate = diagnostic
     ? perfBegin(
         `变电 Fragments cache core.update(true) · ${diagnostic.entryPath}`,
@@ -78,24 +79,19 @@ function safeFragmentsUpdate(
     // 不同 OBC 版本 update 可能返回 void 或 Promise<void>
     if (result && typeof (result as Promise<void>).then === 'function') {
       outstandingFragmentsUpdateCount += 1;
-      if (endUpdate) {
-        void (result as Promise<void>).then(
+      return Promise.resolve(result)
+        .then(
           () => {
-            outstandingFragmentsUpdateCount = Math.max(0, outstandingFragmentsUpdateCount - 1);
             finishUpdate();
           },
           (err) => {
-            outstandingFragmentsUpdateCount = Math.max(0, outstandingFragmentsUpdateCount - 1);
             debugWarn(DEBUG_FRAGMENTS, `[Fragments] update failed (${label})`, err);
             finishUpdate(true);
           },
-        );
-      } else {
-        void (result as Promise<void>).catch((err) => {
-          outstandingFragmentsUpdateCount = Math.max(0, outstandingFragmentsUpdateCount - 1);
-          debugWarn(DEBUG_FRAGMENTS, `[Fragments] update failed (${label})`, err);
+        )
+        .finally(() => {
+          outstandingFragmentsUpdateCount--;
         });
-      }
     } else {
       finishUpdate();
     }
@@ -155,11 +151,29 @@ async function initializeIfcEngine(ctx: ViewerContext): Promise<void> {
     throw err;
   }
 
-  ctx.world.camera.controls?.addEventListener('update', () => {
+  let busy = false,
+    pending = false;
+  const update = () => {
+    if (busy) {
+      pending = true;
+      return;
+    }
+    pending = false;
     // 使用 safeFragmentsUpdate：相机移动触发 Fragments 重建 virtual tile 时，
     // 内部 "Malformed tile" 异常不能变成 Uncaught promise
-    safeFragmentsUpdate(ctx, 'camera-controls-update', false);
-  });
+    const result = safeFragmentsUpdate(ctx, 'camera-controls-update', false);
+    if (result) {
+      busy = true;
+      void result
+        .finally(() => {
+          busy = false;
+          if (pending) update();
+        })
+        .catch(reportBackgroundError);
+    }
+  };
+  const unsubscribe = cameraPoseHub(ctx).subscribe(update);
+  ctx.world.renderer?.onDisposed?.add(unsubscribe);
   debugLog(DEBUG_IFC_LOAD, '[IFC Engine] ready');
 }
 
@@ -230,7 +244,9 @@ export function registerModelEvents(
 
       // update(true) 强制重建 virtual tiles，最可能抛 "Malformed tile"
       // warn 中带 modelId，方便定位是哪一个 IFC 出问题
-      safeFragmentsUpdate(ctx, `model-added:${model.modelId}`, true, loadDiagnostic);
+      safeFragmentsUpdate(ctx, `model-added:${model.modelId}`, true, loadDiagnostic)?.catch(
+        reportBackgroundError,
+      );
     } catch (err) {
       logger.error(`[IFC Loader] onItemSet failed: ${runtimeModelId}`, err);
       finishModelAdded(true);

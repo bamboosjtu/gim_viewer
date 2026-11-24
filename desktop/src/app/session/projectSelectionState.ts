@@ -26,6 +26,11 @@ interface SelectionHost {
 /** User selection owns cancellation and feedback independently of project source data. */
 export class ProjectSelectionState implements ViewerSelectionState {
   constructor(private readonly host: SelectionHost) {}
+  patrolIsolation?: {
+    engineering: EngineeringSelectionScope | null;
+    representation:
+      import('../../shared/representationSelection.js').RepresentationSelectionScope | null;
+  };
   onlySelected = false;
   autoLocate = true;
   hoverCleanup: (() => void) | null = null;

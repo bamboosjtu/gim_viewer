@@ -29,6 +29,17 @@ import { container } from './dom.js';
 export interface ViewerRuntimeWithUI {
   ctx: ViewerContext;
   modelCallbacks: ModelEventCallbacks;
+  patrol?: {
+    restoreIfc: (
+      key: string,
+      request: import('../../shared/selectionContracts.js').SelectionRequest,
+    ) => Promise<void>;
+    inspect: () => Promise<void>;
+    clip: () => ((p: import('three').Vector3) => boolean) | undefined;
+    visibility: ReturnType<
+      typeof import('./viewerToolBinding.js').bindViewerToolCommands
+    >['visibility'];
+  };
 }
 
 const binding = new RetryableResource<ViewerRuntimeWithUI>();
@@ -86,6 +97,10 @@ export async function getViewerRuntimeWithUI(
 
       const runtime = await getViewerRuntime(container);
       const { ctx } = runtime;
+      if (ctx.world?.camera) {
+        const { cameraPoseHub } = await import('../../viewer/cameraPoseHub.js');
+        rollback.push(cameraPoseHub(ctx).bindSession(() => state.projectGeneration));
+      }
       const previousVisibility = state.selection.selectionVisibility,
         previousHistory = state.viewState.viewHistory;
       state.selection.selectionVisibility ??= createSelectionVisibility(state, ctx);
@@ -176,6 +191,7 @@ export async function getViewerRuntimeWithUI(
             .catch((error) => logger.warn('[DEV selection]', error));
         },
         tools,
+        state.navigation,
       );
 
       rollback.push(() => disposeSelection?.());
@@ -211,7 +227,16 @@ export async function getViewerRuntimeWithUI(
         },
       };
 
-      return { ctx, modelCallbacks };
+      return {
+        ctx,
+        modelCallbacks,
+        patrol: {
+          restoreIfc: disposeSelection.restoreIfc,
+          inspect: disposeSelection.inspect,
+          clip: tools.clipTest,
+          visibility: tools.visibility,
+        },
+      };
     } catch (error) {
       for (const dispose of rollback.reverse()) {
         try {

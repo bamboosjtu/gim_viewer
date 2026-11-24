@@ -11,9 +11,9 @@ const ownership = {
   'substation session resource release':
     'substationFineQueue substationConnectionPreview substationConnectionPorts substationResourceMonitor substationMemoryPressure',
   'geometry release and viewer cleanup':
-    'deviceUnknownBounds engineeringGeometryFilter engineeringRepresentationChanged engineeringGeometryEvidenceChanged loadedXmlModGroups loadedStlGroups geometryDiagnosticsByDevPath modRootGroup stlRootGroup projectSourceToViewerMatrix',
+    'deviceUnknownBounds engineeringGeometryFilter engineeringRepresentationChanged engineeringGeometryEvidenceChanged loadedXmlModGroups loadedStlGroups geometryDiagnosticsByDevPath modRootGroup stlRootGroup projectSourceToViewerMatrix projectCoordinateFrame',
   'toolbox port bound to the viewer; masks released on session teardown':
-    'viewerCommands toolModelChanged toolGeometryFilter',
+    'viewerCommands toolModelChanged toolGeometryFilter navigation',
   'viewer readiness across project sessions': 'initialized eventsRegistered',
 };
 

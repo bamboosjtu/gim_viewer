@@ -770,7 +770,7 @@ describe('十样本新增 primitive（docs/schema/substation-mod.md）', () => {
     );
     const doc = parseXmlMod(xml, 'MOD/new-prim.mod');
     expect(doc.entities[0].primitive).toEqual({ type: 'RotationalEllipsoid', h: 100, lr: 350, wr: 200 });
-    expect(doc.entities[1].primitive).toEqual({ type: 'BeamChannelLike', length: 1600, model: '10#' });
+    expect(doc.entities[1].primitive).toEqual({ type: 'BeamChannelLike', family:'BeamChannel', length: 1600, model: '10#' });
   });
 
   it('未识别 primitive 保留 source type 与 raw 属性', () => {

@@ -48,6 +48,7 @@ export interface SubstationConnectionPreview {
   release(): void;
 }
 
+import { ViewerNavigationCommands } from '../shared/viewerNavigationCommands.js';
 import { ViewerCommands } from '../shared/viewerCommands.js';
 import type { ProjectLoadSession } from '../shared/projectSession.js';
 import type { SessionScope } from '../shared/sessionScope.js';
@@ -67,6 +68,7 @@ export class AppState {
     | ((root: string, mesh: import('three').Mesh, group: import('three').Object3D) => boolean)
     | null = null;
   toolModelChanged?: (id?: string) => void;
+  readonly navigation = new ViewerNavigationCommands();
   readonly viewerCommands = new ViewerCommands();
   readonly ifc = new IfcRuntimeState({
     captureSession: () => this.captureProjectSession(),
@@ -189,6 +191,12 @@ export class AppState {
   // null 表示未设置（MOD/STL 将保留原始坐标，可能与 IFC 错位）。
   // 优先从 FragmentsManager.baseCoordinationMatrix 自动同步；
   // GIM_COORD_OFFSET localStorage 仍可作为手工调试入口。
+  projectCoordinateFrame: {
+    matrix: THREE.Matrix4;
+    revision: number;
+    reason: string;
+    confidence: 'manual' | 'fragments-base' | 'estimated' | 'unknown';
+  } | null = null;
   projectSourceToViewerMatrix: THREE.Matrix4 | null = null;
 
   get geometryLoadToken(): number {
@@ -275,6 +283,7 @@ export class AppState {
     this.modRootGroup = null;
     this.stlRootGroup = null;
     // 清空项目级坐标转换矩阵（新项目需重新自动同步或手动设置）
+    this.projectCoordinateFrame = null;
     this.projectSourceToViewerMatrix = null;
     this.selection.resetHighlightState();
     return true;

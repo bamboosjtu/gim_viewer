@@ -47,7 +47,7 @@
 | StretchedBody | StretchedBody | L,Array,Normal | 截面多边形端盖（Earcut）+ 侧面，沿解释后的 Normal 位移 | 无分段 | 见专节；少于 3 点或非法 Normal 返回 null |
 | PorcelainBushing | PorcelainBushing；Insulator、VTypeInsulator、ConePorcelainBushing 映射而来 | R,R1,R2,N,H | 锥柱主体 Cylinder(R2,R,H) + N 组伞裙片 | L0 仅主体，L1/L2 加伞裙；N 上限 512 | 伞裙为浏览近似，不还原真实伞形、伞间距与瓷色 |
 | TerminalBlock | TerminalBlock | L,W,H?,T,R,BL,CL,CS,RS,CN,RN,Phase | 基板 Box(L,W,T) + CN×RN 圆柱端子 | L0 仅基板，L1/L2 加端子 | 栅格>4096 不生成几何并记诊断；H、Phase 不参与几何 |
-| ChannelSteel | ChannelSteel；DoubleChannelSteel | L,Model,D?,H?,B?,T? | 外廓盒 Box(B 或 D 或 100, L, H 或 T 或 50)，长度沿 +Y | 无 LOD 变化 | 无截面型号表；L 或宽高非正返回 null；Model 仅保留 |
+| ChannelSteel | ChannelSteel；DoubleChannelSteel | L,Model,D?,H?,B?,T? | 用宽 B、高 H、腹板厚 D、翼缘厚 T 生成开口槽形，沿局部 Y 轴拉伸 | 无 LOD 变化 | 显式有效尺寸优先，缺失或不可用截面参数按浏览策略估算 |
 | Table | Table | H,LL1,LL2,TL1,TL2 | 外廓盒 Box(LL1,LL2,H)，居中 | 无 LOD 变化 | LL1、LL2、H 非正返回 null；TL1/TL2 未使用，忽略孔洞与栏栅 |
 | RectangularFixedPlate | RectangularFixedPlate（含 Rectangularfixedplate） | raw：L 或 L1、W 或 W1、T 或 H | Box(l,w,t)，底面 Z=0 | 无 | 缺字段按 1 mm 兜底，不跳过；螺栓孔忽略 |
 | OffsetRectangularTable | OffsetRectangularTable | raw 七字段：LL,LW,TL,TW,H,XOFF,YOFF | 8 顶点棱台：下矩形 XY 居中 Z=0，上矩形在 Z=H 并施加 XOFF/YOFF | 12 三角形 | 缺任一字段、非有限或非正尺寸返回 null；其他编码不支持 |
@@ -56,8 +56,12 @@
 | Wire | Wire | D,FitCoordArray | 拟合点 CatmullRom 样条管，半径 D/2 | 管段 8–256，径向 6 | 有效点少于 2 个返回 null；另叠 1px 中心线 |
 | Cable | Cable | D,StartCoord,InflectionCoordArray,EndCoord | 首末点与拐点拼合后的同样条管 | 同 Wire | 非法首末点被静默丢弃 |
 | RotationalEllipsoid | RotationalEllipsoid | H,LR,WR | 半径 0.5 的单位球按 LR、WR、H 三轴缩放（当全长） | 固定 16×8 | 每轴下限 1 mm；不是精确椭球参数化 |
-| BeamChannelLike | BeamChannel、LightBeamChannel、H、H-beam、BeamChannelLike | Length,Model | 固定盒 Box(100,Length,50)，居中 | 无 | 无型号表；Length 缺失按 1 mm 兜底 |
+| BeamChannelLike | BeamChannel、LightBeamChannel、H、H-beam | Length,Model | 槽形或 H 形截面沿源局部 Y 轴居中拉伸 | 同一截面贯穿各级 LOD | 缺尺寸走下述浏览估算；缺正长度时保留缺口 |
 | Unsupported | 其余任意标签（含非法 Boolean Type） | raw | 无 | 无 | 跳过并计入 unsupported 统计；sourceType 保留原标签，不记 empty |
+
+**型材截面浏览策略。** 单位均为 mm。显式宽、高及满足截面净空的腹板厚、翼缘厚逐项优先。`[10` 使用公称高 100、宽 48，`C10`、`10#` 在未声明系列时按相同尺寸估算，腹板、翼缘分别取 5.3 和 8.5。其他无尺寸的槽钢取高 100、宽 50，H 型钢取高 100、宽 100；腹板、翼缘默认取 5 和 8，小截面分别限至宽、高的四分之一。模型保持原始长度、放置矩阵和开口方向；无有效长度时仍标记范围未知。Ready 提示与巡视统计保留估算标记。此约定用于模型浏览，尺寸或型号完整性留给独立 Validate CLI。[热轧槽钢公称外形参考](https://en.pipemanufactory.com/hot-rolled-steel-channel-u-channel)
+
+台型垫片按原始 `TableGasket` 的底部外半径和高度定位覆盖缺口。固定板及方形垫片须有明确外形尺寸。曲线管的保守范围取各段 Catmull-Rom 三次曲线的 Bézier 控制凸包，再扩张管半径。
 
 ## 标签归一与导出器别名
 
@@ -138,7 +142,8 @@ loader 另叠一条 1px 中心线：每 Entity 一条 Line，超过 1000 条时�
 |---|---|---|
 | PorcelainBushing（含 Insulator/VTypeInsulator、ConePorcelainBushing） | 锥柱 + 均布伞裙片 | 真实伞形曲线、伞间距、瓷色、V 串双串几何 |
 | TerminalBlock | 基板 + 规则栅格端子 | 高度 H、Phase、螺孔与接线细节 |
-| ChannelSteel、Table、BeamChannelLike | 外廓盒体 | 截面型号、腹板/翼缘、孔洞、栏栅 |
+| ChannelSteel、BeamChannelLike | 拉伸开口截面 | 未提供的截面参数按浏览值估算；圆角和翼缘斜度未建模 |
+| Table | 外廓盒体 | 孔洞、栏栅 |
 | RectangularRing（SquareGasket、TableGasket） | 四块板拼合 | 圆角、密封槽、螺栓分布 |
 | RectangularFixedPlate | 矩形板 | 螺栓孔、倒角、开槽 |
 | EllipticRing | 平均半径圆环 | 椭圆长短轴差异 |
@@ -175,7 +180,7 @@ loader 另叠一条 1px 中心线：每 Entity 一条 Line，超过 1000 条时�
 - parser 接受不等于几何支持：19 个 canonical 类型都有分支，但字段缺失、NaN、非正尺寸、退化轮廓、栅格超限会得到 null 或零尺寸几何；renderableTypes 只是诊断分类，不保证该 Entity 出图。
 - 尺寸与安装测量不可用：伞裙、端子栅格、盒体、样条管、圆环只保证浏览轮廓与位置量级，不能反推设计尺寸、装配间隙或电气参数。
 - 新增类型必须同时补字段映射（含别名）、浏览几何与 LOD/近似说明、上限与失败 reason，并同步本文与 [substation-mod](substation-mod.md) 的分工；只加 parser 分支会让文件被记成 unsupported 或 partial。
-- 已知偏差：当前实现已为 ChannelSteel、Table 生成外廓盒体（早期文字说明曾记为“无直接几何”）；以本文与源码为准，其它文档与源码不一致时应同步。
+- 型材的公称值或估算值只影响浏览几何，源尺寸字段及其缺项保持可检查。
 - 颜色、可见性与材质共享只影响显示，不能据此推断设备类别、带电状态或工程归属。
 
 ## 相关文档

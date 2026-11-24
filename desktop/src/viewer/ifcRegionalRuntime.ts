@@ -8,6 +8,8 @@ interface RegionalProperties {
 }
 interface WorkerReplies {
   open: unknown;
+  'patrol-catalog': import('./patrol/ifcNavigationSource.js').IfcNavigationCatalog;
+  'patrol-mesh': ObjectFineResult;
   'prepare-region': { small: number[]; retained: number; unknown: number };
   region: ObjectFineResult[];
   properties: RegionalProperties;
@@ -15,11 +17,12 @@ interface WorkerReplies {
 type RegionalMessage =
   | { stage: string; elapsedMs?: number; records?: number; reason?: string }
   | { id: number; error?: string; data?: unknown };
-import { setRenderVisibility } from './demandRendering.js';
+import { setRenderVisibility, requestObjectRender } from './demandRendering.js';
 import measuredWorkerAsset from './ifcRegionalWorker.ts?worker&url';
 import { createMeasuredWorker, measurementWorkerUrl } from '../measurement/hostWorker.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import { beginIfcGeometryWork } from './geometryWorkGate.js';
+import { cameraPoseHub } from './cameraPoseHub.js';
 import * as THREE from 'three';
 import type { ViewerContext } from './viewerEngine.js';
 import type { RegionalIndex, RegionalObject } from './ifcRegionalData.js';
@@ -137,6 +140,8 @@ export class IfcRegionalRuntime {
   private sourceGeneration = 0;
   private memoryPressure: MemoryPressure = 'unknown';
   private busy = false;
+  private pendingView = false;
+  private unsubscribeCamera: () => void;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private interval: ReturnType<typeof setInterval>;
   private transform: THREE.Matrix4;
@@ -174,7 +179,7 @@ export class IfcRegionalRuntime {
     this.root.name = 'IFC regional detail';
     this.root.add(this.instances.root);
     options.ctx.world.scene.three.add(this.root);
-    options.ctx.world.camera.controls?.addEventListener('update', this.schedule);
+    this.unsubscribeCamera = cameraPoseHub(options.ctx).subscribe(this.scheduleView);
     window.addEventListener('gim-ifc-detail-mode', this.schedule);
     options.ctx.fragments.list.onBeforeDelete.add(this.disposed);
     this.interval = setInterval(() => {
@@ -278,7 +283,15 @@ export class IfcRegionalRuntime {
   private schedule = () => {
     if (!this.current()) return;
     this.epoch++;
-    if (this.timer) clearTimeout(this.timer);
+    this.scheduleView();
+  };
+  private scheduleView = () => {
+    if (!this.current()) return;
+    if (this.busy) {
+      this.pendingView = true;
+      return;
+    }
+    if (this.timer) return;
     this.timer = setTimeout(() => {
       this.timer = null;
       void this.update().catch((error) => logger.warn('[IFC regional]', error));
@@ -288,6 +301,41 @@ export class IfcRegionalRuntime {
     return this.options.visibility
       ? this.options.visibility.setDetailVisible(ids, visible)
       : this.options.model.setVisible(ids, visible);
+  }
+  async patrolSource<K extends 'patrol-catalog' | 'patrol-mesh'>(
+    type: K,
+    signal: AbortSignal,
+    object?: { expressId: number; globalId: string },
+  ): Promise<WorkerReplies[K]> {
+    const unlock = await acquireRegionalSource();
+    try {
+      signal.throwIfAborted();
+      if (!this.current()) throw Error('旧 IFC 工程');
+      const release = await beginIfcGeometryWork();
+      try {
+        signal.throwIfAborted();
+        if (!this.current()) throw Error('旧 IFC 工程');
+        IfcRegionalRuntime.useSource(this);
+        if (this.idleTimer) clearTimeout(this.idleTimer);
+        await this.open();
+        signal.throwIfAborted();
+        const request = object
+          ? { type, expressId: object.expressId, globalId: object.globalId }
+          : { type };
+        const cancel = () => this.closeSource();
+        signal.addEventListener('abort', cancel, { once: true });
+        try {
+          return await this.send<K>(request);
+        } finally {
+          signal.removeEventListener('abort', cancel);
+        }
+      } finally {
+        this.retainSource();
+        release();
+      }
+    } finally {
+      unlock();
+    }
   }
   private async farIds() {
     if (!this.guidIds)
@@ -401,6 +449,8 @@ export class IfcRegionalRuntime {
         return;
       }
       const ids = await this.farIds();
+      if (objects.some((o) => !this.groups.has(o.expressId)))
+        cameraPoseHub(this.options.ctx).admitted('ifc');
       let prepared = false;
       for (let start = 0; start < objects.length; start += 32) {
         if (!this.current() || epoch !== this.epoch) return;
@@ -536,7 +586,10 @@ export class IfcRegionalRuntime {
       unlock();
       releaseGeometry();
       this.busy = false;
-      if (this.current() && epoch !== this.epoch) this.schedule();
+      if (this.current() && (this.pendingView || epoch !== this.epoch)) {
+        this.pendingView = false;
+        this.scheduleView();
+      }
     }
   }
   pick(
@@ -706,6 +759,7 @@ export class IfcRegionalRuntime {
   private async refineObject(
     object: RegionalObject,
     generation: number,
+    patrolResult?: ObjectFineResult,
   ): Promise<THREE.Group | undefined> {
     const wanted = () =>
       this.current() &&
@@ -715,7 +769,7 @@ export class IfcRegionalRuntime {
     const existing = this.groups.get(object.expressId);
     if (existing?.userData.lod === 2) return existing;
     if (this.memoryPressure === 'critical') throw Error('当前内存压力过高，暂不能加载更多精细模型');
-    if (!this.fineRuntime) {
+    if (!patrolResult && !this.fineRuntime) {
       this.fineRuntime = new IfcObjectFineRuntime({
         sourcePath: this.sourcePath,
         wasm: { ...this.options.ctx.ifcLoader.settings.wasm },
@@ -737,7 +791,7 @@ export class IfcRegionalRuntime {
       name: object.name,
       provider: 'ifc-object-fine',
     };
-    const result = await this.fineRuntime.load(identity);
+    const result = patrolResult ?? (await this.fineRuntime!.load(identity));
     // Selection may have moved while the isolated IFC worker was evaluating.
     // Do not let a late result resurrect L2 after the user returned to the
     // browser representation.
@@ -793,6 +847,48 @@ export class IfcRegionalRuntime {
       lod: 2,
     });
     return group;
+  }
+  /** An articulated source leaf owns an exact, unbatched representation while open. */
+  async movePatrolLeaf(
+    id: number,
+    motion: THREE.Matrix4,
+    frame: THREE.Matrix4,
+    signal: AbortSignal,
+  ): Promise<() => void> {
+    const object = this.index.objects.find((o) => o.expressId === id);
+    if (!object || !this.permits(id) || !this.root.visible) throw Error('门扇表示不可用');
+    const existing = this.fineRequested.has(id);
+    let group = this.groups.get(id);
+    if (group?.userData.lod !== 2) {
+      if (this.finePending.has(id)) group = await this.finePending.get(id);
+      else {
+        const mesh = await this.patrolSource('patrol-mesh', signal, object);
+        signal.throwIfAborted();
+        const generation = (this.fineGeneration.get(id) ?? 0) + 1;
+        this.fineGeneration.set(id, generation);
+        this.fineRequested.add(id);
+        try {
+          group = await this.refineObject(object, generation, mesh);
+        } catch (error) {
+          if (!existing) this.releaseFine(id);
+          throw error;
+        }
+      }
+    }
+    if (!group || signal.aborted || !this.current()) {
+      if (!existing && this.current()) this.releaseFine(id);
+      throw Error('门扇表示已变更');
+    }
+    const original = group.matrix.clone();
+    group.matrix.premultiply(frame.clone().multiply(motion).multiply(frame.clone().invert()));
+    group.updateMatrixWorld(true);
+    requestObjectRender(group);
+    return () => {
+      group.matrix.copy(original);
+      group.updateMatrixWorld(true);
+      requestObjectRender(group);
+      if (!existing && this.current()) this.releaseFine(id);
+    };
   }
   /** Return one explicit object to the automatic L1/far representation. */
   releaseFine(expressId: number): void {
@@ -865,7 +961,7 @@ export class IfcRegionalRuntime {
     this.epoch++;
     if (this.timer) clearTimeout(this.timer);
     clearInterval(this.interval);
-    this.options.ctx.world.camera.controls?.removeEventListener('update', this.schedule);
+    this.unsubscribeCamera();
     window.removeEventListener('gim-ifc-detail-mode', this.schedule);
     this.options.ctx.fragments.list.onBeforeDelete.remove(this.disposed);
     this.closeSource();

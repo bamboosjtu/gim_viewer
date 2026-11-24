@@ -5,7 +5,7 @@ export function omitIfcOpeningRelations(
   bytes: Uint8Array,
   retainRelation: (id: number) => boolean = () => false,
   onRelation?: (relation: { id: number; host: number; opening: number }) => void,
-  onSpan?: (id: number, start: number, end: number) => void
+  onSpan?: (id: number, start: number, end: number) => void,
 ): number {
   let start = -1,
     quoted = false,
@@ -57,9 +57,7 @@ export function omitIfcOpeningRelations(
         while (whitespace(bytes[p])) p++;
         if (match && bytes[p] === 40) {
           const id = Number(
-            new TextDecoder()
-              .decode(bytes.subarray(start + 1, bytes.indexOf(61, start)))
-              .trim()
+            new TextDecoder().decode(bytes.subarray(start + 1, bytes.indexOf(61, start))).trim(),
           );
           onSpan?.(id, start, i + 1);
           if (onRelation) {
@@ -110,10 +108,7 @@ export function omitIfcOpeningRelations(
               if (c === 35 && depth === 0) {
                 let end = k + 1;
                 while (bytes[end] >= 48 && bytes[end] <= 57) end++;
-                refs.set(
-                  field,
-                  Number(new TextDecoder().decode(bytes.subarray(k + 1, end)))
-                );
+                refs.set(field, Number(new TextDecoder().decode(bytes.subarray(k + 1, end))));
                 k = end - 1;
               }
             }
@@ -127,8 +122,7 @@ export function omitIfcOpeningRelations(
             start = -1;
             continue;
           }
-          for (let k = start; k <= i; k++)
-            if (bytes[k] !== 10 && bytes[k] !== 13) bytes[k] = 32;
+          for (let k = start; k <= i; k++) if (bytes[k] !== 10 && bytes[k] !== 13) bytes[k] = 32;
           removed++;
         }
       }
@@ -145,20 +139,34 @@ export function omitIfcOpeningRelations(
 export class IfcOpeningRelationEditor {
   private spans: Map<number, readonly [number, number]> | null = null;
   private removed = new Set<number>();
+  private originals = new Map<number, Uint8Array>();
 
   constructor(private readonly bytes: Uint8Array) {}
+
+  restoreOriginal(): boolean {
+    for (const [start, data] of this.originals) this.bytes.set(data, start);
+    const changed = this.originals.size > 0;
+    this.originals.clear();
+    this.removed.clear();
+    return changed;
+  }
 
   omit(ids: Iterable<number>): number {
     if (!this.spans) {
       const spans = new Map<number, readonly [number, number]>();
-      omitIfcOpeningRelations(this.bytes, () => true, undefined,
-        (id, start, end) => spans.set(id, [start, end]));
+      omitIfcOpeningRelations(
+        this.bytes,
+        () => true,
+        undefined,
+        (id, start, end) => spans.set(id, [start, end]),
+      );
       this.spans = spans;
     }
     let count = 0;
     for (const id of ids) {
       const span = this.spans.get(id);
       if (!span || this.removed.has(id)) continue;
+      this.originals.set(span[0], this.bytes.slice(span[0], span[1]));
       for (let i = span[0]; i < span[1]; i++) {
         if (this.bytes[i] !== 10 && this.bytes[i] !== 13) this.bytes[i] = 32;
       }

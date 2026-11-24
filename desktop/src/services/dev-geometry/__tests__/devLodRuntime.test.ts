@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { DevLodRuntime, startDeviceLod } from '../devLodRuntime.js';
 import { AppState } from '../../../app/state.js';
 import type { ViewerContext } from '../../../viewer/viewerEngine.js';
-import { DEV_GEOMETRY_VERSION } from '../devSpatialCatalog.js';
+import { deviceTemplateCacheKey } from '../../../infrastructure/cache/devLodIdentity.js';
 import { perfProductMomentSnapshot, perfReset, perfSnapshot } from '../../../utils/perfTimings.js';
 import {ByteWorkBudget} from '../../../utils/byteWorkBudget.js';
 import {DevGlbTemplate} from '../devGlbTemplateRuntime.js';
@@ -118,7 +118,7 @@ it('isolates all engineering member roots and restores ordinary equipment select
   expect([a.visible,b.visible,c.visible]).toEqual([true,true,true]);
 });
 function occurrence(id: number, failed = false) {
-  const devPath = `DEV/${id}.dev`, key = `${DEV_GEOMETRY_VERSION}|sha|${devPath.toLowerCase()}|lod0`;
+  const devPath = `DEV/${id}.dev`, key = deviceTemplateCacheKey('sha',devPath,0);
   return { entry: { devPath, templateStatus: failed ? 'failed' : 'ready' }, inView: true,
     desired: 0, browseDesired: 0, displayed: 0, key: failed ? undefined : key,
     failedKey: failed ? key : undefined, group: failed ? undefined : new THREE.Group() };
@@ -203,7 +203,7 @@ it('indexed view candidates preserve visible and selected detail under pressure 
     new THREE.Box3(new THREE.Vector3(90,90,90),new THREE.Vector3(100,100,100))];
   const rows = [0,1,2,3].map(id => ({...occurrence(id), box: id === 3 ? null : boxes[id === 0 ? 0 : 1],
     entry: {...occurrence(id).entry, rootOccurrence: String(id)}, displayed: 1,
-    key: `${DEV_GEOMETRY_VERSION}|sha|dev/${id}.dev|lod1`, group: id === 3 ? undefined : new THREE.Group()}));
+    key: deviceTemplateCacheKey('sha',`dev/${id}.dev`,1), group: id === 3 ? undefined : new THREE.Group()}));
   rows.forEach((row, i) => {internal.rows.set(String(i), row); internal.viewIndex.set(String(i), row.box);});
   internal.selected = '2';
   runtime.setExternalMemoryPressure('critical'); internal.update();
@@ -471,7 +471,7 @@ it('late failures cannot poison a newer LOD request; explicit refinement retries
   internal.render = vi.fn(async () => {
     expect(row.failedKey).toBeUndefined();
     row.group = new THREE.Group(); row.entry.templateStatus = 'ready';
-    row.key = `${DEV_GEOMETRY_VERSION}|sha|dev/1.dev|lod2`;
+    row.key = deviceTemplateCacheKey('sha','dev/1.dev',2);
     internal.ready();
   });
   internal.anchor = new THREE.Matrix4();
@@ -505,10 +505,10 @@ it('ordinary selection stays at L0/L1 and only explicit refinement requests L2',
   internal.rows.set('root', row);
   internal.anchor = new THREE.Matrix4();
   const lods: number[] = [];
-  internal.render = vi.fn(async (_row: any, lod: number) => {
+  internal.render = vi.fn(async (_row: any, lod: 0 | 1 | 2) => {
     lods.push(lod);
     row.group = new THREE.Group();
-    row.key = `${DEV_GEOMETRY_VERSION}|sha|dev/3.dev|lod${lod}`;
+    row.key = deviceTemplateCacheKey('sha','dev/3.dev',lod);
     row.displayed = lod;
     row.entry.templateStatus = 'ready';
   });
@@ -543,7 +543,7 @@ it('does not turn a browseable L0/L1 group into a base failure when explicit L2 
   row.displayed = 1;
   row.browseDesired = 1;
   row.desired = 1;
-  row.key = `${DEV_GEOMETRY_VERSION}|sha|dev/9.dev|lod1`;
+  row.key = deviceTemplateCacheKey('sha','dev/9.dev',1);
   internal.rows.set('root', row);
   internal.anchor = new THREE.Matrix4();
   internal.render = vi.fn(async () => { throw new Error('fine CSG failed'); });
@@ -561,8 +561,8 @@ it('retries one failed DEV browser task without clearing other occurrences', asy
   const failed = occurrence(10, true), other = occurrence(11);
   internal.rows.set('failed', failed); internal.rows.set('other', other);
   internal.anchor = new THREE.Matrix4();
-  internal.render = vi.fn(async (row: any, lod: number) => {
-    row.group = new THREE.Group(); row.key = `${DEV_GEOMETRY_VERSION}|sha|${row.entry.devPath.toLowerCase()}|lod${lod}`;
+  internal.render = vi.fn(async (row: any, lod: 0 | 1 | 2) => {
+    row.group = new THREE.Group(); row.key = deviceTemplateCacheKey('sha',row.entry.devPath,lod);
     row.displayed = lod; row.entry.templateStatus = 'ready';
   });
   await runtime.retry('failed');
@@ -576,8 +576,8 @@ it('moving from one selected device to another releases the old fine request', a
   const a = occurrence(4), b = occurrence(5);
   internal.rows.set('a', a); internal.rows.set('b', b);
   internal.anchor = new THREE.Matrix4();
-  internal.render = vi.fn(async (row: any, lod: number) => {
-    row.group = new THREE.Group(); row.key = `${DEV_GEOMETRY_VERSION}|sha|${row.entry.devPath.toLowerCase()}|lod${lod}`;
+  internal.render = vi.fn(async (row: any, lod: 0 | 1 | 2) => {
+    row.group = new THREE.Group(); row.key = deviceTemplateCacheKey('sha',row.entry.devPath,lod);
     row.displayed = lod; row.entry.templateStatus = 'ready';
   });
   await runtime.refine('a');

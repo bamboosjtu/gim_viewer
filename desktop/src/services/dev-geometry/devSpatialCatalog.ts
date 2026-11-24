@@ -1,6 +1,7 @@
 import { GEOMETRY_CACHE_VERSION as DEV_GEOMETRY_VERSION } from '@desktop/contracts.js';
 export { DEV_GEOMETRY_VERSION };
 import * as THREE from 'three';
+import { steelSection } from '../../gim/geometry/steelSection.js';
 import { stretchedBodyDisplacement } from '../../gim/geometry/stretchedBody.js';
 import { offsetRectangularTableVertices } from '../../gim/geometry/offsetRectangularTable.js';
 import type { XmlModPrimitive } from '../../gim/geometry/ir.js';
@@ -16,6 +17,7 @@ export interface DevSourceBounds {
   sourceBounds: BoundsTuple | null; // DEV local metres, without CBM or IFC anchor
   boundsQuality: 'conservative' | 'unknown' | 'empty';
   primitiveCounts: Record<string, number>;
+  estimatedSteelSections?: number;
   unsupportedTypes: string[];
   absoluteConeCount?: number;
   diagnostic?: string;
@@ -43,6 +45,15 @@ export function boxTuple(tuple: BoundsTuple): THREE.Box3 {
 export function primitiveBounds(p: XmlModPrimitive): THREE.Box3 | null {
   const radial = (r: number, z0: number, z1: number) => new THREE.Box3(v(-r, -r, z0), v(r, r, z1));
   switch (p.type) {
+    case 'BeamChannelLike':
+    case 'ChannelSteel': {
+      const s = steelSection(p);
+      if (!s) return null;
+      return new THREE.Box3(
+        v(-s.width / 2, -s.length / 2, -s.height / 2),
+        v(s.width / 2, s.length / 2, s.height / 2),
+      );
+    }
     case 'Cuboid':
       return new THREE.Box3(v(-p.l / 2, -p.w / 2, 0), v(p.l / 2, p.w / 2, p.h));
     case 'Cylinder':
@@ -97,14 +108,116 @@ export function primitiveBounds(p: XmlModPrimitive): THREE.Box3 | null {
       return null;
   }
 }
-export function documentBounds(doc: XmlModDocument): { box: THREE.Box3; unknown: boolean } {
+/** Bounds for an incomplete navigation source only. These ranges never become collision surfaces. */
+function patrolPrimitiveRange(p: XmlModPrimitive): THREE.Box3 | null {
+  const known = primitiveBounds(p);
+  if (known) return known;
+  if (p.type === 'RectangularFixedPlate' || p.type === 'RectangularRing') {
+    const a = p.raw;
+    if (p.type === 'RectangularRing' && p.sourceForm === 'TableGasket') {
+      const outer = Number(a.OR),
+        top = Number(a.TR),
+        inner = Number(a.IR),
+        height = Number(a.H);
+      if (
+        ![outer, top, inner, height].every(Number.isFinite) ||
+        !(outer > top && top > inner && inner > 0 && height > 0)
+      )
+        return null;
+      return new THREE.Box3(v(-outer, -outer, 0), v(outer, outer, height));
+    }
+    const dims =
+      p.type === 'RectangularFixedPlate'
+        ? [Number(a.L ?? a.L1), Number(a.W ?? a.W1), Number(a.T ?? a.H)]
+        : [Number(a.L1), Number(a.W1), Number(a.H ?? a.T)];
+    if (!dims.every((n) => Number.isFinite(n) && n > 0)) return null;
+    const [l, w, h] = dims;
+    return new THREE.Box3(v(-l / 2, -w / 2, -h), v(l / 2, w / 2, h));
+  }
+  if (
+    p.type === 'RotationalEllipsoid' &&
+    [p.lr, p.wr, p.h].every((n) => Number.isFinite(n) && n > 0)
+  ) {
+    const half = v(Math.max(1, p.lr), Math.max(1, p.wr), Math.max(1, p.h)).multiplyScalar(0.5);
+    return new THREE.Box3(half.clone().negate(), half);
+  }
+  if (p.type === 'Wire' || p.type === 'Cable') {
+    const coords = p.type === 'Wire' ? p.fitPoints : p.inflectionPoints;
+    if (
+      coords.length < 6 ||
+      coords.length % 3 ||
+      !coords.every(Number.isFinite) ||
+      !(p.d > 0 && Number.isFinite(p.d))
+    )
+      return null;
+    const points: THREE.Vector3[] = [];
+    for (let i = 0; i < coords.length; i += 3)
+      points.push(new THREE.Vector3().fromArray(coords, i));
+    const curve = new THREE.CatmullRomCurve3(points),
+      box = new THREE.Box3().setFromPoints(points);
+    const spans = points.length - 1;
+    for (let i = 0; i < spans; i++) {
+      // Recover the two interior Bézier controls of this cubic. The convex hull
+      // encloses the complete spline, including overshoot between fit points.
+      const a = points[i],
+        d = points[i + 1];
+      const u = curve
+        .getPoint((i + 1 / 3) / spans)
+        .multiplyScalar(27)
+        .addScaledVector(a, -8)
+        .sub(d);
+      const w = curve
+        .getPoint((i + 2 / 3) / spans)
+        .multiplyScalar(27)
+        .sub(a)
+        .addScaledVector(d, -8);
+      box.expandByPoint(
+        u
+          .clone()
+          .multiplyScalar(2)
+          .sub(w)
+          .multiplyScalar(1 / 18),
+      );
+      box.expandByPoint(
+        w
+          .multiplyScalar(2)
+          .sub(u)
+          .multiplyScalar(1 / 18),
+      );
+    }
+    const roundoff = 32 * Number.EPSILON * Math.max(1, box.min.length(), box.max.length());
+    return box.expandByScalar(Math.max(p.d / 2, 1e-6) + roundoff);
+  }
+  if (p.type === 'Unsupported') {
+    const a = p.raw;
+    if (p.sourceType === 'FlatSteel') {
+      const model = /^(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)$/i.exec(a.Model ?? '');
+      const dims = [Number(a.Length), Number(model?.[1]), Number(model?.[2])];
+      if (!model || !dims.every((n) => Number.isFinite(n) && n > 0)) return null;
+      const r = Math.hypot(...dims);
+      return new THREE.Box3(v(-r, -r, -r), v(r, r, r));
+    }
+    if (
+      (p.sourceType === 'GimGeCableSymbolicCurve' && ['标注线', '标高线'].includes(a.Category)) ||
+      (p.sourceType === 'GimGeCableConcentration' && a.Description === '接线点')
+    ) {
+      const r = Number(a.L ?? a.D);
+      if (Number.isFinite(r) && r > 0) return new THREE.Box3(v(-r, -r, -r), v(r, r, r));
+    }
+  }
+  return null;
+}
+export function documentBounds(
+  doc: XmlModDocument,
+  patrolRange = false,
+): { box: THREE.Box3; unknown: boolean } {
   const box = new THREE.Box3(),
     byId = new Map<number, THREE.Box3>();
   const entities = new Map(doc.entities.map((e) => [e.id, e]));
   let unknown = doc.malformedEntityCount > 0;
   for (const e of doc.entities) {
     if (e.primitive.type === 'Boolean') continue;
-    const bounds = primitiveBounds(e.primitive);
+    const bounds = patrolRange ? patrolPrimitiveRange(e.primitive) : primitiveBounds(e.primitive);
     if (!bounds || !tupleBox(bounds)) {
       if (e.visible) unknown = true;
       continue;
@@ -174,6 +287,7 @@ export async function buildDevSourceBounds(
   files: Map<string, File>,
   parse: (text: string, path: string) => XmlModDocument,
   discovery: import('./modGeometryDiscovery.js').GeometryDiscoveryOptions = {},
+  patrolRange = false,
 ): Promise<DevSourceBounds> {
   const result: DevSourceBounds = {
     devPath,
@@ -198,7 +312,7 @@ export async function buildDevSourceBounds(
       const file = getFileByPath(files, edge.modPath);
       if (!file) throw Error(`Source missing: ${edge.modPath}`);
       const doc = parse(await file.text(), edge.modPath),
-        bounds = documentBounds(doc);
+        bounds = documentBounds(doc, patrolRange);
       for (const e of doc.entities)
         if (e.primitive.type === 'StretchedBody') {
           const mode =
@@ -213,6 +327,11 @@ export async function buildDevSourceBounds(
         );
       for (const e of doc.entities)
         if (e.visible) {
+          if (
+            (e.primitive.type === 'ChannelSteel' || e.primitive.type === 'BeamChannelLike') &&
+            steelSection(e.primitive)?.estimated
+          )
+            result.estimatedSteelSections = (result.estimatedSteelSections ?? 0) + 1;
           if (e.primitive.type === 'TruncatedCone' && e.primitive.tr > 1)
             result.absoluteConeCount = (result.absoluteConeCount ?? 0) + 1;
           const type =

@@ -8,6 +8,22 @@ interface IfcRuntimeHost {
   entries(): readonly IfcEntry[];
 }
 /** Session-owned registry; late deletion must only remove its own runtime address. */
+class RegionalSources extends Map<string, IfcRegionalRuntime> {
+  revision = 0;
+  override set(key: string, value: IfcRegionalRuntime) {
+    if (this.get(key) !== value) this.revision++;
+    return super.set(key, value);
+  }
+  override delete(key: string) {
+    const removed = super.delete(key);
+    if (removed) this.revision++;
+    return removed;
+  }
+  override clear() {
+    if (this.size) this.revision++;
+    super.clear();
+  }
+}
 export class IfcRuntimeState {
   readonly runtimeModelIds = new Map<string, string>();
   readonly logicalModelIds = new Map<string, string>();
@@ -16,7 +32,7 @@ export class IfcRuntimeState {
     string,
     { modelId: string; runtimeModelId: string; visible: boolean }
   >();
-  readonly regionalRuntimes = new Map<string, IfcRegionalRuntime>();
+  readonly regionalRuntimes = new RegionalSources();
   constructor(private readonly host: IfcRuntimeHost) {}
   getRuntimeModelId(
     logicalModelId: string,

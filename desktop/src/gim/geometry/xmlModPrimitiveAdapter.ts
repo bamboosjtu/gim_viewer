@@ -79,8 +79,9 @@ export function mapXmlModPrimitive(
         h: firstNumericAttr(attrs, ['H'], 1),
       };
     case 'SquareGasket':
-    case 'TableGasket':
       return { type: 'RectangularRing', raw: attrs };
+    case 'TableGasket':
+      return { type: 'RectangularRing', sourceForm: 'TableGasket', raw: attrs };
     case 'EllipticRing': {
       const lr = firstNumericAttr(attrs, ['LR'], 1);
       const wr = firstNumericAttr(attrs, ['WR'], lr);
@@ -150,6 +151,7 @@ export function mapXmlModPrimitive(
     case 'H':
       return {
         type: 'BeamChannelLike',
+        family: canonicalName,
         length: num(attrs, 'Length'),
         model: attrs['Model'] ?? '',
       };

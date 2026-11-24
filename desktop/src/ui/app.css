@@ -501,6 +501,12 @@
 
 /* The toolbar responds to the remaining canvas after either side panel changes width. */
 #viewport {container-type:inline-size}
+.patrol-panel:not([hidden]) {position:absolute;z-index:5;bottom:58px;left:50%;transform:translateX(-50%);width:max-content;max-width:calc(100% - 32px);box-sizing:border-box;display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:6px;padding:6px 9px;border:1px solid #cdd7e4;border-radius:8px;background:#fff;color:#34465e;box-shadow:0 3px 10px #23395926;font:inherit;font-size:12px}
+.patrol-panel [role=status] {min-width:0;overflow-wrap:anywhere}
+.patrol-panel button {font:inherit;white-space:nowrap;padding:4px 8px;border:1px solid #cdd7e4;border-radius:5px;background:#f6f9fd;color:inherit;cursor:pointer}
+.patrol-panel button:hover {background:#eaf1f9;color:#184c96}
+.patrol-crosshair {position:absolute;z-index:15;left:50%;top:50%;transform:translate(-50%,-50%);color:white;text-shadow:0 0 3px black;pointer-events:none;font:24px/1 monospace}
+.patrol-panel[hidden],.patrol-panel button[hidden],.patrol-crosshair[hidden] {display:none}
 #selection-toolbar {
   position:absolute; top:8px; left:8px; z-index:5; width:calc(100% - 16px); max-width:1100px;
   display:flex; flex-direction:column; color:#253751; background:linear-gradient(180deg,#fff,#f6f9fd);
@@ -508,6 +514,13 @@
 }
 #main:has(#props-drawer.collapsed) #selection-toolbar {width:calc(100% - 105px)}
 .viewer-tool-tabs {display:grid; grid-template-columns:3fr 4fr 3fr 1.2fr 2fr; align-items:stretch; padding:7px 2px}
+.viewer-tool-tabs:has([data-icon=patrol]:not([hidden])) {grid-template-columns:3fr 4fr 3fr 1.2fr 3fr}
+@container (max-width:700px) {
+  .viewer-tool-tabs:has([data-icon=patrol]:not([hidden])) {grid-template-columns:3fr 4fr 3fr minmax(40px,1.35fr) 3fr}
+  .viewer-tool-tabs .viewer-group-heading {white-space:nowrap;padding-inline:2px;gap:3px}
+}
+#viewport:is([data-navigation=walking],[data-navigation=paused],[data-navigation=inspecting],[data-navigation=returning]) .viewer-camera-dock {display:none}
+.viewer-ribbon-actions .viewer-glyph[hidden] {display:none}
 .viewer-ribbon-group {min-width:0; padding:0 6px; border-inline-end:1px solid #cbd5e1}
 .viewer-ribbon-group:last-child {border:0}
 .viewer-ribbon-actions {display:flex;align-items:stretch;justify-content:space-around;gap:2px}

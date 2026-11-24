@@ -1,10 +1,13 @@
 import type { ViewerViewHistory } from '../viewer/viewHistory.js';
 
 export class ProjectViewState {
-  viewHistory: Pick<
-    ViewerViewHistory,
-    'back' | 'canGoBack' | 'clear' | 'dispose' | 'interruptRestore' | 'recordVisibility'
-  > | null = null;
+  viewHistory:
+    | (Pick<
+        ViewerViewHistory,
+        'back' | 'canGoBack' | 'clear' | 'dispose' | 'interruptRestore' | 'recordVisibility'
+      > &
+        Partial<Pick<ViewerViewHistory, 'suspend' | 'resume' | 'flush'>>)
+    | null = null;
   stationOverview: (() => void) | null = null;
   engineeringNavigationCleanup: (() => void) | null = null;
 

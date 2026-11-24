@@ -1,3 +1,4 @@
+import { cameraPoseHub } from './cameraPoseHub.js';
 import * as THREE from 'three';
 import type { ViewerContext } from './viewerEngine.js';
 
@@ -35,6 +36,8 @@ function sameCamera<Visibility>(
 export class ViewerViewHistory<Visibility = string> {
   private readonly stack: ViewSnapshot<Visibility>[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private suspended = false;
+  private readonly unsubscribe: () => void;
   private restoring = false;
   private generation = 0;
   private disposed = false;
@@ -43,7 +46,7 @@ export class ViewerViewHistory<Visibility = string> {
     this.cancelRestore?.();
   };
   private readonly onCameraUpdate = (): void => {
-    if (this.restoring || this.disposed) return;
+    if (this.suspended || this.restoring || this.disposed) return;
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
       this.timer = null;
@@ -61,12 +64,15 @@ export class ViewerViewHistory<Visibility = string> {
           addEventListener?: (type: string, listener: () => void) => void;
         })
       | undefined;
-    controls?.addEventListener?.('update', this.onCameraUpdate);
+    this.unsubscribe = cameraPoseHub(ctx).subscribe(({ owner }) => {
+      if (owner.source === 'orbit') this.onCameraUpdate();
+    });
     controls?.addEventListener?.('controlstart', this.onControlStart);
     this.record();
   }
 
   get canGoBack(): boolean {
+    if (this.suspended) return false;
     if (this.restoring || this.disposed) return false;
     return (
       this.stack.length >= 2 ||
@@ -99,7 +105,7 @@ export class ViewerViewHistory<Visibility = string> {
   }
 
   private record(): void {
-    if (this.disposed) return;
+    if (this.suspended || this.disposed) return;
     const next = this.snapshot();
     if (!next) return;
     const previous = this.stack[this.stack.length - 1];
@@ -111,6 +117,7 @@ export class ViewerViewHistory<Visibility = string> {
   }
 
   async back(): Promise<boolean> {
+    if (this.suspended) return false;
     if (this.restoring || this.disposed) return false;
     const controls = this.ctx.world.camera.controls;
     if (!controls?.setLookAt) return false;
@@ -216,11 +223,28 @@ export class ViewerViewHistory<Visibility = string> {
     if (!this.restoring) this.record();
   }
 
+  flush(): void {
+    if (this.timer !== null) {
+      clearTimeout(this.timer);
+      this.timer = null;
+      this.record();
+    }
+  }
+  suspend(): void {
+    this.interruptRestore();
+    this.flush();
+    this.suspended = true;
+  }
+  resume(): void {
+    this.suspended = false;
+  }
+
   interruptRestore(): void {
     this.cancelRestore?.();
   }
 
   clear(): void {
+    this.suspended = false;
     this.generation++;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
@@ -242,7 +266,7 @@ export class ViewerViewHistory<Visibility = string> {
           removeEventListener?: (type: string, listener: () => void) => void;
         })
       | undefined;
-    controls?.removeEventListener?.('update', this.onCameraUpdate);
+    this.unsubscribe();
     controls?.removeEventListener?.('controlstart', this.onControlStart);
   }
 }

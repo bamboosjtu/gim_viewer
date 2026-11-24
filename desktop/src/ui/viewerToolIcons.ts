@@ -1,6 +1,8 @@
 const paths = {
   home: 'm2 11 10-8 10 8 M5 10v11h5v-7h4v7h5V10',
   orbit: 'M20 9a8 8 0 1 0 0 6 M20 4v5h-5 M10 10l4-2 4 2-4 2z M10 10v4l4 2 4-2v-4m-4 2v4',
+  patrol:
+    'M15.4 4a1.7 1.7 0 1 1-3.4 0 1.7 1.7 0 0 1 3.4 0z M5.5 12l2-4 4.3-1 3.2 4 4 1 M12 7.5l-2.3 6.2 4.5 3.3 1.8 4.3 M10.1 13.4l-1.6 4.1-3.8 3',
   pan: 'M6 12V6a1.5 1.5 0 0 1 3 0v5-7a1.5 1.5 0 0 1 3 0v7-8a1.5 1.5 0 0 1 3 0v8-6a1.5 1.5 0 0 1 3 0v8c0 5-2 8-6 8h-1c-2 0-3-1-5-4l-3-4c-1-2 0-3 2-2l3 3',
   zoomIn: 'M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0z M15 15l6 6 M10 6v8m-4-4h8',
   zoomOut: 'M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0z M15 15l6 6 M6 10h8',
@@ -37,6 +39,7 @@ export function toolGlyph(button: HTMLElement, icon: ToolIcon, label: string, he
     vertical: '垂直剖切',
     distance: '距离',
     home: '复位',
+    patrol: '巡视',
     view: '标准视角',
   };
   caption.textContent = captions[icon] ?? label;

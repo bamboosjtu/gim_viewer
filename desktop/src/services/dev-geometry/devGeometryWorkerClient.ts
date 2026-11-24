@@ -1103,7 +1103,12 @@ export class DevGeometryPreprocessor {
             noSplit:
               task.noSplit || this.memoryPressure === 'high' || this.memoryPressure === 'critical',
           };
-        } else message = { ...address, kind: 'bounds' };
+        } else
+          message = {
+            ...address,
+            kind: 'bounds',
+            ...(task.key.startsWith('patrol-range:') ? { patrolRange: true } : {}),
+          };
         worker.postMessage(message, transfer);
         task.measuredContext = measurementWorkerTask(worker);
         for (const owner of task.measuredInputs ?? [])
@@ -1342,6 +1347,9 @@ export class DevGeometryPreprocessor {
     traceId?: string,
   ): Promise<DevGlbSerializationResult> {
     return this.request('compile', path, lod, key, priority, traceId);
+  }
+  patrolRange(path: string): Promise<DevSourceBounds> {
+    return this.request('bounds', path, 0, 'patrol-range:' + path.toLowerCase(), 1);
   }
   bounds(path: string): Promise<DevSourceBounds> {
     return this.request('bounds', path, 0, `bounds:${path.toLowerCase()}`, 0.4);

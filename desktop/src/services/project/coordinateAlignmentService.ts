@@ -151,6 +151,12 @@ export async function syncProjectSourceToViewerFromFragments(
   // 应用顺序：先旋转 GIM 几何到 Y-up，再用 baseCoordinationMatrix 平移到 viewer 原点
   const combined = base.clone().multiply(Z_UP_TO_Y_UP);
   if (!isCurrent()) return false;
+  state.projectCoordinateFrame = {
+    matrix: combined,
+    revision: (state.projectCoordinateFrame?.revision ?? 0) + 1,
+    reason: baseModelId,
+    confidence: 'fragments-base',
+  };
   state.projectSourceToViewerMatrix = combined;
   state.deviceLodRuntime?.notifyCoordinateAnchor?.();
 
@@ -206,6 +212,12 @@ export function loadManualCoordOffsetFromLocalStorage(state: AppState): boolean 
 
   const [dx, dy, dz] = nums;
   const alignment = makeTranslationAlignment(dx, dy, dz);
+  state.projectCoordinateFrame = {
+    matrix: alignment.sourceToViewer,
+    revision: (state.projectCoordinateFrame?.revision ?? 0) + 1,
+    reason: alignment.reason,
+    confidence: 'manual',
+  };
   state.projectSourceToViewerMatrix = alignment.sourceToViewer;
 
   debugLog(

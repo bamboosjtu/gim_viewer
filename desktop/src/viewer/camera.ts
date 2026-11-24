@@ -1,5 +1,6 @@
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import { logger } from '../utils/logger.js';
+import { cameraPoseHub } from './cameraPoseHub.js';
 import * as THREE from 'three';
 import type { ViewerContext } from './viewerEngine.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
@@ -62,6 +63,7 @@ export function fitCameraToScene(
   state: { hasFittedCamera: boolean },
   options?: { force?: boolean },
 ): boolean {
+  if (cameraPoseHub(ctx).current.source !== 'orbit') return false;
   if (state.hasFittedCamera && !options?.force) {
     debugLog(DEBUG_IFC_LOAD, '[Camera] fitCameraToScene skipped: hasFittedCamera=true');
     return false;
@@ -161,6 +163,7 @@ export function fitCameraToStationOverview(
   state: { hasFittedCamera: boolean },
   options?: { force?: boolean; farPlane?: number; fillFraction?: number },
 ): boolean {
+  if (cameraPoseHub(ctx).current.source !== 'orbit') return false;
   if (state.hasFittedCamera && !options?.force) {
     debugLog(DEBUG_IFC_LOAD, '[Camera] station overview skipped: hasFittedCamera=true');
     return false;
@@ -271,11 +274,18 @@ export async function frameBox(
     (size.length() * 0.6) / Math.tan(fov / 2) / Math.min(1, aspect),
   );
   const position = center.clone().addScaledVector(direction, distance);
+  const hub = cameraPoseHub(ctx),
+    token = hub.current;
+  if (token.source !== 'orbit') return;
   let abort!: () => void;
   const interrupted = new Promise<void>((resolve) => {
     abort = resolve;
   });
   const cancel = (): void => {
+    if (hub.current !== token) {
+      abort();
+      return;
+    }
     // CameraControls.stop() snaps to its old end target. Freeze the current
     // position/target first, so a subsequent empty selection retains the view.
     if (controls.getPosition && controls.getTarget) {

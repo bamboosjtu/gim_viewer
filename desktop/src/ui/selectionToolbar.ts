@@ -1,3 +1,4 @@
+import { mountPatrolOverlay } from './patrolOverlay.js';
 import { toolGlyph } from './viewerToolIcons.js';
 import { mountViewerToolbox } from './viewerToolbox.js';
 import { logger } from '../utils/logger.js';
@@ -46,8 +47,12 @@ export function setupSelectionToolbar(state: AppState): () => void {
   };
   clear.addEventListener('click', clearSelection);
   const toolbox = mountViewerToolbox(state, bar, viewport, [locate, clear]);
+  const group = bar.querySelector<HTMLElement>('[data-group="view"] .viewer-ribbon-actions');
+  const patrol =
+    group && state.navigation ? mountPatrolOverlay(state.navigation, group, viewport) : null;
   viewport.append(bar);
   const refreshVisibility = () => {
+    if (patrol) patrol.enter.hidden = state.currentProjectType !== 'substation';
     viewport.classList.toggle(
       'has-3d-tools',
       state.currentProjectType !== 'transmission_line' &&
@@ -88,6 +93,7 @@ export function setupSelectionToolbar(state: AppState): () => void {
   document.addEventListener('keydown', escape);
   return () => {
     observer.disconnect();
+    patrol?.dispose();
     toolbox.dispose();
     state.viewerCommands.removeEventListener('change', refreshVisibility);
     document.removeEventListener('keydown', escape);

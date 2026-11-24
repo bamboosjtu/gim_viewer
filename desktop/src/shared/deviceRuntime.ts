@@ -14,6 +14,9 @@ export type DeviceRuntime = {
   refine?(rootOccurrence: string): Promise<THREE.Group[]>;
   releaseFine?(rootOccurrence: string): void;
   setOnlySelected?(only: boolean): void;
+  patrolDirectory?(
+    signal: AbortSignal,
+  ): Promise<import('../viewer/patrol/navigationQueryPort.js').PatrolDirectory>;
   release(): void;
   clearSelection(): void;
   notifyCoordinateAnchor?(): void;

@@ -1,3 +1,4 @@
+import { cameraPoseHub } from './cameraPoseHub.js';
 import CameraControls from 'camera-controls';
 import { orientationAxes } from './orientationAxes.js';
 import * as THREE from 'three';
@@ -69,6 +70,8 @@ export function bindViewerTools(
   };
   port.execute = async (c) => {
     const s = port.snapshot;
+    const owner = cameraPoseHub(ctx).current;
+    if (owner.source === 'patrol') return;
     const seq = ++revision;
     s.message = '';
     if (c.kind === 'camera') {
@@ -96,7 +99,7 @@ export function bindViewerTools(
         )[c.action];
         const v = new THREE.Vector3(...dir);
         const frame = matrix() ?? (await bindings.resolveAnchor());
-        if (seq !== revision) return;
+        if (seq !== revision || cameraPoseHub(ctx).current !== owner) return;
         if (frame) v.transformDirection(frame);
         else v.applyAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
         const target = controls.getTarget(new THREE.Vector3()),

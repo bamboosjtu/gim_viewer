@@ -81,7 +81,7 @@ L2 使用递归精确 CSG；失败后的轮廓回退仍报告 partial。可见�
 ## 边界
 
 - XML 是设计/导出表达，不是施工安装真值；不能据浏览几何反推尺寸、间隙或电气参数。
-- `ChannelSteel`、`Table` 当前生成外廓盒体；早期“无直接几何”的描述已失效，以 [XML primitive](xml-primitives.md) 与源码为准。
+- `ChannelSteel` 使用源尺寸或默认参数生成开口槽形；`Table` 采用外廓盒体。详见 [XML 图元与截面估算](xml-primitives.md)。
 - 颜色/材质共享只影响显示，不推断设备类别、带电状态或工程归属。
 - 几何与颜色契约见[几何模型](geometry-model.md)，运行与缓存见[DEV 几何](../architecture/dev-geometry.md)。
 

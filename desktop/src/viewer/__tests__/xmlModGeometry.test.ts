@@ -180,12 +180,24 @@ describe('primitiveToGeometry', () => {
       expect(g).toBeInstanceOf(THREE.BufferGeometry);
     });
 
-    it('ChannelSteel → 外廓盒体浏览近似', () => {
+    it('ChannelSteel retains an open channel across its source length', () => {
       const g = primitiveToGeometry({
         type: 'ChannelSteel',
         l: 2000, model: 'C5', d: 50, h: 100, b: 40, t: 8,
       });
       expect(g).not.toBeNull();
+    });
+
+    it('uses an open C10 section when only a designation and length exist',()=>{
+      const g=primitiveToGeometry({type:'BeamChannelLike',family:'BeamChannel',model:'C10',length:1600})!;
+      g.computeBoundingBox();
+      expect(g.boundingBox?.getSize(new THREE.Vector3()).toArray()).toEqual([48,1600,100]);
+      const material=new THREE.MeshBasicMaterial({side:THREE.DoubleSide});
+      const mesh=new THREE.Mesh(g,material);
+      const endRay=(x:number)=>new THREE.Raycaster(new THREE.Vector3(x,-900,0),new THREE.Vector3(0,1,0)).intersectObject(mesh);
+      expect(endRay(0)).toHaveLength(0);
+      expect(endRay(-22).length).toBeGreaterThan(0);
+      material.dispose();
     });
 
     it('Table → 外廓盒体浏览近似', () => {

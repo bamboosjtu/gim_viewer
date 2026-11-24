@@ -222,6 +222,7 @@ export type XmlModPrimitive =
   | {
       type:
         "RectangularFixedPlate" | "OffsetRectangularTable" | "RectangularRing";
+      sourceForm?: "TableGasket";
       raw: Record<string, string>;
     }
   /** 变电软母线（Bentley/BIMBase/SDDP）：FitCoordArray 拟合点序列，绝对 mm 坐标展平为 [x,y,z,...] */
@@ -231,7 +232,12 @@ export type XmlModPrimitive =
   /** 旋转椭球 */
   | { type: "RotationalEllipsoid"; h: number; lr: number; wr: number }
   /** 槽钢类钢（BeamChannel/LightBeamChannel/H）：截面由型号查表，暂用近似盒体 */
-  | { type: "BeamChannelLike"; length: number; model: string }
+  | {
+      type: "BeamChannelLike";
+      length: number;
+      model: string;
+      family?: "BeamChannel" | "LightBeamChannel" | "H";
+    }
   /** 布尔运算（Bentley/BIMBase）：引用同 MOD 文件内的两个 Entity ID，可链式嵌套 */
   | {
       type: "Boolean";

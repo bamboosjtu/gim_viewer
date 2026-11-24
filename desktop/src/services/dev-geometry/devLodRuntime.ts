@@ -5,7 +5,10 @@ import {
   restoreDevPlacementHighlights,
 } from './devLodPlacement.js';
 import { DevLodSceneCommits } from './devLodSceneCommits.js';
-import { deviceTemplateCacheKey } from '../../infrastructure/cache/devLodIdentity.js';
+import {
+  deviceTemplateCacheKey,
+  STEEL_SECTION_POLICY,
+} from '../../infrastructure/cache/devLodIdentity.js';
 import { logger } from '../../utils/logger.js';
 import { setRenderVisibility, requestObjectRender } from '../../viewer/demandRendering.js';
 import { createLazyGeometrySourceFiles } from './modGeometrySourceFiles.js';
@@ -69,6 +72,16 @@ import {
   type DevSpatialOccurrence,
 } from './devSpatialCatalog.js';
 import { ensureGeometryLayers } from './modGeometryScene.js';
+import {
+  readPatrolCache,
+  writePatrolCache,
+} from '../../infrastructure/cache/navigation/patrolCache.js';
+import type {
+  PatrolDirectory,
+  PatrolPart,
+  PatrolSource,
+} from '../../viewer/patrol/navigationQueryPort.js';
+import { cameraPoseHub } from '../../viewer/cameraPoseHub.js';
 import { getSourceGeometryOccurrences } from './sourceGeometryService.js';
 import { startSubstationResourceMonitor } from '../project/projectResourceTelemetry.js';
 import { observeFirstGeometry } from '../presentation/geometryPresentationService.js';
@@ -232,13 +245,14 @@ export class DevLodRuntime {
     () => this.current(),
     () => this.cameraMovingUntil,
   );
+  private unsubscribeCamera?: () => void;
   private cameraMovingUntil = 0;
   private cameraSchedule = () => {
     if (!this.current()) return;
     this.diagnostics.currentViewReady = false;
     this.diagnostics.currentViewSettled = false;
     this.cameraMovingUntil = performance.now() + 200;
-    if (this.cameraTimer) clearTimeout(this.cameraTimer);
+    if (this.cameraTimer) return;
     this.cameraTimer = setTimeout(() => {
       this.cameraTimer = null;
       this.update();
@@ -252,6 +266,147 @@ export class DevLodRuntime {
     }, 100);
   }
   private wanted = new Set<string>();
+  private readonly patrolWanted = new Set<string>();
+  private readonly patrolGround = new Set<string>();
+  private patrolCatalog?: PatrolDirectory;
+  private async patrolTemplate(dev: string, signal: AbortSignal) {
+    signal.throwIfAborted();
+    const key = this.key(dev, 2);
+    this.patrolWanted.add(key);
+    this.wanted.add(key);
+    try {
+      const result = await this.template(dev, 2, 1);
+      signal.throwIfAborted();
+      if (!this.current()) throw Error('DEV 来源已切换');
+      if (!result && this.templateStore.nullResults.get(key) === 'empty') return null;
+      if (
+        !result ||
+        result.status !== 'complete' ||
+        result.diagnostics.simplifiedBooleans ||
+        result.diagnostics.omittedSmallParts ||
+        result.diagnostics.sourceDiagnostics?.length
+      )
+        throw Error(
+          'DEV 原始几何不完整：' +
+            dev +
+            ' ' +
+            (result?.diagnostics.reason ?? result?.status ?? '无三角形'),
+        );
+      return result;
+    } finally {
+      this.patrolWanted.delete(key);
+    }
+  }
+  async patrolDirectory(signal: AbortSignal): Promise<PatrolDirectory> {
+    if (this.patrolCatalog) return this.patrolCatalog;
+    if (
+      !this.worker ||
+      !this.catalogLookupReady ||
+      this.diagnostics.directoryCompleted < this.rows.size
+    )
+      throw Error('DEV 来源目录仍在准备');
+    const unknown = (this.state.sourceGeometry.catalog?.diagnostics ?? []).map(
+      (d) => d.documentPath,
+    );
+    const sources: PatrolSource[] = [],
+      precise = new Map<string, THREE.Box3 | null>();
+    for (const row of this.rows.values()) {
+      signal.throwIfAborted();
+      const e = row.entry;
+      if (e.boundsQuality === 'empty' && !e.diagnostic) continue;
+      let bounds =
+        e.boundsQuality === 'conservative' && e.sourceBounds ? boxTuple(e.sourceBounds) : undefined;
+      if (!bounds) {
+        // Curved wires have no analytic catalog bounds. Prove their range once per
+        // template from complete source geometry before declaring the area unknown.
+        if (!precise.has(e.devPath)) {
+          const key = this.key(e.devPath, 2) + '/patrol-source-envelope-v1';
+          const cached = await readPatrolCache<number[] | 'empty'>('coverage', key);
+          signal.throwIfAborted();
+          if (cached === 'empty') precise.set(e.devPath, null);
+          else if (cached?.length === 6)
+            precise.set(
+              e.devPath,
+              new THREE.Box3(
+                new THREE.Vector3().fromArray(cached),
+                new THREE.Vector3().fromArray(cached, 3),
+              ),
+            );
+          else {
+            try {
+              const verified = await this.worker.patrolRange(e.devPath);
+              signal.throwIfAborted();
+              if (verified.boundsQuality === 'conservative' && verified.sourceBounds) {
+                precise.set(e.devPath, boxTuple(verified.sourceBounds));
+                if (this.session.sourceSha256)
+                  await writePatrolCache('coverage', key, verified.sourceBounds);
+              } else {
+                // A default display section is neither a physical profile nor evidence of the true gross extent.
+                if (
+                  ['Table', 'RectangularFixedPlate', 'RectangularRing'].some(
+                    (type) => e.primitiveCounts[type],
+                  )
+                )
+                  throw Error('缺少有来源依据的板件范围：' + e.devPath);
+                const t = await this.patrolTemplate(e.devPath, signal);
+                precise.set(e.devPath, t?.bounds.clone() ?? null);
+                if (this.session.sourceSha256)
+                  await writePatrolCache(
+                    'coverage',
+                    key,
+                    t ? [...t.bounds.min.toArray(), ...t.bounds.max.toArray()] : 'empty',
+                  );
+              }
+            } catch (error) {
+              signal.throwIfAborted();
+              throw Error('来源范围未知：' + String(error));
+            }
+          }
+        }
+        bounds = precise.get(e.devPath) ?? undefined;
+        if (!bounds) continue;
+      }
+      const matrix = createSourcePlacementMatrix(e.placementMatrix);
+      const load = async (signal: AbortSignal) => {
+        if (
+          Object.keys(e.primitiveCounts).some((type) =>
+            ['Table', 'RectangularFixedPlate', 'RectangularRing'].includes(type),
+          )
+        )
+          throw Error('来源只提供型材外廓或无开孔板件，缺少可靠碰撞面');
+        const t = await this.patrolTemplate(e.devPath, signal);
+        if (!t) throw Error('DEV 无可用三角形');
+        const parts: PatrolPart[] = [];
+        t.template.scene.updateMatrixWorld(true);
+        t.template.scene.traverse((obj) => {
+          if (!(obj instanceof THREE.Mesh)) return;
+          const geo = (obj as THREE.Mesh<THREE.BufferGeometry>).geometry,
+            pos = geo.getAttribute('position');
+          const positions = new Float32Array(pos.count * 3);
+          for (let i = 0; i < pos.count; i++) {
+            positions[3 * i] = pos.getX(i);
+            positions[3 * i + 1] = pos.getY(i);
+            positions[3 * i + 2] = pos.getZ(i);
+          }
+          const indices = geo.index
+            ? Uint32Array.from(geo.index.array)
+            : Uint32Array.from({ length: pos.count }, (_, i) => i);
+          parts.push({ positions, indices, matrix: obj.matrixWorld.toArray() });
+        });
+        return parts;
+      };
+      sources.push({
+        id: e.rootOccurrence,
+        assetKey: 'dev:' + e.devPath,
+        bounds: bounds.clone().applyMatrix4(matrix),
+        matrix,
+        support: this.patrolGround.has(e.rootOccurrence),
+        estimatedSteelSections: e.estimatedSteelSections,
+        load,
+      });
+    }
+    return (this.patrolCatalog = { sources, unknown });
+  }
   private displayedPins = new Map<string, number>();
   private pinKeys = new RevisionSet<string>();
   private selected = '';
@@ -299,7 +454,7 @@ export class DevLodRuntime {
       worker: () => this.worker,
       key: (...args) => this.key(...args),
       pinned: () => this.pinned(),
-      isWanted: (key) => this.wanted.has(key),
+      isWanted: (key) => this.wanted.has(key) || this.patrolWanted.has(key),
       taskIdentity: (...args) => this.taskIdentity(...args),
       catalogHint: (dev) => this.catalogHint(dev),
       markEmptyDev: (dev) => this.markEmptyDev(dev),
@@ -411,7 +566,7 @@ export class DevLodRuntime {
     return lod === 1 && (priority === 0 || demand >= 2);
   }
   private catalogKey(dev: string) {
-    return `${DEV_SPATIAL_CATALOG_VERSION}|${DEV_GEOMETRY_VERSION}|${this.sourceIdentity}|${dev.toLowerCase()}`;
+    return `${DEV_SPATIAL_CATALOG_VERSION}|${DEV_GEOMETRY_VERSION}|${this.sourceIdentity}|${STEEL_SECTION_POLICY}:${dev.toLowerCase()}`;
   }
   /** A catalog read started before the directory loop reaches this DEV also
    * short-circuits already-queued LOD0 work for a validated empty source. */
@@ -482,9 +637,11 @@ export class DevLodRuntime {
     this.worker.setMemoryPressure?.(this.memoryPressure);
     this.diagnostics.workerCount = this.worker.workerCount;
     this.worker.onActivity = () => this.requestReady();
-    this.ctx.world.camera.controls?.addEventListener('update', this.cameraSchedule);
+    this.unsubscribeCamera = cameraPoseHub(this.ctx).subscribe(this.cameraSchedule);
     const byDev = new Map<string, typeof seeds>();
     for (const seed of seeds) {
+      if (/道路|地坪|场坪|楼板|踏步|台阶|楼梯|平台|坡道|路面/.test(seed.name))
+        this.patrolGround.add(seed.id);
       const dev = normalize(seed.devPath),
         list = byDev.get(dev) ?? [];
       list.push(seed);
@@ -785,9 +942,10 @@ export class DevLodRuntime {
         setRenderVisibility(
           row.group,
           !this.onlySelected ||
-            (this.state.selection.representationSelection?.devRoots.has(
-              row.entry.rootOccurrence ?? key,
-            ) ??
+            ((
+              this.state.selection.patrolIsolation?.representation ??
+              this.state.selection.representationSelection
+            )?.devRoots.has(row.entry.rootOccurrence ?? key) ??
               (row.entry.rootOccurrence ?? key) === this.selected),
         );
         this.state.engineeringGeometryFilter?.(row.group);
@@ -837,7 +995,7 @@ export class DevLodRuntime {
     }
     const candidates = this.viewIndex.query(view.frustum);
     this.diagnostics.viewIndex = { ...this.viewIndex.diagnostics };
-    const wanted = new Set<string>();
+    const wanted = new Set<string>(this.patrolWanted);
     this.wanted = wanted;
     const requests: Array<
       Array<{ row: Occurrence; key: string; lod: DeviceLod; priority: number }>
@@ -901,6 +1059,7 @@ export class DevLodRuntime {
       // Visible L0 outranks offscreen L0; offscreen still remains wanted and
       // is reached later (aged priority prevents permanent starvation).
       const priority = selected ? 0 : lod === 0 ? (row.inView ? 1 : 3) : 2;
+      if (lod === 1) cameraPoseHub(this.ctx).admitted('dev');
       requests[priority].push({ row, key, lod, priority });
     }
     // Admit visible base work before offscreen templates can occupy the host
@@ -1024,9 +1183,10 @@ export class DevLodRuntime {
                 };
               group.visible =
                 !this.onlySelected ||
-                (this.state.selection.representationSelection?.devRoots.has(
-                  row.entry.rootOccurrence,
-                ) ??
+                ((
+                  this.state.selection.patrolIsolation?.representation ??
+                  this.state.selection.representationSelection
+                )?.devRoots.has(row.entry.rootOccurrence) ??
                   row.entry.rootOccurrence === this.selected);
               this.state.engineeringGeometryFilter?.(group);
               if (this.batchEnabled) {
@@ -1577,7 +1737,7 @@ export class DevLodRuntime {
     if (this.statusTimer) clearTimeout(this.statusTimer);
     this.sceneCommits.close();
     this.timer = this.cameraTimer = this.statusTimer = null;
-    this.ctx.world?.camera?.controls?.removeEventListener('update', this.cameraSchedule);
+    this.unsubscribeCamera?.();
     window.removeEventListener('gim-toggle-background-detail', this.pauseEvent);
     this.worker?.cancel();
     for (const row of this.rows.values()) {

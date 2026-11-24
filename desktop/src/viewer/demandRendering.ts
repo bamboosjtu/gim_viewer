@@ -1,3 +1,4 @@
+import { cameraPoseHub } from './cameraPoseHub.js';
 import type * as THREE from 'three';
 import type { ViewerContext } from './viewerEngine.js';
 import type { OrthoPerspectiveCamera, SimpleRenderer } from '@thatopen/components';
@@ -202,10 +203,14 @@ export function installDemandRendering(ctx: ViewerContext, renderer: SimpleRende
   const request = () => demand.request(true);
   const unwatch = observeSceneChanges(ctx.world.scene.three, demand.request);
   const camera = ctx.world.camera as OrthoPerspectiveCamera;
-  const controls = camera.controls;
-  controls?.addEventListener('update', request);
-  camera.projection.onChanged.add(request);
-  camera.onAspectUpdated.add(request);
+  const hub = cameraPoseHub(ctx);
+  const unsubscribe = hub.subscribe(request);
+  const projectionChanged = () => {
+    hub.publish(hub.current);
+    request();
+  };
+  camera.projection.onChanged.add(projectionChanged);
+  camera.onAspectUpdated.add(projectionChanged);
   ctx.world.onBeforeUpdate.add(demand.tick);
   renderer.onBeforeUpdate.add(demand.before);
   renderer.onAfterUpdate.add(demand.after);
@@ -218,9 +223,9 @@ export function installDemandRendering(ctx: ViewerContext, renderer: SimpleRende
   const dispose = () => {
     demand.dispose();
     unwatch();
-    controls?.removeEventListener('update', request);
-    camera.projection.onChanged.remove(request);
-    camera.onAspectUpdated.remove(request);
+    unsubscribe();
+    camera.projection.onChanged.remove(projectionChanged);
+    camera.onAspectUpdated.remove(projectionChanged);
     ctx.world.onBeforeUpdate.remove(demand.tick);
     renderer.onBeforeUpdate.remove(demand.before);
     renderer.onAfterUpdate.remove(demand.after);

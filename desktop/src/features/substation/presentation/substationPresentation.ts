@@ -76,77 +76,84 @@ export function createNodeClickHandler(
   };
 }
 
+export async function presentSldSelection(
+  state: AppState,
+  gridId: string,
+  showMessage: (text: string) => void,
+  session?: ProjectLoadSession,
+  existing?: import('../../../shared/selectionContracts.js').SelectionRequest,
+) {
+  if (session && !state.isCurrentSession(session)) return;
+  if (!state.currentStdSldIndex) return;
+  const request = existing ?? state.selection.beginSelection({ kind: 'sld', key: gridId });
+  try {
+    const { getCbmNodesByGridId } = await import('../../../gim/stdSldIndex.js');
+    if (session && !state.isCurrentSession(session)) return;
+    const nodes = getCbmNodesByGridId(state.currentStdSldIndex, gridId);
+    if (nodes.length === 0) {
+      const [{ clearSelectionHighlight }, { syncSelectionNavigation }] = await Promise.all([
+        import('../../../services/selection/nodeInteractionService.js'),
+        import('../../../services/selection/selectionNavigation.js'),
+      ]);
+      if (!state.selection.isCurrentSelection(request)) return;
+      await selectionPresentation().unlinkedDiagram(state, gridId, request);
+      await Promise.all([
+        clearSelectionHighlight(state, request, showMessage),
+        syncSelectionNavigation(state, request),
+      ]);
+      logger.info('[SLD→CBM] gridId 无对应 CBM 节点:', gridId);
+      return;
+    }
+    if (state.currentProjectType === 'substation') {
+      if (!state.selection.isCurrentSelection(request)) return;
+      if (!state.engineering.sources) {
+        state.selection.selectionMessage = '工程来源正在准备，完成后可定位单线图对象';
+        setSelectionStatus(state.selection.selectionMessage);
+        return;
+      }
+      if (nodes.length === 1) {
+        const { selectEngineeringCbmSource } =
+          await import('../../../services/engineering/engineeringCbmSelection.js');
+        if (state.selection.isCurrentSelection(request))
+          await selectEngineeringCbmSource(state, nodes[0].path, request);
+      } else {
+        const { clearEngineeringHighlight } =
+          await import('../../../services/engineering/engineeringSelection.js');
+        await clearEngineeringHighlight(state, request);
+        if (state.selection.isCurrentSelection(request))
+          await selectionPresentation().chooseSources(
+            '该单线图对象关联多个来源，请选择要查看的来源',
+            nodes.map((node) => ({
+              label: `${node.name || '来源对象'} · ${node.path}`,
+              choose: () => {
+                if (state.selection.isCurrentSelection(request))
+                  createNodeClickHandler(state, showMessage)(node);
+              },
+            })),
+            () => state.selection.isCurrentSelection(request),
+          );
+      }
+      return;
+    }
+    const { handleNodeClick } =
+      await import('../../../services/selection/nodeInteractionService.js');
+    if (session && !state.isCurrentSession(session)) return;
+    request.target = { kind: 'cbm', key: nodes[0].path };
+    await handleNodeClick(state, nodes[0], showMessage, request);
+  } catch (err) {
+    logger.warn('[SLD→CBM] 联动失败:', err);
+  }
+}
+
 export function setupSldGridIdInteraction(
   state: AppState,
   showMessage: (text: string) => void,
   session?: ProjectLoadSession,
 ): Promise<void> {
   const scope = state.sessionScope(session ?? state.captureProjectSession());
-  const selected = async (gridId: string) => {
-    if (session && !state.isCurrentSession(session)) return;
-    if (!state.currentStdSldIndex) return;
-    const request = state.selection.beginSelection({ kind: 'sld', key: gridId });
-    try {
-      const { getCbmNodesByGridId } = await import('../../../gim/stdSldIndex.js');
-      if (session && !state.isCurrentSession(session)) return;
-      const nodes = getCbmNodesByGridId(state.currentStdSldIndex, gridId);
-      if (nodes.length === 0) {
-        const [{ clearSelectionHighlight }, { syncSelectionNavigation }] = await Promise.all([
-          import('../../../services/selection/nodeInteractionService.js'),
-          import('../../../services/selection/selectionNavigation.js'),
-        ]);
-        if (!state.selection.isCurrentSelection(request)) return;
-        await selectionPresentation().unlinkedDiagram(state, gridId, request);
-        await Promise.all([
-          clearSelectionHighlight(state, request, showMessage),
-          syncSelectionNavigation(state, request),
-        ]);
-        logger.info('[SLD→CBM] gridId 无对应 CBM 节点:', gridId);
-        return;
-      }
-      if (state.currentProjectType === 'substation') {
-        if (!state.selection.isCurrentSelection(request)) return;
-        if (!state.engineering.sources) {
-          state.selection.selectionMessage = '工程来源正在准备，完成后可定位单线图对象';
-          setSelectionStatus(state.selection.selectionMessage);
-          return;
-        }
-        if (nodes.length === 1) {
-          const { selectEngineeringCbmSource } =
-            await import('../../../services/engineering/engineeringCbmSelection.js');
-          if (state.selection.isCurrentSelection(request))
-            await selectEngineeringCbmSource(state, nodes[0].path, request);
-        } else {
-          const { clearEngineeringHighlight } =
-            await import('../../../services/engineering/engineeringSelection.js');
-          await clearEngineeringHighlight(state, request);
-          if (state.selection.isCurrentSelection(request))
-            await selectionPresentation().chooseSources(
-              '该单线图对象关联多个来源，请选择要查看的来源',
-              nodes.map((node) => ({
-                label: `${node.name || '来源对象'} · ${node.path}`,
-                choose: () => {
-                  if (state.selection.isCurrentSelection(request))
-                    createNodeClickHandler(state, showMessage)(node);
-                },
-              })),
-              () => state.selection.isCurrentSelection(request),
-            );
-        }
-        return;
-      }
-      const { handleNodeClick } =
-        await import('../../../services/selection/nodeInteractionService.js');
-      if (session && !state.isCurrentSession(session)) return;
-      request.target = { kind: 'cbm', key: nodes[0].path };
-      await handleNodeClick(state, nodes[0], showMessage, request);
-    } catch (err) {
-      logger.warn('[SLD→CBM] 联动失败:', err);
-    }
-  };
   return diagramPresentation()
     .onSelect(async (gridId) => {
-      if (scope.isCurrent()) await selected(gridId);
+      if (scope.isCurrent()) await presentSldSelection(state, gridId, showMessage, session);
     }, scope.isCurrent)
     .then((dispose) => {
       scope.own(dispose);

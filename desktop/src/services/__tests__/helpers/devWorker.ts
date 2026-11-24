@@ -8,6 +8,7 @@ export function createDevWorkerMock(overrides:Partial<WorkerApi>={}):WorkerApi{
   return {
     workerCount:1,cacheConcurrency:8,activePaths:[],onActivity:vi.fn(),
     compile:vi.fn<WorkerApi['compile']>().mockRejectedValue(new Error('Unexpected worker compile')),
+    patrolRange:vi.fn<WorkerApi['patrolRange']>().mockRejectedValue(new Error('Unexpected patrol range request')),
     bounds:vi.fn<WorkerApi['bounds']>().mockRejectedValue(new Error('Unexpected worker bounds')),
     take:vi.fn<WorkerApi['take']>().mockRejectedValue(new Error('Unexpected worker take')),
     acknowledge:vi.fn(),promote:vi.fn(),cancelQueued:vi.fn(),cancelTask:vi.fn(),cancel:vi.fn(),

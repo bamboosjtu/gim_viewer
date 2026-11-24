@@ -152,7 +152,9 @@ export function refreshToolGeometryFilter(state: AppState): void {
 export function applyGeometryFilter(state: AppState, onlyRoot?: THREE.Object3D): void {
   const owned = contexts.get(state);
   if (!owned) return;
-  const selection = state.selection.engineeringSelection;
+  const selection = state.selection.patrolIsolation
+    ? state.selection.patrolIsolation.engineering
+    : state.selection.engineeringSelection;
   const representation = getEngineeringRepresentations(state);
   if (!state.selection.onlySelected && !state.toolGeometryFilter) {
     for (const [mesh, baseline] of owned.meshBaseline) setRenderVisibility(mesh, baseline);

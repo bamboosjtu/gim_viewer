@@ -50,6 +50,12 @@ export async function autoLoadModStlPostIfc(
       const THREE = await import('three');
       if (!state.isCurrentSession(session)) return;
       state.projectSourceToViewerMatrix = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
+      state.projectCoordinateFrame = {
+        matrix: state.projectSourceToViewerMatrix,
+        revision: 1,
+        confidence: 'estimated',
+        reason: 'dev-only-source-z-up-metres',
+      };
     }
     await startDeviceLod(state, resourceCtx, session, (text, detail) => {
       if (state.isCurrentSession(session)) {

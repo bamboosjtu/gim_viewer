@@ -200,6 +200,7 @@ const viewerSourceValues = new Map([
   ['gim/ifcConnectionSubset.ts', new Set(['omitIndexedOpenings', 'buildEarlyConnectionInput'])],
   ['gim/modelIdentity.ts', new Set(['createIfcModelId'])],
   ['gim/fileLookup.ts', new Set(['getFileByPath'])],
+  ['gim/geometry/steelSection.ts', new Set(['steelSection', 'steelSectionContour'])],
   ['gim/geometry/stretchedBody.ts', new Set(['stretchedBodyDisplacement'])],
   ['gim/geometry/offsetRectangularTable.ts', new Set(['offsetRectangularTableVertices'])],
   ['gim/geometry/xmlModParser.ts', new Set(['parseXmlMod'])],

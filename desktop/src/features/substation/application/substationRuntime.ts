@@ -18,6 +18,27 @@ export async function openSubstationProject(
 ): Promise<'equipment' | void> {
   const scope = context.state.sessionScope(context.session);
   if (!scope.isCurrent()) return;
+  const port = context.state.navigation;
+  if (port) {
+    let activation: Promise<void> | undefined;
+    port.execute = (action) => {
+      if (action !== 'prepare' || activation) return;
+      activation = import('../presentation/patrolBinding.js')
+        .then(async ({ bindPatrol }) => {
+          if (scope.isCurrent()) await bindPatrol(context.state, scope, context.showMessage);
+        })
+        .catch((error) => {
+          if (scope.isCurrent()) port.set('orbit', String(error));
+        })
+        .finally(() => {
+          activation = undefined;
+        });
+    };
+    scope.own(() => {
+      port.execute = undefined;
+      port.set('orbit');
+    });
+  }
   try {
     const perfSession = perfCurrentSession();
     let validation: Awaited<ReturnType<typeof validateGimCache>> | null = null;

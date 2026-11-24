@@ -243,7 +243,7 @@ self.onmessage = createWorkerProbe().wrap<DevGeometryWorkerRequest>(async ({ dat
     const partition = data.kind === 'compile' ? data.partition : undefined;
     if (data.kind === 'bounds') {
       result = await trace.measure('dev.bounds', () =>
-        buildDevSourceBounds(data.path, files, parse, discovery),
+        buildDevSourceBounds(data.path, files, parse, discovery, data.patrolRange),
       );
     } else if (data.kind === 'merge') {
       const bytes = await trace.measure('dev.part-merge', () =>

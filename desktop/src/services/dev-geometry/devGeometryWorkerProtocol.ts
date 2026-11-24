@@ -27,7 +27,7 @@ type TaskRequest = TaskAddress & {
   parentTaskId?: string;
   _gimMeasurementContext?: TraceContext;
 } & (
-    | { kind: 'bounds' }
+    | { kind: 'bounds'; patrolRange?: boolean }
     | { kind: 'compile'; noSplit?: boolean; partition?: DevGeometryWorkerPartition }
     | { kind: 'merge'; parts: Uint8Array[] }
   );

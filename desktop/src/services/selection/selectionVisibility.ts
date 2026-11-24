@@ -96,8 +96,10 @@ export function createSelectionVisibility(
       if (guard && !guard.isCurrent()) return;
       const request = state.selection.selectionRequest;
       const ownsHighlight = request && state.selection.selectionHighlightRequestId === request.id;
-      const engineering =
-        state.selection.engineeringSelection?.requestId === request?.id
+      const frozen = state.selection.patrolIsolation;
+      const engineering = frozen
+        ? frozen.engineering
+        : state.selection.engineeringSelection?.requestId === request?.id
           ? state.selection.engineeringSelection
           : null;
       if (engineering) {
@@ -110,7 +112,7 @@ export function createSelectionVisibility(
           if (ref.globalId) row.globalIds.add(ref.globalId);
           committedScopes.set(id, row);
         }
-      } else if (guard || selectionOwner !== (request?.id ?? null)) {
+      } else if (!frozen && (guard || selectionOwner !== (request?.id ?? null))) {
         committedScopes = new Map();
         selectionOwner = request?.id ?? null;
         const scope = (id: string) => {
