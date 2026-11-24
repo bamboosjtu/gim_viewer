@@ -30,6 +30,7 @@ export function mountPatrolOverlay(
   cross.textContent = '+';
   panel.append(status);
   const start = button(panel, '开始巡视', 'start');
+  const choose = button(panel, '自选起点', 'pickStart');
   const resume = button(panel, '继续巡视', 'resume');
   const measure = button(panel, '两点测量', 'measure');
   const home = button(panel, '返回巡视入口', 'return');
@@ -45,6 +46,8 @@ export function mountPatrolOverlay(
     enter.setAttribute('aria-label', active ? '退出巡视' : '进入巡视');
     enter.dataset.tip = active ? '退出巡视，恢复自由浏览视角' : '进入第一人称巡视';
     start.hidden = mode !== 'ready';
+    choose.hidden = (mode !== 'preparing' && mode !== 'ready') || port.pickingStart;
+    home.textContent = port.gateHome ? '返回大门' : '返回巡视入口';
     resume.hidden = home.hidden = mode !== 'paused' && mode !== 'inspecting';
     measure.hidden = resume.hidden || port.measuring;
     status.textContent =

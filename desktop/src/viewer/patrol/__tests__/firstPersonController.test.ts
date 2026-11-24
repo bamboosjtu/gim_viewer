@@ -37,7 +37,7 @@ it('falls back to dragging, caps long-frame motion, and stops all walking input 
     commands,
     query,
     new Matrix4(),
-    new Vector3(),
+    { feet: new Vector3(), sourceId: 'test-floor', yaw: 0, pitch: 0 },
     1,
     () => true,
     new AbortController().signal,

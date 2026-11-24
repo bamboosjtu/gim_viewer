@@ -10,6 +10,7 @@ import {
   freezeOrbit,
   restoreOrbit,
 } from '../../../viewer/patrol/patrolContextSnapshot.js';
+import type { PatrolPose } from '../../../viewer/patrol/navigationQueryPort.js';
 import { FirstPersonController } from '../../../viewer/patrol/firstPersonController.js';
 import { PatrolNavigationRuntime } from '../runtime/patrolNavigationRuntime.js';
 import { selectEngineeringTarget } from '../../../services/engineering/engineeringSelection.js';
@@ -30,8 +31,11 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
   let run: AbortController | undefined,
     walker: FirstPersonController | undefined,
     frame = state.projectCoordinateFrame;
-  let entry: Vector3 | undefined,
-    source = '',
+  let entry: PatrolPose | undefined,
+    home: PatrolPose | undefined,
+    last: PatrolPose | undefined,
+    planned: 'gate' | 'last' | 'manual' = 'manual',
+    search: AbortController | undefined,
     entryRequest = 0,
     switching = false,
     inspectionChanged = false;
@@ -100,6 +104,8 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
   const evidence = () => ({
     mode: port.mode,
     coverageMs,
+    startKind: planned,
+    home: home ? { feet: home.feet.toArray(), yaw: home.yaw, gate: port.gateHome } : undefined,
     estimatedSectionOccurrences: nav.metrics.estimatedSectionOccurrences,
     drawCount,
     capped: walker?.capped,
@@ -182,6 +188,9 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
   };
   async function exit() {
     const s = snapshot;
+    if (walker && frameValid()) last = walker.position();
+    search?.abort();
+    search = undefined;
     run?.abort();
     run = undefined;
     entryRequest++;
@@ -234,6 +243,94 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
       snapshot = undefined;
     }
   }
+  function ready(pose: PatrolPose, kind: typeof planned) {
+    entry = pose;
+    planned = kind;
+    port.pickingStart = false;
+    const label =
+      kind === 'last'
+        ? '已定位上次巡视位置'
+        : kind === 'gate'
+          ? '已定位站区大门，面向站内'
+          : '自选起点已就绪';
+    port.set(
+      'ready',
+      label + (nav.metrics.estimatedSectionOccurrences ? ' · 工程含估算型材截面' : ''),
+    );
+  }
+  async function verified(pose: PatrolPose, signal: AbortSignal): Promise<PatrolPose | undefined> {
+    await nav.prepare(pose.feet, signal);
+    signal.throwIfAborted();
+    const hit = nav.step(pose.feet, pose.feet);
+    if ('feet' in hit && hit.sourceId === pose.sourceId) return { ...pose, feet: hit.feet };
+  }
+  async function prepareStart(owner: AbortController) {
+    const ticket = ++entryRequest;
+    const attempt = new AbortController();
+    search = attempt;
+    const signal = AbortSignal.any([owner.signal, attempt.signal]);
+    const current = () => alive(owner) && ticket === entryRequest && !signal.aborted;
+    const eligible = () => {
+      if (!current()) return false;
+      if (!frameValid()) throw Error('工程坐标或几何批次已变更，请重新选择入口');
+      return true;
+    };
+    try {
+      if (
+        !frame ||
+        frame.confidence === 'unknown' ||
+        frame.confidence === 'manual' ||
+        !frameValid()
+      )
+        throw Error('工程坐标依据尚未确认');
+      const started = performance.now();
+      if (last) {
+        const saved = await verified(last, signal).catch(() => {
+          signal.throwIfAborted();
+          return undefined;
+        });
+        if (!eligible()) return;
+        if (saved) {
+          coverageMs = performance.now() - started;
+          ready(saved, 'last');
+          return;
+        }
+        last = undefined;
+      }
+      const gate = await nav.stationEntrance(signal);
+      if (!eligible()) return;
+      if (gate) {
+        home = gate;
+        port.gateHome = true;
+        coverageMs = performance.now() - started;
+        ready(gate, 'gate');
+        return;
+      }
+      if (home && !port.gateHome) {
+        const saved = await verified(home, signal);
+        if (!eligible()) return;
+        if (saved) {
+          coverageMs = performance.now() - started;
+          ready(saved, 'manual');
+          return;
+        }
+      }
+      home = undefined;
+      port.gateHome = false;
+      port.pickingStart = true;
+      port.set('preparing', '未找到可用的站区大门落脚点，请点击道路或楼面选择起点');
+    } catch (error) {
+      if (current()) {
+        port.pickingStart = true;
+        port.set(
+          'preparing',
+          (error instanceof Error ? error.message : String(error)) + '；可点击道路或楼面选择起点',
+        );
+      }
+    } finally {
+      if (search === attempt) search = undefined;
+    }
+  }
   async function execute(action: NavigationAction) {
     if (!scope.isCurrent()) return;
     if (switching) {
@@ -247,6 +344,10 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
       return;
     }
     if (action === 'prepare' && port.mode === 'orbit') {
+      if (frame !== state.projectCoordinateFrame || batch !== state.geometryLoadToken) {
+        home = last = undefined;
+        port.gateHome = false;
+      }
       if (batch !== state.geometryLoadToken) {
         nav.dispose();
         batch = state.geometryLoadToken;
@@ -254,11 +355,22 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
       }
       run = new AbortController();
       frame = state.projectCoordinateFrame;
-      port.set('preparing', '点击道路、地坪或楼梯平台选择巡视入口');
+      entry = undefined;
+      port.pickingStart = false;
+      port.set('preparing', last ? '正在确认上次巡视位置' : '正在定位站区大门');
+      await prepareStart(run);
       return;
     }
     const owner = run;
     if (!owner || !alive(owner)) return;
+    if (action === 'pickStart' && (port.mode === 'preparing' || port.mode === 'ready')) {
+      ++entryRequest;
+      search?.abort();
+      entry = undefined;
+      port.pickingStart = true;
+      port.set('preparing', '点击道路、地坪或楼梯平台选择起点');
+      return;
+    }
     if (action === 'pause') {
       if (!walker) {
         await exit();
@@ -280,6 +392,7 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
       switching = true;
       try {
         snapshot = capture();
+        if (!home) home = entry;
         if (snapshot.only)
           state.selection.patrolIsolation = {
             engineering: state.selection.engineeringSelection,
@@ -346,26 +459,29 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
       tools.snapshot.tool = 'distance';
       tools.notify();
       port.set('inspecting', '点击两个可见表面测距');
-    } else if (action === 'return' && walker && entry) {
+    } else if (action === 'return' && walker && home) {
       const seq = ++entryRequest;
       port.set('returning', '正在确认入口支撑与净空');
       walker.stop();
-      await nav.prepare(entry, owner.signal);
+      const destination = await verified(home, owner.signal);
       if (!alive(owner) || seq !== entryRequest) return;
-      const result = nav.step(entry, entry);
-      if ('reason' in result || result.sourceId !== source) {
+      if (!destination || !frameValid()) {
         port.set('paused', '入口不可用，已保留当前位置');
         return;
       }
-      walker.returnToEntry();
-      port.set('paused', '已返回入口');
+      walker.relocate(destination);
+      port.set('paused', port.gateHome ? '已返回站区大门' : '已返回巡视入口');
     }
   }
   async function choose(e: MouseEvent) {
-    if (port.mode !== 'preparing' || e.button !== 0 || !run) return;
+    if (port.mode !== 'preparing' || !port.pickingStart || e.button !== 0 || !run) return;
     const owner = run,
       seq = ++entryRequest;
     const current = () => alive(owner) && seq === entryRequest;
+    if (frame !== state.projectCoordinateFrame) {
+      home = last = undefined;
+      port.gateHome = false;
+    }
     frame = state.projectCoordinateFrame;
     if (
       !frame ||
@@ -411,14 +527,10 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
         port.set('preparing', result.reason + '，可另选入口');
         return;
       }
-      entry = result.feet;
-      source = result.sourceId;
-      port.set(
-        'ready',
-        nav.metrics.estimatedSectionOccurrences
-          ? '入口已就绪 · 工程含估算型材截面'
-          : '入口地面和障碍数据已就绪',
-      );
+      const direction = cam.three
+        .getWorldDirection(new Vector3())
+        .transformDirection(frame.matrix.clone().invert());
+      ready({ ...result, yaw: Math.atan2(direction.x, direction.y), pitch: 0 }, 'manual');
     } catch (error) {
       if (current()) port.set('preparing', error instanceof Error ? error.message : String(error));
     }
@@ -450,6 +562,8 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
       cam.controls.enabled = snapshot.camera.enabled;
       Object.assign(cam.controls.mouseButtons, snapshot.camera.buttons);
     }
+    port.gateHome = port.pickingStart = false;
+    home = last = undefined;
     hub.claim('orbit', state.projectGeneration);
     snapshot = undefined;
     state.selection.patrolIsolation = undefined;

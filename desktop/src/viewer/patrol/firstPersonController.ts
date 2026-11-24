@@ -3,7 +3,11 @@ import type { OrthoPerspectiveCamera } from '@thatopen/components';
 import type { ViewerContext } from '../viewerEngine.js';
 import { cameraPoseHub } from '../cameraPoseHub.js';
 import type { ViewerNavigationCommands } from '../../shared/viewerNavigationCommands.js';
-import { patrolProfile as profile, type NavigationQueryPort } from './navigationQueryPort.js';
+import {
+  patrolProfile as profile,
+  type NavigationQueryPort,
+  type PatrolPose,
+} from './navigationQueryPort.js';
 
 /** The owner stops the RAF whenever movement settles. RenderDemand is notified by the camera hub. */
 export class FirstPersonController {
@@ -28,27 +32,24 @@ export class FirstPersonController {
   private dx = 0;
   private dy = 0;
   readonly feet: Vector3;
-  readonly entry: Vector3;
-  private readonly entryYaw: number;
+  private sourceId: string;
   constructor(
     ctx: ViewerContext,
     private canvas: HTMLCanvasElement,
     private commands: ViewerNavigationCommands,
     private nav: NavigationQueryPort,
     private sourceFrame: Matrix4,
-    entry: Vector3,
+    start: PatrolPose,
     private generation: number,
     private valid: () => boolean,
     private runSignal: AbortSignal,
   ) {
     this.hub = cameraPoseHub(ctx);
     this.camera = ctx.world.camera as OrthoPerspectiveCamera;
-    this.feet = entry.clone();
-    this.entry = entry.clone();
-    const dir = this.camera.three
-      .getWorldDirection(new Vector3())
-      .transformDirection(sourceFrame.clone().invert());
-    this.entryYaw = this.yaw = Math.atan2(dir.x, dir.y);
+    this.feet = start.feet.clone();
+    this.sourceId = start.sourceId;
+    this.yaw = start.yaw;
+    this.pitch = start.pitch;
     const { signal } = this.events;
     const key = (e: KeyboardEvent, down: boolean) => {
       if (commands.mode !== 'walking' || e.ctrlKey || e.altKey || e.metaKey) return;
@@ -255,6 +256,7 @@ export class FirstPersonController {
         }
       } else {
         this.feet.copy(result.feet);
+        this.sourceId = result.sourceId;
         changed = true;
         this.commands.set('walking');
       }
@@ -267,10 +269,14 @@ export class FirstPersonController {
       this.accumulator = 0;
     }
   };
-  returnToEntry() {
-    this.feet.copy(this.entry);
-    this.yaw = this.entryYaw;
-    this.pitch = 0;
+  position(): PatrolPose {
+    return { feet: this.feet.clone(), sourceId: this.sourceId, yaw: this.yaw, pitch: this.pitch };
+  }
+  relocate(pose: PatrolPose) {
+    this.feet.copy(pose.feet);
+    this.yaw = pose.yaw;
+    this.pitch = pose.pitch;
+    this.sourceId = pose.sourceId;
     this.apply();
   }
   stop() {

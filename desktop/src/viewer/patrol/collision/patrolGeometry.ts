@@ -105,11 +105,16 @@ export function visitTriangles(
 
 const epsilon = 1e-5;
 const minUp = Math.cos((profile.maxSlopeDegrees * Math.PI) / 180);
-export function supportHeight(t: Triangle, p: Vector3): number | undefined {
+export function supportHeight(
+  t: Triangle,
+  p: Vector3,
+  stepDown: number = profile.stepDown,
+  stepUp: number = profile.stepUp,
+): number | undefined {
   const normal = t.getNormal(v());
   if (normal.z < minUp) return;
   const z = t.a.z - ((p.x - t.a.x) * normal.x + (p.y - t.a.y) * normal.y) / normal.z;
-  if (z < p.z - profile.stepDown - epsilon || z > p.z + profile.stepUp + epsilon) return;
+  if (z < p.z - stepDown - epsilon || z > p.z + stepUp + epsilon) return;
   const bary = t.getBarycoord(new Vector3(p.x, p.y, z), v());
   if (bary && Math.min(bary.x, bary.y, bary.z) >= -epsilon) return z;
 }

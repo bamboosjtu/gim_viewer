@@ -23,6 +23,23 @@ async function exercise(cdp, indoor, result) {
       mode: __gimAppState.navigation.mode,
       message: __gimAppState.navigation.message,
     }));
+  const direction = () =>
+    page(() =>
+      __gimWorld.camera.three.getWorldDirection(__gimWorld.camera.three.position.clone()).toArray(),
+    );
+  const ready = async (kind) => {
+    for (let i = 0; i < 600; i++) {
+      const s = await status();
+      if (s.mode === 'ready') {
+        assert.equal(await page(() => __gimAppState.navigation.evidence().startKind), kind);
+        return;
+      }
+      if (s.mode === 'preparing' && (await page(() => __gimAppState.navigation.pickingStart)))
+        throw Error(s.message);
+      await sleep(200);
+    }
+    throw Error('timed out preparing ' + kind);
+  };
   const eye = () => page(() => __gimWorld.camera.three.position.toArray());
   const feet = () =>
     page(() => {
@@ -97,7 +114,46 @@ async function exercise(cdp, indoor, result) {
     return list.sort((a, b) => Number(b.road) - Number(a.road) || b.area - a.area).slice(0, 16);
   }, indoor);
   await button('进入巡视');
-  await sleep(600);
+  await ready('gate');
+  const initialOrbit = await eye();
+  await button('开始巡视');
+  await sleep(250);
+  const gate = await page(() => __gimAppState.navigation.evidence().home);
+  assert.ok(gate?.gate);
+  result.gateFeet = await feet();
+  assert.ok(distance(result.gateFeet, gate.feet) < 0.01);
+  const gateView = await direction();
+  result.gateDistance = await page(() => {
+    const s = __gimAppState,
+      w = __gimWorld,
+      eye = w.camera.three.position.clone();
+    let minimum = Infinity;
+    for (const rt of s.ifc.regionalRuntimes.values())
+      for (const o of rt.index.objects) {
+        if (!/平开大门|推拉大门/.test(o.name) || /门杆|矩形柱/.test(o.name)) continue;
+        const b = rt.worldBounds(o);
+        if (b) {
+          const p = eye.clone();
+          p.y = Math.max(b.min.y, Math.min(b.max.y, p.y));
+          minimum = Math.min(minimum, b.distanceToPoint(p));
+        }
+      }
+    return Number.isFinite(minimum) ? minimum : null;
+  });
+  assert.ok(
+    result.gateDistance !== null && result.gateDistance <= 11,
+    'first entry is not near the source gate',
+  );
+  await press('Escape', 'Escape');
+  await sleep(200);
+  assert.equal((await status()).mode, 'paused');
+  await button('退出巡视');
+  await sleep(400);
+  assert.equal((await status()).mode, 'orbit');
+  assert.ok(distance(await eye(), initialOrbit) < 0.001);
+  await button('进入巡视');
+  await ready('last');
+  await button('自选起点');
   result.entries = [];
   for (const candidate of candidates) {
     await page(
@@ -136,8 +192,7 @@ async function exercise(cdp, indoor, result) {
   const originalCount = await count();
   await button('开始巡视');
   await sleep(300);
-  const start = await eye(),
-    startFoot = await feet();
+  const startFoot = await feet();
   result.walk = [];
   await key('keyDown', 'w', 'KeyW');
   try {
@@ -267,12 +322,26 @@ async function exercise(cdp, indoor, result) {
   await sleep(200);
   assert.equal((await status()).mode, 'paused');
   assert.deepEqual(await selection(), original);
-  await button('返回巡视入口');
+  const checkpoint = await feet(),
+    look = await direction();
+  await button('退出巡视');
+  await sleep(400);
+  assert.ok(distance(await eye(), orbit) < 0.001);
+  await button('进入巡视');
+  await ready('last');
+  await button('开始巡视');
+  await sleep(250);
+  assert.ok(distance(await feet(), checkpoint) < 0.01, 're-entry lost the last walking position');
+  assert.ok(distance(await direction(), look) < 0.001, 're-entry lost yaw or pitch');
+  await press('Escape', 'Escape');
+  await sleep(200);
+  await button('返回大门');
   for (let i = 0; i < 100; i++) {
     await sleep(150);
     if ((await status()).mode !== 'returning') break;
   }
-  assert.ok(distance(await eye(), start) < 0.01, 'entry pose not restored');
+  assert.ok(distance(await feet(), result.gateFeet) < 0.01, 'gate position not restored');
+  assert.ok(distance(await direction(), gateView) < 0.001, 'gate direction not restored');
   await button('退出巡视');
   await sleep(400);
   assert.equal((await status()).mode, 'orbit');
@@ -304,13 +373,20 @@ async function main() {
         buildManifest: resolve(manifest),
         sample,
         timeoutMs: 240000,
-        exercise: ({ cdp }) => exercise(cdp, routes[label] === 'stairs', result),
+        exercise: async ({ cdp }) => {
+          try {
+            return await exercise(cdp, routes[label] === 'stairs', result);
+          } catch (error) {
+            result.error = String(error);
+            throw error;
+          }
+        },
       });
       result.run = run.out;
-      assert.equal(result.outcome, 'PASS', 'native run did not finish the route');
+      assert.equal(result.outcome, 'PASS', result.error ?? 'native run did not finish the route');
     } catch (error) {
       result.outcome = 'FAIL';
-      result.error = String(error);
+      result.error ??= String(error);
       throw error;
     } finally {
       const dest = join(dir, label + '.json');

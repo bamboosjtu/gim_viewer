@@ -38,6 +38,12 @@ export interface NavigationCoverage {
   geometryRevision: string;
   complete: boolean;
 }
+export interface PatrolPose {
+  feet: Vector3;
+  yaw: number;
+  pitch: number;
+  sourceId: string;
+}
 export type StepResult = { feet: Vector3; sourceId: string } | { reason: string };
 export interface NavigationQueryPort {
   prepare(point: Vector3, signal: AbortSignal): Promise<void>;

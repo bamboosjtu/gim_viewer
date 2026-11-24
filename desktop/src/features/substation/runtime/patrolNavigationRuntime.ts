@@ -1,4 +1,10 @@
 import { Box3, Matrix4, Vector3, Triangle } from 'three';
+import {
+  gateApproaches,
+  stationGateRank,
+  type GateApproach,
+  type GateBounds,
+} from './patrolGate.js';
 import type { AppState } from '../../../app/state.js';
 import type { ProjectLoadSession } from '../../../shared/projectSession.js';
 import {
@@ -19,6 +25,7 @@ import {
 import {
   patrolProfile as profile,
   type PatrolDirectory,
+  type PatrolPose,
   type PatrolSource,
   type NavigationCoverage,
   type NavigationQueryPort,
@@ -47,7 +54,7 @@ const codec = [
 const xy = (a: number, b: number) => a + ',' + b;
 const groundType = /^IFC(SLAB|STAIR(FLIGHT)?|RAMP(FLIGHT)?|ROAD|PAVEMENT|SITE|GEOGRAPHICELEMENT)$/;
 const groundLabel =
-  /楼板|踏步|楼梯|台阶|坡道|路面|道路|场坪|地坪|平台|\b(stair|floor|road|pavement|landing|ramp)\b/i;
+  /楼板|踏步|楼梯|台阶|坡道|路面|道路|广场|站区地面|室外地面|场坪|地坪|平台|\b(stair|floor|road|pavement|landing|ramp)\b/i;
 const toEngineering = new Matrix4().makeRotationX(Math.PI / 2);
 const abort = (signal: AbortSignal) => signal.throwIfAborted();
 
@@ -75,6 +82,7 @@ function reserveBuild(signal: AbortSignal): Promise<() => void> {
 export class PatrolNavigationRuntime implements NavigationQueryPort {
   private readonly key: string;
   private directory?: PatrolDirectory;
+  private approaches: GateApproach[] = [];
   private catalogOwner?: AppState['sourceGeometry']['catalog'];
   private ifcOwner?: number;
   private entryOwner?: AppState['currentIfcEntries'];
@@ -135,6 +143,7 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
     if (hasDev && !base) throw Error('导航数据不完整：等待 DEV 目录');
     const sources = [...(base?.sources ?? [])],
       unknown = [...(base?.unknown ?? [])];
+    const gates: GateBounds[] = [];
     for (const entry of state.currentIfcEntries) {
       const runtime = state.ifc.regionalRuntimes.get(entry.modelId);
       if (!runtime) throw Error('导航数据不完整：等待 IFC 来源 ' + entry.modelId);
@@ -155,6 +164,10 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
           new Vector3().fromArray(b),
           new Vector3().fromArray(b, 3),
         ).applyMatrix4(toEngineering);
+        if (/^(IFCDOOR(STANDARDCASE)?|IFCGATE|IFCBUILDINGELEMENTPROXY)$/.test(product.type)) {
+          const rank = stationGateRank(product.label);
+          if (rank) gates.push({ rank, bounds });
+        }
         sources.push({
           id,
           assetKey: 'ifc:' + id,
@@ -187,7 +200,9 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
     }
     this.check(signal);
     if (!this.directoryCurrent()) throw Error('导航来源发生变更，请重新选择入口');
+    const site = new Box3();
     for (const row of sources) {
+      site.union(row.bounds);
       this.sourcesById.set(row.id, row);
       if (!isUsableAffineMatrix(row.matrix.elements)) {
         unknown.push(row.id);
@@ -218,8 +233,54 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
     this.metrics.estimatedSectionOccurrences = sources.filter(
       (row) => row.estimatedSteelSections,
     ).length;
+    for (const occurrence of state.sourceGeometry.catalog.occurrences) {
+      const source = this.sourcesById.get(occurrence.id);
+      const rank = source && stationGateRank(occurrence.name);
+      if (rank && source) gates.push({ rank, bounds: source.bounds });
+    }
+    this.approaches = gateApproaches(gates, site);
     this.directory = { sources, unknown };
   }
+  stationEntrance(signal: AbortSignal): Promise<PatrolPose | undefined> {
+    const work = this.serial.then(async () => {
+      this.check(signal);
+      await this.catalog(signal);
+      this.check(signal);
+      for (const { point, yaw } of this.approaches) {
+        const key = xy(Math.floor(point.x / size), Math.floor(point.y / size));
+        // A gate sill and a world grid are not floor data. Skip unsupported XY
+        // candidates before asking for any meshes, then test actual surfaces.
+        // Some gate proxies represent only the lintel, several metres above the road.
+        const below = 6,
+          above = 2;
+        const low = point.clone().setZ(point.z - below),
+          high = point.clone().setZ(point.z + above);
+        const column = new Box3(low, high);
+        const supports = (r: PatrolSource) => r.support && r.bounds.intersectsBox(column);
+        if (!this.grid.get(key)?.some(supports) && !this.large.some(supports)) continue;
+        await this.prepareBlocks(point, signal);
+        this.check(signal);
+        const heights = new Set<number>();
+        for (const row of this.loaded.get(key) ?? [])
+          if (row.support)
+            visitTriangles(row, column, (t) => {
+              const z = supportHeight(t, point, below, above);
+              if (z !== undefined) heights.add(z);
+              return false;
+            });
+        for (const z of [...heights].sort(
+          (a, b) => Math.abs(a - point.z) - Math.abs(b - point.z),
+        )) {
+          const feet = point.clone().setZ(z),
+            verified = this.step(feet, feet);
+          if ('feet' in verified) return { ...verified, yaw, pitch: 0 };
+        }
+      }
+    });
+    this.serial = work.catch(() => {});
+    return work;
+  }
+
   prepare(point: Vector3, signal: AbortSignal) {
     const work = this.serial.then(() => this.prepareBlocks(point, signal));
     this.serial = work.catch(() => {});
@@ -543,5 +604,6 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
     this.grid.clear();
     this.large.length = 0;
     this.directory = undefined;
+    this.approaches = [];
   }
 }

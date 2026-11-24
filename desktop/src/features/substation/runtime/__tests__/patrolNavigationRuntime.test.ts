@@ -34,13 +34,18 @@ function source(
 ): PatrolSource {
   return { id, assetKey: id, bounds, matrix: identity, support, load };
 }
-function fixture(id: string, sources: PatrolSource[], unknown: string[] = []) {
+function fixture(
+  id: string,
+  sources: PatrolSource[],
+  unknown: string[] = [],
+  occurrences = [{ id: 'dev', name: '' }],
+) {
   const session = { sourceSha256: id, geometryToken: 1 } as ProjectLoadSession;
   const state = {
     geometryLoadToken: 1,
     ifc: { regionalRuntimes: new Map() },
     currentIfcEntries: [],
-    sourceGeometry: { catalog: { occurrences: [{}] } },
+    sourceGeometry: { catalog: { occurrences } },
     deviceLodRuntime: { patrolDirectory: async () => ({ sources, unknown }) },
     isCurrentSession: () => true,
   } as unknown as AppState;
@@ -56,6 +61,34 @@ const slab = () =>
     },
   ]);
 describe('source coverage and navigation cache', () => {
+  it('uses real ground on the gate approach and can use the inner side if the outside is unmodelled', async () => {
+    const gate = source('gate', new Box3(p(0.5, 2, 3.5), p(0.8, 6, 3.8)), false, async () => [
+      {
+        positions: new Float32Array([0.5, 2, 3.5, 0.5, 6, 3.5, 0.5, 6, 3.8]),
+        indices: new Uint32Array([0, 1, 2]),
+        matrix: identity.toArray(),
+      },
+    ]);
+    const nav = fixture('gate-inside', [slab(), gate], [], [{ id: 'gate', name: '站区大门' }]);
+    try {
+      const spawn = await nav.stationEntrance(new AbortController().signal);
+      expect(spawn?.sourceId).toBe('floor');
+      expect(spawn?.feet.x).toBeCloseTo(2.15);
+      expect(spawn?.feet.z).toBeCloseTo(0);
+      expect(spawn?.yaw).toBeCloseTo(Math.PI / 2);
+    } finally {
+      nav.dispose();
+    }
+  });
+  it('falls back to user choice for an unlabelled or unsupported gate', async () => {
+    const nav = fixture('no-gate', [slab()]);
+    try {
+      expect(await nav.stationEntrance(new AbortController().signal)).toBeUndefined();
+    } finally {
+      nav.dispose();
+    }
+  });
+
   it('stands on and climbs a tread narrower than the body diameter', async () => {
     const tread = source('next-tread', new Box3(p(1, 0, 0), p(1.32, 3, 0.167)), true, async () => [
       {

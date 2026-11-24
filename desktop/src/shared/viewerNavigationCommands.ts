@@ -1,10 +1,21 @@
 export type NavigationMode =
   'orbit' | 'preparing' | 'ready' | 'walking' | 'paused' | 'inspecting' | 'returning';
 export type NavigationAction =
-  'prepare' | 'start' | 'pause' | 'resume' | 'inspect' | 'measure' | 'door' | 'return' | 'exit';
+  | 'prepare'
+  | 'pickStart'
+  | 'start'
+  | 'pause'
+  | 'resume'
+  | 'inspect'
+  | 'measure'
+  | 'door'
+  | 'return'
+  | 'exit';
 export class ViewerNavigationCommands extends EventTarget {
   mode: NavigationMode = 'orbit';
   message = '';
+  gateHome = false;
+  pickingStart = false;
   dragLook = false;
   measuring = false;
   doorHint = false;
