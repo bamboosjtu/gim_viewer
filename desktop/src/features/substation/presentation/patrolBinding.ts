@@ -158,7 +158,7 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
     hub.stopAdmissionTrace();
     walker?.dispose();
     walker = undefined;
-    port.measuring = port.estimated = false;
+    port.measuring = port.estimated = port.limitedCoverage = false;
     const current = () => scope.isCurrent();
     try {
       const failures = await restorePatrolContext(current, [
@@ -199,6 +199,7 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
   function ready(pose: PatrolPose, kind: typeof planned) {
     entry = pose;
     port.estimated = !!pose.estimated;
+    port.limitedCoverage = !!pose.limitedCoverage;
     planned = kind;
     port.pickingStart = false;
     const label =

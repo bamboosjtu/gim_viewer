@@ -65,8 +65,10 @@ export function mountPatrolOverlay(
         : mode === 'inspecting'
           ? '检查设备'
           : '巡视已暂停');
-    if (port.estimated && (mode === 'walking' || mode === 'ready' || mode === 'paused'))
-      status.textContent += ' · 当前位置使用估算截面';
+    if (mode === 'walking' || mode === 'ready' || mode === 'paused') {
+      if (port.estimated) status.textContent += ' · 附近使用近似碰撞模型';
+      if (port.limitedCoverage) status.textContent += ' · 部分来源范围未知';
+    }
   };
   let consumed = false;
   const key = (event: KeyboardEvent) => {

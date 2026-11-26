@@ -305,75 +305,49 @@ export class DevLodRuntime {
       this.diagnostics.directoryCompleted < this.rows.size
     )
       throw Error('DEV 来源目录仍在准备');
-    const unknown = (this.state.sourceGeometry.catalog?.diagnostics ?? []).map(
-      (d) => d.documentPath,
+    const unknown = new Set(
+      this.state.sourceGeometry.catalog?.diagnostics.map((d) => d.documentPath),
     );
-    const sources: PatrolSource[] = [],
-      precise = new Map<string, THREE.Box3 | null>();
+    const sources: PatrolSource[] = [];
+    const ranges = new Map<string, { bounds?: THREE.Box3; unresolved: boolean }>();
     for (const row of this.rows.values()) {
       signal.throwIfAborted();
       const e = row.entry;
       if (e.boundsQuality === 'empty' && !e.diagnostic) continue;
-      let bounds =
-        e.boundsQuality === 'conservative' && e.sourceBounds ? boxTuple(e.sourceBounds) : undefined;
-      if (!bounds) {
-        // Curved wires have no analytic catalog bounds. Prove their range once per
-        // template from complete source geometry before declaring the area unknown.
-        if (!precise.has(e.devPath)) {
+      const approximate = ['Table', 'RectangularFixedPlate', 'RectangularRing'].some(
+        (type) => e.primitiveCounts[type],
+      );
+      let bounds = e.sourceBounds ? boxTuple(e.sourceBounds) : undefined;
+      if (e.boundsQuality !== 'conservative') {
+        let range = ranges.get(e.devPath);
+        if (!range) {
           const key = this.key(e.devPath, 2) + '/patrol-source-envelope-v1';
-          const cached = await readPatrolCache<number[] | 'empty'>('coverage', key);
+          const cached = await readPatrolCache<DevSourceBounds['sourceBounds']>('coverage', key);
           signal.throwIfAborted();
-          if (cached === 'empty') precise.set(e.devPath, null);
-          else if (cached?.length === 6)
-            precise.set(
-              e.devPath,
-              new THREE.Box3(
-                new THREE.Vector3().fromArray(cached),
-                new THREE.Vector3().fromArray(cached, 3),
-              ),
-            );
+          if (cached?.length === 6) range = { bounds: boxTuple(cached), unresolved: false };
           else {
             try {
-              const verified = await this.worker.patrolRange(e.devPath);
+              const local = await this.worker.patrolRange(e.devPath);
               signal.throwIfAborted();
-              if (verified.boundsQuality === 'conservative' && verified.sourceBounds) {
-                precise.set(e.devPath, boxTuple(verified.sourceBounds));
-                if (this.session.sourceSha256)
-                  await writePatrolCache('coverage', key, verified.sourceBounds);
-              } else {
-                // A default display section is neither a physical profile nor evidence of the true gross extent.
-                if (
-                  ['Table', 'RectangularFixedPlate', 'RectangularRing'].some(
-                    (type) => e.primitiveCounts[type],
-                  )
-                )
-                  throw Error('缺少有来源依据的板件范围：' + e.devPath);
-                const t = await this.patrolTemplate(e.devPath, signal);
-                precise.set(e.devPath, t?.bounds.clone() ?? null);
-                if (this.session.sourceSha256)
-                  await writePatrolCache(
-                    'coverage',
-                    key,
-                    t ? [...t.bounds.min.toArray(), ...t.bounds.max.toArray()] : 'empty',
-                  );
-              }
-            } catch (error) {
+              range = {
+                bounds: local.sourceBounds ? boxTuple(local.sourceBounds) : bounds,
+                unresolved: local.boundsQuality === 'unknown',
+              };
+              if (!range.unresolved && local.sourceBounds && this.session.sourceSha256)
+                await writePatrolCache('coverage', key, local.sourceBounds);
+            } catch {
               signal.throwIfAborted();
-              throw Error('来源范围未知：' + String(error));
+              range = { bounds, unresolved: true };
             }
           }
+          ranges.set(e.devPath, range);
         }
-        bounds = precise.get(e.devPath) ?? undefined;
-        if (!bounds) continue;
+        if (range.unresolved) unknown.add(e.devPath);
+        bounds = range.bounds;
       }
+      if (!bounds) continue;
       const matrix = createSourcePlacementMatrix(e.placementMatrix);
       const load = async (signal: AbortSignal) => {
-        if (
-          Object.keys(e.primitiveCounts).some((type) =>
-            ['Table', 'RectangularFixedPlate', 'RectangularRing'].includes(type),
-          )
-        )
-          throw Error('来源只提供型材外廓或无开孔板件，缺少可靠碰撞面');
         const t = await this.patrolTemplate(e.devPath, signal);
         if (!t) throw Error('DEV 无可用三角形');
         const parts: PatrolPart[] = [];
@@ -402,10 +376,13 @@ export class DevLodRuntime {
         matrix,
         support: this.patrolGround.has(e.rootOccurrence),
         estimatedSteelSections: e.estimatedSteelSections,
+        approximate,
         load,
       });
     }
-    return (this.patrolCatalog = { sources, unknown });
+    signal.throwIfAborted();
+    if (!this.current()) throw Error('DEV 来源已切换');
+    return (this.patrolCatalog = { sources, unknown: [...unknown] });
   }
   private displayedPins = new Map<string, number>();
   private pinKeys = new RevisionSet<string>();

@@ -87,6 +87,7 @@ function reserveBuild(signal: AbortSignal): Promise<() => void> {
 
 export class PatrolNavigationRuntime implements NavigationQueryPort {
   private readonly key: string;
+  private hasEstimatedSources = false;
   private directory?: PatrolDirectory;
   private approaches: GateApproach[] = [];
   private catalogOwner?: AppState['sourceGeometry']['catalog'];
@@ -251,6 +252,7 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
           else this.grid.set(k, [row]);
         }
     }
+    this.hasEstimatedSources = sources.some((row) => row.approximate || row.estimatedSteelSections);
     this.metrics.estimatedSectionOccurrences = sources.filter(
       (row) => row.estimatedSteelSections,
     ).length;
@@ -278,17 +280,22 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
           high = point.clone().setZ(point.z + above);
         const column = new Box3(low, high);
         const supports = (r: PatrolSource) => r.support && r.bounds.intersectsBox(column);
-        if (!this.grid.get(key)?.some(supports) && !this.large.some(supports)) continue;
-        await this.prepareBlocks(point, signal);
+        const candidates = [...(this.grid.get(key) ?? []), ...this.large].filter(supports);
+        if (!candidates.length) continue;
+        const envelope = sweepBounds(low, high);
+        await this.prepareBlocks(point, signal, point, envelope);
         this.check(signal);
         const heights = new Set<number>();
-        for (const row of this.loaded.get(key) ?? [])
-          if (row.support)
-            visitTriangles(row, column, (t) => {
-              const z = supportHeight(t, point, below, above);
-              if (z !== undefined) heights.add(z);
-              return false;
-            });
+        const resident = this.resident();
+        for (const candidate of candidates) {
+          const row = resident.get(candidate.id);
+          if (!row) continue;
+          visitTriangles(row, column, (t) => {
+            const z = supportHeight(t, point, below, above);
+            if (z !== undefined) heights.add(z);
+            return false;
+          });
+        }
         for (const z of [...heights].sort(
           (a, b) => Math.abs(a - point.z) - Math.abs(b - point.z),
         )) {
@@ -319,8 +326,6 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
     if (!this.session.sourceSha256) throw Error('导航数据不完整：缺少来源 SHA');
     await this.catalog(signal);
     this.check(signal);
-    if (this.directory!.unknown.length)
-      throw Error('导航数据不完整：来源范围未知 ' + this.directory!.unknown[0]);
     const cx = Math.floor(anchor.x / size),
       cy = Math.floor(anchor.y / size);
     const keep = new Set<string>();
@@ -346,7 +351,7 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
           new Vector3((x + 1) * size, (y + 1) * size, Infinity),
         );
 
-        const key = this.key + '/tile/section-evidence-v1/' + tile;
+        const key = this.key + '/tile/browser-evidence-v1/' + tile;
         const prev = corridor
           ? undefined
           : await readPatrolCache<NavigationCoverage>('coverage', key);
@@ -458,7 +463,7 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
             asset,
           });
           coverage.processedSources.push(row.id);
-          if (row.estimatedSteelSections) coverage.estimatedSources.push(row.id);
+          if (row.estimatedSteelSections || row.approximate) coverage.estimatedSources.push(row.id);
         }
         this.check(signal);
         if (corridor) {
@@ -471,21 +476,27 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
           this.residentSources = undefined;
           continue;
         }
+        const unlocated = this.directory!.unknown.length > 0;
         coverage.ground = gaps.some((s) => s.support)
           ? 'partial'
-          : coverage.estimatedSources.some((id) => this.sourcesById.get(id)?.support)
-            ? 'estimated'
-            : 'complete';
+          : unlocated
+            ? 'unknown'
+            : coverage.estimatedSources.some((id) => this.sourcesById.get(id)?.support)
+              ? 'estimated'
+              : 'complete';
         coverage.obstacles = gaps.length
           ? 'partial'
-          : coverage.estimatedSources.length
-            ? 'estimated'
-            : 'complete';
+          : unlocated
+            ? 'unknown'
+            : coverage.estimatedSources.length
+              ? 'estimated'
+              : 'complete';
         coverage.complete = coverage.ground === 'complete' && coverage.obstacles === 'complete';
         this.gaps.set(tile, gaps);
         if (rows === recovered) this.metrics.blockHits++;
         else if (
           !gaps.length &&
+          !unlocated &&
           rows.every((row) => this.savedAssets.has(this.key + '/' + row.assetKey))
         )
           await writePatrolCache('coverage', key, coverage);
@@ -551,7 +562,6 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
     if (!this.directoryCurrent()) return { reason: '导航数据不完整：正在准备变更的来源' };
     if (!this.directory || (!this.loaded.size && !this.corridors.size))
       return { reason: '导航数据不完整：正在准备前方分块' };
-    if (this.directory.unknown.length) return { reason: '导航数据不完整：来源范围未知' };
     const box = sweepBounds(from, to);
     let usedResidentCoverage = false;
     const rows = new Map<string, PlacedAsset>();
@@ -583,14 +593,19 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
       }
     const step = solvePatrolStep(rows, box, from, to);
     if ('feet' in step && usedResidentCoverage) this.metrics.residentSweepSteps++;
-    if ('feet' in step && this.metrics.estimatedSectionOccurrences) {
-      for (const id of rows.keys()) {
-        const source = this.sourcesById.get(id);
-        if (source?.estimatedSteelSections && source.bounds.intersectsBox(box)) {
-          step.estimated = true;
-          break;
+    if ('feet' in step) {
+      if (this.directory.unknown.length) step.limitedCoverage = true;
+      if (this.hasEstimatedSources)
+        for (const id of rows.keys()) {
+          const source = this.sourcesById.get(id);
+          if (
+            (source?.estimatedSteelSections || source?.approximate) &&
+            source.bounds.intersectsBox(box)
+          ) {
+            step.estimated = true;
+            break;
+          }
         }
-      }
     }
     return step;
   }

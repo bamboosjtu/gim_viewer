@@ -281,11 +281,39 @@ describe('source coverage and navigation cache', () => {
     ).toBe(false);
     runtime.dispose();
   });
-  it('refuses unresolved source range; a verified warm block uses the same floor and no build', async () => {
+  it('finds the gate with an unlocated cabinet and builds only geometry near the landing', async () => {
+    const gate = source('gate', new Box3(p(0.5, 2, 3.5), p(0.8, 6, 3.8)), false, async () => [
+      {
+        positions: new Float32Array([0.5, 2, 3.5, 0.5, 6, 3.5, 0.5, 6, 3.8]),
+        indices: new Uint32Array([0, 1, 2]),
+        matrix: identity.toArray(),
+      },
+    ]);
+    const load = vi.fn(async () => {
+      throw Error('irrelevant geometry');
+    });
+    const remote = source('equipment', new Box3(p(5, 6), p(7, 7, 2)), false, load);
+    const rt = fixture(
+      'gate-local',
+      [slab(), gate, remote],
+      ['unlocated-cabinet'],
+      [{ id: 'gate', name: '站区大门' }],
+    );
+    try {
+      const spawn = await rt.stationEntrance(new AbortController().signal);
+      expect(spawn).toMatchObject({ sourceId: 'floor', limitedCoverage: true });
+      expect(rt.step(spawn!.feet, spawn!.feet.clone().add(p(0.03, 0)))).toMatchObject({
+        limitedCoverage: true,
+      });
+      expect(load).not.toHaveBeenCalled();
+      expect(rt.step(p(7.99, 8.4), p(7.99, 8.4))).toMatchObject({ reason: '无连续落脚面' });
+    } finally {
+      rt.dispose();
+    }
+  });
+
+  it('reuses a verified warm block without rebuilding the source', async () => {
     const signal = new AbortController().signal;
-    const unknown = fixture('unknown', [slab()], ['ifc-without-bounds']);
-    await expect(unknown.prepare(p(2, 2), signal)).rejects.toThrow('来源范围未知');
-    unknown.dispose();
     const f = slab(),
       load = vi.spyOn(f, 'load');
     for (const hits of [0, 1]) {

@@ -108,10 +108,14 @@ export function primitiveBounds(p: XmlModPrimitive): THREE.Box3 | null {
       return null;
   }
 }
-/** Bounds for an incomplete navigation source only. These ranges never become collision surfaces. */
+/** Navigation range broad phase. Collision still uses the template triangles. */
 function patrolPrimitiveRange(p: XmlModPrimitive): THREE.Box3 | null {
   const known = primitiveBounds(p);
   if (known) return known;
+  if (p.type === 'Table' && [p.ll1, p.ll2, p.h].every((n) => Number.isFinite(n) && n > 0)) {
+    const half = v(p.ll1 / 2, p.ll2 / 2, p.h / 2);
+    return new THREE.Box3(half.clone().negate(), half);
+  }
   if (p.type === 'RectangularFixedPlate' || p.type === 'RectangularRing') {
     const a = p.raw;
     if (p.type === 'RectangularRing' && p.sourceForm === 'TableGasket') {

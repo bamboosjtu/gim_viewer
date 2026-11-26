@@ -20,6 +20,7 @@ export interface PatrolSource {
   matrix: Matrix4;
   support: boolean;
   estimatedSteelSections?: number;
+  approximate?: boolean;
   door?: import('./doorMotion.js').DoorMotionDescriptor;
   moveLeaf?: (transform: Matrix4, signal: AbortSignal) => Promise<() => void>;
   load: (signal: AbortSignal) => Promise<PatrolPart[]>;
@@ -42,13 +43,15 @@ export interface NavigationCoverage {
 }
 export interface PatrolPose {
   estimated?: boolean;
+  limitedCoverage?: boolean;
   feet: Vector3;
   yaw: number;
   pitch: number;
   sourceId: string;
 }
 export type StepResult =
-  { feet: Vector3; sourceId: string; estimated?: boolean } | { reason: string };
+  | { feet: Vector3; sourceId: string; estimated?: boolean; limitedCoverage?: boolean }
+  | { reason: string };
 export interface NavigationQueryPort {
   prepare(point: Vector3, signal: AbortSignal, from?: Vector3): Promise<void>;
   prefetchAhead?(from: Vector3, stride: Vector3, signal: AbortSignal): void;

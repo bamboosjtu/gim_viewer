@@ -45,6 +45,7 @@ export class ViewerNavigationCommands extends EventTarget {
   pickingStart = false;
   dragLook = false;
   estimated = false;
+  limitedCoverage = false;
   measuring = false;
   doorHint = false;
   revision = 0;

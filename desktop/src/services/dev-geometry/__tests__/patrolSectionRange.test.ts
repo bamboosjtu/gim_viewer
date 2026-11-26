@@ -30,6 +30,7 @@ it('includes the real curved tube between fit points and localizes only explicit
       ),
       true,
     );
+  expect(bounds('<Table LL1="450" LL2="300" H="150"/>').box.max.toArray()).toEqual([225, 150, 75]);
   const plate = bounds('<RectangularFixedPlate L="108" W="83" T="20"/>');
   expect(plate.unknown).toBe(false);
   expect(plate.box.min.x).toBe(-54);

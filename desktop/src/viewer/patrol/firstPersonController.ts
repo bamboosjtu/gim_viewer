@@ -50,6 +50,7 @@ export class FirstPersonController {
     this.feet = start.feet.clone();
     this.sourceId = start.sourceId;
     this.commands.estimated = !!start.estimated;
+    this.commands.limitedCoverage = !!start.limitedCoverage;
     this.yaw = start.yaw;
     this.pitch = start.pitch;
     const { signal } = this.events;
@@ -262,8 +263,12 @@ export class FirstPersonController {
       } else {
         this.feet.copy(result.feet);
         this.sourceId = result.sourceId;
-        if (this.commands.estimated !== !!result.estimated) {
+        if (
+          this.commands.estimated !== !!result.estimated ||
+          this.commands.limitedCoverage !== !!result.limitedCoverage
+        ) {
           this.commands.estimated = !!result.estimated;
+          this.commands.limitedCoverage = !!result.limitedCoverage;
           this.commands.dispatchEvent(new Event('change'));
         }
         changed = true;
@@ -287,6 +292,7 @@ export class FirstPersonController {
     this.pitch = pose.pitch;
     this.sourceId = pose.sourceId;
     this.commands.estimated = !!pose.estimated;
+    this.commands.limitedCoverage = !!pose.limitedCoverage;
     this.apply();
   }
   stop() {
