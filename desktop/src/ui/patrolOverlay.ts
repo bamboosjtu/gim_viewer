@@ -1,3 +1,4 @@
+import { acceptsNavigationAction } from '../shared/viewerNavigationCommands.js';
 import { toolGlyph } from './viewerToolIcons.js';
 import type {
   NavigationAction,
@@ -34,7 +35,8 @@ export function mountPatrolOverlay(
   const resume = button(panel, '继续巡视', 'resume');
   const measure = button(panel, '两点测量', 'measure');
   const home = button(panel, '返回巡视入口', 'return');
-  button(panel, '退出巡视', 'exit');
+  const cancel = button(panel, '取消操作', 'pause');
+  const exit = button(panel, '退出巡视', 'exit');
   viewport.append(panel, cross);
   const render = () => {
     const mode = port.mode;
@@ -49,7 +51,9 @@ export function mountPatrolOverlay(
     choose.hidden = (mode !== 'preparing' && mode !== 'ready') || port.pickingStart;
     home.textContent = port.gateHome ? '返回大门' : '返回巡视入口';
     resume.hidden = home.hidden = mode !== 'paused' && mode !== 'inspecting';
-    measure.hidden = resume.hidden || port.measuring;
+    cancel.hidden = !['returning', 'operatingDoor', 'pickingDevice'].includes(mode);
+    exit.disabled = enter.disabled = mode === 'exiting';
+    measure.hidden = !acceptsNavigationAction(mode, 'measure') || port.measuring;
     status.textContent =
       port.message ||
       (mode === 'walking'
@@ -61,6 +65,8 @@ export function mountPatrolOverlay(
         : mode === 'inspecting'
           ? '检查设备'
           : '巡视已暂停');
+    if (port.estimated && (mode === 'walking' || mode === 'ready' || mode === 'paused'))
+      status.textContent += ' · 当前位置使用估算截面';
   };
   let consumed = false;
   const key = (event: KeyboardEvent) => {

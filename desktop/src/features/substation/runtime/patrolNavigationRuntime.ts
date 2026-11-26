@@ -12,12 +12,12 @@ import {
   writePatrolCache,
 } from '../../../infrastructure/cache/navigation/patrolCache.js';
 import { PatrolAssetBuilder } from '../../../infrastructure/workers/patrolAssetBuilder.js';
+import { solvePatrolStep } from '../../../viewer/patrol/collision/patrolStep.js';
 import { doorRange, doorTransform } from '../../../viewer/patrol/doorMotion.js';
 import {
   bodyHits,
   triangleDistanceSquared,
   supportHeight,
-  supportedInterval,
   visitTriangles,
   type PatrolAsset,
   type PlacedAsset,
@@ -51,6 +51,12 @@ const codec = [
   'bvh-v1',
   'grid-' + size,
 ].join('/');
+function sweepBounds(from: Vector3, to: Vector3) {
+  const box = new Box3().setFromPoints([from, to]).expandByScalar(profile.radius);
+  box.min.z = Math.min(from.z, to.z) - profile.stepDown - 0.01;
+  box.max.z = Math.max(from.z, to.z) + profile.height + profile.stepUp;
+  return box;
+}
 const xy = (a: number, b: number) => a + ',' + b;
 const groundType = /^IFC(SLAB|STAIR(FLIGHT)?|RAMP(FLIGHT)?|ROAD|PAVEMENT|SITE|GEOGRAPHICELEMENT)$/;
 const groundLabel =
@@ -106,6 +112,19 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
   private readonly gaps = new Map<string, PatrolSource[]>();
   private readonly loaded = new Map<string, PlacedAsset[]>();
   private readonly assets = new Map<string, PatrolAsset>();
+  private residentSources?: Map<string, PlacedAsset>;
+  private readonly corridors = new Map<string, Map<string, PlacedAsset>>();
+  /** A placed asset covers its complete occurrence on both sides of a tile edge. */
+  private resident() {
+    if (!this.residentSources) {
+      this.residentSources = new Map();
+      for (const block of this.corridors.values())
+        for (const placed of block.values()) this.residentSources.set(placed.id, placed);
+      for (const block of this.loaded.values())
+        for (const placed of block) this.residentSources.set(placed.id, placed);
+    }
+    return this.residentSources;
+  }
   private readonly builder = new PatrolAssetBuilder();
   readonly metrics = {
     estimatedSectionOccurrences: 0,
@@ -114,6 +133,8 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
     blockHits: 0,
     blocks: 0,
     queries: 0,
+    residentSweepSteps: 0,
+    missingSweepSteps: 0,
     queryMs: [] as number[],
   };
   constructor(
@@ -281,29 +302,38 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
     return work;
   }
 
-  prepare(point: Vector3, signal: AbortSignal) {
-    const work = this.serial.then(() => this.prepareBlocks(point, signal));
+  prepare(point: Vector3, signal: AbortSignal, from?: Vector3) {
+    const box = from && sweepBounds(from, point);
+    const work = this.serial.then(() => this.prepareBlocks(point, signal, from ?? point, box));
     this.serial = work.catch(() => {});
     return work;
   }
-  private async prepareBlocks(point: Vector3, signal: AbortSignal) {
+  private async prepareBlocks(
+    point: Vector3,
+    signal: AbortSignal,
+    anchor = point,
+    corridor?: Box3,
+    speculative = false,
+  ) {
     this.check(signal);
     if (!this.session.sourceSha256) throw Error('导航数据不完整：缺少来源 SHA');
     await this.catalog(signal);
     this.check(signal);
     if (this.directory!.unknown.length)
       throw Error('导航数据不完整：来源范围未知 ' + this.directory!.unknown[0]);
-    const cx = Math.floor(point.x / size),
-      cy = Math.floor(point.y / size);
+    const cx = Math.floor(anchor.x / size),
+      cy = Math.floor(anchor.y / size);
     const keep = new Set<string>();
     for (let x = cx - 1; x <= cx + 1; x++)
       for (let y = cy - 1; y <= cy + 1; y++) keep.add(xy(x, y));
-    for (const k of this.loaded.keys())
+    for (const k of new Set([...this.loaded.keys(), ...this.corridors.keys()]))
       if (!keep.has(k)) {
         this.loaded.delete(k);
+        this.corridors.delete(k);
+        this.residentSources = undefined;
         this.gaps.delete(k);
       }
-    const used = new Set([...this.loaded.values()].flat().map((a) => a.asset));
+    const used = new Set(Array.from(this.resident().values(), (a) => a.asset));
     for (const [k, a] of this.assets) if (!used.has(a)) this.assets.delete(k);
     // Only admit blocks actually intersected by the footprint and the next fixed step.
     const r = profile.radius + profile.fast / 60;
@@ -316,22 +346,30 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
           new Vector3((x + 1) * size, (y + 1) * size, Infinity),
         );
 
-        const key = this.key + '/tile/' + tile;
-        const prev = await readPatrolCache<NavigationCoverage>('coverage', key);
+        const key = this.key + '/tile/section-evidence-v1/' + tile;
+        const prev = corridor
+          ? undefined
+          : await readPatrolCache<NavigationCoverage>('coverage', key);
         this.check(signal);
         const recovered =
-          prev?.complete &&
-          prev.ground === 'complete' &&
-          prev.obstacles === 'complete' &&
+          prev &&
+          (prev.obstacles === 'complete' || prev.obstacles === 'estimated') &&
+          (prev.ground === 'complete' || prev.ground === 'estimated') &&
           prev.geometryRevision === this.key
             ? prev.expectedSources.map((id) => this.sourcesById.get(id))
             : undefined;
-        const rows = recovered?.every((r): r is PatrolSource => !!r)
+        const candidates = recovered?.every((r): r is PatrolSource => !!r)
           ? recovered
           : [
               ...(this.grid.get(tile) ?? []),
               ...this.large.filter((a) => box.intersectsBox(a.bounds)),
             ];
+        const rows = corridor
+          ? candidates.filter(
+              (row) => row.bounds.intersectsBox(corridor) && !this.resident().has(row.id),
+            )
+          : candidates;
+        if (corridor && !rows.length) continue;
         const coverage: NavigationCoverage = {
           tileId: tile,
           geometryRevision: this.key,
@@ -341,6 +379,7 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
           expectedSources: rows.map((r) => r.id),
           processedSources: [],
           failedSources: [],
+          estimatedSources: [],
         };
         const placed: PlacedAsset[] = [],
           gaps: PatrolSource[] = [];
@@ -419,22 +458,86 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
             asset,
           });
           coverage.processedSources.push(row.id);
+          if (row.estimatedSteelSections) coverage.estimatedSources.push(row.id);
         }
         this.check(signal);
-        coverage.ground = gaps.some((s) => s.support) ? 'partial' : 'complete';
-        coverage.obstacles = gaps.length ? 'partial' : 'complete';
-        coverage.complete = gaps.length === 0;
+        if (corridor) {
+          // Each placement is a complete occurrence. The rest of this tile is still unproven.
+          const local = this.corridors.get(tile) ?? new Map<string, PlacedAsset>();
+          for (const item of placed) local.set(item.id, item);
+          this.corridors.set(tile, local);
+          if (!speculative && gaps.length)
+            this.gaps.set(tile, [...(this.gaps.get(tile) ?? []), ...gaps]);
+          this.residentSources = undefined;
+          continue;
+        }
+        coverage.ground = gaps.some((s) => s.support)
+          ? 'partial'
+          : coverage.estimatedSources.some((id) => this.sourcesById.get(id)?.support)
+            ? 'estimated'
+            : 'complete';
+        coverage.obstacles = gaps.length
+          ? 'partial'
+          : coverage.estimatedSources.length
+            ? 'estimated'
+            : 'complete';
+        coverage.complete = coverage.ground === 'complete' && coverage.obstacles === 'complete';
         this.gaps.set(tile, gaps);
         if (rows === recovered) this.metrics.blockHits++;
         else if (
-          coverage.complete &&
+          !gaps.length &&
           rows.every((row) => this.savedAssets.has(this.key + '/' + row.assetKey))
         )
           await writePatrolCache('coverage', key, coverage);
         this.check(signal);
+        this.corridors.delete(tile);
         this.loaded.set(tile, placed);
+        this.residentSources = undefined;
         this.metrics.blocks++;
       }
+  }
+  private aheadTile?: string;
+  private aheadPending = false;
+  prefetchAhead(from: Vector3, stride: Vector3, signal: AbortSignal) {
+    if (
+      this.aheadPending ||
+      signal.aborted ||
+      this.state.substationMemoryPressure === 'high' ||
+      this.state.substationMemoryPressure === 'critical'
+    )
+      return;
+    const x = Math.floor(from.x / size),
+      y = Math.floor(from.y / size);
+    const untilEdge = (value: number, tile: number, delta: number) =>
+      delta === 0 ? Infinity : ((tile + Number(delta > 0)) * size - value) / delta;
+    const tx = untilEdge(from.x, x, stride.x),
+      ty = untilEdge(from.y, y, stride.y);
+    if (Math.min(tx, ty) > 3 * 60) return;
+    const nx = x + (tx <= ty ? Math.sign(stride.x) : 0);
+    const ny = y + (ty <= tx ? Math.sign(stride.y) : 0);
+    const tile = xy(nx, ny);
+    if (this.loaded.has(tile) || this.aheadTile === tile) return;
+    this.aheadTile = tile;
+    // Preload only missing sources in the walking direction. Entry picking and door
+    // operation can still request a full tile through the normal prepare path.
+    const ahead = from.clone().addScaledVector(stride, 3 * 60);
+    const corridor = sweepBounds(from, ahead);
+    const rise = from.distanceTo(ahead) * Math.tan((profile.maxSlopeDegrees * Math.PI) / 180);
+    corridor.min.z -= rise;
+    corridor.max.z += rise;
+    const missing = (row: PatrolSource) =>
+      row.bounds.intersectsBox(corridor) && !this.resident().has(row.id);
+    if (!this.grid.get(tile)?.some(missing) && !this.large.some(missing)) return;
+    this.aheadPending = true;
+    const center = new Vector3((nx + 0.5) * size, (ny + 0.5) * size, from.z);
+    const anchor = from.clone();
+    const work = this.serial.then(() => this.prepareBlocks(center, signal, anchor, corridor, true));
+    this.serial = work
+      .catch(() => {})
+      .finally(() => {
+        this.aheadPending = false;
+        if (signal.aborted) this.aheadTile = undefined;
+      });
   }
   step(from: Vector3, to: Vector3): StepResult {
     const start = performance.now();
@@ -446,73 +549,50 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
   }
   private query(from: Vector3, to: Vector3): StepResult {
     if (!this.directoryCurrent()) return { reason: '导航数据不完整：正在准备变更的来源' };
-    const r = profile.radius;
-    const box = new Box3().setFromPoints([from, to]).expandByScalar(r);
-    box.min.z = from.z - profile.stepDown - 0.01;
-    box.max.z = from.z + profile.height + profile.stepUp;
+    if (!this.directory || (!this.loaded.size && !this.corridors.size))
+      return { reason: '导航数据不完整：正在准备前方分块' };
+    if (this.directory.unknown.length) return { reason: '导航数据不完整：来源范围未知' };
+    const box = sweepBounds(from, to);
+    let usedResidentCoverage = false;
     const rows = new Map<string, PlacedAsset>();
     for (let x = Math.floor(box.min.x / size); x <= Math.floor(box.max.x / size); x++)
       for (let y = Math.floor(box.min.y / size); y <= Math.floor(box.max.y / size); y++) {
-        const block = this.loaded.get(xy(x, y));
-        if (!block) return { reason: '导航数据不完整：正在准备前方分块' };
-        // Refine the coverage proof to the actual swept volume. A partial source
-        // with a known range can only be excluded when that range is disjoint.
-        const missing = this.gaps.get(xy(x, y))?.find((row) => row.bounds.intersectsBox(box));
-        if (missing) return { reason: '导航数据不完整：扫掠范围内存在缺失几何 ' + missing.id };
+        const tile = xy(x, y),
+          block = this.loaded.get(tile);
+        const gap = this.gaps.get(tile)?.find((source) => source.bounds.intersectsBox(box));
+        if (gap) return { reason: '导航数据不完整：扫掠范围内存在缺失几何 ' + gap.id };
+        if (!block) {
+          // A pending tile may contain unrelated equipment. Prove this sweep from
+          // the authoritative directory and full, already placed occurrence meshes.
+          const resident = this.resident();
+          usedResidentCoverage = true;
+          for (const candidates of [this.grid.get(tile) ?? [], this.large]) {
+            for (const source of candidates) {
+              if (!source.bounds.intersectsBox(box)) continue;
+              const placed = resident.get(source.id);
+              if (!placed) {
+                this.metrics.missingSweepSteps++;
+                return { reason: '导航数据不完整：正在准备前方分块' };
+              }
+              rows.set(source.id, placed);
+            }
+          }
+          continue;
+        }
         for (const row of block) rows.set(row.id, row);
       }
-    let floor = -Infinity,
-      sourceId = '';
-    const intervals: [number, number][] = [];
-    // Treads can be narrower than the body diameter even while standing still.
-    // Allow only a verified next tread on this same support object under the foot disk.
-    const footprint = Array.from({ length: 8 }, (_, i) =>
-      to
-        .clone()
-        .add(new Vector3(r * Math.cos((i * Math.PI) / 4), r * Math.sin((i * Math.PI) / 4), 0)),
-    );
-    const reachableTreads = new Map<string, number>();
-    for (const row of rows.values())
-      if (row.support)
-        visitTriangles(row, box, (t) => {
-          const interval = supportedInterval(t, from, to);
-          if (interval) intervals.push(interval);
-          for (const sample of footprint) {
-            const height = supportHeight(t, sample);
-            if (height !== undefined && height > (reachableTreads.get(row.id) ?? -Infinity))
-              reachableTreads.set(row.id, height);
-          }
-          const height = supportHeight(t, to);
-          if (height !== undefined && height > floor) {
-            floor = height;
-            sourceId = row.id;
-          }
-          return false;
-        });
-    if (!sourceId) return { reason: '无连续落脚面' };
-    intervals.sort((a, b) => a[0] - b[0]);
-    let covered = 0;
-    for (const [start, end] of intervals) {
-      if (start > covered + 1e-8) break;
-      covered = Math.max(covered, end);
+    const step = solvePatrolStep(rows, box, from, to);
+    if ('feet' in step && usedResidentCoverage) this.metrics.residentSweepSteps++;
+    if ('feet' in step && this.metrics.estimatedSectionOccurrences) {
+      for (const id of rows.keys()) {
+        const source = this.sourcesById.get(id);
+        if (source?.estimatedSteelSections && source.bounds.intersectsBox(box)) {
+          step.estimated = true;
+          break;
+        }
+      }
     }
-    if (covered < 1 - 1e-8) return { reason: '无连续落脚面' };
-    const feet = to.clone().setZ(floor);
-    for (const row of rows.values())
-      if (
-        visitTriangles(row, box, (t) => {
-          const tread = reachableTreads.get(row.id);
-          if (
-            tread !== undefined &&
-            tread >= floor &&
-            Math.max(t.a.z, t.b.z, t.c.z) <= tread + 1e-5
-          )
-            return false;
-          return bodyHits(t, from, feet);
-        })
-      )
-        return { reason: '前方受阻或头顶净空不足' };
-    return { feet, sourceId };
+    return step;
   }
   get hasDoors() {
     return this.trustedDoors.size > 0;
@@ -580,26 +660,34 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
       this.opened.set(id, undo);
     }
     const matrix = closing ? row.matrix : doorTransform(descriptor, angle).multiply(row.matrix);
+    const updatePlacement = (p: PlacedAsset) => {
+      p.matrix = matrix;
+      p.inverse = matrix.clone().invert();
+    };
     for (const tile of this.loaded.values())
-      for (const p of tile)
-        if (p.id === id) {
-          p.matrix = matrix;
-          p.inverse = matrix.clone().invert();
-        }
+      for (const p of tile) if (p.id === id) updatePlacement(p);
+    for (const tile of this.corridors.values()) {
+      const p = tile.get(id);
+      if (p) updatePlacement(p);
+    }
     return closing ? '门已关闭' : '门已开启';
   }
   leave() {
+    this.aheadTile = undefined;
     for (const undo of this.opened.values()) undo();
     this.opened.clear();
     this.trustedDoors.clear();
     this.builder.dispose();
+    this.corridors.clear();
     this.loaded.clear();
+    this.residentSources = undefined;
     this.gaps.clear();
     this.assets.clear();
     this.savedAssets.clear();
   }
   dispose() {
     this.leave();
+    this.doors.clear();
     this.sourcesById.clear();
     this.grid.clear();
     this.large.length = 0;

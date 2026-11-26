@@ -176,7 +176,7 @@ export async function getViewerRuntimeWithUI(
           return false;
         },
         (rootOccurrence, instanceKey, request, hint) => {
-          void import('../selection/devViewportSelection.js')
+          return import('../selection/devViewportSelection.js')
             .then(({ selectViewportDev }) =>
               selectViewportDev(
                 ctx,

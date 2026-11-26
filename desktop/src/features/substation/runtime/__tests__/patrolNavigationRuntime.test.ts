@@ -89,6 +89,72 @@ describe('source coverage and navigation cache', () => {
     }
   });
 
+  it('crosses a pending tile on a resident stair only when every source in the sweep is accounted for', async () => {
+    const floor = slab();
+    floor.matrix = new Matrix4().makeScale(2, 1, 1);
+    floor.bounds.max.x = 16;
+    const load = vi.fn(async () => {
+      throw Error('no triangles');
+    });
+    const unknownWall = source('wall', new Box3(p(8.01, 5, 0), p(8.12, 6, 2)), false, load);
+    const rt = fixture('tile-edge-proof', [floor, unknownWall]);
+    try {
+      await rt.prepare(p(6, 4), new AbortController().signal);
+      expect(rt.metrics.blocks).toBe(1);
+      expect(rt.step(p(7.72, 4), p(7.76, 4))).toHaveProperty('feet');
+      expect(rt.step(p(8.01, 4), p(8.04, 4))).toHaveProperty('feet');
+      expect(rt.step(p(7.72, 5.1), p(7.76, 5.1))).toMatchObject({
+        reason: expect.stringContaining('正在准备'),
+      });
+      expect(load).not.toHaveBeenCalled();
+      expect(rt.metrics.blocks).toBe(1);
+    } finally {
+      rt.dispose();
+    }
+  });
+  it('prepares only the required neighbour sources and preserves partial coverage', async () => {
+    const floor = slab();
+    floor.matrix = new Matrix4().makeScale(2, 1, 1);
+    floor.bounds.max.x = 16;
+    const distant = source(
+      'distant',
+      new Box3(p(12, 7), p(13, 7.5, 1)),
+      false,
+      vi.fn(async () => {
+        throw Error('missing');
+      }),
+    );
+    const wall = source(
+      'wall',
+      new Box3(p(8.1, 3), p(8.1, 5, 2)),
+      false,
+      vi.fn(async () => [
+        {
+          matrix: identity.toArray(),
+          positions: new Float32Array([8.1, 3, 0, 8.1, 5, 0, 8.1, 4, 2]),
+          indices: new Uint32Array([0, 1, 2]),
+        },
+      ]),
+    );
+    const rt = fixture('prefetch', [floor, wall, distant]),
+      start = p(6, 4),
+      signal = new AbortController().signal;
+    try {
+      await rt.prepare(start, signal);
+      rt.prefetchAhead(start, p(0.025, 0), signal);
+      rt.prefetchAhead(start, p(0.025, 0), signal);
+      await rt.prepare(p(7.9, 4), signal, p(7.88, 4));
+      expect(wall.load).toHaveBeenCalledTimes(1);
+      expect(distant.load).not.toHaveBeenCalled();
+      expect(rt.metrics.blocks).toBe(1);
+      expect(rt.step(p(7.82, 4), p(7.86, 4))).toMatchObject({
+        reason: expect.stringContaining('受阻'),
+      });
+      expect(rt.step(p(8, 2), p(8.05, 2))).toHaveProperty('feet');
+    } finally {
+      rt.dispose();
+    }
+  });
   it('stands on and climbs a tread narrower than the body diameter', async () => {
     const tread = source('next-tread', new Box3(p(1, 0, 0), p(1.32, 3, 0.167)), true, async () => [
       {
@@ -108,6 +174,97 @@ describe('source coverage and navigation cache', () => {
     if ('feet' in step) expect(step.feet.z).toBeCloseTo(0.167);
     runtime.dispose();
   });
+  it('allows a solid tread with an attached nosing but rejects a detached underside', async () => {
+    for (const connected of [true, false]) {
+      const part = source('tread', new Box3(p(1, 0, 0.15), p(1.32, 3, 0.17)), true, async () => [
+        {
+          matrix: identity.toArray(),
+          positions: new Float32Array([
+            1, 0, 0.17, 1.32, 0, 0.17, 1.32, 3, 0.17, 1, 3, 0.17, 1, 0, 0.15, 1.32, 0, 0.15, 1.32,
+            3, 0.15, 1, 3, 0.15,
+          ]),
+          indices: new Uint32Array([
+            0,
+            1,
+            2,
+            0,
+            2,
+            3,
+            4,
+            7,
+            5,
+            5,
+            7,
+            6,
+            ...(connected ? [0, 3, 4, 4, 3, 7, 1, 5, 2, 2, 5, 6] : []),
+          ]),
+        },
+      ]);
+      const rt = fixture('nosing-' + connected, [slab(), part]);
+      try {
+        const foot = p(0.82, 1);
+        await rt.prepare(foot, new AbortController().signal);
+        expect(rt.step(foot, foot)).toHaveProperty(connected ? 'feet' : 'reason');
+      } finally {
+        rt.dispose();
+      }
+    }
+  });
+  it('blocks an unrelated low fin in the same mesh as a reachable tread', async () => {
+    const step = source('stairs-with-fin', new Box3(p(0.7, 0), p(1.4, 3, 0.2)), true, async () => [
+      {
+        matrix: identity.toArray(),
+        positions: new Float32Array([
+          1, 0, 0.2, 1.4, 0, 0.2, 1.4, 3, 0.2, 1, 3, 0.2, 0.82, 0.9, 0, 0.82, 1.1, 0, 0.82, 1, 0.12,
+        ]),
+        indices: new Uint32Array([0, 1, 2, 0, 2, 3, 4, 5, 6]),
+      },
+    ]);
+    const rt = fixture('low-fin', [slab(), step]);
+    try {
+      await rt.prepare(p(1, 1), new AbortController().signal);
+      expect(rt.step(p(0.75, 1), p(0.8, 1))).toHaveProperty('reason');
+      expect(rt.step(p(0.99, 1), p(1.01, 1))).toHaveProperty('reason');
+      expect(rt.step(p(1.01, 1, 0.2), p(0.99, 1, 0.2))).toHaveProperty('reason');
+      expect(rt.step(p(0.99, 2), p(1.01, 2))).toHaveProperty('feet');
+    } finally {
+      rt.dispose();
+    }
+  });
+  it.each([true, false])(
+    'retains estimated coverage on cold and warm entry (support %s)',
+    async (support) => {
+      const member = source('steel', new Box3(p(3, 3), p(4, 4, 0.1)), support, async () => [
+        {
+          matrix: identity.toArray(),
+          positions: new Float32Array([3, 3, 0, 4, 3, 0, 3, 4, 0]),
+          indices: new Uint32Array([0, 1, 2]),
+        },
+      ]);
+      member.estimatedSteelSections = 1;
+      const key = 'estimated-' + support;
+      for (const hits of [0, 1]) {
+        const rt = fixture(key, [slab(), member]);
+        try {
+          await rt.prepare(p(3, 3), new AbortController().signal);
+          expect(rt.metrics.blockHits).toBe(hits);
+          const tile = [...records].find(
+            ([k]) => k.startsWith('coverage' + key) && k.includes('/tile/'),
+          );
+          expect(tile?.[1]).toMatchObject({
+            ground: support ? 'estimated' : 'complete',
+            obstacles: 'estimated',
+            complete: false,
+            estimatedSources: ['steel'],
+          });
+          expect(rt.step(p(3, 3), p(3, 3))).toMatchObject({ estimated: true, sourceId: 'floor' });
+          expect(rt.step(p(1, 1), p(1, 1))).not.toHaveProperty('estimated', true);
+        } finally {
+          rt.dispose();
+        }
+      }
+    },
+  );
   it('blocks a swept volume intersecting a failed source, and permits disjoint floor in the same tile', async () => {
     const gap = source('failed-equipment', new Box3(p(3, 3), p(4, 4, 2)), false, async () => {
       throw Error('missing triangles');

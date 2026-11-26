@@ -519,7 +519,7 @@
   .viewer-tool-tabs:has([data-icon=patrol]:not([hidden])) {grid-template-columns:3fr 4fr 3fr minmax(40px,1.35fr) 3fr}
   .viewer-tool-tabs .viewer-group-heading {white-space:nowrap;padding-inline:2px;gap:3px}
 }
-#viewport:is([data-navigation=walking],[data-navigation=paused],[data-navigation=inspecting],[data-navigation=returning]) .viewer-camera-dock {display:none}
+#viewport[data-navigation]:not([data-navigation=orbit],[data-navigation=preparing],[data-navigation=ready]) .viewer-camera-dock {display:none}
 .viewer-ribbon-actions .viewer-glyph[hidden] {display:none}
 .viewer-ribbon-group {min-width:0; padding:0 6px; border-inline-end:1px solid #cbd5e1}
 .viewer-ribbon-group:last-child {border:0}

@@ -1,5 +1,15 @@
 export type NavigationMode =
-  'orbit' | 'preparing' | 'ready' | 'walking' | 'paused' | 'inspecting' | 'returning';
+  | 'orbit'
+  | 'preparing'
+  | 'ready'
+  | 'walking'
+  | 'paused'
+  | 'inspecting'
+  | 'returning'
+  | 'operatingDoor'
+  | 'pickingDevice'
+  | 'restoringSelection'
+  | 'exiting';
 export type NavigationAction =
   | 'prepare'
   | 'pickStart'
@@ -11,12 +21,30 @@ export type NavigationAction =
   | 'door'
   | 'return'
   | 'exit';
+const allowed: Record<NavigationMode, readonly NavigationAction[]> = {
+  orbit: ['prepare'],
+  preparing: ['pickStart', 'exit'],
+  ready: ['pickStart', 'start', 'exit'],
+  walking: ['pause', 'inspect', 'door', 'exit'],
+  paused: ['resume', 'measure', 'return', 'exit'],
+  inspecting: ['pause', 'resume', 'measure', 'return', 'exit'],
+  returning: ['pause', 'exit'],
+  operatingDoor: ['pause', 'exit'],
+  pickingDevice: ['pause', 'exit'],
+  restoringSelection: ['exit'],
+  exiting: [],
+};
+export function acceptsNavigationAction(mode: NavigationMode, action: NavigationAction) {
+  return allowed[mode].includes(action);
+}
+
 export class ViewerNavigationCommands extends EventTarget {
   mode: NavigationMode = 'orbit';
   message = '';
   gateHome = false;
   pickingStart = false;
   dragLook = false;
+  estimated = false;
   measuring = false;
   doorHint = false;
   revision = 0;
@@ -31,6 +59,6 @@ export class ViewerNavigationCommands extends EventTarget {
   }
   escape(): void {
     if (this.mode === 'preparing' || this.mode === 'ready') this.execute?.('exit');
-    else if (this.mode !== 'paused' && this.mode !== 'orbit') this.execute?.('pause');
+    else if (acceptsNavigationAction(this.mode, 'pause')) this.execute?.('pause');
   }
 }

@@ -197,3 +197,34 @@ it('a cancelled commit cannot remove or unhighlight a newer retry of the same ob
     expect(f.fine.load).toHaveBeenCalledTimes(2);
   } finally {f.runtime.release();}
 });
+
+it.each(['selection','door'])('shares a pending L2 when %s acquires first and retains an open door across selection changes',async first=>{
+  const f=runtimeFixture(), frame=new THREE.Matrix4(), delta=frame.clone().makeTranslation(1,0,0);
+  let resolve!:(value:ObjectFineResult)=>void;
+  const pending=new Promise<ObjectFineResult>(done=>{resolve=done;});
+  const patrol=vi.spyOn(f.runtime,'patrolSource').mockImplementation(async()=>pending);
+  f.fine.load.mockReturnValue(pending);
+  try {
+    const move=()=>f.runtime.movePatrolLeaf(7,delta,frame,new AbortController().signal);
+    const select=()=>f.runtime.refine(object);
+    const doorFirst = first === 'door' ? move() : undefined;
+    const selection = select();
+    const opening = doorFirst ?? move();
+    f.runtime.clearFineSelection();
+    resolve(f.result);
+    const [mesh,close]=await Promise.all([selection,opening]);
+    expect(f.fine.load.mock.calls.length+patrol.mock.calls.length).toBe(1);
+    expect(mesh?.parent).toBe(f.runtime.root);
+    const opened=mesh!.matrix.clone();
+    f.runtime.clearFineSelection();
+    expect(mesh!.matrix.equals(opened)).toBe(true);
+    expect(f.internal.groups.get(7)).toBe(mesh);
+    await f.runtime.refine(object);
+    close();
+    expect(f.internal.groups.get(7)).toBe(mesh);
+    expect(mesh!.matrix.equals(opened)).toBe(false);
+    close();
+    f.runtime.clearFineSelection();
+    expect(f.internal.groups.has(7)).toBe(false);
+  } finally {f.runtime.release();}
+});

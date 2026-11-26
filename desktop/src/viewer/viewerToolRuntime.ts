@@ -14,6 +14,10 @@ export function bindViewerTools(
   host: HTMLElement,
   port: ViewerCommands,
   bindings: {
+    navigation?: Pick<
+      import('../shared/viewerNavigationCommands.js').ViewerNavigationCommands,
+      'mode'
+    >;
     anchor: () => THREE.Matrix4 | null;
     resolveAnchor: () => Promise<THREE.Matrix4 | null>;
     bounds: () => Promise<THREE.Box3>;
@@ -71,7 +75,7 @@ export function bindViewerTools(
   port.execute = async (c) => {
     const s = port.snapshot;
     const owner = cameraPoseHub(ctx).current;
-    if (owner.source === 'patrol') return;
+    if (owner.source === 'patrol' || bindings.navigation?.mode === 'exiting') return;
     const seq = ++revision;
     s.message = '';
     if (c.kind === 'camera') {

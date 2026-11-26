@@ -41,13 +41,16 @@ async function exercise(cdp, indoor, result) {
     throw Error('timed out preparing ' + kind);
   };
   const eye = () => page(() => __gimWorld.camera.three.position.toArray());
-  const feet = () =>
+  const walkSample = () =>
     page(() => {
       const p = __gimWorld.camera.three.position
         .clone()
         .applyMatrix4(__gimAppState.projectCoordinateFrame.matrix.clone().invert());
-      return [p.x, p.y, p.z - 1.68];
+      const nav = __gimAppState.navigation;
+      const foot = nav.evidence().feet;
+      return { feet: foot, eyeOffset: p.z - foot[2], mode: nav.mode, message: nav.message };
     });
+  const feet = async () => (await walkSample()).feet;
   const mouse = (type, x, y, extra) =>
     cdp.send('Input.dispatchMouseEvent', { type, x, y, ...extra });
   const click = async ([x, y]) => {
@@ -66,17 +69,33 @@ async function exercise(cdp, indoor, result) {
     await key('keyUp', k, c);
   };
   const button = async (label) => {
-    const point = await page((label) => {
-      const button = [...document.querySelectorAll('button')].find(
-        (b) =>
-          b.getClientRects().length &&
-          (b.getAttribute('aria-label') === label || b.textContent === label),
-      );
-      if (!button) return null;
-      const r = button.getBoundingClientRect();
-      return [r.left + r.width / 2, r.top + r.height / 2];
-    }, label);
-    assert.ok(point, 'missing control: ' + label);
+    const locate = () =>
+      page((label) => {
+        const button = [...document.querySelectorAll('button')].find(
+          (b) =>
+            b.getClientRects().length &&
+            (b.getAttribute('aria-label') === label || b.textContent === label),
+        );
+        if (!button) return null;
+        const r = button.getBoundingClientRect();
+        return [r.left + r.width / 2, r.top + r.height / 2];
+      }, label);
+    let point = await locate();
+    for (let attempt = 0; !point && attempt < 20; attempt++) {
+      await sleep(200);
+      point = await locate();
+    }
+    if (!point) {
+      result.missingControl = await page(() => ({
+        mode: __gimAppState.navigation.mode,
+        projectType: __gimAppState.currentProjectType,
+        viewport: [innerWidth, innerHeight],
+        visibility: document.visibilityState,
+        button: document.querySelector('[data-icon="patrol"]')?.outerHTML,
+        bar: !!document.querySelector('#selection-toolbar'),
+      }));
+      throw Error('missing control: ' + label);
+    }
     await click(point);
   };
   const center = () =>
@@ -113,6 +132,14 @@ async function exercise(cdp, indoor, result) {
       }
     return list.sort((a, b) => Number(b.road) - Number(a.road) || b.area - a.area).slice(0, 16);
   }, indoor);
+  if (indoor) {
+    // This route supplies keyboard input only on the flight. Use the supported drag-look
+    // fallback so the user's physical mouse cannot steer the isolated test window.
+    await page(() => {
+      __gimWorld.renderer.three.domElement.requestPointerLock = () =>
+        Promise.reject(new DOMException('Keyboard route uses drag look', 'NotAllowedError'));
+    });
+  }
   await button('进入巡视');
   await ready('gate');
   const initialOrbit = await eye();
@@ -193,20 +220,46 @@ async function exercise(cdp, indoor, result) {
   await button('开始巡视');
   await sleep(300);
   const startFoot = await feet();
+  const walkDirection = await direction();
+  if (indoor)
+    await page(() => {
+      const scene = __gimWorld.scene.three,
+        cam = __gimWorld.camera.three;
+      const previous = scene.onAfterRender;
+      const inv = __gimAppState.projectCoordinateFrame.matrix.clone().invert(),
+        p = cam.position.clone();
+      const frames = [];
+      scene.onAfterRender = function (...args) {
+        previous.apply(this, args);
+        p.copy(cam.position).applyMatrix4(inv);
+        if (frames.length < 4096 && frames.at(-1)?.[1] !== p.x)
+          frames.push([performance.now(), p.x, p.z]);
+      };
+      window.__endPatrolAscent = () => {
+        scene.onAfterRender = previous;
+        delete window.__endPatrolAscent;
+        return frames;
+      };
+    });
+  const cacheAtStart = await page(() => __gimAppState.navigation.evidence().cache);
+  let blocked = 0,
+    eyeError = 0;
   result.walk = [];
   await key('keyDown', 'w', 'KeyW');
   try {
     for (let i = 0; i < 600; i++) {
       await sleep(250);
-      const p = await feet();
+      const sample = await walkSample();
+      const p = sample.feet;
+      eyeError = Math.max(eyeError, Math.abs(sample.eyeOffset - 1.68));
       result.walk.push(p);
       if (indoor ? p[0] >= 17.65 : distance(p, startFoot) > 1.8) break;
-      if (
-        i > 8 &&
-        result.walk.slice(-6).every((v) => distance(v, p) < 1e-6) &&
-        !(await status()).message.includes('正在准备')
-      )
-        break;
+      const prior = result.walk.at(-2);
+      blocked =
+        prior && distance(prior, p) < 1e-6 && sample.message && !sample.message.includes('正在准备')
+          ? blocked + 1
+          : 0;
+      if (sample.mode !== 'walking' || blocked >= 6) break;
     }
   } finally {
     await key('keyUp', 'w', 'KeyW');
@@ -214,6 +267,24 @@ async function exercise(cdp, indoor, result) {
   const end = await feet();
   assert.ok(distance(startFoot, end) > 0.4, 'no walking displacement');
   if (indoor) {
+    const frames = await page(() => window.__endPatrolAscent());
+    const edge = 16 - 0.27; // On this route the foot disk first touches the adjacent tile at X=15.73 m.
+    const i = frames.findIndex(
+      (f, index) => index > 0 && f[1] >= edge && frames[index - 1][1] < edge,
+    );
+    assert.ok(i > 0, 'did not cross the navigation tile boundary');
+    result.ascent = {
+      frames: frames.length,
+      elapsedMs: frames.at(-1)[0] - frames[0][0],
+      boundaryFrameMs: frames[i][0] - frames[i - 1][0],
+      upperFoot: end,
+      startFoot,
+    };
+    const cacheAtLanding = await page(() => __gimAppState.navigation.evidence().cache);
+    result.ascent.missingSweepSteps =
+      cacheAtLanding.missingSweepSteps - cacheAtStart.missingSweepSteps;
+    result.ascent.residentSweepSteps =
+      cacheAtLanding.residentSweepSteps - cacheAtStart.residentSweepSteps;
     assert.ok(Math.abs(end[2]) < 0.035, 'did not reach upper landing');
     assert.ok(
       result.walk.some((p) => p[2] > -1.25 && p[2] < -0.2),
@@ -221,14 +292,33 @@ async function exercise(cdp, indoor, result) {
     );
     await key('keyDown', 's', 'KeyS');
     try {
-      for (let i = 0; i < 200; i++) {
-        await sleep(100);
-        if ((await feet())[0] < 13.65) break;
-      }
+      // Release on the original narrow tread instead of overshooting it between CDP polls.
+      await page(
+        (start) =>
+          new Promise((resolve, reject) => {
+            const deadline = performance.now() + 20000;
+            const sample = () => {
+              const foot = __gimAppState.navigation.evidence().feet;
+              if (foot[0] <= start[0] + 0.18 && Math.abs(foot[2] - start[2]) < 0.04)
+                return resolve(true);
+              if (performance.now() > deadline) return reject(Error('未走回起始踏面'));
+              requestAnimationFrame(sample);
+            };
+            sample();
+          }),
+        startFoot,
+      );
     } finally {
       await key('keyUp', 's', 'KeyS');
     }
-    result.lowerTread = await feet();
+    const lower = await walkSample();
+    result.lowerTread = lower.feet;
+    result.eyeHeightMaxError = Math.max(eyeError, Math.abs(lower.eyeOffset - 1.68));
+    result.directionDrift = distance(walkDirection, await direction());
+    assert.ok(
+      result.eyeHeightMaxError < 0.00001 && result.directionDrift < 0.00001,
+      'stairs changed the eye offset or look direction',
+    );
     assert.ok(
       Math.abs(result.lowerTread[2] - startFoot[2]) < 0.04,
       'did not descend to the original tread',

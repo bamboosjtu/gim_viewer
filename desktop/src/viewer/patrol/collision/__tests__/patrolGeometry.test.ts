@@ -18,6 +18,15 @@ describe('source navigation geometry', () => {
     expect(bodyHits(wall, a, b)).toBe(true);
     expect(bodyHits(wall, p(-1, 3, 0), p(1, 3, 0))).toBe(false);
   });
+  it('checks the lower end of the vertical sweep on ascent and descent', () => {
+    const lip = new Triangle(p(-0.04, -0.1, 0.06), p(0.04, -0.1, 0.06), p(0, 0.1, 0.06));
+    const low = p(0, 0, 0),
+      high = p(1, 0, 0.24);
+    expect(bodyHits(lip, low, high)).toBe(true);
+    expect(bodyHits(lip, high, low)).toBe(true);
+    for (const vertex of [lip.a, lip.b, lip.c]) vertex.x += 0.55;
+    expect(bodyHits(lip, low, high)).toBe(false);
+  });
   it('tests head clearance and resolves support relative to the current floor', () => {
     const ceiling = new Triangle(p(-2, -2, 1.5), p(2, -2, 1.5), p(0, 2, 1.5));
     expect(bodyHits(ceiling, p(0, 0, 0), p(0, 0, 0))).toBe(true);

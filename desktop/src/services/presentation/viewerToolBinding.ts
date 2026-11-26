@@ -40,6 +40,7 @@ export function bindViewerToolCommands(
   const anchor = () => state.projectSourceToViewerMatrix;
   const runtime = bindViewerTools(ctx, container, state.viewerCommands, {
     anchor,
+    navigation: state.navigation,
     home: () => {
       if (state.viewState.stationOverview) state.viewState.stationOverview();
       else fitCameraToScene(ctx, state.viewState, { force: true });

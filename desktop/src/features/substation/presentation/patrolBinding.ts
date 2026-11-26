@@ -5,17 +5,20 @@ import type { SessionScope } from '../../../shared/sessionScope.js';
 import { getViewerRuntimeWithUI } from '../../../services/presentation/viewerUIBinding.js';
 import { pickVisibleRay } from '../../../viewer/selection.js';
 import { cameraPoseHub } from '../../../viewer/cameraPoseHub.js';
-import {
-  capturePatrolCamera,
-  freezeOrbit,
-  restoreOrbit,
-} from '../../../viewer/patrol/patrolContextSnapshot.js';
+import { freezeOrbit, restoreOrbit } from '../../../viewer/patrol/patrolContextSnapshot.js';
 import type { PatrolPose } from '../../../viewer/patrol/navigationQueryPort.js';
 import { FirstPersonController } from '../../../viewer/patrol/firstPersonController.js';
 import { PatrolNavigationRuntime } from '../runtime/patrolNavigationRuntime.js';
-import { selectEngineeringTarget } from '../../../services/engineering/engineeringSelection.js';
-import { clearCurrentSelection } from '../../../services/selection/selectionCommands.js';
-import type { NavigationAction } from '../../../shared/viewerNavigationCommands.js';
+import { capturePatrolWorkspace } from './patrolWorkspace.js';
+import {
+  PatrolOperationOwner,
+  type PatrolOperationMode,
+  restorePatrolContext,
+} from '../../../viewer/patrol/patrolSessionController.js';
+import {
+  acceptsNavigationAction,
+  type NavigationAction,
+} from '../../../shared/viewerNavigationCommands.js';
 
 export async function bindPatrol(state: AppState, scope: SessionScope, show: (s: string) => void) {
   const { ctx, patrol } = await getViewerRuntimeWithUI(state, show);
@@ -37,18 +40,17 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
     planned: 'gate' | 'last' | 'manual' = 'manual',
     search: AbortController | undefined,
     entryRequest = 0,
-    switching = false,
-    inspectionChanged = false;
+    switching = false;
   let doorTimer: ReturnType<typeof setTimeout> | undefined,
-    doorSequence = 0,
-    doorBusy = false;
+    doorSequence = 0;
+  const operations = new PatrolOperationOwner();
   const doorHint = (on: boolean) => {
     if (port.doorHint === on) return;
     port.doorHint = on;
     port.dispatchEvent(new Event('change'));
   };
   async function doorUnderCrosshair() {
-    if (!nav.hasDoors || port.mode !== 'walking' || !scope.isCurrent()) return;
+    if (!nav.hasDoors || !scope.isCurrent()) return;
     const rect = canvas!.getBoundingClientRect();
     const { devHit, near, result } = await pickVisibleRay(
       ctx,
@@ -76,7 +78,7 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
   const refreshDoor = () => {
     ++doorSequence;
     doorHint(false);
-    if (port.mode !== 'walking' || !nav.hasDoors || doorBusy || doorTimer) return;
+    if (port.mode !== 'walking' || !nav.hasDoors || doorTimer) return;
     doorTimer = setTimeout(() => {
       doorTimer = undefined;
       const seq = doorSequence;
@@ -105,6 +107,7 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
     mode: port.mode,
     coverageMs,
     startKind: planned,
+    feet: walker?.feet.toArray(),
     home: home ? { feet: home.feet.toArray(), yaw: home.yaw, gate: port.gateHome } : undefined,
     estimatedSectionOccurrences: nav.metrics.estimatedSectionOccurrences,
     drawCount,
@@ -117,21 +120,12 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
       assetsHit: nav.metrics.assetHits,
       blocksPrepared: nav.metrics.blocks,
       blocksHit: nav.metrics.blockHits,
+      residentSweepSteps: nav.metrics.residentSweepSteps,
+      missingSweepSteps: nav.metrics.missingSweepSteps,
     },
   });
   port.evidence = evidence;
-  const capture = () => ({
-    camera: capturePatrolCamera(cam),
-    tool: structuredClone(tools.snapshot),
-    visibility: patrol.visibility.getVisibility(),
-    target: state.selection.selectionRequest?.target
-      ? { ...state.selection.selectionRequest.target }
-      : null,
-    origin: state.selection.selectionRequest?.origin,
-    only: state.selection.onlySelected,
-    selectionId: state.selection.selectionRequest?.id,
-  });
-  let snapshot: ReturnType<typeof capture> | undefined;
+  let snapshot: ReturnType<typeof capturePatrolWorkspace> | undefined;
   let interrupted: 'pause' | 'exit' | undefined;
   const alive = (owner: AbortController | undefined) =>
     !!owner && owner === run && !owner.signal.aborted && scope.isCurrent();
@@ -140,44 +134,6 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
     frame === state.projectCoordinateFrame &&
     state.projectSourceToViewerMatrix === frame?.matrix &&
     batch === state.geometryLoadToken;
-  const restoreSelection = async () => {
-    const s = snapshot;
-    if (
-      !s ||
-      (!inspectionChanged && s.selectionId === state.selection.selectionRequest?.id) ||
-      !scope.isCurrent()
-    )
-      return;
-    inspectionChanged = false;
-    const target = s.target;
-    if (!target) {
-      await clearCurrentSelection(state);
-      return;
-    }
-    const request = state.selection.beginSelection(target, s.origin);
-    if (
-      target.kind === 'engineering' ||
-      target.kind === 'engineering-source' ||
-      target.kind === 'engineering-group'
-    ) {
-      await selectEngineeringTarget(state, { kind: target.kind, key: target.key }, request, {
-        fit: false,
-        load: false,
-      });
-    } else if (target.kind === 'ifc-object' || target.kind === 'ifc-element') {
-      await patrol.restoreIfc(target.key, request);
-    } else if (target.kind === 'sld') {
-      const { presentSldSelection } = await import('./substationPresentation.js');
-      if (state.selection.isCurrentSelection(request))
-        await presentSldSelection(state, target.key, show, scope.session, request);
-    } else if (target.kind === 'cbm') {
-      const { selectViewportDev } =
-        await import('../../../services/selection/devViewportSelection.js');
-      if (state.selection.isCurrentSelection(request))
-        await selectViewportDev(ctx, state, target.key, '', request, show);
-    }
-    if (scope.isCurrent()) s.selectionId = state.selection.selectionRequest?.id;
-  };
   const endMeasurement = () => {
     port.measuring = false;
     if (snapshot) {
@@ -188,63 +144,61 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
   };
   async function exit() {
     const s = snapshot;
+    port.set('exiting', '正在恢复自由浏览');
+    if (s) cam.controls.enabled = false;
+    operations.cancel();
     if (walker && frameValid()) last = walker.position();
     search?.abort();
     search = undefined;
     run?.abort();
     run = undefined;
-    entryRequest++;
+    ++entryRequest;
     entry = undefined;
     renderer?.onBeforeUpdate?.remove(draw);
     hub.stopAdmissionTrace();
     walker?.dispose();
     walker = undefined;
-    nav.leave();
-    port.measuring = false;
-    if (!s) {
-      port.set('orbit');
-      return;
-    }
-    switching = true;
+    port.measuring = port.estimated = false;
+    const current = () => scope.isCurrent();
     try {
-      const token = hub.claim('orbit', scope.session.generation);
-      if (frameValid())
-        await restoreOrbit(cam, s.camera, () => scope.isCurrent() && hub.current === token);
-      else {
-        cam.controls.enabled = s.camera.enabled;
-        state.viewState.stationOverview?.();
-      }
-      if (!scope.isCurrent()) return;
-      hub.publish(token);
-      await restoreSelection();
-      if (!scope.isCurrent()) return;
-      state.selection.patrolIsolation = undefined;
-      await patrol!.visibility.setVisibility(
-        {
-          ...s.visibility,
-          isolatedSelection: s.only ? (state.selection.selectionRequest?.id ?? null) : null,
-        },
-        scope.isCurrent,
-      );
-      if (!scope.isCurrent()) return;
-      const distances = new Map(
-        [...s.tool.distances, ...tools.snapshot.distances].map((d) => [d.id, d]),
-      );
-      tools.snapshot = { ...s.tool, distances: [...distances.values()] };
-      tools.notify();
+      const failures = await restorePatrolContext(current, [
+        ['门扇', () => nav.leave()],
+        [
+          '相机',
+          async () => {
+            if (!s) return;
+            const token = hub.claim('orbit', scope.session.generation);
+            if (frameValid())
+              await restoreOrbit(
+                cam,
+                { ...s.camera, enabled: false },
+                () => current() && hub.current === token,
+              );
+            else state.viewState.stationOverview?.();
+            if (current()) hub.publish(token);
+          },
+        ],
+        ['选择', () => s?.restoreSelection()],
+        ['显隐', () => s?.restoreVisibility()],
+        ['工具', () => s?.restoreTools()],
+      ]);
+      if (current() && failures.length) show('已退出巡视，未能恢复' + failures.join('、'));
     } finally {
-      if (scope.isCurrent()) {
-        cam.controls.enabled = s.camera.enabled;
-        state.viewState.viewHistory?.resume?.();
+      if (current()) {
+        if (s) {
+          Object.assign(cam.controls.mouseButtons, s.camera.buttons);
+          cam.controls.enabled = s.camera.enabled;
+          state.viewState.viewHistory?.resume?.();
+        }
         port.set('orbit');
       }
-      switching = false;
       interrupted = undefined;
       snapshot = undefined;
     }
   }
   function ready(pose: PatrolPose, kind: typeof planned) {
     entry = pose;
+    port.estimated = !!pose.estimated;
     planned = kind;
     port.pickingStart = false;
     const label =
@@ -255,14 +209,16 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
           : '自选起点已就绪';
     port.set(
       'ready',
-      label + (nav.metrics.estimatedSectionOccurrences ? ' · 工程含估算型材截面' : ''),
+      label +
+        (!pose.estimated && nav.metrics.estimatedSectionOccurrences ? ' · 工程含估算型材截面' : ''),
     );
   }
   async function verified(pose: PatrolPose, signal: AbortSignal): Promise<PatrolPose | undefined> {
     await nav.prepare(pose.feet, signal);
     signal.throwIfAborted();
     const hit = nav.step(pose.feet, pose.feet);
-    if ('feet' in hit && hit.sourceId === pose.sourceId) return { ...pose, feet: hit.feet };
+    if ('feet' in hit && hit.sourceId === pose.sourceId)
+      return { ...pose, ...hit, estimated: hit.estimated };
   }
   async function prepareStart(owner: AbortController) {
     const ticket = ++entryRequest;
@@ -337,6 +293,7 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
       if (action === 'exit' || (action === 'pause' && interrupted !== 'exit')) interrupted = action;
       return;
     }
+    if (!acceptsNavigationAction(port.mode, action)) return;
     if (action === 'exit') {
       ++doorSequence;
       doorHint(false);
@@ -371,27 +328,48 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
       port.set('preparing', '点击道路、地坪或楼梯平台选择起点');
       return;
     }
+    const operate = (
+      mode: PatrolOperationMode,
+      message: string,
+      work: (signal: AbortSignal) => Promise<() => void>,
+    ) =>
+      operations.run(
+        port,
+        owner.signal,
+        mode,
+        message,
+        () => walker!.stop(),
+        work,
+        (error) => {
+          if (alive(owner) && walker) port.set('paused', error);
+        },
+      );
     if (action === 'pause') {
       if (!walker) {
         await exit();
         return;
       }
-      entryRequest++;
-      port.set('paused');
-      walker?.stop();
-      endMeasurement();
-      await restoreSelection();
+      await operate('restoringSelection', '正在恢复巡视选择', async () => {
+        endMeasurement();
+        await snapshot?.restoreSelection();
+        return () => port.set('paused');
+      });
       return;
     }
     if (!frameValid()) {
-      port.set('paused', '坐标框架或几何批次已变更，请退出后重新选择入口');
-      walker?.stop();
+      if (walker) {
+        port.set('paused', '坐标框架或几何批次已变更，请退出后重新选择入口');
+        walker.stop();
+      } else {
+        await exit();
+        show('坐标框架或几何批次已变更，请重新选择入口');
+      }
       return;
     }
     if (action === 'start' && port.mode === 'ready' && entry && frame) {
       switching = true;
       try {
-        snapshot = capture();
+        snapshot = capturePatrolWorkspace(state, scope, ctx, patrol!, show);
         if (!home) home = entry;
         if (snapshot.only)
           state.selection.patrolIsolation = {
@@ -432,27 +410,33 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
         await execute(action);
       }
     } else if (action === 'resume' && walker) {
+      const person = walker;
+      const resume = () => {
+        person.walk();
+        refreshDoor();
+      };
       endMeasurement();
-      walker.walk();
-      refreshDoor();
-      await restoreSelection();
-    } else if (action === 'door' && walker && port.mode === 'walking' && !doorBusy) {
-      doorBusy = true;
-      try {
+      if (!snapshot?.needsSelectionRestore()) resume();
+      else
+        await operate('restoringSelection', '正在恢复巡视选择', async () => {
+          await snapshot?.restoreSelection();
+          return resume;
+        });
+    } else if (action === 'door' && walker) {
+      const feet = walker.feet.clone();
+      await operate('operatingDoor', '正在检查门扇扫掠空间', async (signal) => {
         const id = await doorUnderCrosshair();
-        if (!id || !alive(owner) || port.mode !== 'walking') return;
-        port.set('paused', '正在检查门扇扫掠空间');
-        walker.stop();
-        const message = await nav.toggleDoor(id, walker.feet.clone(), owner.signal);
-        if (alive(owner)) port.set('paused', message);
-      } finally {
-        doorBusy = false;
-      }
-    } else if (action === 'inspect' && walker && port.mode === 'walking') {
-      port.set('inspecting');
-      walker.stop();
-      inspectionChanged = true;
-      await patrol!.inspect();
+        signal.throwIfAborted();
+        const message = id ? await nav.toggleDoor(id, feet, signal) : '准星未命中可操作的门';
+        return () => port.set('paused', message);
+      });
+    } else if (action === 'inspect' && walker) {
+      await operate('pickingDevice', '正在检查准星设备', async () => {
+        if (snapshot) snapshot.inspectionChanged = true;
+        await patrol!.inspect();
+        return () =>
+          port.set('inspecting', port.message === '正在检查准星设备' ? '' : port.message);
+      });
     } else if (action === 'measure' && walker) {
       port.measuring = true;
       tools.snapshot.first = undefined;
@@ -460,17 +444,22 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
       tools.notify();
       port.set('inspecting', '点击两个可见表面测距');
     } else if (action === 'return' && walker && home) {
-      const seq = ++entryRequest;
-      port.set('returning', '正在确认入口支撑与净空');
-      walker.stop();
-      const destination = await verified(home, owner.signal);
-      if (!alive(owner) || seq !== entryRequest) return;
-      if (!destination || !frameValid()) {
-        port.set('paused', '入口不可用，已保留当前位置');
-        return;
-      }
-      walker.relocate(destination);
-      port.set('paused', port.gateHome ? '已返回站区大门' : '已返回巡视入口');
+      const target = home,
+        person = walker;
+      await operate('returning', '正在确认入口支撑与净空', async (signal) => {
+        endMeasurement();
+        await snapshot?.restoreSelection();
+        signal.throwIfAborted();
+        const destination = await verified(target, signal);
+        return () => {
+          if (!destination || !frameValid()) {
+            port.set('paused', '入口不可用，已保留当前位置');
+            return;
+          }
+          person.relocate(destination);
+          port.set('paused', port.gateHome ? '已返回站区大门' : '已返回巡视入口');
+        };
+      });
     }
   }
   async function choose(e: MouseEvent) {
@@ -540,7 +529,11 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
     void execute(action).catch(async (error) => {
       if (!scope.isCurrent()) return;
       show(String(error));
-      if (action === 'start') await exit();
+      if (action === 'exit') {
+        port.set('orbit');
+        return;
+      }
+      if (action === 'start' || !walker || !alive(run)) await exit();
       else {
         port.set('paused', String(error));
         walker?.stop();
@@ -555,6 +548,7 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
     clearTimeout(doorTimer);
     doorSequence++;
     doorHint(false);
+    operations.cancel();
     run?.abort();
     walker?.dispose();
     nav.dispose();

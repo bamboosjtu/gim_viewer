@@ -111,7 +111,8 @@ export class IfcRegionalRuntime {
   >();
   private groups = new Map<number, THREE.Group>();
   /** Explicit L2 objects remain visible until the user returns to browsing. */
-  private fineRequested = new Set<number>();
+  private fineOwners = new Map<number, Set<'selection' | symbol>>();
+  private patrolMeshRequests = new Map<number, AbortController>();
   /** Deduplicate concurrent clicks on the same IFC object. */
   private finePending = new Map<number, Promise<THREE.Group | undefined>>();
   private fineQueueCancels = new Map<number, () => boolean>();
@@ -428,7 +429,7 @@ export class IfcRegionalRuntime {
         : scopedCandidates;
       // L1 follows the camera, while an explicitly refined object is retained
       // until the user releases it.  Ordinary selection never enters this set.
-      const desired = new Set([...objects.map((o) => o.expressId), ...this.fineRequested]);
+      const desired = new Set([...objects.map((o) => o.expressId), ...this.fineOwners.keys()]);
       if (this.selectedExpressId !== null) desired.add(this.selectedExpressId);
       this.diagnostics.requested = objects.length;
       const restore: number[] = [];
@@ -511,6 +512,7 @@ export class IfcRegionalRuntime {
         if (!this.current() || epoch !== this.epoch) return;
         for (const object of batch) {
           if (!this.current() || epoch !== this.epoch) return;
+          if (this.groups.has(object.expressId)) continue;
           const result = results.get(object.expressId);
           if (!result?.parts.length) {
             this.diagnostics.failed++;
@@ -715,28 +717,41 @@ export class IfcRegionalRuntime {
   }
   /** Explicit user request for precise IFC object geometry. */
   async refine(object: RegionalObject): Promise<THREE.Group | undefined> {
-    const existing = this.finePending.get(object.expressId);
+    return this.acquireFine(object, 'selection');
+  }
+
+  private async acquireFine(
+    object: RegionalObject,
+    owner: 'selection' | symbol,
+  ): Promise<THREE.Group | undefined> {
+    const id = object.expressId;
+    const existing = this.finePending.get(id);
+    const ready = this.groups.get(id);
+    if (!existing && ready?.userData.lod !== 2 && this.memoryPressure === 'critical')
+      throw Error('当前内存压力过高，暂不能加载更多精细模型');
+    const owners = this.fineOwners.get(id) ?? new Set<'selection' | symbol>();
+    this.fineOwners.set(id, owners);
+    owners.add(owner);
     if (existing) return existing;
-    const ready = this.groups.get(object.expressId);
-    if (ready?.userData.lod === 2) {
-      this.fineRequested.add(object.expressId);
-      return ready;
-    }
-    if (this.memoryPressure === 'critical') throw Error('当前内存压力过高，暂不能加载更多精细模型');
-    this.fineRequested.add(object.expressId);
+    if (ready?.userData.lod === 2) return ready;
     let result: THREE.Group | undefined;
     const generation = (this.fineGeneration.get(object.expressId) ?? 0) + 1;
     this.fineGeneration.set(object.expressId, generation);
+    const meshRequest = owner === 'selection' ? undefined : new AbortController();
+    if (meshRequest) this.patrolMeshRequests.set(id, meshRequest);
     const run = async (): Promise<void> => {
-      result = await this.refineObject(object, generation);
+      const mesh = meshRequest
+        ? await this.patrolSource('patrol-mesh', meshRequest.signal, object)
+        : undefined;
+      result = await this.refineObject(object, generation, mesh);
     };
-    const queued = this.options.fineQueue?.enqueueUserIfcFine(
-      `ifc:${this.modelId.toLowerCase()}:${object.expressId}`,
-      run,
-    );
-    const pending = queued
-      ? queued.promise.then(() => result)
-      : this.refineObject(object, generation);
+    const queued =
+      !meshRequest &&
+      this.options.fineQueue?.enqueueUserIfcFine(
+        `ifc:${this.modelId.toLowerCase()}:${object.expressId}`,
+        run,
+      );
+    const pending = queued ? queued.promise.then(() => result) : run().then(() => result);
     if (queued) this.fineQueueCancels.set(object.expressId, queued.cancel);
     this.finePending.set(object.expressId, pending);
     try {
@@ -746,10 +761,11 @@ export class IfcRegionalRuntime {
       // it must not turn the camera-driven L1 scheduler into an implicit L2
       // retry loop.  The inspector can issue a fresh request.
       if (this.fineGeneration.get(object.expressId) === generation)
-        this.fineRequested.delete(object.expressId);
-      this.schedule();
+        this.releaseRepresentation(object.expressId);
       throw error;
     } finally {
+      if (meshRequest && this.patrolMeshRequests.get(id) === meshRequest)
+        this.patrolMeshRequests.delete(id);
       if (this.finePending.get(object.expressId) === pending) {
         this.finePending.delete(object.expressId);
         this.fineQueueCancels.delete(object.expressId);
@@ -763,7 +779,7 @@ export class IfcRegionalRuntime {
   ): Promise<THREE.Group | undefined> {
     const wanted = () =>
       this.current() &&
-      this.fineRequested.has(object.expressId) &&
+      this.fineOwners.has(object.expressId) &&
       this.fineGeneration.get(object.expressId) === generation;
     if (!wanted()) return undefined;
     const existing = this.groups.get(object.expressId);
@@ -857,44 +873,52 @@ export class IfcRegionalRuntime {
   ): Promise<() => void> {
     const object = this.index.objects.find((o) => o.expressId === id);
     if (!object || !this.permits(id) || !this.root.visible) throw Error('门扇表示不可用');
-    const existing = this.fineRequested.has(id);
-    let group = this.groups.get(id);
-    if (group?.userData.lod !== 2) {
-      if (this.finePending.has(id)) group = await this.finePending.get(id);
-      else {
-        const mesh = await this.patrolSource('patrol-mesh', signal, object);
-        signal.throwIfAborted();
-        const generation = (this.fineGeneration.get(id) ?? 0) + 1;
-        this.fineGeneration.set(id, generation);
-        this.fineRequested.add(id);
-        try {
-          group = await this.refineObject(object, generation, mesh);
-        } catch (error) {
-          if (!existing) this.releaseFine(id);
-          throw error;
-        }
-      }
-    }
-    if (!group || signal.aborted || !this.current()) {
-      if (!existing && this.current()) this.releaseFine(id);
-      throw Error('门扇表示已变更');
-    }
-    const original = group.matrix.clone();
-    group.matrix.premultiply(frame.clone().multiply(motion).multiply(frame.clone().invert()));
-    group.updateMatrixWorld(true);
-    requestObjectRender(group);
-    return () => {
-      group.matrix.copy(original);
+    signal.throwIfAborted();
+    const owner = Symbol('patrol-door');
+    const release = () => this.releaseOwner(id, owner);
+    signal.addEventListener('abort', release, { once: true });
+    try {
+      const group = await this.acquireFine(object, owner);
+      signal.throwIfAborted();
+      if (
+        !group ||
+        !this.current() ||
+        this.groups.get(id) !== group ||
+        !this.permits(id) ||
+        !this.root.visible
+      )
+        throw Error('门扇表示已变更');
+      const original = group.matrix.clone();
+      group.matrix.premultiply(frame.clone().multiply(motion).multiply(frame.clone().invert()));
       group.updateMatrixWorld(true);
       requestObjectRender(group);
-      if (!existing && this.current()) this.releaseFine(id);
-    };
+      return () => {
+        if (!this.fineOwners.get(id)?.has(owner)) return;
+        group.matrix.copy(original);
+        group.updateMatrixWorld(true);
+        requestObjectRender(group);
+        release();
+      };
+    } catch (error) {
+      release();
+      throw error;
+    } finally {
+      signal.removeEventListener('abort', release);
+    }
   }
-  /** Return one explicit object to the automatic L1/far representation. */
   releaseFine(expressId: number): void {
+    this.releaseOwner(expressId, 'selection');
+  }
+  private releaseOwner(expressId: number, owner: 'selection' | symbol) {
+    const owners = this.fineOwners.get(expressId);
+    if (owners?.delete(owner) && !owners.size) this.releaseRepresentation(expressId);
+  }
+  private releaseRepresentation(expressId: number) {
+    this.patrolMeshRequests.get(expressId)?.abort();
+    this.patrolMeshRequests.delete(expressId);
     this.fineGeneration.set(expressId, (this.fineGeneration.get(expressId) ?? 0) + 1);
     this.finePending.delete(expressId);
-    this.fineRequested.delete(expressId);
+    this.fineOwners.delete(expressId);
     this.fineQueueCancels.get(expressId)?.();
     this.fineQueueCancels.delete(expressId);
     const group = this.groups.get(expressId);
@@ -903,7 +927,7 @@ export class IfcRegionalRuntime {
       this.groups.delete(expressId);
     }
     const local = this.localIds.get(expressId);
-    if (local !== undefined) {
+    if (local !== undefined && !this.groups.has(expressId)) {
       this.localIds.delete(expressId);
       void this.setFarVisible([local], true)
         .then(async () => {
@@ -913,7 +937,7 @@ export class IfcRegionalRuntime {
         .catch(() => undefined);
     }
     this.fineRuntime?.forget(expressId);
-    if (!this.fineRequested.size) this.fineRuntime?.cancel();
+    if (!this.fineOwners.size) this.fineRuntime?.cancel();
     // A cancelled selection must not leave a late exact result able to replace
     // the restored browser representation. The worker request itself remains
     // session-scoped and is rejected by release/selection guards when needed.
@@ -923,16 +947,7 @@ export class IfcRegionalRuntime {
    * The browser keeps the cheap regional representation and never treats an
    * old selection as a permanent L2 residency request. */
   clearFineSelection(): void {
-    if (
-      !this.fineRequested.size &&
-      ![...this.groups.values()].some((group) => group.userData.lod === 2)
-    )
-      return;
-    for (const expressId of [...this.fineRequested]) this.releaseFine(expressId);
-    for (const [expressId, group] of [...this.groups]) {
-      if (group.userData.lod !== 2) continue;
-      this.releaseFine(expressId);
-    }
+    for (const id of this.fineOwners.keys()) this.releaseFine(id);
   }
   async properties(expressId: number) {
     const key = `${this.options.cacheKey}|properties|${expressId}`;
@@ -967,7 +982,9 @@ export class IfcRegionalRuntime {
     this.closeSource();
     this.fineRuntime?.release();
     this.fineRuntime = null;
-    this.fineRequested.clear();
+    this.fineOwners.clear();
+    for (const request of this.patrolMeshRequests.values()) request.abort();
+    this.patrolMeshRequests.clear();
     this.finePending.clear();
     this.fineGeneration.clear();
     for (const cancel of this.fineQueueCancels.values()) cancel();

@@ -100,7 +100,7 @@ export function setupSelection(
     instanceKey: string,
     request: SelectionRequest,
     hint?: import('../engineering/representations.js').DevRepresentationHint,
-  ) => void,
+  ) => void | Promise<void>,
   tools?: PickTools,
   navigation?: import('../shared/viewerNavigationCommands.js').ViewerNavigationCommands,
 ) {
@@ -333,7 +333,7 @@ export function setupSelection(
         )
           return;
         if (inspection && !result && !near && !devHit) {
-          navigation?.set('inspecting', '准星未命中可见设备');
+          if (navigation) navigation.set(navigation.mode, '准星未命中可见设备');
           return;
         }
         if (!inspection && tools?.measuring()) {
@@ -385,7 +385,7 @@ export function setupSelection(
           devHit.distance < Math.min(near?.distance ?? Infinity, ifcDistance)
         ) {
           request.target = { kind: 'cbm', key: devHit.rootOccurrence };
-          onDevSelected?.(devHit.rootOccurrence, devHit.instanceKey, request, devHit.hint);
+          await onDevSelected(devHit.rootOccurrence, devHit.instanceKey, request, devHit.hint);
           return;
         }
         if (near && (!result || near.distance < (result.rayDistance ?? result.distance))) {

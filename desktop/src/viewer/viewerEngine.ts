@@ -41,7 +41,16 @@ export async function createViewerEngine(container: HTMLElement): Promise<Viewer
     }
     world.camera = new OBC.OrthoPerspectiveCamera(components);
     components.init();
-    components.get(OBC.Grids).create(world);
+    const grid = components.get(OBC.Grids).create(world);
+    // Treat the reference plane as a backdrop even where the engineering model lies below Y=0.
+    // Three draws the opaque queue first. Explicit alpha blending keeps the grid's distance fade.
+    grid.three.renderOrder = Number.MIN_SAFE_INTEGER;
+    grid.material.transparent = false;
+    grid.material.blending = THREE.CustomBlending;
+    grid.material.blendSrc = THREE.SrcAlphaFactor;
+    grid.material.blendDst = THREE.OneMinusSrcAlphaFactor;
+    grid.material.blendSrcAlpha = THREE.OneFactor;
+    grid.material.depthWrite = false;
 
     const ifcLoader = components.get(OBC.IfcLoader);
     const fragments = components.get(OBC.FragmentsManager);

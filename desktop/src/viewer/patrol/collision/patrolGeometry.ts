@@ -70,7 +70,7 @@ export interface PlacedAsset {
 export function visitTriangles(
   row: PlacedAsset,
   world: Box3,
-  visit: (t: Triangle) => boolean,
+  visit: (t: Triangle, index: number) => boolean,
 ): boolean {
   const q = world.clone().applyMatrix4(row.inverse),
     stack = [0],
@@ -97,7 +97,7 @@ export function visitTriangles(
       triangle.a.fromArray(vertices, off).applyMatrix4(row.matrix);
       triangle.b.fromArray(vertices, off + (row.mirror ? 6 : 3)).applyMatrix4(row.matrix);
       triangle.c.fromArray(vertices, off + (row.mirror ? 3 : 6)).applyMatrix4(row.matrix);
-      if (visit(triangle)) return true;
+      if (visit(triangle, order[i])) return true;
     }
   }
   return false;
@@ -197,11 +197,24 @@ export function triangleDistanceSquared(a: Triangle, b: Triangle): number {
       best = Math.min(best, segmentTriangle(u, v, q));
   return best;
 }
-/** The swept capsule spine is a parallelogram. Test both faces plus its edges. */
+/** At a step, the capsule travels vertically at the lower endpoint and horizontally at the upper level. */
 export function bodyHits(t: Triangle, from: Vector3, to: Vector3, padding = 0): boolean {
   const r = profile.radius,
-    lo = Math.max(from.z, to.z) + r + epsilon;
-  const hi = Math.max(from.z, to.z) + profile.height - r;
+    lower = Math.min(from.z, to.z),
+    upper = Math.max(from.z, to.z);
+  const lo = upper + r + epsilon;
+  const hi = upper + profile.height - r;
+  const limit = (r + padding - epsilon) ** 2;
+  if (
+    Math.max(t.a.z, t.b.z, t.c.z) <= lower + epsilon - padding ||
+    Math.min(t.a.z, t.b.z, t.c.z) >= hi + r + padding
+  )
+    return false;
+  if (upper > lower) {
+    const foot = from.z < to.z ? from : to;
+    if (segmentTriangle(foot.clone().setZ(lower + r + epsilon), foot.clone().setZ(hi), t) < limit)
+      return true;
+  }
   const a = new Vector3(from.x, from.y, lo),
     b = new Vector3(to.x, to.y, lo);
   const c = b.clone().setZ(hi),
@@ -211,7 +224,6 @@ export function bodyHits(t: Triangle, from: Vector3, to: Vector3, padding = 0): 
     Math.min(t.a.z, t.b.z, t.c.z) >= hi + r + padding
   )
     return false;
-  const limit = (r + padding - epsilon) ** 2;
   if (segmentTriangle(a, d, t) < limit) return true;
   if (a.distanceToSquared(b) < epsilon ** 2) return false;
   for (const edge of [
