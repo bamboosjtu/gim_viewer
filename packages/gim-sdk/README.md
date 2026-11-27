@@ -48,6 +48,6 @@ for (const entity of result.entities) {
 }
 ```
 
-原有 Desktop 入口继续使用带图元映射回调的 Parser 签名。IFC 解析结果作为对象证据传入。物理目录和来源实例可先于语义识别交付，组成投影引用已建立的实体。
+Desktop 的 DOM 与 Worker 入口均选择工程列主序布局并读取同一 Raw 文档语法。B.3/B.6 使用 SDK 局部模板，宿主按需套用材质、装配和 LOD，混合 MOD 的 Boolean 与其余叶子继续使用宿主求值器。IFC 解析结果作为对象证据传入。物理目录和来源实例可先于语义识别交付，组成投影引用已建立的实体。
 
 包内测试与夹具随源码维护。可从 `desktop/` 运行 `npm run test:module -- ../packages/gim-sdk/src/semantic`，同时检查 SDK 模块和 Viewer 消费者。实体盘点器使用独立 Python 实现，通过配置与共享契约用例核对结果。

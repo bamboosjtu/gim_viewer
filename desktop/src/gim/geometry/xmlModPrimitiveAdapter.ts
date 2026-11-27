@@ -108,9 +108,9 @@ export function mapXmlModPrimitive(
         h: firstNumericAttr(attrs, ['T'], 1),
       };
     case 'Boolean': {
-      const rawOp = (attrs['Type'] ?? '').trim().toLowerCase();
-      const entity1 = parseXmlModEntityId(attrs['Entity1']);
-      const entity2 = parseXmlModEntityId(attrs['Entity2']);
+      const rawOp = (attrs['Type'] ?? attrs.TYPE ?? '').trim().toLowerCase();
+      const entity1 = parseXmlModEntityId(attrs['Entity1'] ?? attrs.ENTITY1);
+      const entity2 = parseXmlModEntityId(attrs['Entity2'] ?? attrs.ENTITY2);
       if (
         !['union', 'intersection', 'difference'].includes(rawOp) ||
         entity1 === undefined ||
@@ -284,7 +284,7 @@ function parseRing(attrs: Record<string, string>): XmlModPrimitive {
     type: 'Ring',
     r: num(attrs, 'R'),
     dr: num(attrs, 'DR'),
-    rad: num(attrs, 'Rad'),
+    rad: Number(attrs.Rad ?? attrs.RAD ?? 2 * Math.PI),
   };
 }
 

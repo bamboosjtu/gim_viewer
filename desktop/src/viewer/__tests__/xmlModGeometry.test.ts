@@ -459,7 +459,8 @@ describe('xmlModDocumentToGroup', () => {
     expect(group.children.length).toBe(1);
     const mesh = group.children[0] as THREE.Mesh;
     expect(mesh).toBeInstanceOf(THREE.Mesh);
-    expect(mesh.geometry).toBeInstanceOf(THREE.CylinderGeometry);
+    expect(mesh.geometry).toBeInstanceOf(THREE.BufferGeometry);
+    expect(mesh.geometry.getAttribute('position').count).toBe(4 * 16 + 2);
   });
 
   it('多 Entity（含 Visible=False）→ Visible=False 的 mesh.visible=false', () => {
@@ -757,8 +758,8 @@ describe('Boolean CSG（P3-1，three-bvh-csg）', () => {
       }));
     const expected = snapshot(collectBakedGeometriesByMaterial(doc));
     const otherDoc = { ...doc, modPath: 'MOD/other-cooperative.mod', entities: doc.entities.map((entity) => ({
-      ...entity, primitive: entity.primitive.type === 'Cuboid'
-        ? { ...entity.primitive, l: entity.primitive.l + 20 }
+      ...entity, primitive: entity.primitive.type === 'Standard' && entity.primitive.canonical.kind === 'Cuboid'
+        ? { ...entity.primitive, canonical:{...entity.primitive.canonical,length:entity.primitive.canonical.length+20} }
         : entity.primitive,
     })) };
     const otherExpected = snapshot(collectBakedGeometriesByMaterial(otherDoc));

@@ -83,6 +83,8 @@ EngineeringEntity   GeometryAsset（来源模板复用）
 
 ## MOD/PHM 与 primitive
 
+DOM 与 Worker 通过相同的 SDK Raw Parser 读取变电 XML，工程入口显式选择 `project-column-major`。长方体、圆柱按标准尺寸解释并在实际请求的 LOD 编译局部毫米网格。缓存叶子的缓冲只读，宿主在实例副本上烘焙变换并处理镜像。混合文档的隐藏操作数通过文档内唯一 ID 参与原有轮廓或精确 CSG 求值。
+
 - MOD 为 `Device/Entities/Entity` XML；每个 Entity 有可选 TransformMatrix、Color 和首个子 primitive。
 - primitive 的规范化标签、字段、别名、近似和 LOD 见[XML primitive](../schema/xml-primitives.md)。
 - `StretchedBody` 的 Array/Normal 支持方向基矢和完整位移两种解释；范围与网格共用同一解释函数。

@@ -7,7 +7,7 @@ import {
 import { DevLodSceneCommits } from './devLodSceneCommits.js';
 import {
   deviceTemplateCacheKey,
-  STEEL_SECTION_POLICY,
+  DEV_SHAPE_POLICY,
 } from '../../infrastructure/cache/devLodIdentity.js';
 import { logger } from '../../utils/logger.js';
 import { setRenderVisibility, requestObjectRender } from '../../viewer/demandRendering.js';
@@ -543,7 +543,7 @@ export class DevLodRuntime {
     return lod === 1 && (priority === 0 || demand >= 2);
   }
   private catalogKey(dev: string) {
-    return `${DEV_SPATIAL_CATALOG_VERSION}|${DEV_GEOMETRY_VERSION}|${this.sourceIdentity}|${STEEL_SECTION_POLICY}:${dev.toLowerCase()}`;
+    return `${DEV_SPATIAL_CATALOG_VERSION}|${DEV_GEOMETRY_VERSION}|${this.sourceIdentity}|${DEV_SHAPE_POLICY}:${dev.toLowerCase()}`;
   }
   /** A catalog read started before the directory loop reaches this DEV also
    * short-circuits already-queued LOD0 work for a validated empty source. */

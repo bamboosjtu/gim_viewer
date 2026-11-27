@@ -36,14 +36,14 @@ import {
   ifcGeometryBusy,
   onGeometryWorkAvailable,
 } from '../../../viewer/geometryWorkGate.js';
-import { STEEL_SECTION_POLICY } from '../../../infrastructure/cache/devLodIdentity.js';
+import { DEV_SHAPE_POLICY } from '../../../infrastructure/cache/devLodIdentity.js';
 import { GEOMETRY_CACHE_VERSION } from '@desktop/contracts.js';
 
 const size = 8;
 const codec = [
   'nav-v1',
   GEOMETRY_CACHE_VERSION,
-  STEEL_SECTION_POLICY,
+  DEV_SHAPE_POLICY,
   'z-up-m-v1',
   'roles-v1',
   'bvh-v1',

@@ -31,10 +31,7 @@ describe('parseXmlMod', () => {
       expect(e.id).toBe(0);
       expect(e.type).toBe('simple');
       expect(e.visible).toBe(true);
-      const p = e.primitive as Extract<XmlModPrimitive, { type: 'Cylinder' }>;
-      expect(p.type).toBe('Cylinder');
-      expect(p.r).toBe(50);
-      expect(p.h).toBe(300);
+      expect(e.primitive).toEqual({type:'Standard',canonical:{kind:'Cylinder',radius:50,height:300}});
       expect(e.transformMatrix).toEqual(IDENTITY);
       expect(e.color).toEqual({ r: 200, g: 50, b: 50, a: 100 });
     });
@@ -47,11 +44,7 @@ describe('parseXmlMod', () => {
           <Color R="128" G="128" B="128" A="100" />
         </Entity>`,
       );
-      const p = parseXmlMod(xml, 'MOD/cuboid.mod').entities[0].primitive as Extract<
-        XmlModPrimitive,
-        { type: 'Cuboid' }
-      >;
-      expect(p).toEqual({ type: 'Cuboid', l: 800, w: 600, h: 2000 });
+      expect(parseXmlMod(xml, 'MOD/cuboid.mod').entities[0].primitive).toEqual({type:'Standard',canonical:{kind:'Cuboid',length:800,width:600,height:2000}});
     });
 
     it('StretchedBody：Array/Normal 保留 string，L 数值', () => {
@@ -334,11 +327,9 @@ describe('parseXmlMod', () => {
       expect(doc.entities).toEqual([]);
     });
 
-    it('Device 无 Entities 子节点 → isEmpty=true', () => {
+    it('Device 缺少 Entities 时报告无效文档', () => {
       const xml = '<?xml version="1.0" encoding="utf-8"?><Device></Device>';
-      const doc = parseXmlMod(xml, 'MOD/no-entities.mod');
-      expect(doc.isEmpty).toBe(true);
-      expect(doc.entities).toEqual([]);
+      expect(() => parseXmlMod(xml, 'MOD/no-entities.mod')).toThrow(/Entities/);
     });
   });
 
@@ -571,7 +562,7 @@ describe('parseXmlMod', () => {
   });
 
   describe('数值字段解析失败', () => {
-    it('Cuboid L 为非数字 → l=NaN', () => {
+    it('Cuboid 的非法 L 保留原文与诊断', () => {
       const xml = wrap(
         `<Entity ID="0" Type="simple" Visible="True">
           <Cuboid L="abc" W="100" H="100" />
@@ -579,16 +570,12 @@ describe('parseXmlMod', () => {
           <Color R="100" G="100" B="100" A="100" />
         </Entity>`,
       );
-      const p = parseXmlMod(xml, 'MOD/bad-l.mod').entities[0].primitive as Extract<
-        XmlModPrimitive,
-        { type: 'Cuboid' }
-      >;
-      expect(Number.isNaN(p.l)).toBe(true);
-      expect(p.w).toBe(100);
-      expect(p.h).toBe(100);
+      const doc = parseXmlMod(xml, 'MOD/bad-l.mod');
+      expect(doc.entities[0].primitive).toMatchObject({type:'Unsupported',raw:{L:'abc'}});
+      expect(doc.diagnostics).toContainEqual(expect.objectContaining({code:'invalid-field-value',field:'L'}));
     });
 
-    it('Cylinder R 缺失 → r=NaN', () => {
+    it('Cylinder 缺少 R 时形成局部失败', () => {
       const xml = wrap(
         `<Entity ID="0" Type="simple" Visible="True">
           <Cylinder H="300" />
@@ -596,12 +583,9 @@ describe('parseXmlMod', () => {
           <Color R="100" G="100" B="100" A="100" />
         </Entity>`,
       );
-      const p = parseXmlMod(xml, 'MOD/no-r.mod').entities[0].primitive as Extract<
-        XmlModPrimitive,
-        { type: 'Cylinder' }
-      >;
-      expect(Number.isNaN(p.r)).toBe(true);
-      expect(p.h).toBe(300);
+      const doc = parseXmlMod(xml, 'MOD/no-r.mod');
+      expect(doc.entities[0].primitive).toMatchObject({type:'Unsupported',raw:{H:'300'}});
+      expect(doc.diagnostics).toContainEqual(expect.objectContaining({code:'invalid-field-value',field:'R'}));
     });
 
     it('StretchedBody.Array/Normal 缺失 → 空字符串', () => {

@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { steelSection } from '../../gim/geometry/steelSection.js';
 import { stretchedBodyDisplacement } from '../../gim/geometry/stretchedBody.js';
 import { offsetRectangularTableVertices } from '../../gim/geometry/offsetRectangularTable.js';
-import type { XmlModPrimitive } from '../../gim/geometry/ir.js';
+import { primitiveName, type XmlModPrimitive } from '../../gim/geometry/ir.js';
 import type { XmlModDocument } from '../../gim/geometry/xmlModParser.js';
 import { discoverGeometriesFromDevPath } from './modGeometryDiscovery.js';
 import { getFileByPath } from '../../gim/fileLookup.js';
@@ -45,6 +45,15 @@ export function boxTuple(tuple: BoundsTuple): THREE.Box3 {
 export function primitiveBounds(p: XmlModPrimitive): THREE.Box3 | null {
   const radial = (r: number, z0: number, z1: number) => new THREE.Box3(v(-r, -r, z0), v(r, r, z1));
   switch (p.type) {
+    case 'Standard': {
+      const shape = p.canonical;
+      return shape.kind === 'Cylinder'
+        ? radial(shape.radius, 0, shape.height)
+        : new THREE.Box3(
+            v(-shape.length / 2, -shape.width / 2, 0),
+            v(shape.length / 2, shape.width / 2, shape.height),
+          );
+    }
     case 'BeamChannelLike':
     case 'ChannelSteel': {
       const s = steelSection(p);
@@ -338,8 +347,7 @@ export async function buildDevSourceBounds(
             result.estimatedSteelSections = (result.estimatedSteelSections ?? 0) + 1;
           if (e.primitive.type === 'TruncatedCone' && e.primitive.tr > 1)
             result.absoluteConeCount = (result.absoluteConeCount ?? 0) + 1;
-          const type =
-            e.primitive.type === 'Unsupported' ? e.primitive.sourceType : e.primitive.type;
+          const type = primitiveName(e.primitive);
           result.primitiveCounts[type] = (result.primitiveCounts[type] ?? 0) + 1;
           if (!primitiveBounds(e.primitive) && e.primitive.type !== 'Boolean')
             result.unsupportedTypes.push(type);

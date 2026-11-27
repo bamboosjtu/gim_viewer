@@ -32,6 +32,8 @@ export type DeviceLod = 0 | 1 | 2;
 import { Brush, Evaluator, ADDITION, INTERSECTION, SUBTRACTION } from 'three-bvh-csg';
 import type { XmlModColor, XmlModEntity, XmlModPrimitive } from '../gim/geometry/ir.js';
 import type { XmlModDocument } from '../gim/geometry/xmlModParser.js';
+import { entityIndex, compileStandardLeaf } from '../gim/geometry/xmlModDocument.js';
+import type { MeshData } from '@gim/gim-sdk/geometry';
 
 const MOD_MM_TO_SCENE_UNIT = 0.001;
 export { MOD_MM_TO_SCENE_UNIT };
@@ -170,12 +172,29 @@ function rawNumber(
   return fallback;
 }
 
+export function geometryFromMeshData(mesh: MeshData): THREE.BufferGeometry {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
+  geometry.setAttribute('normal', new THREE.BufferAttribute(mesh.normals, 3));
+  // Mesh merge and CSG share a material layout with UV-bearing legacy leaves.
+  geometry.setAttribute(
+    'uv',
+    new THREE.BufferAttribute(mesh.uvs ?? new Float32Array((mesh.positions.length / 3) * 2), 2),
+  );
+  if (mesh.indices) geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
+  return geometry;
+}
+
 function primitiveToGeometryUncached(
   p: XmlModPrimitive,
   lod: DeviceLod,
 ): THREE.BufferGeometry | null {
   const segments = lod === 0 ? 6 : lod === 1 ? 12 : CYLINDER_SEGMENTS;
   switch (p.type) {
+    case 'Standard': {
+      const mesh = compileStandardLeaf(p.canonical, lod);
+      return mesh ? geometryFromMeshData(mesh) : null;
+    }
     case 'Cylinder':
       return zCylinder(p.r, p.r, p.h, segments);
     case 'Cuboid':
@@ -795,7 +814,7 @@ function* bakeGeometrySteps(
     MOD_MM_TO_SCENE_UNIT,
   );
 
-  const entities = new Map(doc.entities.map((entity) => [entity.id, entity]));
+  const entities = entityIndex(doc);
   const memo = new Map<number, THREE.BufferGeometry | null>();
   const visiting = new Set<number>();
   const owned = new Set<THREE.BufferGeometry>();
@@ -1062,7 +1081,7 @@ function sanitizeNum(n: number): number {
 
 /** Filtering uses the fully placed outer bounds, never wall thickness or DEV size. */
 function smallPartThresholdMm(p: XmlModPrimitive): number {
-  switch (p.type) {
+  switch (p.type === 'Standard' ? p.canonical.kind : p.type) {
     case 'Cylinder':
     case 'Sphere':
     case 'Ring':

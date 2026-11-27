@@ -211,6 +211,7 @@ function flattenDocumentToGroup(
   // explicitly to cache/pipeline callers. A non-rendered primitive is not an
   // empty source.
   const renderableTypes = new Set([
+    'Standard',
     'Cuboid',
     'Cylinder',
     'Sphere',
@@ -270,7 +271,7 @@ function flattenDocumentToGroup(
   });
   const hasRenderable = renderableEntityCount > 0;
   const status: XmlModGeometryStatus =
-    doc.declaredEntityCount === 0 ||
+    doc.isEmpty ||
     (!hasRenderable &&
       doc.status !== 'partial' &&
       unsupportedEntityCount === 0 &&

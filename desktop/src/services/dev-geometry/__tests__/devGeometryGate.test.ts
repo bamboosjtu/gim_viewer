@@ -18,6 +18,7 @@ import type { GimIndexResult } from '@desktop/database.js';
 import { parseDev } from '../../../gim/geometry/devParser.js';
 import { primitiveToGeometry, collectBakedGeometriesByMaterial } from '../../../viewer/xmlModGeometry.js';
 import { primitiveBounds } from '../devSpatialCatalog.js';
+import { primitiveName } from '../../../gim/geometry/ir.js';
 
 it('rejects non-affine/collapsed CBM placements without rejecting reflections or small unit scales', () => {
   const identity = new THREE.Matrix4().toArray();
@@ -73,7 +74,7 @@ it('browser LOD uses pixel hysteresis, demotes L2 and retains long objects cross
 });
 
 it.skipIf(process.env.GIM_VERIFY_SUBSTATION01 !== '1')('substation01 core geometry and cold/warm occurrence fingerprint', async () => {
-  const root = resolve('../demo/demo-substation'), files = new Map<string, File>();
+  const root = resolve(process.env.GIM_SUBSTATION01_ROOT ?? '../demo/demo-substation'), files = new Map<string, File>();
   const walk = (dir: string, prefix = '') => {
     for (const name of readdirSync(dir)) {
       const full = join(dir, name), path = prefix ? `${prefix}/${name}` : name, stat = statSync(full);
@@ -94,7 +95,7 @@ it.skipIf(process.env.GIM_VERIFY_SUBSTATION01 !== '1')('substation01 core geomet
   const group = new THREE.Group(), counts: Record<string, number> = {};
   for (const edge of discovered.mods) {
     const doc = parseWorkerXmlMod(await files.get(edge.modPath)!.text(), edge.modPath);
-    for (const entity of doc.entities) if (entity.visible) counts[entity.primitive.type] = (counts[entity.primitive.type] ?? 0) + 1;
+    for (const entity of doc.entities) if (entity.visible) { const type = primitiveName(entity.primitive); counts[type] = (counts[type] ?? 0) + 1; }
     const part = await loadXmlModFromFiles(edge.modPath, files, edge.phmColor, edge.phmColorMaxA, { strict: true, parseXml: parseWorkerXmlMod });
     applyPlacementTransformToSceneUnits(part!, edge.placementTransformMatrix); group.add(part!);
   }
@@ -118,7 +119,7 @@ it.skipIf(process.env.GIM_VERIFY_SUBSTATION01 !== '1')('substation01 core geomet
     const edges = await discoverGeometriesFromDevPath(node.devPath, files, new THREE.Matrix4().toArray(), new Set(), 0, { instances: 0 });
     for (const edge of edges.mods) {
       const doc = parseWorkerXmlMod(await files.get(edge.modPath)!.text(), edge.modPath);
-      for (const e of doc.entities) if (e.visible) bayCounts[e.primitive.type] = (bayCounts[e.primitive.type] ?? 0) + 1;
+      for (const e of doc.entities) if (e.visible) { const type = primitiveName(e.primitive); bayCounts[type] = (bayCounts[type] ?? 0) + 1; }
       const part = await loadXmlModFromFiles(edge.modPath, files, edge.phmColor, edge.phmColorMaxA, { strict: true, parseXml: parseWorkerXmlMod });
       applyPlacementTransformToSceneUnits(part!, edge.placementTransformMatrix); assembly.add(part!);
     }
@@ -130,7 +131,7 @@ it.skipIf(process.env.GIM_VERIFY_SUBSTATION01 !== '1')('substation01 core geomet
   // Python flat key map overwrites SUBDEVICE0's offset with SOLIDMODEL0's matrix.
   const bayReference = [48.38671815505101, -51.51090923204096, -.2, 59.4808792561535, -34.880316678542215, 12.57497037404753];
   [...bayBox.min.toArray(), ...bayBox.max.toArray()].forEach((v, i) => expect(Math.abs(v - bayReference[i])).toBeLessThan(.01));
-  const output = resolve('../output/dev-lod-validation'); mkdirSync(output, { recursive: true });
+  const output = resolve(process.env.GIM_DEV_VALIDATION_OUT ?? '../output/dev-lod-validation'); mkdirSync(output, { recursive: true });
   writeFileSync(join(output, 'geometry-static.json'), JSON.stringify({ primitiveCounts: counts, localBounds: [...box.min.toArray(), ...box.max.toArray()],
     catalog: bounds, bay: { primitiveCounts: bayCounts, sourceBounds: [...bayBox.min.toArray(), ...bayBox.max.toArray()] },
     occurrenceCount: shape(cold).length, coldWarmOccurrenceEqual: true }, null, 2));
