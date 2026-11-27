@@ -11,6 +11,7 @@ it("decodes byte views at a nonzero offset and never allocates indices", () => {
   bytes.set(new TextEncoder().encode("solid binary"));
   v.setUint32(80, 1, true);
   v.setFloat32(108, 27, true);
+  v.setFloat32(124, 1, true);
   const result = compileStl(bytes);
   expect(result).toMatchObject({
     status: "ok",
@@ -20,9 +21,16 @@ it("decodes byte views at a nonzero offset and never allocates indices", () => {
   expect(result.mesh!.positions[3]).toBe(27);
   expect(result.mesh!.indices).toBeUndefined();
   expect(queryStlBounds(bytes)).toMatchObject({
-    bounds: { min: [0, 0, 0], max: [27, 0, 0] },
+    bounds: { min: [0, 0, 0], max: [27, 1, 0] },
   });
   expect(queryStlBounds(bytes).mesh).toBeUndefined();
+  const padded = source.subarray(17);
+  for (const decode of [compileStl, queryStlBounds])
+    expect(decode(padded)).toMatchObject({
+      status: "ok",
+      format: "binary",
+      triangleCount: 1,
+    });
   v.setFloat32(108, NaN, true);
   expect(compileStl(bytes).status).toBe("invalid");
 });
@@ -47,6 +55,19 @@ it("distinguishes capacity, incomplete records and malformed facet structure", (
   }
   const result = compileStl(ascii(facet));
   expect(result.triangleCount).toBe(1);
-  expect(Array.from(result.mesh!.normals)).toEqual(Array(9).fill(0));
+  expect(Array.from(result.mesh!.normals)).toEqual([0, 0, 1, 0, 0, 1, 0, 0, 1]);
+  expect(
+    compileStl(
+      ascii(facet.replace("normal 0 0 0", "normal 0 4 0")),
+    ).mesh?.normals.slice(0, 3),
+  ).toEqual(new Float32Array([0, 1, 0]));
+  for (const decode of [compileStl, queryStlBounds]) {
+    expect(
+      decode(ascii(facet.replace("vertex 0 1 0", "vertex 2 0 0"))),
+    ).toMatchObject({
+      status: "invalid",
+      diagnostics: [{ code: "degenerate-stl-facet" }],
+    });
+  }
   expect(result.mesh!.positions.byteLength).toBe(36);
 });

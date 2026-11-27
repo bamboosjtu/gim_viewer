@@ -74,6 +74,30 @@ function rangeSink(): Sink {
     },
   };
 }
+/** Validate the actual Float32 facet and select its unit shading normal in the decode pass. */
+function finishFacet(normal: Point3, v: number[], mesh: boolean) {
+  const ax = v[3] - v[0],
+    ay = v[4] - v[1],
+    az = v[5] - v[2];
+  const bx = v[6] - v[0],
+    by = v[7] - v[1],
+    bz = v[8] - v[2];
+  const x = ay * bz - az * by,
+    y = az * bx - ax * bz,
+    z = ax * by - ay * bx;
+  if (!(x || y || z)) return false;
+  if (mesh) {
+    if (!normal.some(Boolean)) {
+      normal[0] = x;
+      normal[1] = y;
+      normal[2] = z;
+    }
+    const length = Math.hypot(...normal);
+    for (let i = 0; i < 3; i++) normal[i] /= length;
+  }
+  return true;
+}
+
 function decode(
   input: Input,
   mode: "mesh" | "bounds",
@@ -92,8 +116,17 @@ function decode(
   const declared = bytes.length >= 84 ? view.getUint32(80, true) : 0,
     binaryLength = 84 + 50 * declared;
   const format =
-    expected ?? (solid && binaryLength !== bytes.length ? "ascii" : "binary");
-  const fail = (message: string, capacity = false): StlCompileResult => ({
+    expected ??
+    (solid &&
+    binaryLength !== bytes.length &&
+    !(bytes.length >= binaryLength && bytes.subarray(0, 84).includes(0))
+      ? "ascii"
+      : "binary");
+  const fail = (
+    message: string,
+    capacity = false,
+    code = "invalid-stl",
+  ): StlCompileResult => ({
     format,
     status: capacity ? "capacity-exceeded" : "invalid",
     triangleCount: 0,
@@ -101,7 +134,7 @@ function decode(
       {
         stage: "parse",
         severity: "error",
-        code: capacity ? "capacity-exceeded" : "invalid-stl",
+        code: capacity ? "capacity-exceeded" : code,
         message,
       },
     ],
@@ -113,10 +146,7 @@ function decode(
     if (bytes.length < 84) return fail("Missing binary STL header");
     if (declared > MAX_TRIANGLES)
       return fail("STL exceeds five million triangles", true);
-    if (
-      bytes.length < binaryLength ||
-      (mode === "bounds" && bytes.length !== binaryLength)
-    )
+    if (bytes.length < binaryLength)
       return fail("Binary STL record length mismatch");
     const sink = mode === "mesh" ? meshSink(declared) : rangeSink();
     for (let start = 84; count < declared; count++, start += 50) {
@@ -126,6 +156,12 @@ function decode(
         vertices[i] = view.getFloat32(start + 12 + 4 * i, true);
       if (!normal.every(Number.isFinite) || !vertices.every(Number.isFinite))
         return fail("Nonfinite binary normal or vertex");
+      if (!finishFacet(normal, vertices, mode === "mesh"))
+        return fail(
+          `Degenerate STL facet ${count + 1}`,
+          false,
+          "degenerate-stl-facet",
+        );
       sink.put(normal, vertices);
     }
     return {
@@ -173,6 +209,12 @@ function decode(
           return fail("Invalid ASCII STL vertex");
       if (token() !== "endloop" || token() !== "endfacet")
         return fail("Incomplete ASCII STL triangle");
+      if (!finishFacet(normal, vertices, mode === "mesh"))
+        return fail(
+          `Degenerate STL facet ${count + 1}`,
+          false,
+          "degenerate-stl-facet",
+        );
       sink.put(normal, vertices);
       count++;
       keyword = token();
