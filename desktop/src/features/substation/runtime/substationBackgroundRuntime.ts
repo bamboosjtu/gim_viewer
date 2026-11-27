@@ -297,6 +297,11 @@ export class SubstationBackgroundCoordinator {
       if (task.state === 'queued') this.cancelUserIfcFine(key);
   }
 
+  isPreparingDevGeometry(): boolean {
+    const state = this.tasks.get('devGeometry')?.state;
+    return state === 'queued' || state === 'running';
+  }
+
   snapshot(): Array<SubstationBackgroundTaskEvent & { queuedMs?: number }> {
     const now = performance.now();
     return Array.from(this.tasks.values()).map((record) => ({

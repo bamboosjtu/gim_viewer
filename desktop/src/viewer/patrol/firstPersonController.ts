@@ -27,8 +27,6 @@ export class FirstPersonController {
   private drag?: number;
   private dragX = 0;
   private dragY = 0;
-  private delayed = false;
-  private walkWork?: AbortController;
   private inputEpoch = 0;
   private dx = 0;
   private dy = 0;
@@ -43,14 +41,12 @@ export class FirstPersonController {
     start: PatrolPose,
     private generation: number,
     private valid: () => boolean,
-    private runSignal: AbortSignal,
   ) {
     this.hub = cameraPoseHub(ctx);
     this.camera = ctx.world.camera as OrthoPerspectiveCamera;
     this.feet = start.feet.clone();
     this.sourceId = start.sourceId;
     this.commands.estimated = !!start.estimated;
-    this.commands.limitedCoverage = !!start.limitedCoverage;
     this.yaw = start.yaw;
     this.pitch = start.pitch;
     const { signal } = this.events;
@@ -156,8 +152,6 @@ export class FirstPersonController {
     this.apply();
   }
   walk() {
-    this.walkWork?.abort();
-    this.walkWork = new AbortController();
     this.commands.dragLook = true;
     this.commands.set('walking', '开始巡视');
     this.canvas.tabIndex = 0;
@@ -234,7 +228,6 @@ export class FirstPersonController {
     )
       .normalize()
       .multiplyScalar(speed / 60);
-    if (advance && this.walkWork) this.nav.prefetchAhead?.(this.feet, delta, this.walkWork.signal);
     while (advance && this.accumulator + 1e-10 >= 1 / 60) {
       const started = performance.now();
       this.accumulator -= 1 / 60;
@@ -243,34 +236,10 @@ export class FirstPersonController {
       if ('reason' in result) {
         this.commands.set('walking', result.reason);
         advance = false;
-        if (result.reason.includes('正在准备') && !this.delayed) {
-          this.delayed = true;
-          const epoch = this.inputEpoch;
-          void this.nav
-            .prepare(to, this.walkWork?.signal ?? this.runSignal, this.feet.clone())
-            .then(
-              () => {
-                if (epoch === this.inputEpoch) this.wake();
-              },
-              (e) => {
-                if (epoch === this.inputEpoch) this.commands.set('walking', String(e));
-              },
-            )
-            .finally(() => {
-              if (epoch === this.inputEpoch) this.delayed = false;
-            });
-        }
       } else {
         this.feet.copy(result.feet);
         this.sourceId = result.sourceId;
-        if (
-          this.commands.estimated !== !!result.estimated ||
-          this.commands.limitedCoverage !== !!result.limitedCoverage
-        ) {
-          this.commands.estimated = !!result.estimated;
-          this.commands.limitedCoverage = !!result.limitedCoverage;
-          this.commands.dispatchEvent(new Event('change'));
-        }
+        this.commands.estimated = !!result.estimated;
         changed = true;
         this.commands.set('walking');
       }
@@ -292,13 +261,9 @@ export class FirstPersonController {
     this.pitch = pose.pitch;
     this.sourceId = pose.sourceId;
     this.commands.estimated = !!pose.estimated;
-    this.commands.limitedCoverage = !!pose.limitedCoverage;
     this.apply();
   }
   stop() {
-    this.walkWork?.abort();
-    this.walkWork = undefined;
-    this.delayed = false;
     this.inputEpoch++;
     cancelAnimationFrame(this.frame);
     this.frame = 0;

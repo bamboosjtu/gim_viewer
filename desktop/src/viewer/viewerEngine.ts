@@ -11,6 +11,7 @@ export interface ViewerContext {
   world: OBC.World;
   ifcLoader: OBC.IfcLoader;
   fragments: OBC.FragmentsManager;
+  referenceGrid?: THREE.Object3D;
 }
 
 /** 初始化 OBC 引擎并返回上下文 */
@@ -54,14 +55,15 @@ export async function createViewerEngine(container: HTMLElement): Promise<Viewer
 
     const ifcLoader = components.get(OBC.IfcLoader);
     const fragments = components.get(OBC.FragmentsManager);
+    const ctx = { components, world, ifcLoader, fragments, referenceGrid: grid.three };
     renderer.mode = OBC.RendererMode.MANUAL;
-    installDemandRendering({ components, world, ifcLoader, fragments }, renderer);
+    installDemandRendering(ctx, renderer);
 
     // 诊断钩子：控制台/Playwright 可读取场景与 Fragments 所有权，
     // 不参与产品流程，也不暴露到任何外部网络接口。
     Object.assign(window, { __gimWorld: world, __gimFragments: fragments });
 
-    return { components, world, ifcLoader, fragments };
+    return ctx;
   } catch (error) {
     try {
       await Promise.resolve(components.dispose());

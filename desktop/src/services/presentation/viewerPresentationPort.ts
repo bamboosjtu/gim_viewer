@@ -6,6 +6,7 @@ import type { RegionalObject } from '../../viewer/ifcRegionalData.js';
 /** A prepared properties/model view owns its DOM listeners and can detach them. */
 export interface ViewerPresentation {
   bindProperties(ctx: ViewerContext): () => void;
+  openProperties(ctx: ViewerContext): void;
   showElement(
     ctx: ViewerContext,
     state: AppState,

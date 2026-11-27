@@ -5,6 +5,7 @@ import type { ViewerRuntimeWithUI } from '../../../services/presentation/viewerU
 import { selectEngineeringTarget } from '../../../services/engineering/engineeringSelection.js';
 import { clearCurrentSelection } from '../../../services/selection/selectionCommands.js';
 import { capturePatrolCamera } from '../../../viewer/patrol/patrolContextSnapshot.js';
+import { setRenderVisibility } from '../../../viewer/demandRendering.js';
 
 export function capturePatrolWorkspace(
   state: AppState,
@@ -15,6 +16,8 @@ export function capturePatrolWorkspace(
 ) {
   const tools = state.viewerCommands;
   const cam = ctx.world.camera as OrthoPerspectiveCamera;
+  const grid = ctx.referenceGrid;
+  const gridVisible = grid?.visible;
   const s = {
     camera: capturePatrolCamera(cam),
     tool: structuredClone(tools.snapshot),
@@ -73,6 +76,12 @@ export function capturePatrolWorkspace(
   return Object.assign(s, {
     restoreSelection,
     needsSelectionRestore,
+    hideGrid() {
+      if (grid) setRenderVisibility(grid, false);
+    },
+    restoreGrid() {
+      if (grid && gridVisible !== undefined) setRenderVisibility(grid, gridVisible);
+    },
     restoreVisibility() {
       state.selection.patrolIsolation = undefined;
       return patrol.visibility.setVisibility(

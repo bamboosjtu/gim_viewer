@@ -40,7 +40,6 @@ it('falls back to dragging, caps long-frame motion, and stops all walking input 
     { feet: new Vector3(), sourceId: 'test-floor', yaw: 0, pitch: 0 },
     1,
     () => true,
-    new AbortController().signal,
   );
   try {
     controller.takeCamera();

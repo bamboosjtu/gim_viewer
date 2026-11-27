@@ -21,54 +21,101 @@ export function mountPatrolOverlay(
   const enter = button(group, '进入巡视', 'prepare');
   toolGlyph(enter, 'patrol', '进入巡视', '进入第一人称巡视');
   enter.onclick = () => port.execute?.(port.mode === 'orbit' ? 'prepare' : 'exit');
-  const panel = document.createElement('div');
-  panel.className = 'patrol-panel';
-  const status = document.createElement('span');
-  status.setAttribute('role', 'status');
+  const hud = document.createElement('div');
+  hud.className = 'patrol-hud';
+  const walking = document.createElement('section');
+  walking.className = 'patrol-walking';
+  walking.setAttribute('aria-label', '第一人称巡视');
+  const pause = button(walking, '暂停', 'pause');
+  pause.className = 'patrol-pause';
+  pause.title = 'Esc';
   const cross = document.createElement('div');
   cross.className = 'patrol-crosshair';
   cross.setAttribute('aria-hidden', 'true');
-  cross.textContent = '+';
-  panel.append(status);
-  const start = button(panel, '开始巡视', 'start');
-  const choose = button(panel, '自选起点', 'pickStart');
-  const resume = button(panel, '继续巡视', 'resume');
-  const measure = button(panel, '两点测量', 'measure');
-  const home = button(panel, '返回巡视入口', 'return');
-  const cancel = button(panel, '取消操作', 'pause');
-  const exit = button(panel, '退出巡视', 'exit');
-  viewport.append(panel, cross);
+  const keys = document.createElement('div');
+  keys.className = 'patrol-keys';
+  keys.innerHTML =
+    '<span><kbd>WASD</kbd> 行走</span><span><kbd>Shift</kbd> 加速</span>' +
+    '<span><kbd>鼠标</kbd> <span data-patrol-look></span></span><span><kbd>F</kbd> 查看属性</span>';
+  const look = keys.querySelector('[data-patrol-look]')!;
+  const door = document.createElement('div');
+  door.className = 'patrol-door';
+  door.innerHTML = '<kbd>E</kbd> 操作门';
+  walking.append(cross, keys, door);
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'patrol-backdrop';
+  backdrop.setAttribute('aria-hidden', 'true');
+  const panel = document.createElement('section');
+  panel.className = 'patrol-panel';
+  const title = document.createElement('h2');
+  const status = document.createElement('div');
+  status.setAttribute('role', 'status');
+  const actions = document.createElement('div');
+  actions.className = 'patrol-actions';
+  panel.append(title, status, actions);
+  const start = button(actions, '开始巡视', 'start');
+  const choose = button(actions, '自选起点', 'pickStart');
+  const resume = button(actions, '继续巡视', 'resume');
+  const measure = button(actions, '两点测量', 'measure');
+  const home = button(actions, '返回巡视入口', 'return');
+  const cancel = button(actions, '取消操作', 'pause');
+  const exit = button(actions, '退出巡视', 'exit');
+  start.className = resume.className = 'patrol-primary';
+  hud.append(walking, backdrop, panel);
+  viewport.append(hud);
+
+  const drawer = viewport.closest('#main')?.querySelector('#props-drawer');
+  let drawerCollapsed: boolean | undefined;
+  const restoreDrawer = () => {
+    if (drawerCollapsed !== undefined) drawer?.classList.toggle('collapsed', drawerCollapsed);
+    drawerCollapsed = undefined;
+  };
   const render = () => {
     const mode = port.mode;
-    viewport.dataset.navigation = mode;
-    panel.hidden = mode === 'orbit';
-    cross.hidden = mode !== 'walking';
+    const previous = viewport.dataset.navigation;
     const active = mode !== 'orbit';
+    const immersive =
+      active &&
+      mode !== 'preparing' &&
+      mode !== 'ready' &&
+      mode !== 'failed' &&
+      (mode !== 'exiting' || viewport.hasAttribute('data-patrol-active'));
+    const isWalking = mode === 'walking';
+    if (immersive && drawer && drawerCollapsed === undefined)
+      drawerCollapsed = drawer.classList.contains('collapsed');
+    else if (!active) restoreDrawer();
+    viewport.dataset.navigation = mode;
+    viewport.toggleAttribute('data-patrol-active', immersive);
+    hud.hidden = !active;
+    walking.hidden = !isWalking;
+    door.hidden = !port.doorHint;
+    look.textContent = port.dragLook ? '按住左键拖动' : '环顾';
+    backdrop.hidden = mode !== 'paused';
+    const activeMessage = isWalking && port.message !== '开始巡视' ? port.message : '';
+    panel.hidden = isWalking && !activeMessage;
+    title.textContent =
+      mode === 'paused' ? '巡视暂停' : mode === 'inspecting' && !port.measuring ? '检查对象' : '';
+    title.hidden = !title.textContent;
+    status.textContent = isWalking
+      ? activeMessage
+      : port.message || (mode === 'paused' ? '继续从当前位置巡视' : '');
+    if (mode === 'paused' && port.estimated) status.textContent += ' · 附近使用近似碰撞模型';
     enter.setAttribute('aria-pressed', String(active));
     enter.setAttribute('aria-label', active ? '退出巡视' : '进入巡视');
     enter.dataset.tip = active ? '退出巡视，恢复自由浏览视角' : '进入第一人称巡视';
-    start.hidden = mode !== 'ready';
-    choose.hidden = (mode !== 'preparing' && mode !== 'ready') || port.pickingStart;
+    start.hidden = !acceptsNavigationAction(mode, 'start');
+    choose.hidden =
+      !acceptsNavigationAction(mode, 'pickStart') || port.pickingStart || port.compiling;
     home.textContent = port.gateHome ? '返回大门' : '返回巡视入口';
-    resume.hidden = home.hidden = mode !== 'paused' && mode !== 'inspecting';
+    resume.hidden = !acceptsNavigationAction(mode, 'resume');
+    home.hidden = !acceptsNavigationAction(mode, 'return');
     cancel.hidden = !['returning', 'operatingDoor', 'pickingDevice'].includes(mode);
-    exit.disabled = enter.disabled = mode === 'exiting';
+    exit.hidden = isWalking || !acceptsNavigationAction(mode, 'exit');
+    enter.disabled = mode === 'exiting';
     measure.hidden = !acceptsNavigationAction(mode, 'measure') || port.measuring;
-    status.textContent =
-      port.message ||
-      (mode === 'walking'
-        ? 'WASD 行走 · Shift 加速 · ' +
-          (port.dragLook ? '按住左键拖动环顾' : '鼠标环顾') +
-          ' · F 检查' +
-          (port.doorHint ? ' · E 操作门' : '') +
-          ' · Esc 暂停'
-        : mode === 'inspecting'
-          ? '检查设备'
-          : '巡视已暂停');
-    if (mode === 'walking' || mode === 'ready' || mode === 'paused') {
-      if (port.estimated) status.textContent += ' · 附近使用近似碰撞模型';
-      if (port.limitedCoverage) status.textContent += ' · 部分来源范围未知';
-    }
+    actions.hidden = !Array.from(actions.children).some((child) => !(child as HTMLElement).hidden);
+    if (mode === 'paused' && previous !== mode) resume.focus({ preventScroll: true });
   };
   let consumed = false;
   const key = (event: KeyboardEvent) => {
@@ -97,9 +144,10 @@ export function mountPatrolOverlay(
       window.removeEventListener('blur', blur);
       port.removeEventListener('change', render);
       delete viewport.dataset.navigation;
+      viewport.removeAttribute('data-patrol-active');
+      restoreDrawer();
       enter.remove();
-      panel.remove();
-      cross.remove();
+      hud.remove();
     },
   };
 }

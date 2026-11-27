@@ -501,12 +501,75 @@
 
 /* The toolbar responds to the remaining canvas after either side panel changes width. */
 #viewport {container-type:inline-size}
-.patrol-panel:not([hidden]) {position:absolute;z-index:5;bottom:58px;left:50%;transform:translateX(-50%);width:max-content;max-width:calc(100% - 32px);box-sizing:border-box;display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:6px;padding:6px 9px;border:1px solid #cdd7e4;border-radius:8px;background:#fff;color:#34465e;box-shadow:0 3px 10px #23395926;font:inherit;font-size:12px}
-.patrol-panel [role=status] {min-width:0;overflow-wrap:anywhere}
-.patrol-panel button {font:inherit;white-space:nowrap;padding:4px 8px;border:1px solid #cdd7e4;border-radius:5px;background:#f6f9fd;color:inherit;cursor:pointer}
-.patrol-panel button:hover {background:#eaf1f9;color:#184c96}
-.patrol-crosshair {position:absolute;z-index:15;left:50%;top:50%;transform:translate(-50%,-50%);color:white;text-shadow:0 0 3px black;pointer-events:none;font:24px/1 monospace}
-.patrol-panel[hidden],.patrol-panel button[hidden],.patrol-crosshair[hidden] {display:none}
+/* The patrol HUD is scoped to the WebGL viewport so its reticle shares the picking centre. */
+#main:has(#viewport[data-patrol-active]) {grid-template-columns:minmax(0,1fr) auto}
+#main:has(#viewport[data-patrol-active]) :is(#workspace-rail,#navigator),
+#viewport[data-patrol-active] :is(#selection-toolbar,.viewer-camera-dock,.orientation-axes,.sld-overlay),
+#main:has(#viewport[data-patrol-active]:not([data-navigation=inspecting])) :is(#props-drawer,#btn-toggle-props) {display:none}
+#main:has(#viewport[data-patrol-active]) #props-drawer:not(.collapsed) {width:min(var(--props-width),44vw)}
+#viewport[data-patrol-active] canvas[data-gim-renderer=three]:focus {outline:none}
+
+.patrol-hud {
+  --patrol-surface:rgba(12,26,38,.94);
+  --patrol-border:rgba(162,207,232,.25);
+  --patrol-text:#f1f7fb;
+  --patrol-muted:#bed0dd;
+  --patrol-accent:#9cdef3;
+  position:absolute;inset:0;z-index:15;pointer-events:none;color:var(--patrol-text);font:inherit;
+}
+.patrol-hud[hidden],.patrol-hud [hidden] {display:none}
+.patrol-panel,.patrol-keys,.patrol-door,.patrol-pause {
+  background:var(--patrol-surface);border:1px solid var(--patrol-border);border-radius:8px;
+  box-shadow:0 8px 22px #06101daa;
+}
+.patrol-panel {
+  position:absolute;bottom:64px;left:50%;transform:translateX(-50%);width:max-content;
+  max-width:calc(100% - 32px);box-sizing:border-box;padding:12px 15px;font-size:13px;
+}
+[data-patrol-active] .patrol-panel {bottom:18px}
+[data-navigation=walking] .patrol-panel {bottom:84px;color:var(--patrol-text)}
+[data-navigation=inspecting] .patrol-panel {left:16px;transform:none}
+.patrol-panel h2 {font-size:18px;margin:0 0 6px}
+.patrol-panel [role=status] {color:var(--patrol-muted);overflow-wrap:anywhere;line-height:1.5}
+.patrol-panel [role=status]:empty {display:none}
+.patrol-actions {display:flex;flex-wrap:wrap;gap:8px;pointer-events:auto}
+.patrol-panel [role=status]:not(:empty) + .patrol-actions {margin-top:10px}
+.patrol-hud button {
+  font:inherit;white-space:nowrap;min-height:34px;padding:5px 11px;border:1px solid var(--patrol-border);
+  border-radius:5px;background:#182d3f;color:inherit;cursor:pointer;
+}
+.patrol-hud button:hover {background:#23445b}
+.patrol-hud button:focus-visible {outline:2px solid var(--patrol-accent);outline-offset:2px}
+.patrol-hud button.patrol-primary {background:var(--patrol-accent);border-color:transparent;color:#102737;font-weight:650}
+.patrol-hud button.patrol-primary:hover {background:#bef0ff}
+.patrol-hud button.patrol-pause {
+  position:absolute;top:16px;right:16px;pointer-events:auto;background:var(--patrol-surface);
+}
+.patrol-keys {
+  position:absolute;left:50%;bottom:16px;transform:translateX(-50%);display:flex;flex-wrap:wrap;justify-content:center;gap:6px 12px;
+  width:max-content;box-sizing:border-box;max-width:calc(100% - 32px);padding:8px 11px;font-size:12px;color:var(--patrol-muted);
+}
+.patrol-hud kbd {font:600 11px var(--mono);color:var(--patrol-accent);padding:2px 4px;border:1px solid var(--patrol-border);border-radius:3px}
+.patrol-door {position:absolute;left:50%;top:calc(50% + 27px);transform:translateX(-50%);padding:7px 11px;font-size:13px;white-space:nowrap}
+.patrol-crosshair {
+  position:absolute;left:50%;top:50%;width:20px;height:20px;transform:translate(-50%,-50%);
+  background:linear-gradient(#f5fbff,#f5fbff) center top / 2px 6px no-repeat,
+    linear-gradient(#f5fbff,#f5fbff) center bottom / 2px 6px no-repeat,
+    linear-gradient(#f5fbff,#f5fbff) left center / 6px 2px no-repeat,
+    linear-gradient(#f5fbff,#f5fbff) right center / 6px 2px no-repeat;
+  filter:drop-shadow(0 1px 1px #10212d);
+}
+.patrol-backdrop {position:absolute;inset:0;background:#0815219e;pointer-events:auto}
+[data-navigation=paused] .patrol-panel {
+  left:50%;top:50%;bottom:auto;transform:translate(-50%,-50%);width:min(390px,calc(100% - 32px));padding:22px;pointer-events:auto;
+}
+[data-navigation=paused] .patrol-panel h2 {font-size:25px}
+[data-navigation=paused] .patrol-actions {margin-top:16px}
+[data-navigation=paused] .patrol-primary {width:100%}
+@container (max-width:465px) {
+  .patrol-keys {gap:8px 10px;line-height:1.5}
+  [data-navigation=walking] .patrol-panel {bottom:110px}
+}
 #selection-toolbar {
   position:absolute; top:8px; left:8px; z-index:5; width:calc(100% - 16px); max-width:1100px;
   display:flex; flex-direction:column; color:#253751; background:linear-gradient(180deg,#fff,#f6f9fd);
@@ -519,7 +582,6 @@
   .viewer-tool-tabs:has([data-icon=patrol]:not([hidden])) {grid-template-columns:3fr 4fr 3fr minmax(40px,1.35fr) 3fr}
   .viewer-tool-tabs .viewer-group-heading {white-space:nowrap;padding-inline:2px;gap:3px}
 }
-#viewport[data-navigation]:not([data-navigation=orbit],[data-navigation=preparing],[data-navigation=ready]) .viewer-camera-dock {display:none}
 .viewer-ribbon-actions .viewer-glyph[hidden] {display:none}
 .viewer-ribbon-group {min-width:0; padding:0 6px; border-inline-end:1px solid #cbd5e1}
 .viewer-ribbon-group:last-child {border:0}
@@ -551,7 +613,7 @@
 .viewer-camera-dock .viewer-glyph {width:33px;height:32px;flex:none;border-radius:14px}
 .viewer-camera-dock .viewer-command-caption {display:none}
 .viewer-camera-dock .viewer-glyph:first-child {margin-right:5px}
-#viewport:not(.has-3d-tools) .viewer-camera-dock {display:none}
+#viewport:not(.has-3d-tools) :is(.viewer-camera-dock,#selection-toolbar) {display:none}
 .orientation-axes {display:none;position:absolute;bottom:32px;left:10px;width:74px;height:74px;pointer-events:none;z-index:3}
 .has-3d-tools .orientation-axes {display:block}
 .orientation-axes text {font:700 11px "Segoe UI",sans-serif;paint-order:stroke;stroke:white;stroke-width:2px}

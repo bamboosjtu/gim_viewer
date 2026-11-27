@@ -81,7 +81,7 @@ import type {
   PatrolPart,
   PatrolSource,
 } from '../../viewer/patrol/navigationQueryPort.js';
-import { cameraPoseHub } from '../../viewer/cameraPoseHub.js';
+import { cameraPoseHub, type CameraPoseChange } from '../../viewer/cameraPoseHub.js';
 import { getSourceGeometryOccurrences } from './sourceGeometryService.js';
 import { startSubstationResourceMonitor } from '../project/projectResourceTelemetry.js';
 import { observeFirstGeometry } from '../presentation/geometryPresentationService.js';
@@ -247,8 +247,8 @@ export class DevLodRuntime {
   );
   private unsubscribeCamera?: () => void;
   private cameraMovingUntil = 0;
-  private cameraSchedule = () => {
-    if (!this.current()) return;
+  private cameraSchedule = (pose?: CameraPoseChange) => {
+    if (!this.current() || pose?.owner.source === 'patrol') return;
     this.diagnostics.currentViewReady = false;
     this.diagnostics.currentViewSettled = false;
     this.cameraMovingUntil = performance.now() + 200;
@@ -951,7 +951,7 @@ export class DevLodRuntime {
     // A renderer may be torn down before an already queued camera callback.
     // No view computation is meaningful until a live camera exists.
     const camera = this.ctx.world?.camera?.three as THREE.Camera | undefined;
-    if (!camera) return;
+    if (!camera || cameraPoseHub(this.ctx).current.source === 'patrol') return;
     this.refreshMemoryPressure();
     this.notifyCoordinateAnchor();
     const canvas = this.ctx.world.renderer?.three?.domElement;

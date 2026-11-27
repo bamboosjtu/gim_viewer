@@ -28,19 +28,28 @@ async function exercise(cdp, indoor, result) {
       __gimWorld.camera.three.getWorldDirection(__gimWorld.camera.three.position.clone()).toArray(),
     );
   const ready = async (kind) => {
-    for (let i = 0; i < 600; i++) {
+    for (let i = 0; i < 3000; i++) {
       const s = await status();
       if (s.mode === 'ready') {
         assert.equal(await page(() => __gimAppState.navigation.evidence().startKind), kind);
         return;
       }
-      if (s.mode === 'preparing' && (await page(() => __gimAppState.navigation.pickingStart)))
+      if (
+        s.mode === 'failed' ||
+        (s.mode === 'preparing' && (await page(() => __gimAppState.navigation.pickingStart)))
+      )
         throw Error(s.message);
       await sleep(200);
     }
     throw Error('timed out preparing ' + kind);
   };
   const eye = () => page(() => __gimWorld.camera.three.position.toArray());
+  const referenceGridVisible = () =>
+    page(
+      () =>
+        __gimWorld.scene.three.children.find((node) => node.renderOrder === Number.MIN_SAFE_INTEGER)
+          ?.visible,
+    );
   const walkSample = () =>
     page(() => {
       const p = __gimWorld.camera.three.position
@@ -143,8 +152,14 @@ async function exercise(cdp, indoor, result) {
   await button('进入巡视');
   await ready('gate');
   const initialOrbit = await eye();
+  const cacheStatus = () => page(() => __gimAppState.navigation.evidence().cache);
+  result.firstScene = await cacheStatus();
+  assert.equal(result.firstScene.sceneCached, true, 'compiled scene could not be cached');
+  const originalGridVisibility = await referenceGridVisible();
+  assert.equal(typeof originalGridVisibility, 'boolean');
   await button('开始巡视');
   await sleep(250);
+  assert.equal(await referenceGridVisible(), false, 'reference grid is visible in patrol');
   const gate = await page(() => __gimAppState.navigation.evidence().home);
   assert.ok(gate?.gate);
   result.gateFeet = await feet();
@@ -178,8 +193,20 @@ async function exercise(cdp, indoor, result) {
   await sleep(400);
   assert.equal((await status()).mode, 'orbit');
   assert.ok(distance(await eye(), initialOrbit) < 0.001);
+  assert.equal(await referenceGridVisible(), originalGridVisibility, 'orbit grid was not restored');
   await button('进入巡视');
   await ready('last');
+  result.reopenedScene = await cacheStatus();
+  assert.equal(
+    result.reopenedScene.sceneCacheHit,
+    true,
+    'warm patrol did not read its compiled scene',
+  );
+  assert.equal(
+    result.reopenedScene.assetsBuilt,
+    result.firstScene.assetsBuilt,
+    'warm patrol compiled geometry again',
+  );
   await button('自选起点');
   result.entries = [];
   for (const candidate of candidates) {
@@ -387,7 +414,10 @@ async function exercise(cdp, indoor, result) {
   result.inspection = await page(() => ({
     kind: __gimAppState.selection.selectionRequest?.target?.kind,
     sources: __gimAppState.selection.engineeringSelection?.sourceIds.size,
-    inspector: !!document.querySelector('#props-drawer-body')?.textContent.trim(),
+    inspector:
+      !!document.querySelector('#props-drawer-body')?.textContent.trim() &&
+      !document.querySelector('#props-drawer')?.classList.contains('collapsed') &&
+      document.querySelector('#props-drawer')?.getClientRects().length > 0,
   }));
   assert.ok(
     result.inspection.kind && result.inspection.sources > 0 && result.inspection.inspector,
@@ -395,9 +425,10 @@ async function exercise(cdp, indoor, result) {
   );
   await button('两点测量');
   await sleep(180);
-  await click([cx, cy]);
+  const [measureX, measureY] = await center();
+  await click([measureX, measureY]);
   await sleep(320);
-  await click([cx + 4, cy]);
+  await click([measureX + 4, measureY]);
   await sleep(320);
   const measurement = await page(() => __gimAppState.viewerCommands.snapshot.distances.at(-1));
   assert.ok(
@@ -462,7 +493,7 @@ async function main() {
         root,
         buildManifest: resolve(manifest),
         sample,
-        timeoutMs: 240000,
+        timeoutMs: 720000,
         exercise: async ({ cdp }) => {
           try {
             return await exercise(cdp, routes[label] === 'stairs', result);

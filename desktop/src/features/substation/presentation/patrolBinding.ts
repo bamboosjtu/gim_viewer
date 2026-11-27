@@ -110,6 +110,7 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
     feet: walker?.feet.toArray(),
     home: home ? { feet: home.feet.toArray(), yaw: home.yaw, gate: port.gateHome } : undefined,
     estimatedSectionOccurrences: nav.metrics.estimatedSectionOccurrences,
+    unknownSourceCount: nav.unknownSourceCount,
     drawCount,
     capped: walker?.capped,
     movement: summarize(walker?.tickMs ?? []),
@@ -119,7 +120,10 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
       assetsBuilt: nav.metrics.assetBuilds,
       assetsHit: nav.metrics.assetHits,
       blocksPrepared: nav.metrics.blocks,
-      blocksHit: nav.metrics.blockHits,
+      sceneCacheHit: nav.metrics.fromCache,
+      sceneCached: nav.metrics.persisted,
+      sourcesPrepared: nav.metrics.sourcesPrepared,
+      unavailableSources: nav.metrics.unavailableSources,
       residentSweepSteps: nav.metrics.residentSweepSteps,
       missingSweepSteps: nav.metrics.missingSweepSteps,
     },
@@ -158,7 +162,7 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
     hub.stopAdmissionTrace();
     walker?.dispose();
     walker = undefined;
-    port.measuring = port.estimated = port.limitedCoverage = false;
+    port.measuring = port.estimated = port.compiling = false;
     const current = () => scope.isCurrent();
     try {
       const failures = await restorePatrolContext(current, [
@@ -186,6 +190,7 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
     } finally {
       if (current()) {
         if (s) {
+          s.restoreGrid();
           Object.assign(cam.controls.mouseButtons, s.camera.buttons);
           cam.controls.enabled = s.camera.enabled;
           state.viewState.viewHistory?.resume?.();
@@ -199,7 +204,6 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
   function ready(pose: PatrolPose, kind: typeof planned) {
     entry = pose;
     port.estimated = !!pose.estimated;
-    port.limitedCoverage = !!pose.limitedCoverage;
     planned = kind;
     port.pickingStart = false;
     const label =
@@ -208,31 +212,68 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
         : kind === 'gate'
           ? '已定位站区大门，面向站内'
           : '自选起点已就绪';
-    port.set(
-      'ready',
-      label +
-        (!pose.estimated && nav.metrics.estimatedSectionOccurrences ? ' · 工程含估算型材截面' : ''),
-    );
+    port.set('ready', label);
   }
-  async function verified(pose: PatrolPose, signal: AbortSignal): Promise<PatrolPose | undefined> {
-    await nav.prepare(pose.feet, signal);
-    signal.throwIfAborted();
+  function verified(pose: PatrolPose): PatrolPose | undefined {
     const hit = nav.step(pose.feet, pose.feet);
     if ('feet' in hit && hit.sourceId === pose.sourceId)
       return { ...pose, ...hit, estimated: hit.estimated };
   }
+  async function waitForBrowseScene(signal: AbortSignal) {
+    while (true) {
+      signal.throwIfAborted();
+      const physical = state.sourceGeometry;
+      const dev = state.deviceLodRuntime;
+      if (
+        !state.ifcLoading?.pending &&
+        (!physical || physical.catalog) &&
+        !state.substationFineQueue?.isPreparingDevGeometry?.() &&
+        (!dev || dev.diagnostics.baseRepresentationsSettled !== false)
+      )
+        return;
+      if (physical?.ready && !(await physical.ready))
+        throw Error('工程模型未能打开，请重新打开工程');
+      await new Promise<void>((resolve, reject) => {
+        const cancel = () => {
+          clearTimeout(timer);
+          reject(new DOMException('已取消巡视准备', 'AbortError'));
+        };
+        const timer = setTimeout(() => {
+          signal.removeEventListener('abort', cancel);
+          resolve();
+        }, 150);
+        signal.addEventListener('abort', cancel, { once: true });
+        if (signal.aborted) cancel();
+      });
+    }
+  }
+
   async function prepareStart(owner: AbortController) {
     const ticket = ++entryRequest;
     const attempt = new AbortController();
     search = attempt;
     const signal = AbortSignal.any([owner.signal, attempt.signal]);
     const current = () => alive(owner) && ticket === entryRequest && !signal.aborted;
+    port.compiling = true;
     const eligible = () => {
       if (!current()) return false;
       if (!frameValid()) throw Error('工程坐标或几何批次已变更，请重新选择入口');
       return true;
     };
     try {
+      const started = performance.now();
+      await waitForBrowseScene(signal);
+      if (!current()) return;
+      if (frame !== state.projectCoordinateFrame || batch !== state.geometryLoadToken) {
+        home = last = undefined;
+        port.gateHome = false;
+      }
+      if (batch !== state.geometryLoadToken) {
+        nav.dispose();
+        batch = state.geometryLoadToken;
+        nav = new PatrolNavigationRuntime(state, state.captureProjectSession());
+      }
+      frame = state.projectCoordinateFrame;
       if (
         !frame ||
         frame.confidence === 'unknown' ||
@@ -240,12 +281,13 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
         !frameValid()
       )
         throw Error('工程坐标依据尚未确认');
-      const started = performance.now();
+      await nav.prepareScene(signal, (message) => {
+        if (current()) port.set('preparing', message);
+      });
+      if (!eligible()) return;
+      port.compiling = false;
       if (last) {
-        const saved = await verified(last, signal).catch(() => {
-          signal.throwIfAborted();
-          return undefined;
-        });
+        const saved = verified(last);
         if (!eligible()) return;
         if (saved) {
           coverageMs = performance.now() - started;
@@ -264,7 +306,7 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
         return;
       }
       if (home && !port.gateHome) {
-        const saved = await verified(home, signal);
+        const saved = verified(home);
         if (!eligible()) return;
         if (saved) {
           coverageMs = performance.now() - started;
@@ -278,11 +320,9 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
       port.set('preparing', '未找到可用的站区大门落脚点，请点击道路或楼面选择起点');
     } catch (error) {
       if (current()) {
-        port.pickingStart = true;
-        port.set(
-          'preparing',
-          (error instanceof Error ? error.message : String(error)) + '；可点击道路或楼面选择起点',
-        );
+        port.compiling = false;
+        port.pickingStart = false;
+        port.set('failed', error instanceof Error ? error.message : String(error));
       }
     } finally {
       if (search === attempt) search = undefined;
@@ -302,26 +342,21 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
       return;
     }
     if (action === 'prepare' && port.mode === 'orbit') {
-      if (frame !== state.projectCoordinateFrame || batch !== state.geometryLoadToken) {
-        home = last = undefined;
-        port.gateHome = false;
-      }
-      if (batch !== state.geometryLoadToken) {
-        nav.dispose();
-        batch = state.geometryLoadToken;
-        nav = new PatrolNavigationRuntime(state, state.captureProjectSession());
-      }
       run = new AbortController();
-      frame = state.projectCoordinateFrame;
       entry = undefined;
       port.pickingStart = false;
-      port.set('preparing', last ? '正在确认上次巡视位置' : '正在定位站区大门');
+      port.compiling = true;
+      port.set('preparing', '正在准备离线巡视场景…');
       await prepareStart(run);
       return;
     }
     const owner = run;
     if (!owner || !alive(owner)) return;
-    if (action === 'pickStart' && (port.mode === 'preparing' || port.mode === 'ready')) {
+    if (
+      action === 'pickStart' &&
+      !port.compiling &&
+      (port.mode === 'preparing' || port.mode === 'ready')
+    ) {
       ++entryRequest;
       search?.abort();
       entry = undefined;
@@ -371,6 +406,7 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
       switching = true;
       try {
         snapshot = capturePatrolWorkspace(state, scope, ctx, patrol!, show);
+        snapshot.hideGrid();
         if (!home) home = entry;
         if (snapshot.only)
           state.selection.patrolIsolation = {
@@ -391,7 +427,6 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
           entry,
           scope.session.generation,
           frameValid,
-          owner.signal,
         );
         // Request pointer lock while the toolbar click still carries activation.
         walker.walk();
@@ -451,7 +486,7 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
         endMeasurement();
         await snapshot?.restoreSelection();
         signal.throwIfAborted();
-        const destination = await verified(target, signal);
+        const destination = verified(target);
         return () => {
           if (!destination || !frameValid()) {
             port.set('paused', '入口不可用，已保留当前位置');
@@ -507,11 +542,7 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
         return;
       }
       const feet = p.clone().applyMatrix4(frame.matrix.clone().invert());
-      port.set('preparing', '正在准备入口的地面与障碍数据');
-      const started = performance.now();
-      await nav.prepare(feet, owner.signal);
-      coverageMs = performance.now() - started;
-      if (!current() || !frameValid()) return;
+      if (!frameValid()) return;
       const result = nav.step(feet, feet);
       if ('reason' in result) {
         port.set('preparing', result.reason + '，可另选入口');
@@ -554,6 +585,7 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
     walker?.dispose();
     nav.dispose();
     if (snapshot) {
+      snapshot.restoreGrid();
       cam.controls.enabled = snapshot.camera.enabled;
       Object.assign(cam.controls.mouseButtons, snapshot.camera.buttons);
     }
@@ -562,7 +594,7 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
     hub.claim('orbit', state.projectGeneration);
     snapshot = undefined;
     state.selection.patrolIsolation = undefined;
-    port.measuring = false;
+    port.measuring = port.compiling = false;
     port.set('orbit');
   });
   port.execute('prepare');

@@ -1,4 +1,4 @@
-// A and B share project identity, but each record has its own atomic commit.
+// Scene manifests and mesh assets share project identity. Publish the manifest after its assets commit.
 const databaseName = 'gim-patrol-v1';
 let opening: Promise<IDBDatabase> | undefined;
 async function database() {

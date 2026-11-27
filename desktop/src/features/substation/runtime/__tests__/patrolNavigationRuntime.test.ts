@@ -89,30 +89,37 @@ describe('source coverage and navigation cache', () => {
     }
   });
 
-  it('crosses a pending tile on a resident stair only when every source in the sweep is accounted for', async () => {
+  it('publishes only after all placements have finished and walks across tiles without loading', async () => {
     const floor = slab();
     floor.matrix = new Matrix4().makeScale(2, 1, 1);
     floor.bounds.max.x = 16;
+    let finish!: () => void;
     const load = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
       throw Error('no triangles');
     });
-    const unknownWall = source('wall', new Box3(p(8.01, 5, 0), p(8.12, 6, 2)), false, load);
-    const rt = fixture('tile-edge-proof', [floor, unknownWall]);
+    const wall = source('wall', new Box3(p(8.01, 5, 0), p(8.12, 6, 2)), false, load);
+    const rt = fixture('whole-scene', [floor, wall]);
+    const signal = new AbortController().signal;
+    const from = p(7.72, 5.1),
+      to = p(7.76, 5.1);
     try {
-      await rt.prepare(p(6, 4), new AbortController().signal);
-      expect(rt.metrics.blocks).toBe(1);
-      expect(rt.step(p(7.72, 4), p(7.76, 4))).toHaveProperty('feet');
+      const preparing = rt.prepareScene(signal);
+      await vi.waitFor(() => expect(load).toHaveBeenCalledOnce());
+      expect(rt.step(from, to)).not.toHaveProperty('feet');
+      finish();
+      await preparing;
+      expect(rt.step(from, to)).toMatchObject({ sourceId: 'floor' });
+      expect(rt.metrics.unavailableSources).toBe(1);
       expect(rt.step(p(8.01, 4), p(8.04, 4))).toHaveProperty('feet');
-      expect(rt.step(p(7.72, 5.1), p(7.76, 5.1))).toMatchObject({
-        reason: expect.stringContaining('正在准备'),
-      });
-      expect(load).not.toHaveBeenCalled();
-      expect(rt.metrics.blocks).toBe(1);
+      expect(load).toHaveBeenCalledOnce();
     } finally {
       rt.dispose();
     }
   });
-  it('prepares only the required neighbour sources and preserves partial coverage', async () => {
+  it('prepares obstacles across tiles before movement and retains real collisions', async () => {
     const floor = slab();
     floor.matrix = new Matrix4().makeScale(2, 1, 1);
     floor.bounds.max.x = 16;
@@ -136,17 +143,12 @@ describe('source coverage and navigation cache', () => {
         },
       ]),
     );
-    const rt = fixture('prefetch', [floor, wall, distant]),
-      start = p(6, 4),
+    const rt = fixture('whole-collision', [floor, wall, distant]),
       signal = new AbortController().signal;
     try {
-      await rt.prepare(start, signal);
-      rt.prefetchAhead(start, p(0.025, 0), signal);
-      rt.prefetchAhead(start, p(0.025, 0), signal);
-      await rt.prepare(p(7.9, 4), signal, p(7.88, 4));
+      await rt.prepareScene(signal);
       expect(wall.load).toHaveBeenCalledTimes(1);
-      expect(distant.load).not.toHaveBeenCalled();
-      expect(rt.metrics.blocks).toBe(1);
+      expect(distant.load).toHaveBeenCalledOnce();
       expect(rt.step(p(7.82, 4), p(7.86, 4))).toMatchObject({
         reason: expect.stringContaining('受阻'),
       });
@@ -167,7 +169,7 @@ describe('source coverage and navigation cache', () => {
     ]);
     const runtime = fixture('narrow-tread', [slab(), tread]);
     const start = p(0.8, 1);
-    await runtime.prepare(start, new AbortController().signal);
+    await runtime.prepareScene(new AbortController().signal);
     expect(runtime.step(start, start)).toMatchObject({ sourceId: 'floor' });
     const step = runtime.step(p(0.99, 1), p(1.01, 1));
     expect(step).toMatchObject({ sourceId: 'next-tread' });
@@ -203,7 +205,7 @@ describe('source coverage and navigation cache', () => {
       const rt = fixture('nosing-' + connected, [slab(), part]);
       try {
         const foot = p(0.82, 1);
-        await rt.prepare(foot, new AbortController().signal);
+        await rt.prepareScene(new AbortController().signal);
         expect(rt.step(foot, foot)).toHaveProperty(connected ? 'feet' : 'reason');
       } finally {
         rt.dispose();
@@ -222,7 +224,7 @@ describe('source coverage and navigation cache', () => {
     ]);
     const rt = fixture('low-fin', [slab(), step]);
     try {
-      await rt.prepare(p(1, 1), new AbortController().signal);
+      await rt.prepareScene(new AbortController().signal);
       expect(rt.step(p(0.75, 1), p(0.8, 1))).toHaveProperty('reason');
       expect(rt.step(p(0.99, 1), p(1.01, 1))).toHaveProperty('reason');
       expect(rt.step(p(1.01, 1, 0.2), p(0.99, 1, 0.2))).toHaveProperty('reason');
@@ -246,17 +248,9 @@ describe('source coverage and navigation cache', () => {
       for (const hits of [0, 1]) {
         const rt = fixture(key, [slab(), member]);
         try {
-          await rt.prepare(p(3, 3), new AbortController().signal);
-          expect(rt.metrics.blockHits).toBe(hits);
-          const tile = [...records].find(
-            ([k]) => k.startsWith('coverage' + key) && k.includes('/tile/'),
-          );
-          expect(tile?.[1]).toMatchObject({
-            ground: support ? 'estimated' : 'complete',
-            obstacles: 'estimated',
-            complete: false,
-            estimatedSources: ['steel'],
-          });
+          await rt.prepareScene(new AbortController().signal);
+          expect(rt.metrics.fromCache).toBe(Boolean(hits));
+          expect(rt.metrics.persisted).toBe(true);
           expect(rt.step(p(3, 3), p(3, 3))).toMatchObject({ estimated: true, sourceId: 'floor' });
           expect(rt.step(p(1, 1), p(1, 1))).not.toHaveProperty('estimated', true);
         } finally {
@@ -265,23 +259,23 @@ describe('source coverage and navigation cache', () => {
       }
     },
   );
-  it('blocks a swept volume intersecting a failed source, and permits disjoint floor in the same tile', async () => {
+  it('uses actual support in a partially represented scene', async () => {
     const gap = source('failed-equipment', new Box3(p(3, 3), p(4, 4, 2)), false, async () => {
       throw Error('missing triangles');
     });
     const runtime = fixture('partial', [slab(), gap]),
       signal = new AbortController().signal;
-    await runtime.prepare(p(1, 1), signal);
+    await runtime.prepareScene(signal);
     expect(runtime.step(p(1, 1), p(1.2, 1))).toMatchObject({ sourceId: 'floor' });
-    expect(runtime.step(p(2.5, 3.5), p(3.1, 3.5))).toMatchObject({
-      reason: expect.stringContaining('缺失几何'),
-    });
-    expect(
-      [...records.keys()].some((k) => k.startsWith('coveragepartial') && k.includes('/tile/')),
-    ).toBe(false);
+    expect(runtime.step(p(2.5, 3.5), p(3.1, 3.5))).toMatchObject({ sourceId: 'floor' });
+    expect(runtime.step(p(7.99, 8.4), p(7.99, 8.4))).toMatchObject({ reason: '无连续落脚面' });
+    const manifest = [...records].find(
+      ([key]) => key.startsWith('coveragepartial') && key.endsWith('/scene-v1'),
+    );
+    expect(manifest?.[1]).toMatchObject({ unavailable: ['failed-equipment'] });
     runtime.dispose();
   });
-  it('finds the gate with an unlocated cabinet and builds only geometry near the landing', async () => {
+  it('finds the gate even when some baked assets are unavailable', async () => {
     const gate = source('gate', new Box3(p(0.5, 2, 3.5), p(0.8, 6, 3.8)), false, async () => [
       {
         positions: new Float32Array([0.5, 2, 3.5, 0.5, 6, 3.5, 0.5, 6, 3.8]),
@@ -301,25 +295,26 @@ describe('source coverage and navigation cache', () => {
     );
     try {
       const spawn = await rt.stationEntrance(new AbortController().signal);
-      expect(spawn).toMatchObject({ sourceId: 'floor', limitedCoverage: true });
+      expect(spawn).toMatchObject({ sourceId: 'floor' });
+      expect(rt.unknownSourceCount).toBe(1);
       expect(rt.step(spawn!.feet, spawn!.feet.clone().add(p(0.03, 0)))).toMatchObject({
-        limitedCoverage: true,
+        sourceId: 'floor',
       });
-      expect(load).not.toHaveBeenCalled();
+      expect(load).toHaveBeenCalledOnce();
       expect(rt.step(p(7.99, 8.4), p(7.99, 8.4))).toMatchObject({ reason: '无连续落脚面' });
     } finally {
       rt.dispose();
     }
   });
 
-  it('reuses a verified warm block without rebuilding the source', async () => {
+  it('loads a warm scene without consulting the source directory or rebuilding the mesh', async () => {
     const signal = new AbortController().signal;
     const f = slab(),
       load = vi.spyOn(f, 'load');
     for (const hits of [0, 1]) {
-      const rt = fixture('warm', [f]);
-      await rt.prepare(p(2, 2), signal);
-      expect(rt.metrics.blockHits).toBe(hits);
+      const rt = fixture('warm', hits ? [] : [f]);
+      await rt.prepareScene(signal);
+      expect(rt.metrics.fromCache).toBe(Boolean(hits));
       expect(rt.metrics.assetBuilds).toBe(1 - hits);
       expect(rt.step(p(2, 2), p(2, 2))).toMatchObject({ sourceId: 'floor' });
       rt.dispose();

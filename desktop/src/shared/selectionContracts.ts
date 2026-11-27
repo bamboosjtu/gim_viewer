@@ -80,6 +80,7 @@ export interface SelectionGeometryState {
 }
 
 export interface SubstationFineQueue {
+  isPreparingDevGeometry?(): boolean;
   enqueueUserIfcFine(
     key: string,
     run: () => Promise<void>,

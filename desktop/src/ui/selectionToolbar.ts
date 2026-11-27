@@ -58,11 +58,6 @@ export function setupSelectionToolbar(state: AppState): () => void {
       state.currentProjectType !== 'transmission_line' &&
         (!!state.currentProjectType || state.ifc.loadedModels.size > 0),
     );
-    bar.style.display =
-      state.currentProjectType === 'transmission_line' ||
-      (!state.currentProjectType && !state.ifc.loadedModels.size)
-        ? 'none'
-        : 'flex';
   };
   const observer = new MutationObserver(refreshVisibility);
   observer.observe(viewport, { childList: true });

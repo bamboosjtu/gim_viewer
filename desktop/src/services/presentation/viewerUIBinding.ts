@@ -232,7 +232,19 @@ export async function getViewerRuntimeWithUI(
         modelCallbacks,
         patrol: {
           restoreIfc: disposeSelection.restoreIfc,
-          inspect: disposeSelection.inspect,
+          inspect: async () => {
+            const previous = state.selection.selectionRequest;
+            await disposeSelection.inspect();
+            const selected = state.selection.selectionRequest;
+            if (
+              state.navigation.mode === 'pickingDevice' &&
+              selected &&
+              selected !== previous &&
+              selected.target &&
+              state.selection.isCurrentSelection(selected)
+            )
+              presentation.openProperties(ctx);
+          },
           clip: tools.clipTest,
           visibility: tools.visibility,
         },

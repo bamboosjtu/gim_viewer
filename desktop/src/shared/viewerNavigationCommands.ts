@@ -9,7 +9,8 @@ export type NavigationMode =
   | 'operatingDoor'
   | 'pickingDevice'
   | 'restoringSelection'
-  | 'exiting';
+  | 'exiting'
+  | 'failed';
 export type NavigationAction =
   | 'prepare'
   | 'pickStart'
@@ -33,6 +34,7 @@ const allowed: Record<NavigationMode, readonly NavigationAction[]> = {
   pickingDevice: ['pause', 'exit'],
   restoringSelection: ['exit'],
   exiting: [],
+  failed: ['exit'],
 };
 export function acceptsNavigationAction(mode: NavigationMode, action: NavigationAction) {
   return allowed[mode].includes(action);
@@ -45,8 +47,8 @@ export class ViewerNavigationCommands extends EventTarget {
   pickingStart = false;
   dragLook = false;
   estimated = false;
-  limitedCoverage = false;
   measuring = false;
+  compiling = false;
   doorHint = false;
   revision = 0;
   evidence?: () => Record<string, unknown>;
@@ -59,7 +61,8 @@ export class ViewerNavigationCommands extends EventTarget {
     this.dispatchEvent(new Event('change'));
   }
   escape(): void {
-    if (this.mode === 'preparing' || this.mode === 'ready') this.execute?.('exit');
+    if (this.mode === 'preparing' || this.mode === 'ready' || this.mode === 'failed')
+      this.execute?.('exit');
     else if (acceptsNavigationAction(this.mode, 'pause')) this.execute?.('pause');
   }
 }

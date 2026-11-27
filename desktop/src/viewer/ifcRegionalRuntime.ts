@@ -287,7 +287,7 @@ export class IfcRegionalRuntime {
     this.scheduleView();
   };
   private scheduleView = () => {
-    if (!this.current()) return;
+    if (!this.current() || cameraPoseHub(this.options.ctx).current.source === 'patrol') return;
     if (this.busy) {
       this.pendingView = true;
       return;
@@ -396,7 +396,8 @@ export class IfcRegionalRuntime {
     this.opening = null;
   }
   private async update() {
-    if (this.busy || !this.current()) return;
+    if (this.busy || !this.current() || cameraPoseHub(this.options.ctx).current.source === 'patrol')
+      return;
     this.busy = true;
     const epoch = this.epoch,
       started = performance.now(),
@@ -406,7 +407,12 @@ export class IfcRegionalRuntime {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     IfcRegionalRuntime.useSource(this);
     try {
-      if (!this.current() || epoch !== this.epoch) return;
+      if (
+        !this.current() ||
+        epoch !== this.epoch ||
+        cameraPoseHub(this.options.ctx).current.source === 'patrol'
+      )
+        return;
       // sourceToViewer was resolved from the first model's public coordinates.
       // Its frame is immutable for this session; the manager's initially cached
       // identity must never replace it while its own query is still pending.

@@ -12,7 +12,7 @@ vi.mock('../../engineering/engineeringViewportSelection.js',()=>({selectEngineer
 beforeEach(()=>{vi.resetModules();vi.clearAllMocks();mocks.get.mockResolvedValue({ctx:{fragments:{list:new Map()}}});mocks.drawer.mockReturnValue(mocks.disposeDrawer);mocks.selection.mockReturnValue(mocks.disposeSelection);});
 async function prepare() {
   const {bindViewerPresentation}=await import('../viewerPresentationPort.js');
-  const port={bindProperties:mocks.drawer,showElement:vi.fn(),showRegional:vi.fn(),addModel:vi.fn(),removeModel:vi.fn()};
+  const port={bindProperties:mocks.drawer,showElement:vi.fn(),openProperties:vi.fn(),showRegional:vi.fn(),addModel:vi.fn(),removeModel:vi.fn()};
   bindViewerPresentation(async()=>port);
   const {bindProjectPresentation}=await import('../projectPresentationPort.js');
   bindProjectPresentation((await import('../../../ui/projectPresentation.js')).projectPresentation);

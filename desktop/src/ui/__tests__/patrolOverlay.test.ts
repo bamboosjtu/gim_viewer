@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { mountPatrolOverlay } from '../patrolOverlay.js';
 import { ViewerNavigationCommands } from '../../shared/viewerNavigationCommands.js';
 it('consumes the whole Escape press even when cancelling immediately returns to orbit', () => {
@@ -36,5 +36,43 @@ it('consumes the whole Escape press even when cancelling immediately returns to 
   } finally {
     panel.dispose();
     document.removeEventListener('keydown', normal);
+  }
+});
+
+it('keeps the first-person HUD quiet, shows actual blockers, and restores the property drawer', () => {
+  const main = document.createElement('div');
+  main.id = 'main';
+  main.innerHTML = '<div id="viewport"></div><aside id="props-drawer" class="collapsed"></aside>';
+  const viewport = main.querySelector<HTMLElement>('#viewport')!;
+  const drawer = main.querySelector('#props-drawer')!;
+  const commands = new ViewerNavigationCommands();
+  commands.execute = vi.fn();
+  const overlay = mountPatrolOverlay(commands, document.createElement('div'), viewport);
+  const walking = viewport.querySelector<HTMLElement>('.patrol-walking')!;
+  const panel = viewport.querySelector<HTMLElement>('.patrol-panel')!;
+  try {
+    commands.set('ready', '已定位站区大门');
+    expect(viewport.hasAttribute('data-patrol-active')).toBe(false);
+    commands.dragLook = true;
+    commands.set('walking', '开始巡视');
+    expect(viewport.hasAttribute('data-patrol-active')).toBe(true);
+    expect(walking.hidden).toBe(false);
+    expect(walking.textContent).toContain('按住左键拖动');
+    expect(panel.hidden).toBe(true);
+    commands.set('walking', '无连续落脚面');
+    expect(panel.hidden).toBe(false);
+    expect(panel.querySelector('[role=status]')?.textContent).toBe('无连续落脚面');
+    walking.querySelector('button')?.click();
+    expect(commands.execute).toHaveBeenCalledWith('pause');
+    commands.set('inspecting');
+    drawer.classList.remove('collapsed');
+    expect(walking.hidden).toBe(true);
+    commands.set('paused');
+    expect(panel.querySelector('h2')?.textContent).toBe('巡视暂停');
+    commands.set('orbit');
+    expect(drawer.classList.contains('collapsed')).toBe(true);
+    expect(viewport.hasAttribute('data-patrol-active')).toBe(false);
+  } finally {
+    overlay.dispose();
   }
 });

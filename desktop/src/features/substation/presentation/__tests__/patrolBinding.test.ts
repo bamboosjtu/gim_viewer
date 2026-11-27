@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Matrix4, Vector3 } from 'three';
+import { Matrix4, Object3D, Vector3 } from 'three';
 import type { AppState } from '../../../../app/state.js';
 import type { SessionScope } from '../../../../shared/sessionScope.js';
 import { ViewerNavigationCommands } from '../../../../shared/viewerNavigationCommands.js';
@@ -49,7 +49,7 @@ vi.mock('../../runtime/patrolNavigationRuntime.js', () => ({
     dispose = vi.fn();
     canOperate = () => true;
     stationEntrance = async () => pose();
-    prepare = f.prepare;
+    prepareScene = f.prepare;
     step = pose;
   },
 }));
@@ -70,7 +70,7 @@ vi.mock('../../../../viewer/patrol/firstPersonController.js', () => ({
   },
 }));
 
-async function walking() {
+async function walking(gridVisible = true) {
   const controller = new AbortController(),
     navigation = new ViewerNavigationCommands();
   const matrix = new Matrix4(),
@@ -96,8 +96,11 @@ async function walking() {
       dispose = cb;
     },
   };
+  const referenceGrid = new Object3D();
+  referenceGrid.visible = gridVisible;
   f.viewer.mockResolvedValue({
     ctx: {
+      referenceGrid,
       world: {
         renderer: { three: { domElement: document.createElement('canvas') } },
         camera: { controls, projection: { set: vi.fn() } },
@@ -119,6 +122,7 @@ async function walking() {
   await vi.waitFor(() => expect(navigation.mode).toBe('walking'));
   return {
     navigation,
+    referenceGrid,
     state,
     show,
     cleanup: () => {
@@ -157,6 +161,16 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe('patrol command ownership', () => {
+  it.each([true, false])(
+    'hides the reference grid while walking and restores visibility %s on teardown',
+    async (visible) => {
+      const { navigation, referenceGrid, cleanup } = await walking(visible);
+      expect(referenceGrid.visible).toBe(false);
+      cleanup();
+      expect(navigation.mode).toBe('orbit');
+      expect(referenceGrid.visible).toBe(visible);
+    },
+  );
   it('freezes the person through the door pick and sweep, and rejects a late completion after cancel', async () => {
     const door = deferred();
     f.toggle.mockReturnValue(door.promise);
@@ -182,37 +196,27 @@ describe('patrol command ownership', () => {
       cleanup();
     }
   });
-  it.each(['return', 'inspect'] as const)(
-    'rejects a late %s completion after exiting',
-    async (action) => {
-      const result = deferred();
-      (action === 'return' ? f.prepare : f.inspect).mockReturnValue(result.promise);
-      const { navigation: port, cleanup } = await walking();
-      try {
-        if (action === 'return') {
-          port.execute!('pause');
-          await vi.waitFor(() => expect(port.mode).toBe('paused'));
-        }
-        port.execute!(action);
-        await vi.waitFor(() =>
-          expect(action === 'return' ? f.prepare : f.inspect).toHaveBeenCalledOnce(),
-        );
-        port.execute!('resume');
-        port.execute!('measure');
-        expect(port.mode).toBe(action === 'return' ? 'returning' : 'pickingDevice');
-        port.execute!('exit');
-        await vi.waitFor(() => expect(port.mode).toBe('orbit'));
-        result.resolve('late');
-        await new Promise((resolve) => setTimeout(resolve, 0));
-        expect(port.mode).toBe('orbit');
-        expect(f.relocate).not.toHaveBeenCalled();
-      } finally {
-        cleanup();
-      }
-    },
-  );
+  it('rejects a late inspection completion after exiting', async () => {
+    const result = deferred();
+    f.inspect.mockReturnValue(result.promise);
+    const { navigation: port, cleanup } = await walking();
+    try {
+      port.execute!('inspect');
+      await vi.waitFor(() => expect(f.inspect).toHaveBeenCalledOnce());
+      port.execute!('resume');
+      port.execute!('measure');
+      expect(port.mode).toBe('pickingDevice');
+      port.execute!('exit');
+      await vi.waitFor(() => expect(port.mode).toBe('orbit'));
+      result.resolve('late');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(port.mode).toBe('orbit');
+    } finally {
+      cleanup();
+    }
+  });
   it('finishes exit in orbit and restores remaining tools when selection and visibility both fail', async () => {
-    const { navigation: port, state, show, cleanup } = await walking();
+    const { navigation: port, referenceGrid, state, show, cleanup } = await walking();
     try {
       port.execute!('inspect');
       await vi.waitFor(() => expect(port.mode).toBe('inspecting'));
@@ -230,6 +234,7 @@ describe('patrol command ownership', () => {
       await vi.waitFor(() => expect(port.mode).toBe('orbit'));
       expect(f.dispose).toHaveBeenCalledOnce();
       expect(f.resumeHistory).toHaveBeenCalledOnce();
+      expect(referenceGrid.visible).toBe(true);
       expect(state.viewerCommands.notify).toHaveBeenCalled();
       expect(show).toHaveBeenCalledWith(
         expect.stringMatching(/选择.*selection failure.*显隐.*visibility failure/),
