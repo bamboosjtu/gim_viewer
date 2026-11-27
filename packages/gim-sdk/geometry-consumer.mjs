@@ -267,3 +267,21 @@ for (let i = 0; i < 5; i++)
   assert.ok(meshOf(basicFamily, i).positions.length > 0);
 assert.equal(basicFamily.entities[2].interpretation.canonical.topRadius, 0.5);
 console.log("Basic solids Node consumer passed: B.1/B.5/B.8/B.9/B.16.");
+const plates = compile(
+  wrap(
+    row(
+      1,
+      '<TerminalBlock L="200" W="60" T="8" CL="4" BL="20" CS="20" RS="30" CN="2" RN="3" R="3"/>',
+    ),
+    row(
+      2,
+      '<RectangularFixedPlate L="120" W="100" T="8" CS="20" RS="30" CN="2" RN="3" D="6" MH="1"/>',
+    ),
+    row(
+      3,
+      '<CircularFixedPlate L="100" W="100" T="8" CS="30" N="4" D="8" MH="0"/>',
+    ),
+  ),
+);
+for (let i = 0; i < 3; i++) assert.ok(meshOf(plates, i).indices.length > 36);
+console.log("Perforated plates Node consumer passed: B.25/B.26/B.27.");

@@ -67,7 +67,76 @@ export function interpretXmlModPrimitive(
     );
   let rule: typeof dialect;
   let canonical: CanonicalPrimitive;
+  function count(field: string): number {
+    const n = signed(field);
+    if (!Number.isSafeInteger(n) || n < 0)
+      diagnostics.push({
+        stage: "interpret",
+        severity: "error",
+        code: "invalid-field-value",
+        message: `${field} requires a non-negative integer`,
+        location: { sourceTag: source.sourceTag, field },
+      });
+    return n;
+  }
   switch (source.sourceTag) {
+    case "TERMINALBLOCK":
+    case "TerminalBlock":
+    case "RECTANGULARFIXEDPLATE":
+    case "RectangularFixedPlate":
+    case "CIRCULARFIXEDPLATE":
+    case "CircularFixedPlate": {
+      const size = {
+        length: dimension("L"),
+        width: dimension("W"),
+        thickness: dimension("T"),
+      };
+      const tag = source.sourceTag.toUpperCase();
+      const mh = tag === "TERMINALBLOCK" ? 0 : count("MH");
+      if (mh > 1)
+        diagnostics.push({
+          stage: "interpret",
+          severity: "error",
+          code: "invalid-field-value",
+          message: "MH requires 0 or 1",
+          location: { field: "MH" },
+        });
+      if (tag === "CIRCULARFIXEDPLATE")
+        canonical = {
+          kind: "CircularFixedPlate",
+          ...size,
+          count: count("N"),
+          diameter: dimension("D"),
+          pitchRadius: dimension("CS"),
+          middle: mh === 1,
+        };
+      else {
+        const grid = {
+          rows: count("RN"),
+          columns: count("CN"),
+          rowSpacing: dimension("RS"),
+          columnSpacing: dimension("CS"),
+        };
+        canonical =
+          tag === "TERMINALBLOCK"
+            ? {
+                kind: "TerminalBlock",
+                ...size,
+                ...grid,
+                holeRadius: dimension("R"),
+                bevel: dimension("CL"),
+                bottomMargin: dimension("BL"),
+              }
+            : {
+                kind: "RectangularFixedPlate",
+                ...size,
+                ...grid,
+                diameter: dimension("D"),
+                middle: mh === 1,
+              };
+      }
+      break;
+    }
     case "SPHERE":
     case "Sphere":
       canonical = { kind: "Sphere", radius: dimension("R") };

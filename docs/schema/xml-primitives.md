@@ -46,10 +46,10 @@
 | CircularGasket | CircularGasket | OR,IR,Rad（H 解析但未使用） | Torus(OR, max(0,(OR−IR)/2), 弧 Rad) | 固定 8×16 | IR≥OR 时管半径为 0；H 被忽略 |
 | StretchedBody | StretchedBody | L,Array,Normal | 截面多边形端盖（Earcut）+ 侧面，沿解释后的 Normal 位移 | 无分段 | 见专节；少于 3 点或非法 Normal 返回 null |
 | PorcelainBushing | PorcelainBushing；Insulator、VTypeInsulator、ConePorcelainBushing 映射而来 | R,R1,R2,N,H | 锥柱主体 Cylinder(R2,R,H) + N 组伞裙片 | L0 仅主体，L1/L2 加伞裙；N 上限 512 | 伞裙为浏览近似，不还原真实伞形、伞间距与瓷色 |
-| TerminalBlock | TerminalBlock | L,W,H?,T,R,BL,CL,CS,RS,CN,RN,Phase | 基板 Box(L,W,T) + CN×RN 圆柱端子 | L0 仅基板，L1/L2 加端子 | 栅格>4096 不生成几何并记诊断；H、Phase 不参与几何 |
+| TerminalBlock | TerminalBlock | L,W,T,CL,CS,RS,R,CN,RN,BL | L 沿 Z，W 沿 X，孔沿 Y 贯穿。上方两角按 CL 切边 | 径向离散依 LOD，保持孔数及孔径 | Phase、H 原文归来源 |
 | ChannelSteel | ChannelSteel；DoubleChannelSteel | L,Model,D?,H?,B?,T? | 用宽 B、高 H、腹板厚 D、翼缘厚 T 生成开口槽形，沿局部 Y 轴拉伸 | 无 LOD 变化 | 显式有效尺寸优先，缺失或不可用截面参数按浏览策略估算 |
 | Table | Table | H,LL1,LL2,TL1,TL2 | 外廓盒 Box(LL1,LL2,H)，居中 | 无 LOD 变化 | LL1、LL2、H 非正返回 null；TL1/TL2 未使用，忽略孔洞与栏栅 |
-| RectangularFixedPlate | RectangularFixedPlate（含 Rectangularfixedplate） | raw：L 或 L1、W 或 W1、T 或 H | Box(l,w,t)，底面 Z=0 | 无 | 缺字段按 1 mm 兜底，不跳过；螺栓孔忽略 |
+| RectangularFixedPlate | RectangularFixedPlate | L,W,T,CS,RS,CN,RN,MH,D | XY 阵列，中心孔由 MH 控制，D 为直径 | 分档保持贯通 | 缺少必要字段有诊断 |
 | OffsetRectangularTable | OffsetRectangularTable | raw 七字段：LL,LW,TL,TW,H,XOFF,YOFF | 8 顶点棱台：下矩形 XY 居中 Z=0，上矩形在 Z=H 并施加 XOFF/YOFF | 12 三角形 | 缺任一字段、非有限或非正尺寸返回 null；其他编码不支持 |
 | RectangularRing | RectangularRing；SquareGasket、TableGasket | raw：L1,W1,L2,W2,H 或 T | 四块板拼成的矩形框 | 无 | 内框钳制到不超过外框，缺省 0.8×；退化返回 null |
 | Boolean | Boolean | Type,Entity1,Entity2 | 引用同文件 Entity ID 求值 | L0/L1 轮廓，L2 CSG | 操作数缺失、成环或异常不伪造结果；见专节 |
@@ -78,7 +78,7 @@
 | SquareGasket、TableGasket | RectangularRing | 原 attrs 进 raw |
 | EllipticRing | Ring | r=(LR+WR)/2；dr=DR；rad 取 Rad>0 时的 Rad，否则 2π |
 | BendingCylindrical | Cylinder | r=R；h=L；弯曲半径与弧长忽略 |
-| CircularFixedPlate | Cylinder | r=(L 或 D)/2；h=T；W、CS、N、MH 忽略 |
+| CircularFixedPlate | SDK 独立参数类型 | L=W 时为圆板，首孔 +X，CS 为孔环半径，MH 控制中心孔。L≠W 保留待核证 |
 | 其他标签 | Unsupported | 原 attrs 进 raw |
 
 别名只把来源字段塞进既有槽位，不扩大支持范围；映射后的几何仍是目标类型的浏览近似。
@@ -120,7 +120,7 @@ loader 另叠一条 1px 中心线：每 Entity 一条 Line，超过 1000 条时�
 
 | 类型 | raw 字段 | 回退与判定 |
 |---|---|---|
-| RectangularFixedPlate | L 或 L1、W 或 W1、T 或 H | 逐字段取第一个有限正值，缺失或非正一律 1 mm；只忽略孔洞类字段 |
+| RectangularFixedPlate | 标准字段见上表 | 剖面按阵列和中心开关生成真实孔壁，非法或缺失字段保留来源诊断 |
 | OffsetRectangularTable | LL,LW,TL,TW,H,XOFF,YOFF | 七字段必须齐全、非空、有限，且前五项均大于 0，否则返回 null；XOFF/YOFF 可为负 |
 | RectangularRing | L1,W1,L2,W2,H 或 T | 外框缺省 1 mm；内框缺省 0.8× 外框并钳制不超过外框；两侧厚度都为 0 或厚度非正时返回 null |
 | Unsupported | 全部 attrs | 不生成几何，保留 sourceType 与 raw；计入 unsupportedPrimitiveTypeCounts |
@@ -132,11 +132,11 @@ loader 另叠一条 1px 中心线：每 Entity 一条 Line，超过 1000 条时�
 | 类型 | 近似方式 | 明确忽略 |
 |---|---|---|
 | PorcelainBushing（含 Insulator/VTypeInsulator、ConePorcelainBushing） | 锥柱 + 均布伞裙片 | 真实伞形曲线、伞间距、瓷色、V 串双串几何 |
-| TerminalBlock | 基板 + 规则栅格端子 | 高度 H、Phase、螺孔与接线细节 |
+| TerminalBlock | 两处上角切边及阵列贯通孔 | 来源未约定的接线细节 |
 | ChannelSteel、BeamChannelLike | 拉伸开口截面 | 未提供的截面参数按浏览值估算；圆角和翼缘斜度未建模 |
 | Table | 外廓盒体 | 孔洞、栏栅 |
 | RectangularRing（SquareGasket、TableGasket） | 四块板拼合 | 圆角、密封槽、螺栓分布 |
-| RectangularFixedPlate | 矩形板 | 螺栓孔、倒角、开槽 |
+| RectangularFixedPlate | 带阵列和可选中心孔的矩形板 | 非标准倒角、开槽 |
 | EllipticRing | 平均半径圆环 | 椭圆长短轴差异 |
 | BendingCylindrical | 直圆柱 | 弯曲半径、弧长与路径 |
 | CircularFixedPlate | 圆盘 | 螺栓孔（CS/N/MH）、W |
@@ -155,7 +155,7 @@ loader 另叠一条 1px 中心线：每 Entity 一条 Line，超过 1000 条时�
 | CircularGasket | 8×16 | 8×16 | 8×16 | 不随 LOD 变化 |
 | RotationalEllipsoid | 16×8 | 16×8 | 16×8 | 不随 LOD 变化 |
 | PorcelainBushing 伞裙 | 0 | N | N | N 取 min(512, floor(N))，超出静默截断 |
-| TerminalBlock 端子 | 0 | CN×RN | CN×RN | CN/RN 各限 256；乘积>4096 返回 null 并记 unsupported-or-invalid 诊断 |
+| TerminalBlock 孔 | CN×RN | CN×RN | CN×RN | 单图元孔数和顶点预算在分配前检查 |
 | Wire/Cable 管段 | 8–256 | 8–256 | 8–256 | clamp(点数/3, 8, 256)，径向固定 6 |
 | 小构件过滤（仅烘焙/LOD 路径） | Cylinder/Sphere/Ring/CircularGasket 的最大外接尺寸≤100 mm、Cuboid≤50 mm 时丢弃 | 同 LOD0 | 不过滤 | 整文件无可渲染时回填最大的一件；计数进 omittedSmallParts |
 

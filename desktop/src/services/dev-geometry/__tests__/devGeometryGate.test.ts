@@ -100,8 +100,8 @@ it.skipIf(process.env.GIM_VERIFY_SUBSTATION01 !== '1')('substation01 core geomet
     applyPlacementTransformToSceneUnits(part!, edge.placementTransformMatrix); group.add(part!);
   }
   expect(counts).toEqual({ Cuboid: 85, StretchedBody: 111, Cylinder: 282, Ring: 19, TruncatedCone: 6, Sphere: 2, PorcelainBushing: 11, TerminalBlock: 11 });
-  const box = new THREE.Box3().setFromObject(group, true), reference = [-4.760, -3.982, -.015, 4.760, 3.982, 7.425512638];
-  [...box.min.toArray(), ...box.max.toArray()].forEach((v, i) => expect(Math.abs(v - reference[i])).toBeLessThan(.01));
+  // B.25: independent transformed chamfered XZ outlines, at Y = ±T/2.
+  const box = new THREE.Box3().setFromObject(group, true), reference = [-4.760, -3.982, -.015, 4.760, 3.982, 7.496962905];
   const bounds = await buildDevSourceBounds(dev, files, parseWorkerXmlMod);
   expect(bounds.boundsQuality).toBe('conservative');
   expect(bounds.primitiveCounts).toEqual(counts);
@@ -130,9 +130,11 @@ it.skipIf(process.env.GIM_VERIFY_SUBSTATION01 !== '1')('substation01 core geomet
   // Reference shape kernels with source-scoped DEV matrices. The original
   // Python flat key map overwrites SUBDEVICE0's offset with SOLIDMODEL0's matrix.
   const bayReference = [48.38671815505101, -51.51090923204096, -.2, 59.4808792561535, -34.880316678542215, 12.57497037404753];
-  [...bayBox.min.toArray(), ...bayBox.max.toArray()].forEach((v, i) => expect(Math.abs(v - bayReference[i])).toBeLessThan(.01));
   const output = resolve(process.env.GIM_DEV_VALIDATION_OUT ?? '../output/dev-lod-validation'); mkdirSync(output, { recursive: true });
   writeFileSync(join(output, 'geometry-static.json'), JSON.stringify({ primitiveCounts: counts, localBounds: [...box.min.toArray(), ...box.max.toArray()],
     catalog: bounds, bay: { primitiveCounts: bayCounts, sourceBounds: [...bayBox.min.toArray(), ...bayBox.max.toArray()] },
     occurrenceCount: shape(cold).length, coldWarmOccurrenceEqual: true }, null, 2));
+  for(const [label,actual,expected] of [['core',box,reference],['bay',bayBox,bayReference]] as const){
+    [...actual.min.toArray(),...actual.max.toArray()].forEach((value,i)=>expect(Math.abs(value-expected[i]),`${label} extent[${i}]: ${value} m vs ${expected[i]} m`).toBeLessThan(.01));
+  }
 }, 600000);

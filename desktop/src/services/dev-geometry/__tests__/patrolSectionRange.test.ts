@@ -32,8 +32,10 @@ it('includes the real curved tube between fit points and localizes only explicit
     );
   expect(bounds('<Table LL1="450" LL2="300" H="150"/>').box.max.toArray()).toEqual([225, 150, 75]);
   const plate = bounds('<RectangularFixedPlate L="108" W="83" T="20"/>');
-  expect(plate.unknown).toBe(false);
-  expect(plate.box.min.x).toBe(-54);
+  expect(plate.unknown).toBe(true);
+  const fullPlate=bounds('<RectangularFixedPlate L="108" W="83" T="20" CN="2" RN="2" CS="30" RS="25" MH="0" D="4"/>');
+  expect(fullPlate.unknown).toBe(false);
+  expect(fullPlate.box.min.x).toBe(-54);
   expect(bounds('<RectangularFixedPlate L="108" T="20"/>').unknown).toBe(true);
   expect(bounds('<TableGasket OR="139" TR="136" IR="134" H="20"/>').box.max.toArray()).toEqual([
     139, 139, 20,

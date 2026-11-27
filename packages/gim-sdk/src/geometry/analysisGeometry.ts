@@ -39,6 +39,17 @@ export function analyzePrimitive(p: CanonicalPrimitive): AnalysisGeometry {
   let base: Point3 = [0, 0, 0],
     top: Point3 | undefined;
   switch (p.kind) {
+    case "TerminalBlock":
+      min = [-p.width / 2, -p.thickness / 2, 0];
+      max = [p.width / 2, p.thickness / 2, p.length];
+      break;
+    case "RectangularFixedPlate":
+    case "CircularFixedPlate":
+      if (p.kind === "CircularFixedPlate" && p.length !== p.width)
+        return { range: { coverage: "unknown" }, ports: [] };
+      min = [-p.length / 2, -p.width / 2, 0];
+      max = [p.length / 2, p.width / 2, p.thickness];
+      break;
     case "Sphere":
       min = [-p.radius, -p.radius, -p.radius];
       max = [p.radius, p.radius, p.radius];

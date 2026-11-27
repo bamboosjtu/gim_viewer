@@ -1091,6 +1091,7 @@ function sanitizeNum(n: number): number {
 /** Filtering uses the fully placed outer bounds, never wall thickness or DEV size. */
 function smallPartThresholdMm(p: XmlModPrimitive): number {
   switch (p.type === 'Standard' ? p.canonical.kind : p.type) {
+    case 'CircularFixedPlate': // previously routed through Cylinder's outline threshold
     case 'Cylinder':
     case 'Sphere':
     case 'Ring':

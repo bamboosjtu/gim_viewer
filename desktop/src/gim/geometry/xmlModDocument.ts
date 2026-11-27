@@ -18,6 +18,7 @@ export interface XmlModDocument extends Omit<LegacyDocument, 'entities' | 'diagn
 }
 
 const migratedTags = new Map([
+  ['terminalblock','TerminalBlock'],['rectangularfixedplate','RectangularFixedPlate'],['circularfixedplate','CircularFixedPlate'],
   ['cuboid', 'Cuboid'],
   ['cylinder', 'Cylinder'],
   ['sphere', 'Sphere'],

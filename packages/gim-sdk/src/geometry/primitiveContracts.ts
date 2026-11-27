@@ -5,6 +5,7 @@ import type {
 
 export type GeometryLod = 0 | 1 | 2;
 export type CanonicalPrimitive =
+  | import("./perforatedPlate.js").PlatePrimitive
   | { readonly kind: "Sphere"; readonly radius: number }
   | {
       readonly kind: "OffsetRectangularTable";

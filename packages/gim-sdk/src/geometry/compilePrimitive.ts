@@ -1,4 +1,5 @@
 import { checkGeometryBudget } from "./geometryBudget.js";
+import { plateMesh } from "./perforatedPlate.js";
 import {
   loftRings,
   rectangle,
@@ -193,6 +194,10 @@ function buildLocal(
     message: "Extent must be positive and representable in Float32",
   };
   switch (p.kind) {
+    case "TerminalBlock":
+    case "RectangularFixedPlate":
+    case "CircularFixedPlate":
+      return plateMesh(p, segments, options.limits);
     case "Cuboid":
       return positive(p.length / 2, p.width / 2, p.height)
         ? (checkGeometryBudget({ maxVertices: 24 }, options.limits) ??

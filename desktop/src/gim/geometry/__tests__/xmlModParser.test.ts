@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseXmlMod } from '../xmlModParser.js';
+import { parseXmlMod, readDomXmlMod } from '../xmlModParser.js';
 import type { XmlModEntity, XmlModPrimitive } from '../ir.js';
 
 const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
@@ -109,25 +109,9 @@ describe('parseXmlMod', () => {
           <Color R="80" G="80" B="80" A="100" />
         </Entity>`,
       );
-      const p = parseXmlMod(xml, 'MOD/terminal.mod').entities[0].primitive as Extract<
-        XmlModPrimitive,
-        { type: 'TerminalBlock' }
-      >;
-      expect(p).toEqual({
-        type: 'TerminalBlock',
-        l: 200,
-        w: 100,
-        h: 50,
-        t: 10,
-        r: 5,
-        bl: 20,
-        cl: 30,
-        cs: 40,
-        rs: 50,
-        cn: 6,
-        rn: 3,
-        phase: 'A',
-      });
+      const p=parseXmlMod(xml,'MOD/terminal.mod').entities[0].primitive;
+      expect(p).toEqual({type:'Standard',canonical:{kind:'TerminalBlock',length:200,width:100,thickness:10,holeRadius:5,bottomMargin:20,bevel:30,columnSpacing:40,rowSpacing:50,columns:6,rows:3}});
+      expect(readDomXmlMod(xml,'MOD/terminal.mod','project-column-major').entities[0].primitive?.rawAttributes.Phase).toBe('A');
     });
 
     it('TerminalBlock：H 缺失时 h=undefined', () => {
@@ -138,12 +122,8 @@ describe('parseXmlMod', () => {
           <Color R="80" G="80" B="80" A="100" />
         </Entity>`,
       );
-      const p = parseXmlMod(xml, 'MOD/terminal-no-h.mod').entities[0].primitive as Extract<
-        XmlModPrimitive,
-        { type: 'TerminalBlock' }
-      >;
-      expect(p.h).toBeUndefined();
-      expect(p.phase).toBe('B');
+      const src=readDomXmlMod(xml,'MOD/terminal-no-h.mod','project-column-major').entities[0].primitive!;
+      expect(src.rawAttributes.H).toBeUndefined();expect(src.rawAttributes.Phase).toBe('B');
     });
 
     it('Sphere：R 字段', () => {
@@ -243,7 +223,7 @@ describe('parseXmlMod', () => {
         XmlModPrimitive,
         { raw: Record<string, string> }
       >;
-      expect(p.type).toBe('RectangularFixedPlate');
+      expect(p.type).toBe('Unsupported');
       expect(p.raw).toEqual({ L: '100', W: '50', T: '10' });
     });
 
@@ -594,11 +574,7 @@ describe('parseXmlMod', () => {
           <Color R="100" G="100" B="100" A="100" />
         </Entity>`,
       );
-      const p = parseXmlMod(xml, 'MOD/no-phase.mod').entities[0].primitive as Extract<
-        XmlModPrimitive,
-        { type: 'TerminalBlock' }
-      >;
-      expect(p.phase).toBe('');
+      expect(readDomXmlMod(xml,'MOD/no-phase.mod','project-column-major').entities[0].primitive?.rawAttributes.Phase).toBeUndefined();
     });
   });
 

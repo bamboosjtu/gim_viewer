@@ -180,7 +180,13 @@ describe('Substation source evidence and normalized projections', () => {
     expect(getNodeDisplayName(state.currentCbmTree!, new Map())).toBe('Actual device name');
   });
 
-  it.each(['Insulator', 'ConePorcelainBushing', 'SquareGasket', 'CircularFixedPlate', 'BendingCylindrical'])('maps %s to a browse approximation without losing sibling geometry', (type) => {
+  it('isolates a circular plate with missing standard fields and retains its sibling',()=>{
+    const text='<Device><Entities><Entity ID="1"><CircularFixedPlate FutureAttr="value"/></Entity><Entity ID="2"><Cuboid L="10" W="10" H="10"/></Entity></Entities></Device>';
+    const doc=parseXmlMod(text,'MOD/mixed.mod');
+    expect(doc.entities[0].primitive).toMatchObject({type:'Unsupported',raw:{FutureAttr:'value'}});
+    expect(doc.status).toBe('partial');expect(loadXmlModFromText(text,'MOD/mixed.mod').children).toHaveLength(1);
+  });
+  it.each(['Insulator', 'ConePorcelainBushing', 'SquareGasket', 'BendingCylindrical'])('maps %s to a browse approximation without losing sibling geometry', (type) => {
     const text = `<Device><Entities><Entity ID="1" Visible="TRUE"><${type} FutureAttr="value"/></Entity><Entity ID="2" Visible="True"><Cuboid L="10" W="10" H="10"/></Entity></Entities></Device>`;
     const doc = parseXmlMod(text, 'MOD/mixed.mod');
     expect(doc.entities[0].primitive?.type).not.toBe('Unsupported');

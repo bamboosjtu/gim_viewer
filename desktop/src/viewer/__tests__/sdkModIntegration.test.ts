@@ -155,3 +155,26 @@ it('transfers an owned copy and leaves the shared template drawable', async () =
     template.dispose();
   }
 });
+
+it('G04 renders a through-hole, the surrounding metal and both B.25 bevels in production coordinates', async()=>{
+  const plate=wrap(entity(1,'<TerminalBlock L="200" W="60" T="8" CL="8" BL="20" CS="20" RS="30" CN="2" RN="3" R="3"/>'));
+  const files=new Map([[path,{text:async()=>plate} as File]]);
+  for(const lod of [0,1,2] as const){
+    const group=await loadXmlModFromFiles(path,files,undefined,undefined,{parseXml:parseWorkerXmlMod,lod,strict:true});
+    group!.updateMatrixWorld(true);
+    const hits=(x:number,z:number)=>new THREE.Raycaster(new THREE.Vector3(x,-1,z),new THREE.Vector3(0,1,0)).intersectObject(group!,true).length;
+    expect(hits(.01,.02)).toBe(0);
+    expect(hits(.0015,.024)).toBeGreaterThan(0);
+    expect(hits(.029,.199)).toBe(0);
+    expect(hits(-.029,.199)).toBe(0);
+  }
+});
+
+it('retains the circular plate small-part threshold in outline LODs',()=>{
+  const doc=parseXmlMod(wrap(entity(1,box)+entity(2,'<CircularFixedPlate L="80" W="80" T="5" CS="20" N="3" MH="0" D="4"/>')),path);
+  for(const lod of [0,1,2] as const){
+    const bucket=collectBakedGeometriesByMaterial(doc,lod);
+    expect(bucket.omittedSmallParts).toBe(lod<2?1:0);
+    for(const pieces of bucket.values())for(const geometry of pieces)geometry.dispose();
+  }
+});
