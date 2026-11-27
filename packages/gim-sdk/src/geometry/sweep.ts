@@ -32,20 +32,6 @@ export interface SweepFrame {
   radial?: Point3;
   radialScale?: number;
 }
-export function pathFrames(points: Point3[]): SweepFrame[] {
-  return points.map((center, i) => {
-    const before = i ? unit3(sub3(center, points[i - 1])) : undefined,
-      after =
-        i + 1 < points.length ? unit3(sub3(points[i + 1], center)) : undefined;
-    return {
-      center,
-      tangent:
-        before && after
-          ? unit3(add3(before, after))
-          : (before ?? after ?? [0, 0, 0]),
-    };
-  });
-}
 /** Indexed rings with a transported normal frame. End caps have independent normals. */
 export function sweepTube(
   frames: SweepFrame[],

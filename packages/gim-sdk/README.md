@@ -49,6 +49,8 @@ for (const entity of result.entities) {
 }
 ```
 
-Desktop 的 DOM 与 Worker 入口均选择工程列主序布局并读取同一 Raw 文档语法。B.3/B.6 使用 SDK 局部模板，宿主按需套用材质、装配和 LOD，混合 MOD 的 Boolean 与其余叶子继续使用宿主求值器。IFC 解析结果作为对象证据传入。物理目录和来源实例可先于语义识别交付，组成投影引用已建立的实体。
+Desktop 的 DOM 与 Worker 入口均选择工程列主序布局并读取同一 Raw 文档语法。29 类标准图元使用 SDK 局部模板，宿主按需套用材质、装配和 LOD，混合 MOD 的 Boolean 与其余叶子继续使用宿主求值器。IFC 解析结果作为对象证据传入。物理目录和来源实例可先于语义识别交付，组成投影引用已建立的实体。
 
-包内测试与夹具随源码维护。可从 `desktop/` 运行 `npm run test:module -- ../packages/gim-sdk/src/semantic`，同时检查 SDK 模块和 Viewer 消费者。实体盘点器使用独立 Python 实现，通过配置与共享契约用例核对结果。
+**兼容接口。** `@gim/gim-primitives/geometry/ir.js` 的 `XmlModGeometrySource.entities` 与 `@gim/gim-sdk/parser` 的三参数 `parseXmlModRoot(root, path, mapper)` 保留旧 DTO 调用契约。标准图元的新功能只在 Raw／Canonical 接口维护。Desktop 的旧类型消费限于 Boolean、Cable、提供方型钢和 Unsupported；其余 29 类的旧标签映射和重复网格构造已移除。独立 Blender 工具维护自身的快照。
+
+各图元的参数、预览约定和实际样本覆盖见[逐项能力与证据](../../docs/schema/xml-primitives.md#逐项能力与证据)。包内测试与夹具随源码维护。可从 `desktop/` 运行 `npm run test:module -- ../packages/gim-sdk/src/semantic`，同时检查 SDK 模块和 Viewer 消费者。实体盘点器使用独立 Python 实现，通过配置与共享契约用例核对结果。

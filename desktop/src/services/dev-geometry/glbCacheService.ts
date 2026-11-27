@@ -70,6 +70,7 @@ export interface DevGlbSerializationDiagnostics {
   unsupportedSourceCount: number;
   partialSourceCount: number;
   unsupportedPrimitiveTypeCounts: Record<string, number>;
+  previewShapes?: string[];
   reason?: GeometryDiagnosticReason;
   failedVisibleRootCount?: number;
   failedVisibleRoots?: {
@@ -614,6 +615,10 @@ export async function serializeDevToGlbDetailed(
         const xmlDiagnostics = readXmlDiagnostics(group);
         if (xmlDiagnostics) {
           appendSourceDiagnostics(diagnostics, xmlDiagnostics.sourceDiagnostics);
+          if (xmlDiagnostics.previewShapes?.length)
+            diagnostics.previewShapes = [
+              ...new Set([...(diagnostics.previewShapes ?? []), ...xmlDiagnostics.previewShapes]),
+            ].sort();
           if (xmlDiagnostics.status === 'empty' && !xmlDiagnostics.omittedSmallParts)
             sawEmptyDeviceXml = true;
           addUnsupportedCounts(xmlDiagnostics.unsupportedPrimitiveTypeCounts);
@@ -961,6 +966,10 @@ export function aggregateDevGlbDiagnostics(
       (aggregate.failedVisibleRootCount ?? 0) + (d.failedVisibleRootCount ?? 0);
     if (!aggregate.representationPolicy || d.representationPolicy === 'detailed')
       aggregate.representationPolicy = d.representationPolicy;
+    if (d.previewShapes?.length)
+      aggregate.previewShapes = [
+        ...new Set([...(aggregate.previewShapes ?? []), ...d.previewShapes]),
+      ].sort();
     for (const [type, count] of Object.entries(d.unsupportedPrimitiveTypeCounts)) {
       aggregate.unsupportedPrimitiveTypeCounts[type] =
         (aggregate.unsupportedPrimitiveTypeCounts[type] ?? 0) + count;

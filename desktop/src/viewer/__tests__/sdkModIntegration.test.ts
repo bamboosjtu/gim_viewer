@@ -2,6 +2,8 @@ import { expect, it } from 'vitest';
 import * as THREE from 'three';
 import { MessageChannel } from 'node:worker_threads';
 import { readXmlMod } from '../../../../packages/gim-sdk/node-xml-mod-consumer.mjs';
+import { profiles, bodies } from '../../../../packages/gim-sdk/tests/profileAssemblyFixtures.mjs';
+import { compileXmlModDocument } from '@gim/gim-sdk/geometry';
 import { parseXmlMod, readDomXmlMod } from '../../gim/geometry/xmlModParser.js';
 import { parseWorkerXmlMod, readWorkerXmlMod } from '../../gim/geometry/xmlModWorkerParser.js';
 import { projectXmlMod } from '../../gim/geometry/xmlModDocument.js';
@@ -19,6 +21,45 @@ const entity = (id: number, body: string, visible = true) =>
 const m = (values: string) => `<TRANSFORMMATRIX VALUE="${values}"/>`;
 const box = '<CUBOID L="300" W="300" H="300"/>';
 const ctx = { sourcePath: path, matrixLayout: 'a3-21-example' } as const;
+
+it.each([...profiles, ...bodies])(
+  'matches SDK mesh dimensions, normals and placement across LODs for %s',
+  (tag) => {
+    const text = wrap(entity(1, tag + m('0,1,0,0,-1,0,0,0,0,0,1,0,500,-200,100,1')));
+    const raw = readWorkerXmlMod(text, path, 'project-column-major'),
+      doc = projectXmlMod(raw);
+    for (const lod of [0, 1, 2] as const) {
+      const sdk = compileXmlModDocument(raw, { lod }),
+        local = sdk.templates.get(sdk.entities[0].templateKey!)!.mesh!;
+      const baked = collectBakedGeometriesByMaterial(doc, lod);
+      expect(baked.failures).toEqual([]);
+      const geometry = [...baked.values()][0][0],
+        pos = geometry.getAttribute('position'),
+        normal = geometry.getAttribute('normal');
+      expect(Array.from(geometry.index!.array)).toEqual(Array.from(local.indices!));
+      let positionError = 0,
+        normalError = 0;
+      for (let i = 0; i < pos.count; i++) {
+        const j = 3 * i;
+        positionError = Math.max(
+          positionError,
+          Math.abs(pos.getX(i) - (500 - local.positions[j + 1]) * 0.001),
+          Math.abs(pos.getY(i) - (-200 + local.positions[j]) * 0.001),
+          Math.abs(pos.getZ(i) - (100 + local.positions[j + 2]) * 0.001),
+        );
+        normalError = Math.max(
+          normalError,
+          Math.abs(normal.getX(i) + local.normals[j + 1]),
+          Math.abs(normal.getY(i) - local.normals[j]),
+          Math.abs(normal.getZ(i) - local.normals[j + 2]),
+        );
+      }
+      expect(positionError).toBeLessThan(1e-6);
+      expect(normalError).toBeLessThan(1e-6);
+      geometry.dispose();
+    }
+  },
+);
 
 it('G08 keeps declarations, operand scope and stable diagnostics across Node, Worker and DOM', () => {
   const raw = wrap(
@@ -156,25 +197,75 @@ it('transfers an owned copy and leaves the shared template drawable', async () =
   }
 });
 
-it('G04 renders a through-hole, the surrounding metal and both B.25 bevels in production coordinates', async()=>{
-  const plate=wrap(entity(1,'<TerminalBlock L="200" W="60" T="8" CL="8" BL="20" CS="20" RS="30" CN="2" RN="3" R="3"/>'));
-  const files=new Map([[path,{text:async()=>plate} as File]]);
-  for(const lod of [0,1,2] as const){
-    const group=await loadXmlModFromFiles(path,files,undefined,undefined,{parseXml:parseWorkerXmlMod,lod,strict:true});
+it('G04 renders a through-hole, the surrounding metal and both B.25 bevels in production coordinates', async () => {
+  const plate = wrap(
+    entity(
+      1,
+      '<TerminalBlock L="200" W="60" T="8" CL="8" BL="20" CS="20" RS="30" CN="2" RN="3" R="3"/>',
+    ),
+  );
+  const files = new Map([[path, { text: async () => plate } as File]]);
+  for (const lod of [0, 1, 2] as const) {
+    const group = await loadXmlModFromFiles(path, files, undefined, undefined, {
+      parseXml: parseWorkerXmlMod,
+      lod,
+      strict: true,
+    });
     group!.updateMatrixWorld(true);
-    const hits=(x:number,z:number)=>new THREE.Raycaster(new THREE.Vector3(x,-1,z),new THREE.Vector3(0,1,0)).intersectObject(group!,true).length;
-    expect(hits(.01,.02)).toBe(0);
-    expect(hits(.0015,.024)).toBeGreaterThan(0);
-    expect(hits(.029,.199)).toBe(0);
-    expect(hits(-.029,.199)).toBe(0);
+    const hits = (x: number, z: number) =>
+      new THREE.Raycaster(new THREE.Vector3(x, -1, z), new THREE.Vector3(0, 1, 0)).intersectObject(
+        group!,
+        true,
+      ).length;
+    expect(hits(0.01, 0.02)).toBe(0);
+    expect(hits(0.0015, 0.024)).toBeGreaterThan(0);
+    expect(hits(0.029, 0.199)).toBe(0);
+    expect(hits(-0.029, 0.199)).toBe(0);
   }
 });
 
-it('retains the circular plate small-part threshold in outline LODs',()=>{
-  const doc=parseXmlMod(wrap(entity(1,box)+entity(2,'<CircularFixedPlate L="80" W="80" T="5" CS="20" N="3" MH="0" D="4"/>')),path);
-  for(const lod of [0,1,2] as const){
-    const bucket=collectBakedGeometriesByMaterial(doc,lod);
-    expect(bucket.omittedSmallParts).toBe(lod<2?1:0);
-    for(const pieces of bucket.values())for(const geometry of pieces)geometry.dispose();
+it('retains the circular plate small-part threshold in outline LODs', () => {
+  const doc = parseXmlMod(
+    wrap(
+      entity(1, box) +
+        entity(2, '<CircularFixedPlate L="80" W="80" T="5" CS="20" N="3" MH="0" D="4"/>'),
+    ),
+    path,
+  );
+  for (const lod of [0, 1, 2] as const) {
+    const bucket = collectBakedGeometriesByMaterial(doc, lod);
+    expect(bucket.omittedSmallParts).toBe(lod < 2 ? 1 : 0);
+    for (const pieces of bucket.values()) for (const geometry of pieces) geometry.dispose();
+  }
+});
+
+it('retains the source evidence, LOD policy and failure isolation for complex leaves', async () => {
+  const body = '<PorcelainBushing R="20" R1="40" R2="30" N="4" H="400"/>';
+  const missingLayout =
+    '<Insulator N="4" D="40" N1="2" H1="30" R="3" R1="6" R2="5" FL="10" AL="10" LN="1"/>';
+  const text = wrap(
+    entity(1, body, false) +
+      entity(2, '<CYLINDER R="1" H="500"/>', false) +
+      entity(3, '<BOOLEAN TYPE="DIFFERENCE" ENTITY1="1" ENTITY2="2"/>') +
+      entity(4, missingLayout) +
+      entity(5, box),
+  );
+  for (const lod of [0, 1, 2] as const) {
+    const group = await loadXmlModFromFiles(
+      path,
+      new Map([[path, { text: async () => text } as File]]),
+      undefined,
+      undefined,
+      { parseXml: parseWorkerXmlMod, lod, strict: true },
+    );
+    const meta = group!.userData[XML_MOD_GEOMETRY_DIAGNOSTICS_KEY];
+    expect(meta.status).toBe('partial');
+    expect(meta.previewShapes).toContain('PorcelainBushing:preview-only');
+    expect(meta.failedVisibleRoots).toContainEqual({
+      rootId: 4,
+      dependencies: [{ id: 4, reason: 'unverified-layout' }],
+    });
+    expect(meta.representationPolicy).toBe(lod === 2 ? 'detailed' : 'outline');
+    if (lod < 2) expect(meta.approximatedBooleans.Difference).toBe(1);
   }
 });

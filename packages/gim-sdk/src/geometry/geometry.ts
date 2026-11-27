@@ -22,6 +22,8 @@ export { compilePrimitive } from "./compilePrimitive.js";
 export { compileXmlModDocument } from "./compileXmlModDocument.js";
 export * from "./analysisGeometry.js";
 export { PROFILE_TAGS } from "./profileFamilies.js";
+export { COMPLEX_TAGS } from "./interpretXmlModPrimitive.js";
+export { curveCenterline } from "./curveCable.js";
 export {
   compileStl,
   queryStlBounds,

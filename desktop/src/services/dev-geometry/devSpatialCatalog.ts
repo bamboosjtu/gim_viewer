@@ -4,8 +4,6 @@ import * as THREE from 'three';
 import { aggregateGeometryBounds, analyzePrimitive, queryStlBounds } from '@gim/gim-sdk/geometry';
 import { entityIndex } from '../../gim/geometry/xmlModDocument.js';
 import { steelSection } from '../../gim/geometry/steelSection.js';
-import { stretchedBodyDisplacement } from '../../gim/geometry/stretchedBody.js';
-import { offsetRectangularTableVertices } from '../../gim/geometry/offsetRectangularTable.js';
 import { primitiveName, type XmlModPrimitive } from '../../gim/geometry/ir.js';
 import type { XmlModDocument } from '../../gim/geometry/xmlModParser.js';
 import { discoverGeometriesFromDevPath } from './modGeometryDiscovery.js';
@@ -45,7 +43,6 @@ export function boxTuple(tuple: BoundsTuple): THREE.Box3 {
 }
 /** Analytic conservative bounds; no BufferGeometry, subdivision, CSG or export. */
 export function primitiveBounds(p: XmlModPrimitive): THREE.Box3 | null {
-  const radial = (r: number, z0: number, z1: number) => new THREE.Box3(v(-r, -r, z0), v(r, r, z1));
   switch (p.type) {
     case 'Standard': {
       const { range } = analyzePrimitive(p.canonical);
@@ -62,56 +59,6 @@ export function primitiveBounds(p: XmlModPrimitive): THREE.Box3 | null {
         v(s.width / 2, s.length / 2, s.height / 2),
       );
     }
-    case 'Cuboid':
-      return new THREE.Box3(v(-p.l / 2, -p.w / 2, 0), v(p.l / 2, p.w / 2, p.h));
-    case 'Cylinder':
-      return radial(p.r, 0, p.h);
-    case 'TruncatedCone':
-      return radial(Math.max(p.br, p.tr >= 0 && p.tr <= 1 ? p.tr * p.br : p.tr), 0, p.h);
-    case 'Sphere':
-      return radial(p.r, -p.r, p.r);
-    case 'Ring':
-      return radial(p.r + Math.abs(p.dr), -Math.abs(p.dr), Math.abs(p.dr));
-    case 'CircularGasket': {
-      const tube = Math.abs(p.or - p.ir) / 2;
-      return radial(p.or + tube, -tube, tube);
-    }
-    case 'PorcelainBushing':
-      return radial(
-        Math.max(p.r, p.r1, p.r2),
-        Math.min(0, p.h * (0.5 / Math.max(1, p.n) - 0.06)),
-        Math.max(p.h, p.h * (1 - 0.5 / Math.max(1, p.n) + 0.02)),
-      );
-    case 'TerminalBlock': {
-      const x = Math.max(p.l / 2, Math.abs(((p.cn - 1) * p.cs) / 2) + p.r);
-      const y = Math.max(p.w / 2, Math.abs(((p.rn - 1) * p.rs) / 2) + p.r);
-      return new THREE.Box3(v(-x, -y, 0), v(x, y, p.t + p.bl));
-    }
-    case 'StretchedBody': {
-      const resolved = stretchedBodyDisplacement(p.normal, p.l);
-      if (!resolved) return null;
-      const box = new THREE.Box3();
-      for (const raw of p.array.split(';').filter(Boolean)) {
-        const a = raw.split(',').map(Number);
-        if (a.length < 2 || !a.every(Number.isFinite)) return null;
-        const pt = v(a[0], a[1], a[2] ?? 0);
-        box.expandByPoint(pt);
-        box.expandByPoint(pt.clone().add(v(...resolved.vector)));
-      }
-      return box;
-    }
-    case 'OffsetRectangularTable': {
-      const vertices = offsetRectangularTableVertices(p.raw);
-      if (!vertices) return null;
-      const box = new THREE.Box3();
-      for (let i = 0; i < vertices.length; i += 3)
-        box.expandByPoint(v(vertices[i], vertices[i + 1], vertices[i + 2]));
-      return box;
-    }
-    // Catmull-Rom can overshoot its control polygon. These sources remain unknown.
-    case 'Wire':
-    case 'Cable':
-      return null;
     default:
       return null;
   }
@@ -120,41 +67,8 @@ export function primitiveBounds(p: XmlModPrimitive): THREE.Box3 | null {
 function patrolPrimitiveRange(p: XmlModPrimitive): THREE.Box3 | null {
   const known = primitiveBounds(p);
   if (known) return known;
-  if (p.type === 'Table' && [p.ll1, p.ll2, p.h].every((n) => Number.isFinite(n) && n > 0)) {
-    const half = v(p.ll1 / 2, p.ll2 / 2, p.h / 2);
-    return new THREE.Box3(half.clone().negate(), half);
-  }
-  if (p.type === 'RectangularFixedPlate' || p.type === 'RectangularRing') {
-    const a = p.raw;
-    if (p.type === 'RectangularRing' && p.sourceForm === 'TableGasket') {
-      const outer = Number(a.OR),
-        top = Number(a.TR),
-        inner = Number(a.IR),
-        height = Number(a.H);
-      if (
-        ![outer, top, inner, height].every(Number.isFinite) ||
-        !(outer > top && top > inner && inner > 0 && height > 0)
-      )
-        return null;
-      return new THREE.Box3(v(-outer, -outer, 0), v(outer, outer, height));
-    }
-    const dims =
-      p.type === 'RectangularFixedPlate'
-        ? [Number(a.L ?? a.L1), Number(a.W ?? a.W1), Number(a.T ?? a.H)]
-        : [Number(a.L1), Number(a.W1), Number(a.H ?? a.T)];
-    if (!dims.every((n) => Number.isFinite(n) && n > 0)) return null;
-    const [l, w, h] = dims;
-    return new THREE.Box3(v(-l / 2, -w / 2, -h), v(l / 2, w / 2, h));
-  }
-  if (
-    p.type === 'RotationalEllipsoid' &&
-    [p.lr, p.wr, p.h].every((n) => Number.isFinite(n) && n > 0)
-  ) {
-    const half = v(Math.max(1, p.lr), Math.max(1, p.wr), Math.max(1, p.h)).multiplyScalar(0.5);
-    return new THREE.Box3(half.clone().negate(), half);
-  }
-  if (p.type === 'Wire' || p.type === 'Cable') {
-    const coords = p.type === 'Wire' ? p.fitPoints : p.inflectionPoints;
+  if (p.type === 'Cable') {
+    const coords = p.inflectionPoints;
     if (
       coords.length < 6 ||
       coords.length % 3 ||
@@ -301,11 +215,6 @@ export async function buildDevSourceBounds(
           result.stretchModes ??= {};
           result.stretchModes['direction-length'] =
             (result.stretchModes['direction-length'] ?? 0) + 1;
-        } else if (e.primitive.type === 'StretchedBody') {
-          const mode =
-            stretchedBodyDisplacement(e.primitive.normal, e.primitive.l)?.mode ?? 'invalid';
-          result.stretchModes ??= {};
-          result.stretchModes[mode] = (result.stretchModes[mode] ?? 0) + 1;
         }
       unknown ||= bounds.unknown;
       if (!bounds.box.isEmpty())
@@ -322,10 +231,7 @@ export async function buildDevSourceBounds(
               steelSection(e.primitive)?.estimated)
           )
             result.estimatedSteelSections = (result.estimatedSteelSections ?? 0) + 1;
-          if (
-            (e.primitive.type === 'TruncatedCone' && e.primitive.tr > 1) ||
-            (e.primitive.type === 'Standard' && e.primitive.canonical.kind === 'TruncatedCone')
-          )
+          if (e.primitive.type === 'Standard' && e.primitive.canonical.kind === 'TruncatedCone')
             result.absoluteConeCount = (result.absoluteConeCount ?? 0) + 1;
           const type = primitiveName(e.primitive);
           result.primitiveCounts[type] = (result.primitiveCounts[type] ?? 0) + 1;

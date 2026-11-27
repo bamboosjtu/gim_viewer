@@ -5,6 +5,8 @@ import type {
 
 export type GeometryLod = 0 | 1 | 2;
 export type CanonicalPrimitive =
+  | import("./revolvedBodies.js").BodyPrimitive
+  | import("./curveCable.js").CurvePrimitive
   | import("./profileFamilies.js").ProfilePrimitive
   | import("./perforatedPlate.js").PlatePrimitive
   | { readonly kind: "Sphere"; readonly radius: number }
@@ -75,7 +77,8 @@ export interface GeometryCompileOptions {
       | "cone-top-ratio-v1"
       | "stretch-displacement-v1"
       | "steel-model-section-v1"
-      | "non-similar-rhombi-preview-v1";
+      | "non-similar-rhombi-preview-v1"
+      | "wire-fit-preview-v1";
     evidence: string;
   };
 }

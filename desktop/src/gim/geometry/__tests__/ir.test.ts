@@ -15,7 +15,7 @@ import {
   type XmlModEntity,
   type PhmDocument,
   type GimGeometryInstance,
-} from '../ir.js';
+} from '@gim/gim-primitives/geometry/ir.js';
 
 describe('GimGeometrySource 类型守卫', () => {
   const ifc: GimGeometrySource = {

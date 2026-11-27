@@ -1,5 +1,6 @@
 /** End-to-end assertions executed against the installed ESM bundle. */
 import assert from "node:assert/strict";
+import { profiles, bodies } from "./tests/profileAssemblyFixtures.mjs";
 import { compileXmlModDocument } from "@gim/gim-sdk/geometry";
 import { readXmlMod } from "./node-xml-mod-consumer.mjs";
 
@@ -285,19 +286,6 @@ const plates = compile(
 );
 for (let i = 0; i < 3; i++) assert.ok(meshOf(plates, i).indices.length > 36);
 console.log("Perforated plates Node consumer passed: B.25/B.26/B.27.");
-const profiles = [
-  '<Table LL1="8" LL2="6" TL1="4" TL2="3" H="6"/>',
-  '<BendingCylindrical R="2" L="15" Rad="1.5"/>',
-  '<Ring R="20" DR="2"/>',
-  '<RectangularRing L="40" W="20" R="5" DR="1"/>',
-  '<EllipticRing L="20" W="12" DR="1"/>',
-  '<CircularGasket OR="20" IR="10" H="2"/>',
-  '<TableGasket OR="20" TR="30" IR="10" H="2"/>',
-  '<SquareGasket L1="40" W1="30" L2="20" W2="10" H="2" CT="3" CL="2"/>',
-  ...["AngleSteel", "I-shapedsteel", "ChannelSteel", "T-Steels"].map(
-    (t) => `<${t} B="40" H="60" D="3" T="5" L="100"/>`,
-  ),
-];
 const profileDoc = compile(wrap(...profiles.map((p, i) => row(i + 1, p))));
 for (const [i, e] of profileDoc.entities.entries()) {
   const result = profileDoc.templates.get(e.templateKey);
@@ -305,3 +293,16 @@ for (const [i, e] of profileDoc.entities.entries()) {
   assert.equal(result.status, i === 1 ? "preview-only" : "standard-derived");
 }
 console.log("PR-4 Node consumer passed: 12 profile, sweep and section types.");
+for (const lod of [0, 1, 2]) {
+  const result = compile(wrap(...bodies.map((p, i) => row(i + 1, p))), { lod });
+  assert.equal(result.templates.size, 7);
+  for (const t of result.templates.values()) {
+    assert.equal(t.status, "preview-only");
+    assert.ok(t.mesh.indices.length);
+    assert.ok(t.mesh.positions.every(Number.isFinite));
+    assert.ok(t.mesh.normals.every(Number.isFinite));
+  }
+}
+console.log(
+  "PR-5 Node consumer passed: seven complex types at three LODs, including explicit preview evidence.",
+);

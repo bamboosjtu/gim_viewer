@@ -4,6 +4,17 @@ import { interpretXmlModPrimitive } from "../interpretXmlModPrimitive.js";
 import { analyzePrimitive } from "../analysisGeometry.js";
 import type { GeometryCompileOptions } from "../primitiveContracts.js";
 
+it("separates translated contour roundoff from an actual nonplanar face", () => {
+  const body = (deviation: number) =>
+    shape("StretchedBody", {
+      L: "5",
+      Normal: "0,0,1",
+      Array: `6000,6000,6000;6050,6000,6000;6050,6050,${6000 + deviation};6000,6050,6000`,
+    });
+  expect(compilePrimitive(body(1e-11)).status).toBe("standard-derived");
+  expect(compilePrimitive(body(0.001)).status).toBe("none");
+});
+
 function shape(
   sourceTag: string,
   rawAttributes: Record<string, string>,

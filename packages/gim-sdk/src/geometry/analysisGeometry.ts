@@ -2,6 +2,8 @@ import type { RawXmlModDocument } from "../parser/rawXmlMod.js";
 import { isUsableAffineMatrix } from "../parser/affineMatrix.js";
 import { interpretXmlModPrimitive } from "./interpretXmlModPrimitive.js";
 import { profileAnalysis } from "./profileFamilies.js";
+import { bodyAnalysis } from "./revolvedBodies.js";
+import { curveAnalysis } from "./curveCable.js";
 import type {
   CanonicalPrimitive,
   GeometryDiagnostic,
@@ -33,10 +35,24 @@ export interface GeometryPort {
 export interface AnalysisGeometry {
   range: BoundsCoverage;
   ports: readonly GeometryPort[];
+  repetitions?: readonly { first: Point3; step: Point3; count: number }[];
+  connectionSplitCount?: number;
+  curve?: {
+    diameter: number;
+    declaredSag?: number;
+    segmentCount: number;
+    sagReference?: "unspecified";
+    fitPointCount?: number;
+    maxFitDistanceFromChord?: number;
+  };
 }
 
 export function analyzePrimitive(p: CanonicalPrimitive): AnalysisGeometry {
-  if ("family" in p) return profileAnalysis(p);
+  if ("family" in p) {
+    if (p.family === "body") return bodyAnalysis(p);
+    if (p.family === "curve") return curveAnalysis(p);
+    return profileAnalysis(p);
+  }
   let min: Point3, max: Point3;
   let base: Point3 = [0, 0, 0],
     top: Point3 | undefined;

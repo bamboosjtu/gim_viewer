@@ -1,33 +1,8 @@
-/**
- * 变电 XML MOD primitive → Three.js BufferGeometry 转换。
- *
- * 核心八类与 CircularGasket 按源参数生成浏览几何。
- * StretchedBody 兼容单位方向 × L 和完整 Normal 位移，支持凹截面。
- * PorcelainBushing 的伞裙是浏览近似，LOD0 保留锥形主体。
- * 尚未支持的复杂体和弱 schema 保留具体类型诊断。
- *
- * TransformMatrix 应用：
- * - GIM 矩阵实测为列主序展开（平移在 m[12], m[13], m[14]）
- * - 等同于 Three.js Matrix4.elements 数组布局
- * - 使用 Matrix4.fromArray() 直接加载
- *
- * Color 应用：
- * - R/G/B 范围 0-255 → setRGB(r/255, g/255, b/255)
- * - A 范围 0-100（透明度百分比）→ opacity = a/100
- *
- * 单位：
- * - MOD 原始尺寸/平移为毫米
- * - IFC 当前场景为米量级
- * - xmlModDocumentToGroup 在 Group 层统一缩放 0.001，避免逐 primitive 丢精度
- */
-
+/** SDK local meshes, provider-compatible sections/cables and host Boolean/LOD composition. */
 import { steelSection, steelSectionContour } from '../gim/geometry/steelSection.js';
 import { logger } from '../utils/logger.js';
 import * as THREE from 'three';
 import type { StageObserver } from '../measurement/core.js';
-import { stretchedBodyDisplacement } from '../gim/geometry/stretchedBody.js';
-import { offsetRectangularTableVertices } from '../gim/geometry/offsetRectangularTable.js';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 export type DeviceLod = 0 | 1 | 2;
 import { Brush, Evaluator, ADDITION, INTERSECTION, SUBTRACTION } from 'three-bvh-csg';
 import type { XmlModColor, XmlModEntity, XmlModPrimitive } from '../gim/geometry/ir.js';
@@ -37,11 +12,6 @@ import type { MeshData } from '@gim/gim-sdk/geometry';
 
 const MOD_MM_TO_SCENE_UNIT = 0.001;
 export { MOD_MM_TO_SCENE_UNIT };
-const CYLINDER_SEGMENTS = 16;
-const SPHERE_WIDTH_SEGMENTS = 16;
-const SPHERE_HEIGHT_SEGMENTS = 8;
-const TORUS_RADIAL_SEGMENTS = 8;
-const TORUS_TUBULAR_SEGMENTS = 16;
 
 /** 去重 warn（每种 primitive 只 warn 一次） */
 const _warnedOnce = new Set<string>();
@@ -148,30 +118,7 @@ export function disposeOwnedXmlModMaterials(group: THREE.Object3D): void {
   });
 }
 
-/**
- * 将 primitive 转换为 Three.js BufferGeometry（无缓存版本，内部使用）。
- *
- * 14 类 primitive：
- * - 6 类基础体：Cylinder/Cuboid/Sphere/TruncatedCone/Ring/CircularGasket — 精确几何
- * - StretchedBody：任意平面多边形沿完整 Normal 位移拉伸
- * - PorcelainBushing/TerminalBlock：组合浏览几何
- * - OffsetRectangularTable：显式七字段编码，下矩形 XY 居中且 Z=0，上矩形按 XOFF/YOFF 偏移
- * - 型钢按开口轮廓拉伸；Table 仍采用外廓近似
- * - 2 类弱 schema：RectangularFixedPlate/RectangularRing — 暂停渲染
- */
-function rawNumber(
-  raw: Record<string, string> | undefined,
-  keys: string[],
-  fallback = Number.NaN,
-): number {
-  if (!raw) return fallback;
-  for (const key of keys) {
-    const value = Number(raw[key]);
-    if (Number.isFinite(value) && value > 0) return value;
-  }
-  return fallback;
-}
-
+/** Attach the SDK's local mesh buffers to a render template. */
 export function geometryFromMeshData(mesh: MeshData): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
@@ -188,366 +135,73 @@ export function geometryFromMeshData(mesh: MeshData): THREE.BufferGeometry {
 function primitiveToGeometryUncached(
   p: XmlModPrimitive,
   lod: DeviceLod,
+  onFailure?: (reason: string) => void,
 ): THREE.BufferGeometry | null {
-  const segments = lod === 0 ? 6 : lod === 1 ? 12 : CYLINDER_SEGMENTS;
-  switch (p.type) {
-    case 'Standard': {
-      const mesh = compileStandardLeaf(p.canonical, lod);
-      return mesh ? geometryFromMeshData(mesh) : null;
-    }
-    case 'Cylinder':
-      return zCylinder(p.r, p.r, p.h, segments);
-    case 'Cuboid':
-      return new THREE.BoxGeometry(sanitizeNum(p.l), sanitizeNum(p.w), sanitizeNum(p.h)).translate(
-        0,
-        0,
-        p.h / 2,
-      );
-    case 'Sphere':
-      return new THREE.SphereGeometry(sanitizeNum(p.r), segments, Math.max(4, segments / 2));
-    case 'TruncatedCone':
-      // TR in [0,1] is a ratio; larger values retain the observed absolute-radius dialect.
-      return zCylinder(coneTopRadius(p.br, p.tr), p.br, p.h, segments);
-    case 'Ring':
-      return new THREE.TorusGeometry(
-        sanitizeNum(p.r),
-        Math.abs(sanitizeNum(p.dr)),
-        lod === 0 ? 4 : TORUS_RADIAL_SEGMENTS,
-        lod === 0 ? 8 : TORUS_TUBULAR_SEGMENTS,
-        sanitizeNum(p.rad),
-      );
-    case 'CircularGasket':
-      return new THREE.TorusGeometry(
-        sanitizeNum(p.or),
-        Math.max(0, (sanitizeNum(p.or) - sanitizeNum(p.ir)) / 2),
-        TORUS_RADIAL_SEGMENTS,
-        TORUS_TUBULAR_SEGMENTS,
-        sanitizeNum(p.rad),
-      );
-    case 'Wire': {
-      // 变电软母线：拟合点样条管（绝对 mm 坐标，后续烘焙 mm→m）。
-      // 管径始终用真实 D；远景可见性由 xmlModLoader 的 1px 连接线叠加保证，
-      // 不能用放大管径换可见性。
-      const pts = p.fitPoints;
-      if (pts.length < 6) return null;
-      const curve = new THREE.CatmullRomCurve3(vec3Array(pts));
-      return new THREE.TubeGeometry(
-        curve,
-        Math.min(Math.max(pts.length / 3, 8), 256),
-        Math.max(sanitizeNum(p.d) / 2, 1e-6),
-        6,
-        false,
-      );
-    }
-    case 'Cable': {
-      // 电缆敷设路径：拐点折线圆管；管径用真实 D（epsilon 仅防零半径）
-      const pts = p.inflectionPoints;
-      if (pts.length < 6) return null;
-      const curve = new THREE.CatmullRomCurve3(vec3Array(pts));
-      return new THREE.TubeGeometry(
-        curve,
-        Math.min(Math.max(pts.length / 3, 8), 256),
-        Math.max(sanitizeNum(p.d) / 2, 1e-6),
-        6,
-        false,
-      );
-    }
-    case 'RotationalEllipsoid': {
-      // 近似：单位球按三轴（LR/WR/H 作全长）缩放
-      const geo = new THREE.SphereGeometry(0.5, SPHERE_WIDTH_SEGMENTS, SPHERE_HEIGHT_SEGMENTS);
-      geo.scale(
-        Math.max(sanitizeNum(p.lr), 1),
-        Math.max(sanitizeNum(p.wr), 1),
-        Math.max(sanitizeNum(p.h), 1),
-      );
-      return geo;
-    }
-    case 'BeamChannelLike':
-    case 'ChannelSteel': {
-      const section = steelSection(p);
-      if (!section) return null;
-      const contour = steelSectionContour(section)
-        .map(([x, z]) => [x, -section.length / 2, z].join(','))
-        .join(';');
-      return createStretchedBodyGeometry(contour, '0,1,0', section.length);
-    }
-    case 'StretchedBody':
-      return createStretchedBodyGeometry(p.array, p.normal, p.l);
-    case 'PorcelainBushing': {
-      const parts: THREE.BufferGeometry[] = [zCylinder(p.r2, p.r, p.h, segments)];
-      // Skirt profiles are a browsing approximation; the tapered core remains at every LOD.
-      const n = Math.min(512, Math.max(0, Math.floor(p.n)));
-      if (lod > 0)
-        for (let k = 0; k < n; k++) {
-          const z = (p.h * (k + 0.5)) / n;
-          parts.push(zCylinder(p.r2, p.r1, p.h * 0.02, segments).translate(0, 0, z));
-          parts.push(
-            zCylinder(p.r1, p.r1 * 0.98, p.h * 0.06, segments).translate(0, 0, z - p.h * 0.06),
-          );
-        }
-      return mergeParts(parts);
-    }
-    case 'TerminalBlock': {
-      const parts: THREE.BufferGeometry[] = [
-        new THREE.BoxGeometry(p.l, p.w, p.t).translate(0, 0, p.t / 2),
-      ];
-      const cn = Math.max(0, Math.min(256, Math.floor(p.cn))),
-        rn = Math.max(0, Math.min(256, Math.floor(p.rn)));
-      if (cn * rn > 4096) return null;
-      if (lod > 0)
-        for (let c = 0; c < cn; c++)
-          for (let r = 0; r < rn; r++) {
-            parts.push(
-              zCylinder(p.r, p.r, p.bl, segments).translate(
-                (c - (cn - 1) / 2) * p.cs,
-                (r - (rn - 1) / 2) * p.rs,
-                p.t,
-              ),
-            );
-          }
-      return mergeParts(parts);
-    }
-    case 'RectangularFixedPlate': {
-      // 弱 schema：L/W/T 直接生成浏览用矩形板；螺栓孔等字段忽略。
-      const l = rawNumber(p.raw, ['L', 'L1'], 1);
-      const w = rawNumber(p.raw, ['W', 'W1'], 1);
-      const t = rawNumber(p.raw, ['T', 'H'], 1);
-      return new THREE.BoxGeometry(l, w, t).translate(0, 0, t / 2);
-    }
-    case 'RectangularRing': {
-      // 矩形框近似（垫圈/密封件）：外框 L1×W1、内框 L2×W2、厚度 H，四块板拼合。
-      const l1 = rawNumber(p.raw, ['L1'], 1);
-      const w1 = rawNumber(p.raw, ['W1'], 1);
-      const l2 = Math.min(rawNumber(p.raw, ['L2'], l1 * 0.8), l1);
-      const w2 = Math.min(rawNumber(p.raw, ['W2'], w1 * 0.8), w1);
-      const h = rawNumber(p.raw, ['H', 'T'], 1);
-      const sideL = (l1 - l2) / 2;
-      const sideW = (w1 - w2) / 2;
-      if (!(sideL > 0 || sideW > 0) || !(h > 0)) return null;
-      const parts: THREE.BufferGeometry[] = [];
-      if (sideL > 0) {
-        parts.push(new THREE.BoxGeometry(sideL, w1, h).translate(-(l1 - sideL) / 2, 0, h / 2));
-        parts.push(new THREE.BoxGeometry(sideL, w1, h).translate((l1 - sideL) / 2, 0, h / 2));
-      }
-      if (sideW > 0) {
-        parts.push(new THREE.BoxGeometry(l2, sideW, h).translate(0, -(w1 - sideW) / 2, h / 2));
-        parts.push(new THREE.BoxGeometry(l2, sideW, h).translate(0, (w1 - sideW) / 2, h / 2));
-      }
-      return mergeParts(parts);
-    }
-    case 'Table': {
-      // 桌面/台架类：按长宽高外廓盒体近似，忽略孔洞与栏栅。
-      if (!(p.ll1 > 0) || !(p.ll2 > 0) || !(p.h > 0)) return null;
-      return new THREE.BoxGeometry(p.ll1, p.ll2, p.h);
-    }
-    case 'OffsetRectangularTable': {
-      const vertices = offsetRectangularTableVertices(p.raw);
-      if (!vertices) return null;
-      const geometry = new THREE.BufferGeometry();
-      geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-      geometry.setAttribute('uv', new THREE.Float32BufferAttribute(new Array(16).fill(0), 2));
-      geometry.setIndex([
-        0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3,
-        0, 4, 3, 4, 7,
-      ]);
-      const flat = geometry.toNonIndexed();
-      geometry.dispose();
-      flat.computeVertexNormals();
-      flat.setIndex(
-        Array.from({ length: flat.getAttribute('position').count }, (_, index) => index),
-      );
-      return flat;
-    }
-
-    case 'Unsupported':
-      if (!_warnedOnce.has(`unsupported:${p.sourceType}`)) {
-        _warnedOnce.add(`unsupported:${p.sourceType}`);
-        logger.warn(`[xmlModGeometry] 未支持 primitive "${p.sourceType}"，已跳过`);
-      }
+  if (p.type === 'Standard') {
+    const result = compileStandardLeaf(p.canonical, lod);
+    if (!result.mesh) {
+      onFailure?.(result.diagnostics[0]?.code ?? 'unsupported-primitive');
       return null;
-    default:
-      {
-        const unknownType = (p as { type?: string }).type ?? 'unknown';
-        if (!_warnedOnce.has(unknownType)) {
-          _warnedOnce.add(unknownType);
-          logger.warn(`[xmlModGeometry] 未支持 primitive "${unknownType}"，已跳过`);
-        }
-      }
-      return null;
+    }
+    return geometryFromMeshData(result.mesh);
   }
+  if (p.type === 'ChannelSteel' || p.type === 'BeamChannelLike') {
+    const s = steelSection(p);
+    if (!s) return null;
+    const contour = steelSectionContour(s).map(([x, z]): [number, number, number] => [
+      x,
+      -s.length / 2,
+      z,
+    ]);
+    const result = compileStandardLeaf(
+      {
+        kind: 'StretchedBody',
+        normal: [0, 1, 0],
+        length: s.length,
+        contour,
+        displacement: [0, s.length, 0],
+      },
+      lod,
+    );
+    return result.mesh ? geometryFromMeshData(result.mesh) : null;
+  }
+  if (p.type === 'Cable') {
+    const points = vec3Array(p.inflectionPoints);
+    if (points.length < 2) return null;
+    return new THREE.TubeGeometry(
+      new THREE.CatmullRomCurve3(points),
+      Math.min(Math.max(points.length, 8), 256),
+      Math.max(p.d / 2 || 0, 1e-6),
+      6,
+      false,
+    );
+  }
+  if (p.type === 'Unsupported' && !_warnedOnce.has(p.sourceType)) {
+    _warnedOnce.add(p.sourceType);
+    logger.warn(`[xmlModGeometry] 未支持 primitive "${p.sourceType}"，已跳过`);
+  }
+  return null;
 }
 
-/**
- * 构造 primitive 参数签名（用于 Geometry 缓存键）。
- *
- * 仅提取影响几何形状的参数（半径/高度/分段等），不包含 TransformMatrix。
- * 同 modPath + 同 primitive 类型 + 同参数 → 同一 BufferGeometry。
- */
 const standardSignatures = new WeakMap<object, string>();
 function primitiveSignature(p: XmlModPrimitive): string {
-  switch (p.type) {
-    case 'Standard': {
-      let key = standardSignatures.get(p.canonical);
-      if (key === undefined) {
-        key = JSON.stringify(p.canonical);
-        standardSignatures.set(p.canonical, key);
-      }
-      return key;
-    }
-    case 'Cuboid':
-      return `${sanitizeNum(p.l)},${sanitizeNum(p.w)},${sanitizeNum(p.h)}`;
-    case 'Cylinder':
-      return `r=${sanitizeNum(p.r)},h=${sanitizeNum(p.h)}`;
-    case 'TruncatedCone':
-      return `br=${sanitizeNum(p.br)},tr=${sanitizeNum(p.tr)},h=${sanitizeNum(p.h)}`;
-    case 'Sphere':
-      return `r=${sanitizeNum(p.r)}`;
-    case 'Ring':
-      return `r=${sanitizeNum(p.r)},dr=${sanitizeNum(p.dr)},rad=${sanitizeNum(p.rad)}`;
-    case 'CircularGasket':
-      return `or=${sanitizeNum(p.or)},ir=${sanitizeNum(p.ir)},rad=${sanitizeNum(p.rad)},h=${sanitizeNum(p.h)}`;
-    case 'StretchedBody':
-      return `l=${sanitizeNum(p.l)},array=${p.array},normal=${p.normal}`;
-    // 暂停渲染的 primitive 不会进入缓存（primitiveToGeometryUncached 返回 null）
-    default:
-      return JSON.stringify(p);
+  const shape = p.type === 'Standard' ? p.canonical : p;
+  let key = standardSignatures.get(shape);
+  if (key === undefined) {
+    key = JSON.stringify(shape);
+    standardSignatures.set(shape, key);
   }
+  return key;
 }
-
-/**
- * 将 StretchedBody.Array 解析为三维截面点。
- *
- * 真实样例使用 `x,y,z;...;`，早期文档示例也出现过 `x,y;...;`；
- * 二维点按 z=0 兼容。连续重复点和闭合尾点会被移除，避免 Earcut 退化。
- */
-function parseStretchedBodyPoints(raw: string): THREE.Vector3[] {
-  const parsed = raw
-    .split(';')
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map((part) => part.split(',').map((value) => Number(value.trim())))
-    .filter(
-      (values) => (values.length === 2 || values.length === 3) && values.every(Number.isFinite),
-    )
-    .map((values) => new THREE.Vector3(values[0], values[1], values[2] ?? 0));
-
-  const points: THREE.Vector3[] = [];
-  for (const point of parsed) {
-    if (points.length === 0 || !point.equals(points[points.length - 1])) points.push(point);
-  }
-  if (points.length > 2 && points[0].equals(points[points.length - 1])) points.pop();
-  return points;
-}
-
-/**
- * 构造任意平面截面的拉伸体。
- *
- * Array 中的点已经位于 MOD 局部三维坐标，不能先压成 XY 再靠旋转猜回位置。
- * 这里仅把点投影到与 Normal 正交的二维基底以完成凹多边形三角剖分，最终顶点仍
- * 直接使用原始三维点，并加上统一解释的有符号拉伸位移。
- */
-function createStretchedBodyGeometry(
-  array: string,
-  normalRaw: string,
-  lengthRaw: number,
-): THREE.BufferGeometry | null {
-  let points = parseStretchedBodyPoints(array);
-  const resolved = stretchedBodyDisplacement(normalRaw, lengthRaw);
-  const normal = resolved ? new THREE.Vector3(...resolved.vector) : null;
-  if (points.length < 3 || !normal) return null;
-  const extrusion = normal.clone();
-  normal.normalize();
-
-  const reference =
-    Math.abs(normal.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
-  const axisU = new THREE.Vector3().crossVectors(reference, normal).normalize();
-  const axisV = new THREE.Vector3().crossVectors(normal, axisU).normalize();
-
-  let contour = points.map((point) => new THREE.Vector2(point.dot(axisU), point.dot(axisV)));
-  // 统一为从 +Normal 方向观察时逆时针，便于侧面法向稳定朝外。
-  if (THREE.ShapeUtils.isClockWise(contour)) {
-    points = points.slice().reverse();
-    contour = contour.slice().reverse();
-  }
-
-  const capTriangles = THREE.ShapeUtils.triangulateShape(contour, []);
-  if (capTriangles.length === 0) return null;
-
-  const positions: number[] = [];
-  const pushTriangle = (
-    a: THREE.Vector3,
-    b: THREE.Vector3,
-    c: THREE.Vector3,
-    expectedNormal: THREE.Vector3,
-  ) => {
-    const actual = new THREE.Vector3().crossVectors(
-      new THREE.Vector3().subVectors(b, a),
-      new THREE.Vector3().subVectors(c, a),
-    );
-    if (actual.dot(expectedNormal) < 0) [b, c] = [c, b];
-    positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
-  };
-
-  for (const [ia, ib, ic] of capTriangles) {
-    const a = points[ia];
-    const b = points[ib];
-    const c = points[ic];
-    pushTriangle(a, b, c, normal.clone().negate());
-    pushTriangle(
-      a.clone().add(extrusion),
-      b.clone().add(extrusion),
-      c.clone().add(extrusion),
-      normal,
-    );
-  }
-
-  for (let i = 0; i < points.length; i++) {
-    const next = (i + 1) % points.length;
-    const a = points[i];
-    const b = points[next];
-    const topA = a.clone().add(extrusion);
-    const topB = b.clone().add(extrusion);
-    const outward = new THREE.Vector3()
-      .crossVectors(new THREE.Vector3().subVectors(b, a), normal)
-      .normalize();
-    pushTriangle(a, b, topB, outward);
-    pushTriangle(a, topB, topA, outward);
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  // 与 Three.js 内置几何保持 indexed + position/normal/uv 属性布局一致，
-  // 否则同材质的 StretchedBody 与 Cylinder/Cuboid 在 mergeGeometries 时会整体回退。
-  geometry.setIndex(Array.from({ length: positions.length / 3 }, (_, index) => index));
-  geometry.setAttribute(
-    'uv',
-    new THREE.Float32BufferAttribute(new Array((positions.length / 3) * 2).fill(0), 2),
-  );
-  geometry.computeVertexNormals();
-  geometry.computeBoundingBox();
-  geometry.computeBoundingSphere();
-  return geometry;
-}
-
-/**
- * 将 primitive 转换为 Three.js BufferGeometry（全局共享缓存版本，A.1）。
- *
- * 按 (primitiveType, primitiveParamsSignature) 全局缓存：
- * - 同参数 primitive 全局共享同一 BufferGeometry 实例（跨 modPath）
- * - 变电站工程中基础体参数重复率高，全局共享后 Geometry 数 -80%+
- * - Entity.TransformMatrix 不影响 geometry 顶点，由 entityToMesh 烘焙到 Mesh.matrix
- *
- * @param p primitive 描述
- * @param lod 浏览层级；缓存键只由层级、图元类型和参数决定
- */
 export function primitiveToGeometry(
   p: XmlModPrimitive,
   lod: DeviceLod = 2,
+  onFailure?: (reason: string) => void,
 ): THREE.BufferGeometry | null {
   const sig = `${lod}:${p.type}:${primitiveSignature(p)}`;
   const cached = _sharedGeometryCache.get(sig);
   if (cached) return cached;
-  const geo = primitiveToGeometryUncached(p, lod);
+  const geo = primitiveToGeometryUncached(p, lod, onFailure);
   if (geo) _sharedGeometryCache.set(sig, geo);
   return geo;
 }
@@ -781,6 +435,7 @@ export interface BakedGeometryFailure {
   dependencies: { id: number; reason: string }[];
 }
 export type BakedGeometries = Map<THREE.MeshStandardMaterial, THREE.BufferGeometry[]> & {
+  previewShapes: Set<string>;
   failures: BakedGeometryFailure[];
   simplifiedBooleans: number;
   representationPolicy: 'outline' | 'detailed';
@@ -796,6 +451,7 @@ function* bakeGeometrySteps(
   onStage?: StageObserver,
 ): Generator<void, BakedGeometries, void> {
   const byMaterial = Object.assign(new Map<THREE.MeshStandardMaterial, THREE.BufferGeometry[]>(), {
+    previewShapes: new Set<string>(),
     failures: [] as BakedGeometryFailure[],
     simplifiedBooleans: 0,
     representationPolicy: lod < 2 ? ('outline' as const) : ('detailed' as const),
@@ -803,9 +459,19 @@ function* bakeGeometrySteps(
     omittedSmallParts: 0,
     omittedMaxExtentMm: 0,
   });
-  const build = (p: XmlModPrimitive) => {
+  const build = (p: XmlModPrimitive, id: number) => {
     const started = performance.now();
-    const geometry = primitiveToGeometry(p, lod);
+    const geometry = primitiveToGeometry(p, lod, (reason) => failures.set(id, reason));
+    if (
+      geometry &&
+      p.type === 'Standard' &&
+      'approximation' in p.canonical &&
+      p.canonical.approximation
+    ) {
+      const quality =
+        'modelEstimate' in p.canonical && p.canonical.modelEstimate ? 'estimated' : 'preview-only';
+      byMaterial.previewShapes.add(p.canonical.kind + ':' + quality);
+    }
     const elapsed = timings || onStage ? performance.now() - started : 0;
     if (timings) timings.primitiveMs = (timings.primitiveMs ?? 0) + elapsed;
     onStage?.('dev.primitive', elapsed, {
@@ -867,9 +533,9 @@ function* bakeGeometrySteps(
     try {
       const p = entity.primitive;
       if (p.type !== 'Boolean') {
-        const base = build(p);
+        const base = build(p, id);
         if (base) result = own(base.clone());
-        else return fail(id, `unsupported-or-invalid:${p.type}`);
+        else return fail(id, failures.get(id) ?? `unsupported-or-invalid:${p.type}`);
       } else {
         const a = yield* evaluate(p.entity1);
         const b = yield* evaluate(p.entity2);
@@ -945,9 +611,9 @@ function* bakeGeometrySteps(
         p = e.primitive;
       let pieces: Piece[];
       if (p.type !== 'Boolean') {
-        const geometry = build(p);
+        const geometry = build(p, id);
         if (!geometry) {
-          fail(id, `unsupported-or-invalid:${p.type}`);
+          fail(id, failures.get(id) ?? `unsupported-or-invalid:${p.type}`);
           return [];
         }
         pieces = [{ geometry, matrix, primitive: p }];
@@ -1084,10 +750,6 @@ function vec3Array(flat: number[]): THREE.Vector3[] {
   return out;
 }
 
-function sanitizeNum(n: number): number {
-  return Number.isNaN(n) ? 0 : n;
-}
-
 /** Filtering uses the fully placed outer bounds, never wall thickness or DEV size. */
 function smallPartThresholdMm(p: XmlModPrimitive): number {
   switch (p.type === 'Standard' ? p.canonical.kind : p.type) {
@@ -1104,29 +766,4 @@ function smallPartThresholdMm(p: XmlModPrimitive): number {
     default:
       return 0; // Wire/Cable and structural members always survive.
   }
-}
-
-/** GIM cylinders have their base at Z=0 and their axis along +Z. */
-function zCylinder(
-  top: number,
-  bottom: number,
-  height: number,
-  segments: number,
-): THREE.CylinderGeometry {
-  return new THREE.CylinderGeometry(
-    sanitizeNum(top),
-    sanitizeNum(bottom),
-    sanitizeNum(height),
-    segments,
-  )
-    .rotateX(Math.PI / 2)
-    .translate(0, 0, height / 2);
-}
-export function coneTopRadius(br: number, tr: number): number {
-  return tr >= 0 && tr <= 1 ? br * tr : tr;
-}
-function mergeParts(parts: THREE.BufferGeometry[]): THREE.BufferGeometry | null {
-  const merged = mergeGeometries(parts, false);
-  for (const part of parts) part.dispose();
-  return merged;
 }

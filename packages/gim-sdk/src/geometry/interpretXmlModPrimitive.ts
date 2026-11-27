@@ -6,6 +6,8 @@ import {
   type ProfileTag,
 } from "./profileFamilies.js";
 import { StandardFields } from "./standardFields.js";
+import { BODY_TAGS, readBody } from "./revolvedBodies.js";
+import { readCurve } from "./curveCable.js";
 import type { Point3 } from "./analysisGeometry.js";
 import {
   DEFAULT_GEOMETRY_LIMITS,
@@ -19,6 +21,17 @@ import type {
 } from "./primitiveContracts.js";
 
 export const xmlModInterpretationPolicy = "standard-xml-mod-v1";
+export const COMPLEX_TAGS = [...BODY_TAGS, "Wire", "CurveCable"] as const;
+type ComplexTag = (typeof COMPLEX_TAGS)[number];
+const complexByTag = new Map<string, ComplexTag>(
+  COMPLEX_TAGS.flatMap(
+    (tag) =>
+      [
+        [tag, tag],
+        [tag.toUpperCase(), tag],
+      ] as [string, ComplexTag][],
+  ),
+);
 const profilesByTag = new Map<string, ProfileTag>(
   PROFILE_TAGS.flatMap(
     (tag) =>
@@ -82,6 +95,38 @@ export function interpretXmlModPrimitive(
     );
   let rule: typeof dialect;
   let canonical: CanonicalPrimitive;
+  const complex = complexByTag.get(source.sourceTag);
+  if (complex) {
+    const fields = new StandardFields(source);
+    const shape =
+      complex === "Wire" || complex === "CurveCable"
+        ? readCurve(complex, fields, options)
+        : readBody(complex, fields);
+    diagnostics.push(...fields.diagnostics);
+    if (fields.diagnostics.length)
+      return {
+        status: fields.diagnostics.some((d) => d.code === "capacity-exceeded")
+          ? "unsupported"
+          : "invalid",
+        diagnostics,
+        policyVersion,
+      };
+    if (shape.approximation)
+      diagnostics.push({
+        code: "unverified-shape-detail",
+        severity: "info",
+        stage: "interpret",
+        message: shape.approximation,
+        location: { sourceTag: source.sourceTag },
+      });
+    const compatible = shape.kind === "Wire" && shape.fitOnly;
+    return {
+      status: compatible ? "compatible" : "standard",
+      canonical: shape,
+      diagnostics,
+      policyVersion: compatible ? "wire-fit-preview-v1" : policyVersion,
+    };
+  }
   const profile = profilesByTag.get(source.sourceTag);
   if (profile) {
     const fields = new StandardFields(source);

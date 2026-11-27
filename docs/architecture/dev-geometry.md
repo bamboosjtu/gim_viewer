@@ -96,6 +96,8 @@ DOM 与 Worker 通过相同的 SDK Raw Parser 读取变电 XML，工程入口显
 
 ## STL 与 GL
 
+旋转椭球沿 X 截切；瓷套按主体与两族裙边构造旋转剖面，L0 仅生成主体。绝缘子串记录每支端口、重复节距和片数。Wire 与 CurveCable 保留独立的源方向、管径与分段语义，未核证的剖面细节或插值约定以 `preview-only` 输出。GLB 诊断的 `previewShapes` 记录实际使用的预览或估算图元种类。组合或构造失败仍按可见根隔离。
+
 SDK 的 `compileStl` 在源毫米坐标内解码 Binary/ASCII facet 并输出非索引网格。Desktop 直接采用位置、法向缓冲并在模板拥有它们时一次换算为米。独立范围查询复用相同语法，逐面更新极值，无需构造网格或回读已编译模板。
 
 - STL 仅在标准二进制或 ASCII 布局可校验时给出范围；私有方言保留 unknown，不因范围未知被剔除。

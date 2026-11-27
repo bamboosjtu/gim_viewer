@@ -63,16 +63,13 @@ describe('parseXmlMod', () => {
     it('PorcelainBushing：R/R1/R2/N/H 五字段', () => {
       const xml = wrap(
         `<Entity ID="3" Type="simple" Visible="True">
-          <PorcelainBushing R="30" R1="45" R2="25" N="8" H="500" />
+          <PorcelainBushing R="30" R1="45" R2="35" N="8" H="500" />
           <TransformMatrix Value="1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1" />
           <Color R="180" G="180" B="220" A="100" />
         </Entity>`,
       );
-      const p = parseXmlMod(xml, 'MOD/bushing.mod').entities[0].primitive as Extract<
-        XmlModPrimitive,
-        { type: 'PorcelainBushing' }
-      >;
-      expect(p).toEqual({ type: 'PorcelainBushing', r: 30, r1: 45, r2: 25, n: 8, h: 500 });
+      const p = parseXmlMod(xml, 'MOD/bushing.mod').entities[0].primitive;
+      expect(p).toMatchObject({type:'Standard',canonical:{kind:'PorcelainBushing',r:30,r1:45,r2:35,count:8,height:500}});
     });
 
     it('TruncatedCone：BR/TR/H 字段', () => {
@@ -649,7 +646,7 @@ describe('十样本新增 primitive（docs/schema/substation-mod.md）', () => {
       </Entity>`,
     );
     const e = parseXmlMod(xml, 'MOD/wire.mod').entities[0];
-    expect(e.primitive).toEqual({ type: 'Wire', d: 34.32, fitPoints: [1, 2, 3, 4, 5, 6] });
+    expect(e.primitive).toMatchObject({type:'Standard',canonical:{kind:'Wire',diameter:34.32,sag:1,fitOnly:true,fitPoints:[[1,2,3],[4,5,6]]}});
   });
 
   it('Cable：Start/End 补入拐点序列首尾', () => {
@@ -679,7 +676,7 @@ describe('十样本新增 primitive（docs/schema/substation-mod.md）', () => {
       </Entity>`,
     );
     const doc = parseXmlMod(xml, 'MOD/new-prim.mod');
-    expect(doc.entities[0].primitive).toEqual({ type: 'RotationalEllipsoid', h: 100, lr: 350, wr: 200 });
+    expect(doc.entities[0].primitive).toMatchObject({type:'Standard',canonical:{kind:'RotationalEllipsoid',height:100,polar:350,equatorial:200}});
     expect(doc.entities[1].primitive).toEqual({ type: 'BeamChannelLike', family:'BeamChannel', length: 1600, model: '10#' });
   });
 

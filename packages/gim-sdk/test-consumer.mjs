@@ -22,6 +22,8 @@ if(manifest.runtimeExternals.length)throw Error('SDK consumer needs external run
 await build({entryPoints:[join(root,'node-xml-mod-consumer.mjs')],outfile:join(target,'node-xml-mod-consumer.mjs'),
   bundle:true,format:'esm',platform:'node',external:['@gim/gim-sdk/*']});
 cpSync(join(root,'geometry-consumer.mjs'),join(target,'geometry-consumer.mjs'));
+mkdirSync(join(target,'tests'),{recursive:true});
+cpSync(join(root,'tests/profileAssemblyFixtures.mjs'),join(target,'tests/profileAssemblyFixtures.mjs'));
 cpSync(join(root,'stl-consumer.mjs'),join(target,'stl-consumer.mjs'));
 writeFileSync(join(target,'consumer.mjs'),`
 import assert from 'node:assert/strict';

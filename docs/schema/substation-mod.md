@@ -16,7 +16,7 @@
 </Device>
 ```
 
-合成示例不含工程来源标识。`Device`/`Entities`/`Entity`/`TransformMatrix`/`Color` 标签大小写敏感；primitive 标签在 parser 内做小写归一，别名见 [XML primitive](xml-primitives.md#标签归一与导出器别名)。
+合成示例不含工程来源标识。SDK Raw Parser 识别工程拼写及 A.3.21 的大写节点与属性，保留原始拼写；宿主按明确的来源布局解释矩阵。标签、字段及兼容分支见 [XML primitive](xml-primitives.md)。
 
 `<Device><Entities /></Device>` 是合法空内容；有 Entity 但全部 malformed 或 unsupported 不能记成 empty。缺少 `Entities` 时当前 parser 也返回空文档。
 
@@ -31,14 +31,12 @@
 | `Color` | 可选；RGB 0–255，A 的刻度由文件级 `max(A)` 判定，见[几何模型](geometry-model.md#颜色) |
 | primitive | 跳过 TransformMatrix/Color 后取首个子元素；未知标签保留 `Unsupported/sourceType/raw` |
 
-当前数值读取通常使用 `parseFloat`，缺字段可能为 NaN，不是隐式合法零值。矩阵有限性、单位与轴转换不能由 XML 合法推定；Entity 变换只在其父坐标系应用一次。
+标准数值字段完整匹配有限十进制数。缺失、冲突和非法输入保留 Raw 声明及诊断；宿主仅在已登记的提供方兼容入口采用相应浏览策略。Entity 变换在其父坐标系应用一次。
 
 ## primitive 处理
 
-- 强类型：Cuboid、Cylinder、Sphere、TruncatedCone、Ring、CircularGasket、StretchedBody、PorcelainBushing、TerminalBlock、ChannelSteel、Table、Boolean、Wire、Cable、RotationalEllipsoid、BeamChannelLike。
-- 弱 schema：RectangularFixedPlate、OffsetRectangularTable、RectangularRing；字段不可解释时可能用浏览近似或返回 null，不能当作精确源形状。
-- 导出器别名：`Rectangularfixedplate`、`H-beam`、`DoubleChannelSteel`、`Insulator/VTypeInsulator`、`ConePorcelainBushing`、`EccentricTruncatedCone`、`SquareGasket/TableGasket`、`EllipticRing`、`BendingCylindrical`、`CircularFixedPlate` 等，统一映射到既有分支。
-- 未知标签、非法 Boolean Type：`Unsupported`，保留来源类型和 raw；局部降级，不把文件记成 empty。
+- 附录 B 的 29 类标准图元使用 SDK Canonical 参数，各自返回标准派生、估算、预览或无网格状态。
+- Boolean 使用文档内来源引用。旧 Cable、BeamChannel/LightBeamChannel、H/H-beam、DoubleChannelSteel 及未识别节点保留独立宿主适配。未知标签和非法 Boolean 运算保留原字段并形成局部诊断。
 
 字段、几何、LOD/近似和上限的完整表见 [XML primitive](xml-primitives.md)。这里只保留格式边界：解析成功不等于几何支持，几何存在也不等于字段被正确理解。
 

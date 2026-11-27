@@ -82,255 +82,47 @@ describe('LOD small-part policy', () => {
   });
 });
 
-describe('primitiveToGeometry', () => {
-  describe('强类型 primitive（11 类）', () => {
-    it('Cylinder → CylinderGeometry 顶点数正确', () => {
-      const g = primitiveToGeometry({ type: 'Cylinder', r: 50, h: 300 })!;
-      expect(g).toBeInstanceOf(THREE.CylinderGeometry);
-      const cg = g as THREE.CylinderGeometry;
-      expect(cg.parameters.radiusTop).toBe(50);
-      expect(cg.parameters.radiusBottom).toBe(50);
-      expect(cg.parameters.height).toBe(300);
-      expect(cg.parameters.radialSegments).toBe(16);
-      // 顶点数 > 0
-      expect(g.attributes.position.count).toBeGreaterThan(0);
-    });
-
-    it('Cuboid → BoxGeometry 尺寸正确', () => {
-      // 实现使用 BoxGeometry(l, w, h) → width=l, height=w, depth=h
-      // （Three.js BoxGeometry 参数顺序固定为 width/height/depth，GIM 的 l/w/h 与之直接对应）
-      const g = primitiveToGeometry({ type: 'Cuboid', l: 800, w: 600, h: 2000 })!;
-      expect(g).toBeInstanceOf(THREE.BoxGeometry);
-      const bg = g as THREE.BoxGeometry;
-      expect(bg.parameters.width).toBe(800);
-      expect(bg.parameters.height).toBe(600);
-      expect(bg.parameters.depth).toBe(2000);
-      // BoxGeometry 8 角 × 6 面 = 24 顶点（去重前）
-      expect(g.attributes.position.count).toBe(24);
-    });
-
-    it('Sphere → SphereGeometry 参数正确', () => {
-      const g = primitiveToGeometry({ type: 'Sphere', r: 50 })!;
-      expect(g).toBeInstanceOf(THREE.SphereGeometry);
-      const sg = g as THREE.SphereGeometry;
-      expect(sg.parameters.radius).toBe(50);
-    });
-
-    it('TruncatedCone → CylinderGeometry（顶/底半径不同）', () => {
-      const g = primitiveToGeometry({ type: 'TruncatedCone', br: 100, tr: 50, h: 200 })!;
-      expect(g).toBeInstanceOf(THREE.CylinderGeometry);
-      const cg = g as THREE.CylinderGeometry;
-      expect(cg.parameters.radiusTop).toBe(50);
-      expect(cg.parameters.radiusBottom).toBe(100);
-      expect(cg.parameters.height).toBe(200);
-    });
-
-    it('Ring → TorusGeometry 参数正确', () => {
-      const g = primitiveToGeometry({ type: 'Ring', r: 100, dr: 20, rad: 3.14 })!;
-      expect(g).toBeInstanceOf(THREE.TorusGeometry);
-      const tg = g as THREE.TorusGeometry;
-      expect(tg.parameters.radius).toBe(100);
-      expect(tg.parameters.tube).toBe(20);
-      expect(tg.parameters.arc).toBe(3.14);
-    });
-
-    it('CircularGasket → TorusGeometry（外/内环推导管半径）', () => {
-      const g = primitiveToGeometry({
-        type: 'CircularGasket',
-        h: 10,
-        rad: 6.28,
-        or: 100,
-        ir: 80,
-      });
-      expect(g).toBeInstanceOf(THREE.TorusGeometry);
-      const tg = g as THREE.TorusGeometry;
-      expect(tg.parameters.radius).toBe(100);
-      // 管半径 = (OR - IR) / 2 = 10
-      expect(tg.parameters.tube).toBe(10);
-    });
-
-    it('PorcelainBushing → 组合锥柱与伞裙', () => {
-      const g = primitiveToGeometry({
-        type: 'PorcelainBushing',
-        r: 30,
-        r1: 45,
-        r2: 25,
-        n: 8,
-        h: 500,
-      });
-      expect(g).toBeInstanceOf(THREE.BufferGeometry);
-    });
-
-    it('TerminalBlock → BoxGeometry 简化', () => {
-      const g = primitiveToGeometry({
-        type: 'TerminalBlock',
-        l: 200,
-        w: 100,
-        h: 50,
-        t: 10,
-        r: 5,
-        bl: 20,
-        cl: 30,
-        cs: 40,
-        rs: 50,
-        cn: 6,
-        rn: 3,
-        phase: 'A',
-      });
-      expect(g).toBeInstanceOf(THREE.BufferGeometry);
-    });
-
-    it('ChannelSteel retains an open channel across its source length', () => {
-      const g = primitiveToGeometry({
-        type: 'ChannelSteel',
-        l: 2000, model: 'C5', d: 50, h: 100, b: 40, t: 8,
-      });
-      expect(g).not.toBeNull();
-    });
-
-    it('uses an open C10 section when only a designation and length exist',()=>{
-      const g=primitiveToGeometry({type:'BeamChannelLike',family:'BeamChannel',model:'C10',length:1600})!;
-      g.computeBoundingBox();
-      expect(g.boundingBox?.getSize(new THREE.Vector3()).toArray()).toEqual([48,1600,100]);
-      const material=new THREE.MeshBasicMaterial({side:THREE.DoubleSide});
-      const mesh=new THREE.Mesh(g,material);
-      const endRay=(x:number)=>new THREE.Raycaster(new THREE.Vector3(x,-900,0),new THREE.Vector3(0,1,0)).intersectObject(mesh);
-      expect(endRay(0)).toHaveLength(0);
-      expect(endRay(-22).length).toBeGreaterThan(0);
-      material.dispose();
-    });
-
-    it('Table → 外廓盒体浏览近似', () => {
-      const g = primitiveToGeometry({
-        type: 'Table',
-        h: 750, ll1: 800, ll2: 600, tl1: 80, tl2: 60,
-      });
-      expect(g).not.toBeNull();
-    });
-
-    it('StretchedBody → 沿法向拉伸二维截面', () => {
-      const g = primitiveToGeometry({
-        type: 'StretchedBody',
-        l: 200, array: '0,0;100,0;100,50;0,50', normal: '0,0,200',
-      });
-      expect(g).toBeInstanceOf(THREE.BufferGeometry);
-      g!.computeBoundingBox();
-      expect(g!.boundingBox!.min.toArray()).toEqual([0, 0, 0]);
-      expect(g!.boundingBox!.max.toArray()).toEqual([100, 50, 200]);
-      expect(g!.attributes.position.count).toBeGreaterThan(0);
-      expect(g!.index).not.toBeNull();
-      expect(g!.getAttribute('uv')).toBeDefined();
-    });
-
-    it('StretchedBody 支持位于 XZ 平面的截面并沿 Y 轴拉伸', () => {
-      const g = primitiveToGeometry({
-        type: 'StretchedBody',
-        l: 100, array: '0,0,0;50,0,0;50,0,50;0,0,50', normal: '0,100,0',
-      });
-      expect(g).toBeInstanceOf(THREE.BufferGeometry);
-      g!.computeBoundingBox();
-      expect(g!.boundingBox!.min.toArray()).toEqual([0, 0, 0]);
-      expect(g!.boundingBox!.max.toArray()).toEqual([50, 100, 50]);
-    });
-
-    it('StretchedBody 的一英尺方向基矢使用 L 作为拉伸长度', () => {
-      const g = primitiveToGeometry({
-        type: 'StretchedBody',
-        l: 100, array: '0,0;10,0;10,10;0,10', normal: '0,0,304.8',
-      });
-      expect(g).toBeInstanceOf(THREE.BufferGeometry);
-      g!.computeBoundingBox();
-      expect(g!.boundingBox!.max.z).toBeCloseTo(100);
-    });
-
-    it('StretchedBody 保留其他非单位 Normal 的完整位移解释', () => {
-      const g = primitiveToGeometry({ type: 'StretchedBody', l: 100,
-        array: '0,0;10,0;10,10;0,10', normal: '0,0,200' });
-      g!.computeBoundingBox();
-      expect(g!.boundingBox!.max.z).toBeCloseTo(200);
-    });
-
-    it('StretchedBody.Array 支持真实样例的三维点格式', () => {
-      const g = primitiveToGeometry({
-        type: 'StretchedBody',
-        l: 50, array: '0,0,0;20,0,0;20,10,0;0,10,0', normal: '0,0,1',
-      });
-      expect(g).toBeInstanceOf(THREE.BufferGeometry);
-      g!.computeBoundingBox();
-      expect(g!.boundingBox!.max.toArray()).toEqual([20, 10, 50]);
-    });
-
-    it('StretchedBody 无有效法向或不足三个点时跳过', () => {
-      expect(primitiveToGeometry({
-        type: 'StretchedBody', l: 50, array: '0,0;10,0', normal: '0,0,1',
-      })).toBeNull();
-      expect(primitiveToGeometry({
-        type: 'StretchedBody', l: 50, array: '0,0;10,0;0,10', normal: '0,0,0',
-      })).toBeNull();
-    });
+describe('production leaf routing',()=>{
+  it.each([
+    '<Sphere R="20"/>','<Cuboid L="12" W="10" H="6"/>','<Cylinder R="4" H="9"/>',
+    '<TruncatedCone BR="10" TR="0.5" H="20"/>','<Ring R="20" DR="2"/>','<CircularGasket OR="20" IR="10" H="3"/>',
+    '<PorcelainBushing R="2" R1="4" R2="3" N="2" H="20"/>',
+    '<TerminalBlock L="60" W="40" T="4" CL="2" CS="12" RS="12" BL="8" CN="2" RN="2" R="2"/>',
+    '<Table LL1="6" LL2="4" TL1="3" TL2="2" H="8"/>',
+    '<StretchedBody L="3" Normal="0,2,0" Array="0,0,0;2,0,0;2,0,2;0,0,2"/>',
+    '<OffsetRectangularTable LL="10" LW="8" TL="4" TW="2" H="5" XOFF="-1" YOFF="2"/>',
+    '<RectangularRing L="40" W="30" R="4" DR="1"/>',
+    '<RectangularFixedPlate L="60" W="50" T="4" CN="2" RN="2" RS="15" CS="20" D="3" MH="1"/>',
+    '<ChannelSteel B="40" H="60" D="3" T="4" L="100"/>',
+    '<BeamChannel Model="C10" Length="1600"/>',
+  ])('builds the declared local geometry for %s',tag=>{
+    const doc=parseXmlMod('<Device><Entities><Entity ID="1">'+tag+'</Entity></Entities></Device>','MOD/test.mod');
+    for(const lod of [0,1,2] as const){const g=primitiveToGeometry(doc.entities[0].primitive,lod)!;expect(g.getAttribute('position').count).toBeGreaterThan(0);g.computeBoundingBox();expect(g.boundingBox!.isEmpty()).toBe(false);}
   });
-
-  describe('弱 schema primitive（矩形板/框）', () => {
-    it('RectangularFixedPlate → 矩形板浏览近似', () => {
-      const g = primitiveToGeometry({
-        type: 'RectangularFixedPlate',
-        raw: { L: '100', W: '50', T: '10' },
-      });
-      expect(g).not.toBeNull();
-    });
-
-    it('OffsetRectangularTable rejects unknown fields and constructs the explicit seven-field solid', () => {
-      const g = primitiveToGeometry({
-        type: 'OffsetRectangularTable',
-        raw: { H: '50', L: '200' },
-      });
-      expect(g).toBeNull();
-      const solid = primitiveToGeometry({ type: 'OffsetRectangularTable',
-        raw: { TL: '26', TW: '134', LL: '36', LW: '144', H: '5', XOFF: '0', YOFF: '0' } })!;
-      solid.computeBoundingBox();
-      expect(solid.boundingBox!.min.toArray()).toEqual([-18, -72, 0]);
-      expect(solid.boundingBox!.max.toArray()).toEqual([18, 72, 5]);
-    });
-
-    it('RectangularRing → 矩形框浏览近似', () => {
-      const g = primitiveToGeometry({
-        type: 'RectangularRing',
-        raw: { L1: '100', W1: '80', L2: '80', W2: '60', H: '10' },
-      });
-      expect(g).not.toBeNull();
-    });
-  });
-
-  describe('NaN 数值安全化', () => {
-    it('Cylinder 含 NaN → 按 0 处理', () => {
-      const g = primitiveToGeometry({ type: 'Cylinder', r: NaN, h: NaN })!;
-      expect(g).toBeInstanceOf(THREE.CylinderGeometry);
-      const cg = g as THREE.CylinderGeometry;
-      expect(cg.parameters.radiusTop).toBe(0);
-      expect(cg.parameters.height).toBe(0);
-    });
+  it.each(['<Cylinder H="5"/>','<StretchedBody Array="0,0,0;1,0,0;0,1,0" L="5" Normal="0,0,0"/>','<OffsetRectangularTable L="20" H="30"/>'])('reports a local failure for %s',tag=>{
+    const doc=parseXmlMod('<Device><Entities><Entity ID="1">'+tag+'</Entity></Entities></Device>','MOD/test.mod');
+    expect(doc.status).toBe('partial');expect(primitiveToGeometry(doc.entities[0].primitive)).toBeNull();
   });
 });
-
 describe('entityToMesh', () => {
   describe('primitive → mesh', () => {
     it('Cuboid → mesh geometry 为 BoxGeometry', () => {
-      const e = makeEntity({ type: 'Cuboid', l: 100, w: 200, h: 300 });
+      const e = makeEntity({ type: 'Standard', canonical: {kind:'Cuboid', length:100, width:200, height:300} });
       const mesh = entityToMesh(e)!;
-      expect(mesh.geometry).toBeInstanceOf(THREE.BoxGeometry);
+      expect(mesh.geometry).toBeInstanceOf(THREE.BufferGeometry);
     });
 
     it('Cylinder → mesh geometry 为 CylinderGeometry', () => {
-      const e = makeEntity({ type: 'Cylinder', r: 50, h: 300 });
+      const e = makeEntity({ type: 'Standard', canonical: {kind:'Cylinder', radius:50, height:300} });
       const mesh = entityToMesh(e)!;
-      expect(mesh.geometry).toBeInstanceOf(THREE.CylinderGeometry);
+      expect(mesh.geometry).toBeInstanceOf(THREE.BufferGeometry);
     });
   });
 
   describe('TransformMatrix 应用', () => {
     it('单位矩阵 → mesh.position = (0,0,0)，mesh.quaternion = identity', () => {
       const e = makeEntity(
-        { type: 'Cuboid', l: 100, w: 100, h: 100 },
+        { type: 'Standard', canonical: {kind:'Cuboid', length:100, width:100, height:100} },
         { matrix: IDENTITY },
       );
       const mesh = entityToMesh(e)!;
@@ -347,7 +139,7 @@ describe('entityToMesh', () => {
       // GIM 列主序平移矩阵：translation (100, 200, 50) 在 [12]/[13]/[14]
       const matrix = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 100, 200, 50, 1];
       const e = makeEntity(
-        { type: 'Cuboid', l: 100, w: 100, h: 100 },
+        { type: 'Standard', canonical: {kind:'Cuboid', length:100, width:100, height:100} },
         { matrix },
       );
       const mesh = entityToMesh(e)!;
@@ -358,7 +150,7 @@ describe('entityToMesh', () => {
 
     it('非 16 长度矩阵 → 不应用变换（mesh.position 保持原点）', () => {
       const e = makeEntity(
-        { type: 'Cuboid', l: 100, w: 100, h: 100 },
+        { type: 'Standard', canonical: {kind:'Cuboid', length:100, width:100, height:100} },
         { matrix: [1, 0, 0, 0] }, // 长度 4
       );
       const mesh = entityToMesh(e)!;
@@ -370,7 +162,7 @@ describe('entityToMesh', () => {
 
   describe('Color 应用', () => {
     it('缺失 color → 默认灰色不透明材质', () => {
-      const e = makeEntity({ type: 'Cuboid', l: 100, w: 100, h: 100 });
+      const e = makeEntity({ type: 'Standard', canonical: {kind:'Cuboid', length:100, width:100, height:100} });
       const mesh = entityToMesh(e)!;
       const mat = mesh.material as THREE.MeshStandardMaterial;
       expect(mat).toBeInstanceOf(THREE.MeshStandardMaterial);
@@ -382,7 +174,7 @@ describe('entityToMesh', () => {
 
     it('R/G/B/A 全值 → material.color 与 opacity 正确', () => {
       const color: XmlModColor = { r: 200, g: 50, b: 50, a: 80 };
-      const e = makeEntity({ type: 'Cuboid', l: 100, w: 100, h: 100 }, { color });
+      const e = makeEntity({ type: 'Standard', canonical: {kind:'Cuboid', length:100, width:100, height:100} }, { color });
       const mesh = entityToMesh(e)!;
       const mat = mesh.material as THREE.MeshStandardMaterial;
       // 实现按 (r<<16)|(g<<8)|b 拼成 sRGB hex，由 THREE.Color 按 sRGB 解释
@@ -394,7 +186,7 @@ describe('entityToMesh', () => {
 
     it('A=100 → 不透明材质', () => {
       const color: XmlModColor = { r: 128, g: 128, b: 128, a: 100 };
-      const e = makeEntity({ type: 'Cuboid', l: 100, w: 100, h: 100 }, { color });
+      const e = makeEntity({ type: 'Standard', canonical: {kind:'Cuboid', length:100, width:100, height:100} }, { color });
       const mesh = entityToMesh(e)!;
       const mat = mesh.material as THREE.MeshStandardMaterial;
       expect(mat.transparent).toBe(false);
@@ -403,7 +195,7 @@ describe('entityToMesh', () => {
 
     it('A=0 → 不透明哨兵（Bentley/BIMBase 实测语义，docs/schema/substation-mod.md）', () => {
       const color: XmlModColor = { r: 0, g: 0, b: 0, a: 0 };
-      const e = makeEntity({ type: 'Cuboid', l: 100, w: 100, h: 100 }, { color });
+      const e = makeEntity({ type: 'Standard', canonical: {kind:'Cuboid', length:100, width:100, height:100} }, { color });
       const mesh = entityToMesh(e)!;
       const mat = mesh.material as THREE.MeshStandardMaterial;
       expect(mat.transparent).toBe(false);
@@ -414,7 +206,7 @@ describe('entityToMesh', () => {
   describe('Visible 属性', () => {
     it('Visible=True → mesh.visible = true', () => {
       const e = makeEntity(
-        { type: 'Cuboid', l: 100, w: 100, h: 100 },
+        { type: 'Standard', canonical: {kind:'Cuboid', length:100, width:100, height:100} },
         { visible: true },
       );
       const mesh = entityToMesh(e)!;
@@ -424,7 +216,7 @@ describe('entityToMesh', () => {
     it('Visible=False → mesh.visible = false（不在 entityToMesh 中处理，由 xmlModDocumentToGroup 控制）', () => {
       // entityToMesh 不读 visible，由 xmlModDocumentToGroup 设置
       const e = makeEntity(
-        { type: 'Cuboid', l: 100, w: 100, h: 100 },
+        { type: 'Standard', canonical: {kind:'Cuboid', length:100, width:100, height:100} },
         { visible: false },
       );
       const mesh = entityToMesh(e)!;
@@ -534,22 +326,22 @@ describe('方案 A：Geometry 共享缓存', () => {
   });
 
   it('同参数 primitive → 共享同一 BufferGeometry 实例', () => {
-    const p: XmlModPrimitive = { type: 'Cylinder', r: 50, h: 300 };
+    const p: XmlModPrimitive = { type: 'Standard', canonical: {kind:'Cylinder', radius:50, height:300} };
     const g1 = primitiveToGeometry(p)!;
     const g2 = primitiveToGeometry(p)!;
     expect(g1).toBe(g2); // 引用相等
   });
 
   it('不同参数 → 不共享', () => {
-    const p1: XmlModPrimitive = { type: 'Cylinder', r: 50, h: 300 };
-    const p2: XmlModPrimitive = { type: 'Cylinder', r: 50, h: 400 };
+    const p1: XmlModPrimitive = { type: 'Standard', canonical: {kind:'Cylinder', radius:50, height:300} };
+    const p2: XmlModPrimitive = { type: 'Standard', canonical: {kind:'Cylinder', radius:50, height:400} };
     const g1 = primitiveToGeometry(p1)!;
     const g2 = primitiveToGeometry(p2)!;
     expect(g1).not.toBe(g2);
   });
 
   it('Entity.TransformMatrix 不影响缓存键 → 同 primitive 不同 TransformMatrix 仍共享', () => {
-    const primitive: XmlModPrimitive = { type: 'Cuboid', l: 100, w: 100, h: 100 };
+    const primitive: XmlModPrimitive = { type: 'Standard', canonical: {kind:'Cuboid', length:100, width:100, height:100} };
     const matrixA = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 100, 200, 50, 1];
     const matrixB = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 999, 999, 999, 1];
     const e1 = makeEntity(primitive, { matrix: matrixA });
@@ -564,7 +356,7 @@ describe('方案 A：Geometry 共享缓存', () => {
   });
 
   it('disposeSharedXmlModGeometries 后再次请求 → 新建实例', () => {
-    const p: XmlModPrimitive = { type: 'Cylinder', r: 50, h: 300 };
+    const p: XmlModPrimitive = { type: 'Standard', canonical: {kind:'Cylinder', radius:50, height:300} };
     const g1 = primitiveToGeometry(p)!;
     disposeSharedXmlModGeometries();
     const g2 = primitiveToGeometry(p)!;
@@ -573,7 +365,7 @@ describe('方案 A：Geometry 共享缓存', () => {
 });
 
 describe('Color A 刻度规则（P3-2，docs/schema/substation-mod.md）', () => {
-  const cyl: XmlModPrimitive = { type: 'Cylinder', r: 100, h: 200 };
+  const cyl: XmlModPrimitive = { type: 'Standard', canonical: {kind:'Cylinder', radius:100, height:200} };
 
   function meshOpacity(color: XmlModColor | undefined, maxA = 100): number {
     const mesh = entityToMesh(makeEntity(cyl, { color }), maxA);
@@ -893,7 +685,7 @@ describe('Boolean CSG（P3-1，three-bvh-csg）', () => {
     expect(maxZ2).toBeCloseTo(maxZ1, 4);
 
     // 共享缓存中的原始几何必须保持未变换（居中于原点，原始 mm 单位）
-    const cached = primitiveToGeometry({ type: 'Cuboid', l: 123, w: 77, h: 91 })!;
+    const cached = primitiveToGeometry({ type: 'Standard', canonical: {kind:'Cuboid', length:123, width:77, height:91} })!;
     cached.computeBoundingBox();
     expect(cached.boundingBox!.min.z).toBeCloseTo(0, 1);
     expect(cached.boundingBox!.max.z).toBeCloseTo(91, 1);

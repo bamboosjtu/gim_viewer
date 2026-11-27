@@ -9,9 +9,9 @@
  * - 独立跟踪（state.loadedXmlModGroups），不与 IFC loadedModels 混用
  *
  * 引用链：CBM → DEV → PHM → MOD
- * - Entity 内部 TransformMatrix 由 entityToMesh 应用（primitive 局部坐标 → MOD 局部空间）
+ * - 各 Entity 变换由宿主组合求值逐边应用（primitive 局部坐标 → MOD 局部空间）
  * - CBM/DEV/SUBDEVICE/PHM 外部矩阵由调用方累积后应用（MOD 局部空间 → 工程坐标）
- * - MOD Group 在 xmlModDocumentToGroup 中统一从毫米缩放到 IFC 场景米量级
+ * - 生产加载路径在顶点烘焙时将毫米换算到场景米
  *
  * P0 范围：
  * - 仅处理 currentFiles 非空场景（首次打开）
@@ -21,6 +21,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { parseXmlMod } from '../gim/geometry/xmlModParser.js';
+import { standardConnectionLine } from '../gim/geometry/xmlModDocument.js';
 import {
   applyPhmColorOverride,
   collectBakedGeometriesByMaterial,
@@ -45,6 +46,7 @@ export interface XmlModGeometryDiagnostics {
   malformedEntityCount: number;
   unsupportedEntityCount: number;
   unsupportedPrimitiveTypeCounts: Record<string, number>;
+  previewShapes?: string[];
   sourceDiagnostics?: SourceDiagnostic[];
   failedVisibleRoots?: import('./xmlModGeometry.js').BakedGeometryFailure[];
   simplifiedBooleans?: number;
@@ -82,8 +84,8 @@ function addElectricalConnectionLines(group: THREE.Group, doc: XmlModDocument): 
     if (!entity.visible) continue;
     const primitive = entity.primitive;
     const flat =
-      primitive.type === 'Wire'
-        ? primitive.fitPoints
+      primitive.type === 'Standard'
+        ? standardConnectionLine(primitive.canonical)
         : primitive.type === 'Cable'
           ? primitive.inflectionPoints
           : null;
@@ -210,34 +212,11 @@ function flattenDocumentToGroup(
   // Keep the current renderer's primitive policy, but expose its degradation
   // explicitly to cache/pipeline callers. A non-rendered primitive is not an
   // empty source.
-  const renderableTypes = new Set([
-    'Standard',
-    'Cuboid',
-    'Cylinder',
-    'Sphere',
-    'TruncatedCone',
-    'Ring',
-    'CircularGasket',
-    'StretchedBody',
-    'PorcelainBushing',
-    'TerminalBlock',
-    'Wire',
-    'Cable',
-    'RotationalEllipsoid',
-    'BeamChannelLike',
-    'Boolean',
-    'OffsetRectangularTable',
-    'RectangularFixedPlate',
-    'RectangularRing',
-    'ChannelSteel',
-    'Table',
-  ]);
   let unsupportedEntityCount = doc.malformedEntityCount;
   for (const entity of doc.entities) {
-    if (renderableTypes.has(entity.primitive.type)) continue;
+    if (entity.primitive.type !== 'Unsupported') continue;
     unsupportedEntityCount++;
-    const type =
-      entity.primitive.type === 'Unsupported' ? entity.primitive.sourceType : entity.primitive.type;
+    const type = entity.primitive.sourceType;
     unsupportedPrimitiveTypeCounts[type] = (unsupportedPrimitiveTypeCounts[type] ?? 0) + 1;
   }
 
@@ -301,6 +280,9 @@ function flattenDocumentToGroup(
     malformedEntityCount: doc.malformedEntityCount,
     unsupportedEntityCount,
     unsupportedPrimitiveTypeCounts,
+    ...(byMaterial.previewShapes.size
+      ? { previewShapes: [...byMaterial.previewShapes].sort() }
+      : {}),
     ...(sourceDiagnostics.length ? { sourceDiagnostics } : {}),
     failedVisibleRoots: byMaterial.failures,
     simplifiedBooleans: byMaterial.simplifiedBooleans,

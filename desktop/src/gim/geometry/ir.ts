@@ -6,7 +6,12 @@ import type {
   XmlModPrimitive as LegacyPrimitive,
 } from '@gim/gim-primitives/geometry/ir.js';
 
-export type XmlModPrimitive = LegacyPrimitive | { type: 'Standard'; canonical: CanonicalPrimitive };
+export type XmlModPrimitive =
+  | Extract<
+      LegacyPrimitive,
+      { type: 'Cable' | 'Boolean' | 'ChannelSteel' | 'BeamChannelLike' | 'Unsupported' }
+    >
+  | { type: 'Standard'; canonical: CanonicalPrimitive };
 export type XmlModEntity = Omit<LegacyEntity, 'primitive'> & { primitive: XmlModPrimitive };
 export function primitiveName(p: XmlModPrimitive): string {
   if (p.type === 'Standard') return p.canonical.kind;

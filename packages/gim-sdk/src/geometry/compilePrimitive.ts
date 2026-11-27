@@ -1,6 +1,8 @@
 import { checkGeometryBudget } from "./geometryBudget.js";
 import { plateMesh } from "./perforatedPlate.js";
 import { profileMesh } from "./profileFamilies.js";
+import { bodyMesh } from "./revolvedBodies.js";
+import { curveMesh } from "./curveCable.js";
 import {
   loftRings,
   rectangle,
@@ -133,7 +135,7 @@ export function compilePrimitive(
   return {
     status:
       "family" in primitive && primitive.approximation
-        ? primitive.modelEstimate
+        ? "modelEstimate" in primitive && primitive.modelEstimate
           ? "estimated"
           : "preview-only"
         : "standard-derived",
@@ -201,7 +203,11 @@ function buildLocal(
   segments: number,
   options: GeometryCompileOptions,
 ): MeshBuild {
-  if ("family" in p) return profileMesh(p, segments, options);
+  if ("family" in p) {
+    if (p.family === "body") return bodyMesh(p, segments, options);
+    if (p.family === "curve") return curveMesh(p, options);
+    return profileMesh(p, segments, options);
+  }
   const positive = (...dims: number[]) =>
     dims.every((n) => Math.fround(n) > 0 && Number.isFinite(Math.fround(n)));
   const extent: GeometryDiagnostic = {

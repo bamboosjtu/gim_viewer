@@ -135,7 +135,11 @@ export function loftRings(
     return [dot(d, u), dot(d, v)];
   };
   if (validateContour) {
-    const tolerance = 64 * Number.EPSILON * extent * ring.length;
+    // The source coordinates were rounded at their absolute magnitude before
+    // projection about the first vertex. Account for both roundoff scales.
+    const originScale = Math.max(...origin.map(Math.abs)) + extent;
+    const tolerance =
+      Number.EPSILON * (64 * extent * ring.length + 8 * originScale);
     if (ring.some((p) => Math.abs(dot(sub(p, origin), normal)) > tolerance))
       return invalidShape("Contour is not coplanar");
     if (!simpleRing(ring.map(project)))

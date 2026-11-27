@@ -1,6 +1,8 @@
 import {
   compilePrimitive,
   PROFILE_TAGS,
+  COMPLEX_TAGS,
+  curveCenterline,
   interpretXmlModPrimitive,
   type CanonicalPrimitive,
   type GeometryLod,
@@ -19,6 +21,7 @@ export interface XmlModDocument extends Omit<LegacyDocument, 'entities' | 'diagn
 }
 
 const migratedTags = new Map([
+  ...COMPLEX_TAGS.map((tag) => [tag.toLowerCase(), tag] as [string, string]),
   ...PROFILE_TAGS.map((tag) => [tag.toLowerCase(), tag] as [string, string]),
   ['terminalblock', 'TerminalBlock'],
   ['rectangularfixedplate', 'RectangularFixedPlate'],
@@ -34,7 +37,10 @@ const migratedTags = new Map([
 
 const indexes = new WeakMap<XmlModEntity[], Map<number, XmlModEntity>>();
 export function compileStandardLeaf(shape: CanonicalPrimitive, lod: GeometryLod) {
-  return compilePrimitive(shape, { lod }).mesh;
+  return compilePrimitive(shape, { lod });
+}
+export function standardConnectionLine(shape: CanonicalPrimitive) {
+  return 'family' in shape && shape.family === 'curve' ? curveCenterline(shape).flat() : undefined;
 }
 export function entityIndex(doc: XmlModDocument): ReadonlyMap<number, XmlModEntity> {
   let index = indexes.get(doc.entities);
@@ -85,14 +91,21 @@ export function projectXmlMod(raw: RawXmlModDocument): XmlModDocument {
                   evidence: 'project XML Model-only section convention',
                 },
               }
-            : migrated === 'Table'
+            : migrated === 'Wire'
               ? {
                   compatibility: {
-                    rule: 'non-similar-rhombi-preview-v1',
-                    evidence: 'substation01 raw Table declarations with unequal scale factors',
+                    rule: 'wire-fit-preview-v1',
+                    evidence: 'existing FitCoordArray project provider',
                   },
                 }
-              : {},
+              : migrated === 'Table'
+                ? {
+                    compatibility: {
+                      rule: 'non-similar-rhombi-preview-v1',
+                      evidence: 'substation01 raw Table declarations with unequal scale factors',
+                    },
+                  }
+                : {},
         )
       : undefined;
     if (result?.canonical) {
