@@ -5,7 +5,7 @@ import ts from 'typescript';
 const ownership = {
   'session identity and release': 'projectSession',
   'source state reset on project close':
-    'currentFiles currentIfcEntries currentCbmTree substationSpatialIndex projectName currentProjectType lineCachePersistence currentGimGraph ifcGuidIndex cbmNodeIndex ifcGuidToName substationCapabilities substationEntryPaths substationEntrySizes fileDevRelations deviceToIfcFile currentStdDoc currentSldDoc currentStdSldIndex',
+    'currentFiles currentIfcEntries currentCbmTree substationSpatialIndex projectName projectType lineCachePersistence currentGimGraph ifcGuidIndex cbmNodeIndex ifcGuidToName substationCapabilities substationEntryPaths substationEntrySizes fileDevRelations deviceToIfcFile currentStdDoc currentSldDoc currentStdSldIndex',
   'owners released or reset on project close':
     'ifc selection properties sourceGeometry ifcLoading engineering viewState deviceRuntimeSlot',
   'substation session resource release':
