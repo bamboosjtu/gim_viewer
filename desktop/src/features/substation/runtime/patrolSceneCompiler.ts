@@ -1,6 +1,9 @@
 import type { Vector3 } from 'three';
 import type { PatrolSource } from '../../../viewer/patrol/navigationQueryPort.js';
-import type { PatrolAsset } from '../../../shared/patrolSpatialAsset.js';
+import {
+  UnsupportedPatrolSourceError,
+  type PatrolAsset,
+} from '../../../shared/patrolSpatialAsset.js';
 import type { PatrolAssetBuilder } from '../../../infrastructure/workers/patrolAssetBuilder.js';
 import {
   readPatrolCache,
@@ -39,6 +42,7 @@ export async function compilePatrolAssets(
   sources: PatrolSource[],
   entrance: Vector3 | undefined,
   assets: Map<string, PatrolAsset>,
+  unavailable: Set<string>,
   key: string,
   prefix: string,
   builder: PatrolAssetBuilder,
@@ -47,7 +51,7 @@ export async function compilePatrolAssets(
   check: () => void,
   progress: (message: string) => void,
 ) {
-  const failed = new Set<string>();
+  let needsRetry = false;
   let stored = true;
   const ordered = entrance
     ? [...sources].sort(
@@ -63,7 +67,7 @@ export async function compilePatrolAssets(
       if (preparedTemplates % 10 === 0)
         progress(`正在编译巡视场景 ${preparedTemplates}/${templates.size}…`);
       preparedTemplates++;
-      if (assets.has(row.assetKey)) continue;
+      if (assets.has(row.assetKey) || unavailable.has(row.assetKey)) continue;
       const assetKey = key + '/' + row.assetKey;
       let asset = await readPatrolCache<PatrolAsset>('assets', assetKey);
       check();
@@ -86,9 +90,10 @@ export async function compilePatrolAssets(
           metrics.assetBuilds++;
           if (!(await writePatrolCache('assets', assetKey, asset, prefix))) stored = false;
           check();
-        } catch {
+        } catch (error) {
           check();
-          failed.add(row.assetKey);
+          if (error instanceof UnsupportedPatrolSourceError) unavailable.add(row.assetKey);
+          else needsRetry = true;
           continue;
         }
       }
@@ -97,5 +102,5 @@ export async function compilePatrolAssets(
   }
   const results = await Promise.allSettled([compileNext(), compileNext()]);
   for (const result of results) if (result.status === 'rejected') throw result.reason;
-  return { failed, stored };
+  return { needsRetry, stored };
 }

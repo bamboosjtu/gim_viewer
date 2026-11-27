@@ -16,6 +16,7 @@ import {
   discardPatrolEntry,
   writePatrolCache,
 } from '../../../infrastructure/cache/navigation/patrolCache.js';
+import { UnsupportedPatrolSourceError } from '../../../shared/patrolSpatialAsset.js';
 import { PatrolAssetBuilder } from '../../../infrastructure/workers/patrolAssetBuilder.js';
 import { solvePatrolStep } from '../../../viewer/patrol/collision/patrolStep.js';
 import { doorRange, doorTransform } from '../../../viewer/patrol/doorMotion.js';
@@ -76,6 +77,8 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
   private readonly opened = new Map<string, () => void>();
   private readonly trustedDoors = new Set<string>();
   private prepared = false;
+  // If storage is unavailable, keep successful template buffers for the next entrance.
+  private memoryRepair?: { assets: Map<string, PatrolAsset>; unavailable: Set<string> };
   private preparation?: Promise<void>;
   private readonly sourcesById = new Map<string, PreparedSource>();
   private readonly unavailable = new Set<string>();
@@ -178,6 +181,8 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
               !/栏杆|扶手|墙/.test(product.label)),
           load: async (signal) => {
             const result = await runtime.patrolSource('patrol-mesh', signal, product);
+            if (!result.parts.some((part) => part.indices.length))
+              throw new UnsupportedPatrolSourceError(id + ': IFC source has no triangles');
             return result.parts.map((p) => {
               const positions = new Float32Array(p.vertices.length / 2);
               for (let i = 0; i < positions.length; i += 3)
@@ -225,16 +230,17 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
     const cached = await readPatrolCache<PatrolSceneManifest>('coverage', key);
     this.check(signal);
     this.metrics.fromCache = this.metrics.persisted = false;
-    const assets = new Map<string, PatrolAsset>();
+    const assets = this.memoryRepair?.assets ?? new Map<string, PatrolAsset>();
+    const unavailable = this.memoryRepair?.unavailable ?? new Set<string>();
     if (usableManifest(cached)) {
       progress('正在载入已编译的巡视场景…');
-      const unavailable = new Set(cached.unavailable);
-      for (const item of cached.sources) {
-        if (assets.has(item.assetKey) || unavailable.has(item.assetKey)) continue;
-        const asset = await readPatrolCache<PatrolAsset>('assets', this.key + '/' + item.assetKey);
+      for (const key of cached.unavailable) unavailable.add(key);
+      for (const assetKey of new Set(cached.sources.map((row) => row.assetKey))) {
+        if (assets.has(assetKey) || unavailable.has(assetKey)) continue;
+        const asset = await readPatrolCache<PatrolAsset>('assets', this.key + '/' + assetKey);
         this.check(signal);
         if (usableAsset(asset)) {
-          assets.set(item.assetKey, asset);
+          assets.set(assetKey, asset);
           this.metrics.assetHits++;
         }
       }
@@ -242,23 +248,23 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
         cached.sources.some((row) => row.support && assets.has(row.assetKey)) &&
         cached.sources.every((row) => assets.has(row.assetKey) || unavailable.has(row.assetKey))
       ) {
+        this.memoryRepair = undefined;
         this.publishScene(cached, assets);
         this.metrics.fromCache = this.metrics.persisted = true;
         return;
       }
-    }
-
-    if (cached) {
+    } else if (cached) {
       await discardPatrolEntry('coverage', key, this.cachePrefix);
       this.check(signal);
     }
     progress('正在准备工程来源…');
     const catalog = await this.catalog(signal);
     this.check(signal);
-    const { failed, stored } = await compilePatrolAssets(
+    const { needsRetry, stored } = await compilePatrolAssets(
       catalog.sources,
       catalog.approaches[0]?.point,
       assets,
+      unavailable,
       this.key,
       this.cachePrefix,
       this.builder,
@@ -283,14 +289,16 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
         doorAddress: row.doorAddress,
       })),
       unknown: catalog.unknown,
-      unavailable: [...failed],
+      unavailable: [...unavailable],
       approaches: catalog.approaches.map((row) => ({ point: row.point.toArray(), yaw: row.yaw })),
     };
+    this.memoryRepair = needsRetry ? { assets, unavailable } : undefined;
     if (!manifest.sources.some((row) => row.support && assets.has(row.assetKey)))
       throw Error('巡视场景缺少可用路面或楼面');
     this.metrics.persisted =
       stored && (await writePatrolCache('coverage', key, manifest, this.cachePrefix));
     this.check(signal);
+    if (this.metrics.persisted) this.memoryRepair = undefined;
     this.publishScene(manifest, assets);
   }
 
@@ -530,13 +538,14 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
       }
     }
     this.opened.clear();
-    if (this.metrics.persisted) this.clearScene();
+    if (this.metrics.persisted || this.memoryRepair) this.clearScene();
   }
   dispose() {
     try {
       this.leave();
     } finally {
       this.builder.dispose();
+      this.memoryRepair = undefined;
       this.clearScene();
     }
   }

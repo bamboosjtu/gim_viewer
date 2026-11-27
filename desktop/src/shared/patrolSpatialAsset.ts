@@ -1,4 +1,7 @@
-/** Structured-clone payloads shared by the Worker, cache and spatial query. */
+/** Only source adapters with a confirmed, deterministic lack of collision geometry use this error. */
+export class UnsupportedPatrolSourceError extends Error {}
+
+/** Structured-clone payload shared by the Worker, cache and spatial query. */
 export interface PatrolPart {
   previewShapes?: readonly string[];
   positions: Float32Array;

@@ -31,6 +31,7 @@ import {
   MissingDevDependencyError,
   geometryFailureKind,
 } from '../../gim/geometry/sourceGeometryError.js';
+import { UnsupportedPatrolSourceError } from '../../shared/patrolSpatialAsset.js';
 import { RevisionSet } from '../../utils/byteLru.js';
 import {
   perfCurrentSession,
@@ -279,7 +280,10 @@ export class DevLodRuntime {
       const result = await this.template(dev, 2, 1);
       signal.throwIfAborted();
       if (!this.current()) throw Error('DEV 来源已切换');
-      if (!result && this.templateStore.nullResults.get(key) === 'empty') return null;
+      const terminal = this.templateStore.nullResults.get(key);
+      if (!result && terminal) throw new UnsupportedPatrolSourceError(dev + ': ' + terminal);
+      if (result?.status === 'partial' && result.diagnostics.unsupportedSourceCount > 0)
+        throw new UnsupportedPatrolSourceError(dev + ': unsupported collision source');
       if (
         !result ||
         result.status !== 'complete' ||
@@ -294,6 +298,10 @@ export class DevLodRuntime {
             (result?.diagnostics.reason ?? result?.status ?? '无三角形'),
         );
       return result;
+    } catch (error) {
+      if (error instanceof InvalidDevGeometryError && error.sourceEvidence)
+        throw new UnsupportedPatrolSourceError(error.message);
+      throw error;
     } finally {
       this.patrolWanted.delete(key);
     }
@@ -353,7 +361,6 @@ export class DevLodRuntime {
       const matrix = createSourcePlacementMatrix(e.placementMatrix);
       const load = async (signal: AbortSignal) => {
         const t = await this.patrolTemplate(e.devPath, signal);
-        if (!t) throw Error('DEV 无可用三角形');
         const parts: PatrolPart[] = [];
         t.template.scene.updateMatrixWorld(true);
         t.template.scene.traverse((obj) => {

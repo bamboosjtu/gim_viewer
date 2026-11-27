@@ -6,6 +6,10 @@ import type { AppState } from '../../../../app/state.js';
 import type { ProjectLoadSession } from '../../../../shared/projectSession.js';
 import type { PatrolPart, PatrolSource } from '../../../../viewer/patrol/navigationQueryPort.js';
 
+import { UnsupportedPatrolSourceError } from '../../../../shared/patrolSpatialAsset.js';
+import * as cache from '../../../../infrastructure/cache/navigation/patrolCache.js';
+import { PatrolAssetBuilder } from '../../../../infrastructure/workers/patrolAssetBuilder.js';
+
 const records = vi.hoisted(() => new Map<string, unknown>());
 vi.mock('../../../../infrastructure/cache/navigation/patrolCache.js', async (actual) => ({
   ...await actual<typeof import('../../../../infrastructure/cache/navigation/patrolCache.js')>(),
@@ -277,9 +281,81 @@ describe('source coverage and navigation cache', () => {
     const manifest = [...records].find(
       ([key]) => key.startsWith('coveragepartial') && key.endsWith('/scene-v1'),
     );
-    expect(manifest?.[1]).toMatchObject({ unavailable: ['failed-equipment'] });
+    expect(manifest?.[1]).toMatchObject({ unavailable: [] });
     runtime.dispose();
   });
+  it.each(['load', 'worker', 'no-storage'] as const)(
+    'repairs only the failed template on re-entry (%s)',
+    async (kind) => {
+      const floor = slab(),
+        floorLoad = vi.spyOn(floor, 'load');
+      const sample = slab();
+      sample.id = sample.assetKey = 'recoverable';
+      sample.support = false;
+      sample.bounds = new Box3(p(3, 3), p(4, 4, 2));
+      const load = vi.spyOn(sample, 'load');
+      const stable = source(
+        'unsupported',
+        new Box3(p(6, 6), p(7, 7, 2)),
+        false,
+        vi.fn(async () => {
+          throw new UnsupportedPatrolSourceError('confirmed unsupported source');
+        }),
+      );
+      const write =
+        kind === 'no-storage'
+          ? vi.spyOn(cache, 'writePatrolCache').mockResolvedValue(false)
+          : undefined;
+      const builder = PatrolAssetBuilder.prototype.build;
+      let failBuild = true;
+      const worker =
+        kind === 'worker'
+          ? vi
+              .spyOn(PatrolAssetBuilder.prototype, 'build')
+              .mockImplementation(async function (parts) {
+                if (parts[0].positions[0] === 3 && failBuild) {
+                  failBuild = false;
+                  throw Error('worker out of memory');
+                }
+                return builder.call(this, parts);
+              })
+          : undefined;
+      load.mockImplementation(async () => [
+        {
+          positions: new Float32Array([3, 3, 0, 4, 3, 0, 3, 4, 0]),
+          indices: new Uint32Array([0, 1, 2]),
+          matrix: identity.toArray(),
+        },
+      ]);
+      if (kind !== 'worker') load.mockRejectedValueOnce(Error('temporary source read failure'));
+      const id = 'retry-' + kind,
+        sources = [floor, sample, stable],
+        signal = new AbortController().signal;
+      let rt = fixture(id, sources);
+      try {
+        await rt.prepareScene(signal);
+        expect(rt.step(p(3, 3), p(3.1, 3))).toMatchObject({ reason: '附近缺失碰撞几何' });
+        expect(rt.metrics.assetBuilds).toBe(1);
+        rt.leave();
+        if (kind !== 'no-storage') {
+          rt.dispose();
+          rt = fixture(id, sources);
+        }
+        await rt.prepareScene(signal);
+        expect(rt.step(p(3, 3), p(3.1, 3))).toHaveProperty('feet');
+        expect(rt.step(p(6, 6), p(6.1, 6))).toMatchObject({ reason: '附近缺失碰撞几何' });
+        rt.leave();
+        await rt.prepareScene(signal);
+        expect(floorLoad).toHaveBeenCalledTimes(1);
+        expect(stable.load).toHaveBeenCalledTimes(1);
+        expect(load).toHaveBeenCalledTimes(2);
+      } finally {
+        rt.dispose();
+        write?.mockRestore();
+        worker?.mockRestore();
+      }
+    },
+  );
   it('finds the gate even when some baked assets are unavailable', async () => {
     const gate = source('gate', new Box3(p(0.5, 2, 3.5), p(0.8, 6, 3.8)), false, async () => [
       {
