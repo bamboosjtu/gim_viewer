@@ -12,8 +12,9 @@ import type {
 import type { XmlModColor, XmlModEntity, XmlModPrimitive } from './ir.js';
 import { mapXmlModPrimitive } from './xmlModPrimitiveAdapter.js';
 
-export interface XmlModDocument extends Omit<LegacyDocument, 'entities'> {
+export interface XmlModDocument extends Omit<LegacyDocument, 'entities' | 'diagnostics'> {
   entities: XmlModEntity[];
+  diagnostics: readonly XmlModDiagnostic[];
 }
 
 const migratedTags = new Map([

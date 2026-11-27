@@ -7,7 +7,7 @@ GIM SDK 是仓库内的核心能力包，供桌面 Viewer 处理格式解析、�
 | `@gim/gim-sdk/parser` | CBM/FAM/DEV/PHM/MOD/FileDevRelation/IFC STEP/SCH/STD/SLD 语法、原始值和诊断；不依赖五个 Core |
 | `@gim/gim-sdk/source` | 共享文档、来源图、引用实例、来源收集 |
 | `@gim/gim-sdk/semantic` | 中立证据的类别、整体身份和唯一主归属 |
-| `@gim/gim-sdk/geometry` | 独立物理 occurrence 目录、矩阵、表示地址索引，以及 B.3 长方体和 B.6 圆柱的局部 MeshData 编译 |
+| `@gim/gim-sdk/geometry` | 独立物理 occurrence 目录、矩阵、表示地址索引、局部 MeshData 编译，以及独立于网格的图元和文档范围查询 |
 | `@gim/gim-sdk/engineering` | 工程整体与一对多表示绑定、歧义解析 |
 | `@gim/gim-sdk/projection` | 清册 / 工程组成 / 来源投影和成员树查询 |
 | `@gim/gim-sdk/source-adapter` | 来源证据到纯语义归一化的适配 |
@@ -40,6 +40,7 @@ const raw = parser.parseXmlModRoot(rootNode, {
   matrixLayout: 'project-column-major', // A.3.21 示例使用 'a3-21-example'
 });
 const result = geometry.compileXmlModDocument(raw, { lod: 2 });
+const range = geometry.queryXmlModBounds(raw, { purpose: 'analytical' });
 for (const entity of result.entities) {
   if (entity.templateKey) {
     const mesh = result.templates.get(entity.templateKey).mesh;

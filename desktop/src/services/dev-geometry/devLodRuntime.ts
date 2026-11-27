@@ -741,7 +741,7 @@ export class DevLodRuntime {
           placementMatrix: matrix,
           templateStatus: 'unrequested',
         };
-        const box = bounds.sourceBounds
+        const box = bounds.boundsQuality === 'conservative' && bounds.sourceBounds
           ? boxTuple(bounds.sourceBounds).applyMatrix4(
               (this.anchor?.clone() ?? new THREE.Matrix4()).multiply(
                 createSourcePlacementMatrix(matrix),
@@ -881,7 +881,7 @@ export class DevLodRuntime {
       const placement = matrix
         .clone()
         .multiply(createSourcePlacementMatrix(row.entry.placementMatrix));
-      row.box = row.entry.sourceBounds
+      row.box = row.entry.boundsQuality === 'conservative' && row.entry.sourceBounds
         ? boxTuple(row.entry.sourceBounds).applyMatrix4(placement)
         : null;
       this.viewIndex.set(row.entry.rootOccurrence, row.box);

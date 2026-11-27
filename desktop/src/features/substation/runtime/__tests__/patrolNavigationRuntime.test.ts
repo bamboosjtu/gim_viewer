@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Box3, Matrix4, Vector3 } from 'three';
 import { PatrolNavigationRuntime } from '../patrolNavigationRuntime.js';
+import { DEV_SHAPE_POLICY } from '../../../../infrastructure/cache/devLodIdentity.js';
 import type { AppState } from '../../../../app/state.js';
 import type { ProjectLoadSession } from '../../../../shared/projectSession.js';
 import type { PatrolPart, PatrolSource } from '../../../../viewer/patrol/navigationQueryPort.js';
@@ -311,14 +312,22 @@ describe('source coverage and navigation cache', () => {
     const signal = new AbortController().signal;
     const f = slab(),
       load = vi.spyOn(f, 'load');
-    for (const hits of [0, 1]) {
+    for (const [pass, hits] of [0, 0, 1].entries()) {
       const rt = fixture('warm', hits ? [] : [f]);
       await rt.prepareScene(signal);
       expect(rt.metrics.fromCache).toBe(Boolean(hits));
       expect(rt.metrics.assetBuilds).toBe(1 - hits);
       expect(rt.step(p(2, 2), p(2, 2))).toMatchObject({ sourceId: 'floor' });
       rt.dispose();
+      if (pass === 0) {
+        const current = [...records].filter(([key]) => key.includes('warm/') && key.includes(DEV_SHAPE_POLICY));
+        expect(current.length).toBeGreaterThan(0);
+        for (const [key,value] of current) {
+          records.set(key.replace(DEV_SHAPE_POLICY,'open-steel-section-v1+sdk-box-cylinder-project-column-major-v1'), value);
+          records.delete(key);
+        }
+      }
     }
-    expect(load).toHaveBeenCalledTimes(1);
+    expect(load).toHaveBeenCalledTimes(2);
   });
 });

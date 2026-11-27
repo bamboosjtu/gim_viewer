@@ -1,6 +1,8 @@
 import { GEOMETRY_CACHE_VERSION as DEV_GEOMETRY_VERSION } from '@desktop/contracts.js';
 export { DEV_GEOMETRY_VERSION };
 import * as THREE from 'three';
+import { aggregateGeometryBounds, analyzePrimitive } from '@gim/gim-sdk/geometry';
+import { entityIndex } from '../../gim/geometry/xmlModDocument.js';
 import { steelSection } from '../../gim/geometry/steelSection.js';
 import { stretchedBodyDisplacement } from '../../gim/geometry/stretchedBody.js';
 import { offsetRectangularTableVertices } from '../../gim/geometry/offsetRectangularTable.js';
@@ -46,13 +48,10 @@ export function primitiveBounds(p: XmlModPrimitive): THREE.Box3 | null {
   const radial = (r: number, z0: number, z1: number) => new THREE.Box3(v(-r, -r, z0), v(r, r, z1));
   switch (p.type) {
     case 'Standard': {
-      const shape = p.canonical;
-      return shape.kind === 'Cylinder'
-        ? radial(shape.radius, 0, shape.height)
-        : new THREE.Box3(
-            v(-shape.length / 2, -shape.width / 2, 0),
-            v(shape.length / 2, shape.width / 2, shape.height),
-          );
+      const { range } = analyzePrimitive(p.canonical);
+      return range.coverage === 'conservative'
+        ? new THREE.Box3(v(...range.bounds.min), v(...range.bounds.max))
+        : null;
     }
     case 'BeamChannelLike':
     case 'ChannelSteel': {
@@ -224,47 +223,42 @@ export function documentBounds(
   doc: XmlModDocument,
   patrolRange = false,
 ): { box: THREE.Box3; unknown: boolean } {
-  const box = new THREE.Box3(),
-    byId = new Map<number, THREE.Box3>();
-  const entities = new Map(doc.entities.map((e) => [e.id, e]));
-  let unknown = doc.malformedEntityCount > 0;
-  for (const e of doc.entities) {
-    if (e.primitive.type === 'Boolean') continue;
-    const bounds = patrolRange ? patrolPrimitiveRange(e.primitive) : primitiveBounds(e.primitive);
-    if (!bounds || !tupleBox(bounds)) {
-      if (e.visible) unknown = true;
-      continue;
-    }
-    bounds.applyMatrix4(new THREE.Matrix4().fromArray(e.transformMatrix));
-    byId.set(e.id, bounds);
-    if (e.visible) box.union(bounds);
-  }
-  const stack = new Set<number>();
-  const booleanBox = (id: number): THREE.Box3 | null => {
-    if (byId.has(id)) return byId.get(id)!.clone();
-    if (stack.has(id)) return null;
-    stack.add(id);
-    const e = entities.get(id);
-    if (e?.primitive.type !== 'Boolean') {
-      stack.delete(id);
-      return null;
-    }
-    const a = booleanBox(e.primitive.entity1),
-      b = booleanBox(e.primitive.entity2);
-    stack.delete(id);
-    if (!a || !b) return null;
-    // Union of operand bounds also contains intersection/difference results.
-    const result = a.union(b).applyMatrix4(new THREE.Matrix4().fromArray(e.transformMatrix));
-    byId.set(id, result);
-    return result;
+  const badPlacements = new Set(
+    doc.diagnostics.filter((d) => d.code === 'invalid-source-matrix').map((d) => d.entityId),
+  );
+  const range = aggregateGeometryBounds(
+    doc.entities,
+    entityIndex(doc),
+    'display',
+    (e) => {
+      if (badPlacements.has(e.id)) return { coverage: 'unknown' };
+      const p = e.primitive;
+      if (p.type === 'Boolean') return { op: p.op, operands: [p.entity1, p.entity2] };
+      if (p.type === 'Standard') return analyzePrimitive(p.canonical).range;
+      const bounds = patrolRange ? patrolPrimitiveRange(p) : primitiveBounds(p);
+      if (!bounds || !tupleBox(bounds)) return { coverage: 'unknown' };
+      return {
+        coverage: 'conservative',
+        bounds: {
+          min: bounds.min.toArray(),
+          max: bounds.max.toArray(),
+          unit: 'mm',
+          quality: 'estimated',
+        },
+      };
+    },
+    doc.malformedEntityCount > 0 || badPlacements.has(undefined),
+  );
+  const box =
+    range.coverage === 'conservative'
+      ? range.bounds
+      : range.coverage === 'unknown'
+        ? range.knownBounds
+        : undefined;
+  return {
+    box: box ? new THREE.Box3(v(...box.min), v(...box.max)) : new THREE.Box3(),
+    unknown: range.coverage === 'unknown',
   };
-  for (const e of doc.entities)
-    if (e.visible && e.primitive.type === 'Boolean') {
-      const bounds = booleanBox(e.id);
-      if (bounds) box.union(bounds);
-      else unknown = true;
-    }
-  return { box, unknown };
 }
 /** Validate the same standard binary/ASCII layouts as stlLoader; scan vertices only. */
 export function stlBounds(bytes: ArrayBuffer): THREE.Box3 | null {
@@ -320,7 +314,7 @@ export async function buildDevSourceBounds(
       { ...discovery, strictDependencies: true },
     );
     const total = new THREE.Box3();
-    let unknown = false;
+    let unknown = Boolean(discovered.sourceDiagnostics?.length);
     for (const edge of discovered.mods) {
       const file = getFileByPath(files, edge.modPath);
       if (!file) throw Error(`Source missing: ${edge.modPath}`);

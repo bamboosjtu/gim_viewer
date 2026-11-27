@@ -144,6 +144,38 @@ it('commits base geometry during camera motion and bounds refinement deferral', 
   } finally {clock.mockRestore();vi.clearAllTimers();vi.useRealTimers();}
 });
 
+it('G11 rebuilds old-policy catalog entries, then restores partial bounds without using them for culling',async()=>{
+  const workerApi=await import('../devGeometryWorkerClient.js'),cache=await import('@desktop/devLodCache.js');
+  const presentation=(await import('../../presentation/projectPresentationPort.js')).projectPresentation();
+  const local={devPath:'p.dev',sourceBounds:[0,0,0,.02,.01,.9] as [number,number,number,number,number,number],boundsQuality:'unknown' as const,primitiveCounts:{Cuboid:1,Future:1},unsupportedTypes:['Future']};
+  const records=new Map<string,typeof local>();
+  const bounds=vi.fn(async()=>local),worker=createDevWorkerMock({bounds});
+  const create=vi.spyOn(workerApi,'createDevGeometryPreprocessor').mockReturnValue(worker as never);
+  const refresh=vi.spyOn(presentation,'refreshDeviceBounds').mockResolvedValue(undefined);
+  const read=vi.spyOn(cache,'readDevArtifactBatch').mockImplementation(async(_domain,keys)=>new Map(keys.map(key=>[key,records.has(key)?{status:'hit' as const,value:records.get(key) as never}:{status:'miss' as const}])));
+  try{
+    for(const cold of [true,false]){
+      const {runtime,internal}=fixture();
+      const placement=new THREE.Matrix4().makeTranslation(1000,0,0).toArray();
+      internal.state.currentFiles=new Map([['p.dev',new File(['TYPE=test'],'p.dev')]]);
+      internal.state.sourceGeometry.catalog={occurrences:[{id:'root',sourceId:'root',sourceContextId:'scope',devPath:'p.dev',name:'p',placementMatrix:placement}],diagnostics:[]};
+      internal.ctx.world={scene:{three:new THREE.Scene()},camera:{three:new THREE.PerspectiveCamera(),controls:{addEventListener:vi.fn(),removeEventListener:vi.fn()}}};
+      internal.update=vi.fn();internal.schedule=vi.fn();internal.requestReady=vi.fn();internal.notifyCoordinateAnchor=vi.fn();internal.prepareMissingTemplateSources=vi.fn();
+      internal.persistArtifact=vi.fn(async(_domain:string,key:string,value:typeof local)=>{records.set(key,structuredClone(value));});
+      const key=internal.catalogKey('p.dev');
+      if(cold){const old=key.replace('+boolean-display-bounds-v1','');expect(old).not.toBe(key);records.set(old,{...local,boundsQuality:'unknown',sourceBounds:[0,0,0,10,10,10]});}
+      await runtime.start();
+      const row=internal.rows.get('root');
+      expect(row.entry.sourceBounds).toEqual(local.sourceBounds);
+      expect(row.entry.placementMatrix).toEqual(placement);
+      expect(row.box).toBeNull();expect(internal.state.deviceUnknownBounds.has('root')).toBe(true);
+      expect(runtime.diagnostics.catalogHits).toBe(cold?0:1);
+      expect(bounds).toHaveBeenCalledTimes(1);
+      expect(worker.compile).not.toHaveBeenCalled();
+    }
+  }finally{create.mockRestore();refresh.mockRestore();read.mockRestore();}
+});
+
 it('keeps warm cache consumption capacity independent of compacted computation workers', async () => {
   const {internal}=fixture();internal.worker=createDevWorkerMock({cacheConcurrency:32});
   const releases:Array<()=>void>=[];

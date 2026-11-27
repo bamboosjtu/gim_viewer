@@ -20,3 +20,4 @@ export { DEFAULT_GEOMETRY_LIMITS } from "./geometryBudget.js";
 export { interpretXmlModPrimitive } from "./interpretXmlModPrimitive.js";
 export { compilePrimitive } from "./compilePrimitive.js";
 export { compileXmlModDocument } from "./compileXmlModDocument.js";
+export * from "./analysisGeometry.js";
