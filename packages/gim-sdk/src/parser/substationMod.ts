@@ -5,7 +5,15 @@ import type {
   XmlModPrimitive,
 } from "@gim/gim-primitives/geometry/ir.js";
 import type { ParseDiagnostic, ParseStatus } from "./types.js";
-import { isUsableAffineMatrix } from "./affineMatrix.js";
+import { decodeXmlModMatrix, parseXmlModEntityId } from "./xmlModValues.js";
+import {
+  parseRawXmlModRoot,
+  type RawXmlModDocument,
+  type XmlModReadContext,
+} from "./rawXmlMod.js";
+export type * from "./rawXmlMod.js";
+export type { MatrixLayout } from "./xmlModValues.js";
+export { parseXmlModEntityId };
 
 /** MOD 文件解析结果 */
 export interface XmlModDocument {
@@ -41,18 +49,28 @@ export type XmlPrimitiveMapper = (
   attrs: Record<string, string>,
 ) => XmlModPrimitive | null;
 
-/** The same lexical rule applies to an Entity ID and a Boolean operand reference. */
-export function parseXmlModEntityId(
-  value: string | undefined,
-): number | undefined {
-  const text = value?.trim() ?? "";
-  if (!/^\d+$/.test(text)) return undefined;
-  const id = Number(text);
-  return Number.isSafeInteger(id) ? id : undefined;
-}
-
 /** Same geometry grammar for native DOM and the worker's XML reader. */
 export function parseXmlModRoot(
+  device: XmlModNode,
+  context: XmlModReadContext,
+): RawXmlModDocument;
+export function parseXmlModRoot(
+  device: XmlModNode,
+  modPath: string,
+  mapPrimitive: XmlPrimitiveMapper,
+): XmlModDocument;
+export function parseXmlModRoot(
+  device: XmlModNode,
+  context: string | XmlModReadContext,
+  mapPrimitive?: XmlPrimitiveMapper,
+): XmlModDocument | RawXmlModDocument {
+  if (typeof context !== "string") return parseRawXmlModRoot(device, context);
+  if (!mapPrimitive)
+    throw new TypeError("The legacy MOD reader requires a primitive mapper");
+  return parseLegacyXmlModRoot(device, context, mapPrimitive);
+}
+
+function parseLegacyXmlModRoot(
   device: XmlModNode,
   modPath: string,
   mapPrimitive: XmlPrimitiveMapper,
@@ -241,39 +259,10 @@ function parseTransformMatrix(entityNode: XmlModNode): {
   const tmNode = entityNode.children.find(
     (n) => n.tagName === "TransformMatrix",
   );
-  if (!tmNode)
-    return { matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] };
-  const rawValue = tmNode.attrs["Value"] || "";
-  // Do not filter empty tokens: a 17th empty/illegal slot is still malformed.
-  const tokens = rawValue.split(",").map((value) => value.trim());
-  const numberToken = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
-  const strict =
-    tokens.length === 16 && tokens.every((token) => numberToken.test(token));
-  const matrix = strict ? tokens.map(Number) : [];
-  if (!strict || !matrix.every(Number.isFinite)) {
-    return {
-      matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-      rawValue,
-      diagnostic: {
-        severity: "warning",
-        code: "invalid-source-matrix",
-        message:
-          "TransformMatrix must contain exactly 16 complete finite numbers",
-      },
-    };
-  }
-  if (!isUsableAffineMatrix(matrix)) {
-    return {
-      matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-      rawValue,
-      diagnostic: {
-        severity: "warning",
-        code: "invalid-source-matrix",
-        message: "TransformMatrix is not a usable affine placement",
-      },
-    };
-  }
-  return { matrix };
+  return decodeXmlModMatrix(
+    tmNode ? (tmNode.attrs.Value ?? "") : undefined,
+    "project-column-major",
+  );
 }
 
 /** 解析 <Color R="..." G="..." B="..." A="..." /> */

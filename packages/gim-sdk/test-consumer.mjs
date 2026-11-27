@@ -2,6 +2,7 @@ import {cpSync,mkdirSync,readFileSync,writeFileSync} from 'node:fs';
 import {dirname,resolve,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
+import {build} from 'esbuild';
 const root=dirname(fileURLToPath(import.meta.url)),repo=resolve(root,'../..');
 const target=resolve(repo,'tmp/gim-sdk-consumer',`${Date.now()}-${process.pid}`);
 const installed=join(target,'node_modules/@gim/gim-sdk');
@@ -16,8 +17,14 @@ if(JSON.stringify(Object.keys(packageMetadata.exports).sort())!==JSON.stringify(
 if(manifest.version!==packageMetadata.version||Object.keys(manifest.capabilities??{}).length!==7)
   throw Error('SDK build manifest is stale or lacks capability verification. Run the SDK build first.');
 if(manifest.runtimeExternals.length)throw Error('SDK consumer needs external runtime dependencies');
+// Bundle only the test host's XML reader. Its SDK imports resolve in the
+// isolated project, through the installed package's public exports.
+await build({entryPoints:[join(root,'node-xml-mod-consumer.mjs')],outfile:join(target,'node-xml-mod-consumer.mjs'),
+  bundle:true,format:'esm',platform:'node',external:['@gim/gim-sdk/*']});
+cpSync(join(root,'geometry-consumer.mjs'),join(target,'geometry-consumer.mjs'));
 writeFileSync(join(target,'consumer.mjs'),`
 import assert from 'node:assert/strict';
+import './geometry-consumer.mjs';
 import * as sdk from '@gim/gim-sdk';
 import * as parser from '@gim/gim-sdk/parser';
 import * as source from '@gim/gim-sdk/source';

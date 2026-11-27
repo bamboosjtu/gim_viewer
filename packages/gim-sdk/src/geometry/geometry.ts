@@ -15,3 +15,8 @@ export type {
 } from "./geometryOccurrences.js";
 
 export * from "./affineMatrix.js";
+export type * from "./primitiveContracts.js";
+export { DEFAULT_GEOMETRY_LIMITS } from "./geometryBudget.js";
+export { interpretXmlModPrimitive } from "./interpretXmlModPrimitive.js";
+export { compilePrimitive } from "./compilePrimitive.js";
+export { compileXmlModDocument } from "./compileXmlModDocument.js";

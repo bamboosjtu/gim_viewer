@@ -7,7 +7,7 @@ GIM SDK 是仓库内的核心能力包，供桌面 Viewer 处理格式解析、�
 | `@gim/gim-sdk/parser` | CBM/FAM/DEV/PHM/MOD/FileDevRelation/IFC STEP/SCH/STD/SLD 语法、原始值和诊断；不依赖五个 Core |
 | `@gim/gim-sdk/source` | 共享文档、来源图、引用实例、来源收集 |
 | `@gim/gim-sdk/semantic` | 中立证据的类别、整体身份和唯一主归属 |
-| `@gim/gim-sdk/geometry` | 独立物理 occurrence 目录、矩阵及表示地址索引 |
+| `@gim/gim-sdk/geometry` | 独立物理 occurrence 目录、矩阵、表示地址索引，以及 B.3 长方体和 B.6 圆柱的局部 MeshData 编译 |
 | `@gim/gim-sdk/engineering` | 工程整体与一对多表示绑定、歧义解析 |
 | `@gim/gim-sdk/projection` | 清册 / 工程组成 / 来源投影和成员树查询 |
 | `@gim/gim-sdk/source-adapter` | 来源证据到纯语义归一化的适配 |
@@ -32,6 +32,22 @@ const snapshot = sourceAdapter.normalizeEngineeringSources(scope, inputs);
 const views = projection.projectEngineeringNavigation(inputs, snapshot);
 ```
 
-宿主负责容器读取、Worker、缓存、会话、几何编译和界面。IFC 解析结果作为对象证据传入。物理目录和来源实例可先于语义识别交付，组成投影引用已建立的实体。
+宿主负责容器/XML 文本读取、Worker、缓存、会话、渲染和界面。Node 消费者将 XML 文本转换为保留属性字符串的 `XmlModNode`，再经公开出口编译局部毫米网格。
+
+```js
+const raw = parser.parseXmlModRoot(rootNode, {
+  sourcePath: 'MOD/unit.mod',
+  matrixLayout: 'project-column-major', // A.3.21 示例使用 'a3-21-example'
+});
+const result = geometry.compileXmlModDocument(raw, { lod: 2 });
+for (const entity of result.entities) {
+  if (entity.templateKey) {
+    const mesh = result.templates.get(entity.templateKey).mesh;
+    // mesh.positions / normals / indices 为共享局部缓冲，放置见 entity.source.transformMatrix。
+  }
+}
+```
+
+原有 Desktop 入口继续使用带图元映射回调的 Parser 签名。IFC 解析结果作为对象证据传入。物理目录和来源实例可先于语义识别交付，组成投影引用已建立的实体。
 
 包内测试与夹具随源码维护。可从 `desktop/` 运行 `npm run test:module -- ../packages/gim-sdk/src/semantic`，同时检查 SDK 模块和 Viewer 消费者。实体盘点器使用独立 Python 实现，通过配置与共享契约用例核对结果。
