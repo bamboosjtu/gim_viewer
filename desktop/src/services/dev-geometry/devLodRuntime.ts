@@ -741,13 +741,14 @@ export class DevLodRuntime {
           placementMatrix: matrix,
           templateStatus: 'unrequested',
         };
-        const box = bounds.boundsQuality === 'conservative' && bounds.sourceBounds
-          ? boxTuple(bounds.sourceBounds).applyMatrix4(
-              (this.anchor?.clone() ?? new THREE.Matrix4()).multiply(
-                createSourcePlacementMatrix(matrix),
-              ),
-            )
-          : null;
+        const box =
+          bounds.boundsQuality === 'conservative' && bounds.sourceBounds
+            ? boxTuple(bounds.sourceBounds).applyMatrix4(
+                (this.anchor?.clone() ?? new THREE.Matrix4()).multiply(
+                  createSourcePlacementMatrix(matrix),
+                ),
+              )
+            : null;
         const row = this.rows.get(seed.id)!;
         row.entry = { ...entry, templateStatus: emptySource ? 'empty' : row.entry.templateStatus };
         row.box = box;
@@ -881,9 +882,10 @@ export class DevLodRuntime {
       const placement = matrix
         .clone()
         .multiply(createSourcePlacementMatrix(row.entry.placementMatrix));
-      row.box = row.entry.boundsQuality === 'conservative' && row.entry.sourceBounds
-        ? boxTuple(row.entry.sourceBounds).applyMatrix4(placement)
-        : null;
+      row.box =
+        row.entry.boundsQuality === 'conservative' && row.entry.sourceBounds
+          ? boxTuple(row.entry.sourceBounds).applyMatrix4(placement)
+          : null;
       this.viewIndex.set(row.entry.rootOccurrence, row.box);
       if (row.group) {
         row.group.matrix.copy(placement);

@@ -203,7 +203,10 @@ const viewerSourceValues = new Map([
   ['gim/geometry/steelSection.ts', new Set(['steelSection', 'steelSectionContour'])],
   ['gim/geometry/xmlModParser.ts', new Set(['parseXmlMod'])],
   ['gim/geometry/stlSource.ts', new Set(['decodeStl'])],
-  ['gim/geometry/xmlModDocument.ts', new Set(['entityIndex', 'compileStandardLeaf', 'standardConnectionLine'])],
+  [
+    'gim/geometry/xmlModDocument.ts',
+    new Set(['entityIndex', 'compileStandardLeaf', 'standardConnectionLine']),
+  ],
   ['gim/geometry/ir.ts', new Set(['DEFAULT_ANGULAR_SEGMENTS', 'DEFAULT_LINEAR_SEGMENTS'])],
 ]);
 const adapterSemanticPorts = new Map([

@@ -1,31 +1,72 @@
-import {cpSync,mkdirSync,readFileSync,writeFileSync} from 'node:fs';
-import {dirname,resolve,join} from 'node:path';
-import {fileURLToPath} from 'node:url';
-import {spawnSync} from 'node:child_process';
-import {build} from 'esbuild';
-const root=dirname(fileURLToPath(import.meta.url)),repo=resolve(root,'../..');
-const target=resolve(repo,'tmp/gim-sdk-consumer',`${Date.now()}-${process.pid}`);
-const installed=join(target,'node_modules/@gim/gim-sdk');
-mkdirSync(installed,{recursive:true});
-cpSync(join(root,'dist'),join(installed,'dist'),{recursive:true});
-cpSync(join(root,'package.json'),join(installed,'package.json'));
-const manifest=JSON.parse(readFileSync(join(installed,'dist/build-manifest.json'),'utf8'));
-const packageMetadata=JSON.parse(readFileSync(join(installed,'package.json'),'utf8'));
-const publicEntries=['.','./parser','./source','./semantic','./geometry','./engineering','./projection','./source-adapter'];
-if(JSON.stringify(Object.keys(packageMetadata.exports).sort())!==JSON.stringify(publicEntries.sort()))
-  throw Error('Expected exactly the public SDK entry points');
-if(manifest.version!==packageMetadata.version||Object.keys(manifest.capabilities??{}).length!==7)
-  throw Error('SDK build manifest is stale or lacks capability verification. Run the SDK build first.');
-if(manifest.runtimeExternals.length)throw Error('SDK consumer needs external runtime dependencies');
+import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, resolve, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
+import { build } from "esbuild";
+const root = dirname(fileURLToPath(import.meta.url)),
+  repo = resolve(root, "../..");
+const target = resolve(
+  repo,
+  "tmp/gim-sdk-consumer",
+  `${Date.now()}-${process.pid}`,
+);
+const installed = join(target, "node_modules/@gim/gim-sdk");
+mkdirSync(installed, { recursive: true });
+cpSync(join(root, "dist"), join(installed, "dist"), { recursive: true });
+cpSync(join(root, "package.json"), join(installed, "package.json"));
+const manifest = JSON.parse(
+  readFileSync(join(installed, "dist/build-manifest.json"), "utf8"),
+);
+const packageMetadata = JSON.parse(
+  readFileSync(join(installed, "package.json"), "utf8"),
+);
+const publicEntries = [
+  ".",
+  "./parser",
+  "./source",
+  "./semantic",
+  "./geometry",
+  "./engineering",
+  "./projection",
+  "./source-adapter",
+];
+if (
+  JSON.stringify(Object.keys(packageMetadata.exports).sort()) !==
+  JSON.stringify(publicEntries.sort())
+)
+  throw Error("Expected exactly the public SDK entry points");
+if (
+  manifest.version !== packageMetadata.version ||
+  Object.keys(manifest.capabilities ?? {}).length !== 7
+)
+  throw Error(
+    "SDK build manifest is stale or lacks capability verification. Run the SDK build first.",
+  );
+if (manifest.runtimeExternals.length)
+  throw Error("SDK consumer needs external runtime dependencies");
 // Bundle only the test host's XML reader. Its SDK imports resolve in the
 // isolated project, through the installed package's public exports.
-await build({entryPoints:[join(root,'node-xml-mod-consumer.mjs')],outfile:join(target,'node-xml-mod-consumer.mjs'),
-  bundle:true,format:'esm',platform:'node',external:['@gim/gim-sdk/*']});
-cpSync(join(root,'geometry-consumer.mjs'),join(target,'geometry-consumer.mjs'));
-mkdirSync(join(target,'tests'),{recursive:true});
-cpSync(join(root,'tests/profileAssemblyFixtures.mjs'),join(target,'tests/profileAssemblyFixtures.mjs'));
-cpSync(join(root,'stl-consumer.mjs'),join(target,'stl-consumer.mjs'));
-writeFileSync(join(target,'consumer.mjs'),`
+await build({
+  entryPoints: [join(root, "node-xml-mod-consumer.mjs")],
+  outfile: join(target, "node-xml-mod-consumer.mjs"),
+  bundle: true,
+  format: "esm",
+  platform: "node",
+  external: ["@gim/gim-sdk/*"],
+});
+cpSync(
+  join(root, "geometry-consumer.mjs"),
+  join(target, "geometry-consumer.mjs"),
+);
+mkdirSync(join(target, "tests"), { recursive: true });
+cpSync(
+  join(root, "tests/profileAssemblyFixtures.mjs"),
+  join(target, "tests/profileAssemblyFixtures.mjs"),
+);
+cpSync(join(root, "stl-consumer.mjs"), join(target, "stl-consumer.mjs"));
+writeFileSync(
+  join(target, "consumer.mjs"),
+  `
 import assert from 'node:assert/strict';
 import './geometry-consumer.mjs';
 import './stl-consumer.mjs';
@@ -71,9 +112,15 @@ assert.equal(projection.engineeringQuery(snapshot).tree(snapshot.entities[0].id)
 const controller=new AbortController();controller.abort();
 await assert.rejects(source.extractEngineeringSourceGraph({paths:Object.keys(text),readText:async path=>text[path]},{signal:controller.signal}),error=>error.name==='AbortError');
 console.log(JSON.stringify({contract:'gim-sdk-consumer-v1',capabilities:5,entrypoints:8,entities:1,members:2,physicalRoots:1,views:3,windowAvailable:false}));
-`);
-const child=spawnSync(process.execPath,['consumer.mjs'],{cwd:target,encoding:'utf8',windowsHide:true,
- env:{...process.env,TEMP:target,TMP:target,TMPDIR:target}});
-if(child.error)throw child.error;
-process.stdout.write(child.stdout);process.stderr.write(child.stderr);
-if(child.status!==0)process.exitCode=child.status??1;
+`,
+);
+const child = spawnSync(process.execPath, ["consumer.mjs"], {
+  cwd: target,
+  encoding: "utf8",
+  windowsHide: true,
+  env: { ...process.env, TEMP: target, TMP: target, TMPDIR: target },
+});
+if (child.error) throw child.error;
+process.stdout.write(child.stdout);
+process.stderr.write(child.stderr);
+if (child.status !== 0) process.exitCode = child.status ?? 1;
