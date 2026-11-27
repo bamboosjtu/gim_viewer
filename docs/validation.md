@@ -289,15 +289,17 @@ cargo test --manifest-path app/src-tauri/Cargo.toml six_native_imports -- --igno
 | 范围 | 行/语句 | 函数 | 分支 |
 |---|---|---|---|
 | `packages/gim-sdk/src/semantic/` | 95% | 95% | 90% |
-| `packages/gim-sdk/src/{source,projection,adapters,shared}/` | 90% | 90% | 80% |
+| `packages/gim-sdk/src/{source,geometry,engineering,projection,adapters,shared}/` | 90% | 90% | 80% |
 | `gim/`（桌面按归属检查） | 90% | 90% | 80% |
 | `app/session/{openProject,projectSourceAcquisition}.ts` | 70% | 80% | 50% |
 | `features/substation/application/{substationRuntime,substationOpenStages,substationColdPersistence,substationColdSource}.ts`（合并计算） | 70% | 45% | 70% |
+| `features/substation/runtime/{patrolNavigationRuntime,patrolSceneCache,patrolSceneCompiler}.ts` | 65% | 70% | 55% |
+| `gim/geometry/xmlModDocument.ts` | 85% | 85% | 70% |
 | `services/presentation/viewerUIBinding.ts` | 80% | 50% | 70% |
 | `ui/lineProjectView.ts` | 70% | 60% | 65% |
 | `ui/{lineMapView,lineMapPainter,lineMapPointer,lineMapRenderer}.ts`（合并计算） | 65% | 65% | 60% |
 
-`test:coverage` 先用 Vitest 的阈值匹配器检查变电应用层四个模块是否受同一门禁约束，并用低覆盖夹具验证门禁会失败。随后采集 SDK 自有用例和桌面消费者，合并同一源码的 Istanbul 覆盖数据后检查上表五个 SDK 目录。SDK `geometry/` 和 `engineering/` 在合并报告中提供观察值，单独执行 SDK Vitest 覆盖率时使用包内配置的阈值。桌面热点门槛由 Vitest 配置执行。SDK 与桌面报告分别在 `output/coverage/sdk` 和 `output/coverage/desktop`，合并摘要在 `output/coverage/coverage-summary.json`。两个采集范围必须非空，SDK 用例在同一命令中只执行一次。
+`test:coverage` 先用 Vitest 的阈值匹配器检查变电应用层四个模块是否受同一门禁约束，并用低覆盖夹具验证门禁会失败。随后采集 SDK 自有用例和桌面消费者，合并同一源码的 Istanbul 覆盖数据后检查上表七个 SDK 目录。Geometry 与 Engineering 在合并覆盖率中采用与 SDK 独立运行一致的阈值。桌面热点门槛由 Vitest 配置执行。SDK 与桌面报告分别在 `output/coverage/sdk` 和 `output/coverage/desktop`，合并摘要在 `output/coverage/coverage-summary.json`。两个采集范围必须非空，SDK 用例在同一命令中只执行一次。
 
 `output/coverage/summary.json` 的 `largestModules` 按可执行行数列出前 20 个模块的行、函数与分支覆盖，供评审比较。现有覆盖率下限仍独立执行。
 

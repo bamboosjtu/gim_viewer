@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { projectEngineeringComposition, finalizeEngineeringComposition } from '../composition.js';
 import { normalizeEngineeringModel } from '../../semantic/normalize.js';
-import {declaredObject} from '../../semantic/__tests__/evidenceFixtures.js';
+import {declaredObject} from '../../../tests/support/evidenceFixtures.js';
 const evidence=(sourceId:string,name:string,assemblyParentId?:string)=>declaredObject(sourceId,name,{assemblyParentId});
 describe('whole-only composition projection', () => {
   it('keeps an independently identified cabinet out of the main transformer while hiding its radiator design part', () => {

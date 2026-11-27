@@ -1,7 +1,8 @@
+import { representationEvidenceState } from "../representations.js";
 import { describe, expect, it } from 'vitest';
 import { normalizeEngineeringModel } from '../../semantic/normalize.js';
 import { EngineeringRepresentationIndex } from '../representations.js';
-import {declaredObject} from '../../semantic/__tests__/evidenceFixtures.js';
+import {declaredObject} from '../../../tests/support/evidenceFixtures.js';
 
 const source=(sourceId:string,name:string,assemblyParentId?:string)=>declaredObject(sourceId,name,{assemblyParentId});
 function fixture() {
@@ -79,4 +80,10 @@ describe('engineering representation membership', () => {
     expect(index.resolveDev('r', { devPath: 'missing.dev' }).sourceIds).toEqual([]);
     expect(index.resolveDev('r2', { assemblyPath: 'sub:2/sub:9' }).sourceIds).toEqual([]);
   });
+});
+
+it("retains geometry availability independently of attribution", () => {
+  const binding = {status:"ambiguous" as const,sourceIds:["dev-a","dev-b"],ownerIds:["a","b"]};
+  expect(representationEvidenceState("physical","partial",binding)).toEqual({sourceUsage:"physical",availability:"partial",bindingStatus:"ambiguous"});
+  expect(representationEvidenceState("attributes_only","not_requested",{status:"unassociated",sourceIds:[],ownerIds:[]})).toEqual({sourceUsage:"attributes_only",availability:"not_requested",bindingStatus:"unassociated"});
 });

@@ -1,7 +1,7 @@
 import {expect,it} from 'vitest';
 import {projectInventoryTemplate} from '../inventoryTemplate.js';
 import {normalizeEngineeringModel} from '../../semantic/normalize.js';
-import {declaredObject} from '../../semantic/__tests__/evidenceFixtures.js';
+import {declaredObject} from '../../../tests/support/evidenceFixtures.js';
 import {catalogPathLabel} from '../../semantic/catalog/catalogLabels.js';
 
 it('projects whole leaves and source-to-owner aliases without changing members or pending identities',()=>{

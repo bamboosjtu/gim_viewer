@@ -1,6 +1,6 @@
 import {it,expect} from 'vitest';
 import {normalizeEngineeringModel} from '../semantic.js';
-import {declaredObject} from './evidenceFixtures.js';
+import {declaredObject} from '../../../tests/support/evidenceFixtures.js';
 import type {ObjectEvidence} from '../types.js';
 const child=(id:string,parent:string,extra:Partial<ObjectEvidence>={})=>declaredObject(id,'断路器',{
   composition:[{kind:'semantic_composition',parentSourceIds:[parent],evidence:[`source:${parent}->${id}`],status:'confirmed'}],...extra});

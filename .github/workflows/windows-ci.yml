@@ -14,6 +14,9 @@ on:
       - 'eslint.config.mjs'
       - '.github/action-versions.json'
       - '.github/scripts/**'
+      - 'docs/**'
+      - 'README.md'
+      - 'AGENTS.md'
       - '.github/workflows/**'
 
   pull_request:
@@ -29,6 +32,9 @@ on:
       - 'eslint.config.mjs'
       - '.github/action-versions.json'
       - '.github/scripts/**'
+      - 'docs/**'
+      - 'README.md'
+      - 'AGENTS.md'
       - '.github/workflows/**'
   workflow_dispatch:
 
@@ -89,6 +95,8 @@ jobs:
           node --test .github/scripts/check-action-versions.test.mjs .github/scripts/android-ci.test.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node .github/scripts/check-action-versions.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node .github/scripts/check-docs.mjs
 
       - name: Install frontend dependencies
         run: npm ci
@@ -163,6 +171,9 @@ jobs:
 
       - name: Test architecture boundary checks
         run: npm run test:presentation-boundaries
+
+      - name: Check browser Worker, IndexedDB and patrol UI contracts
+        run: npm run test:engineering:worker -- "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" 14357 patrol
 
       - name: Check frontend types
         run: npm run check:types

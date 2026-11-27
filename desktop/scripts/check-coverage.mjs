@@ -14,6 +14,8 @@ const domainThreshold = { statements: 90, lines: 90, functions: 90, branches: 80
 const mergedThresholds = {
   semantic: { statements: 95, lines: 95, functions: 95, branches: 90 },
   source: domainThreshold,
+  geometry: domainThreshold,
+  engineering: domainThreshold,
   shared: domainThreshold,
   projection: domainThreshold,
   adapters: domainThreshold,

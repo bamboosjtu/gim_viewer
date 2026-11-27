@@ -63,6 +63,8 @@ export default defineConfig({
         'src/gim/**': { statements:90, lines:90, functions:90, branches:80 },
         'src/app/session/{openProject,projectSourceAcquisition}.ts': {statements:70,lines:70,functions:80,branches:50},
         'src/features/substation/application/{substationRuntime,substationOpenStages,substationColdPersistence,substationColdSource}.ts': {statements:70,lines:70,functions:45,branches:70},
+        'src/features/substation/runtime/{patrolNavigationRuntime,patrolSceneCache,patrolSceneCompiler}.ts': {statements:65,lines:65,functions:70,branches:55},
+        'src/gim/geometry/xmlModDocument.ts': {statements:85,lines:85,functions:85,branches:70},
         'src/services/presentation/viewerUIBinding.ts': {statements:80,lines:80,functions:50,branches:70},
         'src/ui/lineProjectView.ts': {statements:70,lines:70,functions:60,branches:65},
         'src/ui/{lineMapView,lineMapPainter,lineMapPointer,lineMapRenderer}.ts': {statements:65,lines:65,functions:65,branches:60},

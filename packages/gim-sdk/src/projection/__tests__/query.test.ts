@@ -1,7 +1,7 @@
 import {it,expect} from 'vitest';
 import {engineeringQuery} from '../query.js';
 import {normalizeEngineeringModel} from '../../semantic/semantic.js';
-import {declaredObject} from '../../semantic/__tests__/evidenceFixtures.js';
+import {declaredObject} from '../../../tests/support/evidenceFixtures.js';
 const member=(id:string,parent:string,independent=false)=>declaredObject(id,'断路器',{
   composition:[{kind:'semantic_composition',parentSourceIds:[parent],status:'confirmed',evidence:[`edge:${id}`]}],
   ...(independent?{objectRoles:[{value:'independent',evidenceId:`role:${id}`}]}:{}),

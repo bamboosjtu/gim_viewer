@@ -1,0 +1,53 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Patrol browser contracts</title>
+<link rel="stylesheet" href="/src/ui/app.css">
+<div id="main"><div id="viewport" style="width:400px;height:300px"></div></div>
+<script type="module">
+import { enterPatrolCache, readPatrolCache, writePatrolCache, discardPatrolEntry, removePatrolProject, patrolCachePrefix } from '/src/infrastructure/cache/navigation/patrolCache.ts';
+import { PatrolAssetBuilder } from '/src/infrastructure/workers/patrolAssetBuilder.ts';
+import { EngineeringWorkerClient } from '/src/infrastructure/workers/engineeringWorkerClient.ts';
+import { mountPatrolOverlay } from '/src/ui/patrolOverlay.ts';
+import { ViewerNavigationCommands } from '/src/shared/viewerNavigationCommands.ts';
+globalThis.runPatrolContract = async () => {
+  const assert = (ok, label) => { if (!ok) throw Error(label); };
+  const client=EngineeringWorkerClient.create(()=>true);
+  try { await client.init('worker-contract',[]);const rejected=await client.extractGeometry().then(()=>'',e=>String(e));assert(rejected.includes('unique project.cbm'),'worker reports unbound source'); }finally{client.close();}
+  const builder=new PatrolAssetBuilder();
+  try {
+    const part={positions:new Float32Array([0,0,0,1,0,0,0,1,0]),indices:new Uint32Array([0,1,2]),matrix:[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]};
+    const asset=await builder.build([part]);
+    assert(asset.nodes.length===1 && asset.vertices.length===9 && part.positions.byteLength===0,'Worker transfer');
+    const keys=[];
+    for(let i=1;i<=5;i++){
+      const prefix=patrolCachePrefix(String(i),i,'test-v1'); keys.push(prefix);
+      await enterPatrolCache(i,prefix);
+      assert(await writePatrolCache('assets',prefix+'mesh',asset,prefix),'asset persistence');
+      assert(await writePatrolCache('coverage',prefix+'manifest',{id:i},prefix),'manifest persistence');
+    }
+    assert(!(await readPatrolCache('assets',keys[0]+'mesh')),'LRU evicts old assets');
+    assert(!(await writePatrolCache('assets',keys[0]+'late',asset,keys[0])),'stale writer');
+    const active=keys[4];assert((await readPatrolCache('assets',active+'mesh')).vertices.length===9,'warm read');
+    await discardPatrolEntry('assets',active+'mesh',active);assert(!(await readPatrolCache('assets',active+'mesh')),'single asset invalidation');
+    await removePatrolProject(5);assert(!(await readPatrolCache('coverage',active+'manifest')),'project clear');
+  } finally {builder.dispose();}
+  const port=new ViewerNavigationCommands(),viewport=document.querySelector('#viewport');
+  const overlay=mountPatrolOverlay(port,document.createElement('div'),viewport);
+  try {
+    port.set('walking','',true);
+    assert(viewport.querySelector('[role=status]').textContent.includes('近似'),'walking quality');
+    port.unknownSourceCount=2;port.set('paused');
+    const actions=viewport.querySelector('.patrol-actions');
+    for(const width of [320,720]){
+      viewport.style.width=width+'px';
+      const panel=viewport.querySelector('.patrol-panel').getBoundingClientRect();
+      for(const b of actions.querySelectorAll('button:not([hidden])')){
+        const box=b.getBoundingClientRect();assert(box.width>0 && box.height>=26 && box.left>=panel.left && box.right<=panel.right,'compact layout');
+      }
+    }
+    assert(document.activeElement.textContent==='继续巡视','resume focus');
+    assert(viewport.querySelector('[role=status]').textContent.includes('2 个来源'),'unknown coverage');
+  } finally {overlay.dispose();}
+  return {passed:true,scope:'Worker transfer, IndexedDB lifecycle and patrol HUD at 320/720 CSS px'};
+};
+</script>

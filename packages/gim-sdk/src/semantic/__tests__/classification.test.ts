@@ -1,6 +1,6 @@
 import {expect,it} from 'vitest';
 import {interpretRecognitionObject} from '../classify.js';
-import {declaredObject} from './evidenceFixtures.js';
+import {declaredObject} from '../../../tests/support/evidenceFixtures.js';
 const value=(value:string,evidenceId=value)=>({value,evidenceId});
 it('retains confirmed type facts when a name describes another object',()=>{
  expect(interpretRecognitionObject(declaredObject('x','油浸式变压器',{typeCategory:'E06'}))).toMatchObject({category:'E06',classificationStatus:'confirmed',meaning:'object'});

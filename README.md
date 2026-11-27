@@ -2,7 +2,7 @@
 
 在本地浏览电网工程 GIM 文件。Windows 桌面版支持变电站、输电线路和独立设备，Android 预览版面向输电线路现场查阅。
 
-[下载 Windows 桌面版](https://github.com/bamboosjtu/gim_viewer/releases/tag/desktop-v0.2.1-preview) · [下载 Android 预览版](https://github.com/bamboosjtu/gim_viewer/releases/tag/android-v0.1.6-preview) · [全部发布](https://github.com/bamboosjtu/gim_viewer/releases)
+[下载 Windows 0.2.1 预览版](https://github.com/bamboosjtu/gim_viewer/releases/tag/desktop-v0.2.1-preview) · [下载 Android 预览版](https://github.com/bamboosjtu/gim_viewer/releases/tag/android-v0.1.6-preview) · [全部发布](https://github.com/bamboosjtu/gim_viewer/releases)
 
 ## 界面预览
 

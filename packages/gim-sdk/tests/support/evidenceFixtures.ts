@@ -1,4 +1,4 @@
-import type {ObjectEvidence} from '../types.js';
+import type {ObjectEvidence} from '../../src/semantic/types.js';
 /** Explicit declarations for projection/selection tests. No recognition heuristics. */
 const declarations:Record<string,Partial<ObjectEvidence>>={
   '主变压器':{typeCategory:'E01'},'变压器':{typeCategory:'E-T'},
