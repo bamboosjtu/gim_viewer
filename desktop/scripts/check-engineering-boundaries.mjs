@@ -204,6 +204,7 @@ const viewerSourceValues = new Map([
   ['gim/geometry/stretchedBody.ts', new Set(['stretchedBodyDisplacement'])],
   ['gim/geometry/offsetRectangularTable.ts', new Set(['offsetRectangularTableVertices'])],
   ['gim/geometry/xmlModParser.ts', new Set(['parseXmlMod'])],
+  ['gim/geometry/stlSource.ts', new Set(['decodeStl'])],
   ['gim/geometry/xmlModDocument.ts', new Set(['entityIndex', 'compileStandardLeaf'])],
   ['gim/geometry/ir.ts', new Set(['DEFAULT_ANGULAR_SEGMENTS', 'DEFAULT_LINEAR_SEGMENTS'])],
 ]);

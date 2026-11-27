@@ -1,7 +1,7 @@
 import { GEOMETRY_CACHE_VERSION as DEV_GEOMETRY_VERSION } from '@desktop/contracts.js';
 export { DEV_GEOMETRY_VERSION };
 import * as THREE from 'three';
-import { aggregateGeometryBounds, analyzePrimitive } from '@gim/gim-sdk/geometry';
+import { aggregateGeometryBounds, analyzePrimitive, queryStlBounds } from '@gim/gim-sdk/geometry';
 import { entityIndex } from '../../gim/geometry/xmlModDocument.js';
 import { steelSection } from '../../gim/geometry/steelSection.js';
 import { stretchedBodyDisplacement } from '../../gim/geometry/stretchedBody.js';
@@ -260,34 +260,10 @@ export function documentBounds(
     unknown: range.coverage === 'unknown',
   };
 }
-/** Validate the same standard binary/ASCII layouts as stlLoader; scan vertices only. */
+/** Range-only decoding shares the STL grammar and allocates no mesh buffers. */
 export function stlBounds(bytes: ArrayBuffer): THREE.Box3 | null {
-  if (bytes.byteLength < 84) return null;
-  const view = new DataView(bytes),
-    count = view.getUint32(80, true),
-    box = new THREE.Box3();
-  if (count <= 5_000_000 && 84 + count * 50 === bytes.byteLength) {
-    for (let i = 0; i < count; i++)
-      for (let j = 0; j < 3; j++) {
-        const offset = 84 + i * 50 + 12 + j * 12;
-        const pt = v(
-          view.getFloat32(offset, true),
-          view.getFloat32(offset + 4, true),
-          view.getFloat32(offset + 8, true),
-        );
-        if (!pt.toArray().every(Number.isFinite)) return null;
-        box.expandByPoint(pt);
-      }
-  } else {
-    const text = new TextDecoder().decode(bytes);
-    if (!/^solid\b/.test(text)) return null; // Private dialect remains explicitly unknown.
-    for (const match of text.matchAll(/\bvertex\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)/g)) {
-      const pt = v(Number(match[1]), Number(match[2]), Number(match[3]));
-      if (!pt.toArray().every(Number.isFinite)) return null;
-      box.expandByPoint(pt);
-    }
-  }
-  return tupleBox(box) ? box : null;
+  const { bounds } = queryStlBounds(bytes);
+  return bounds ? new THREE.Box3(v(...bounds.min), v(...bounds.max)) : null;
 }
 export async function buildDevSourceBounds(
   devPath: string,

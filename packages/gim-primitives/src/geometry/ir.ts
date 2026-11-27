@@ -91,7 +91,7 @@ export type LineModRecords =
 export interface StlGeometrySource {
   kind: "stl";
   stlPath: string;
-  format: "binary";
+  format: "binary" | "ascii";
   triangleCount: number;
   /** STL header 80 字节内容（demo-substation 为 "name"，demo-line 为空白） */
   header?: string;
