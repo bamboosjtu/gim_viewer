@@ -57,3 +57,16 @@ it('includes the real curved tube between fit points and localizes only explicit
     expect(tube.box.containsPoint(p.clone().subScalar(2))).toBe(true);
   }
 });
+
+it('tracks representation quality of reachable leaves, including hidden Boolean operands', () => {
+  const rows = [
+    '<Entity ID="1" Visible="false"><Wire D="2" Sag="1" StartCoord="0,0,0" EndCoord="30,0,0" StartVector="1,0,0" EndVector="1,0,0" FitCoordArray="0,0,0;15,0,0;30,0,0"/></Entity>',
+    '<Entity ID="2"><Table LL1="10" LL2="8" TL1="5" TL2="4" H="9"/></Entity>',
+    '<Entity ID="3"><RectangularFixedPlate L="108" W="83" T="20" CN="2" RN="2" CS="30" RS="25" MH="0" D="4"/></Entity>',
+  ];
+  const bounds = (extra: string) => documentBounds(parseWorkerXmlMod('<Device><Entities>' + rows.join('') + extra + '</Entities></Device>', 'MOD/quality.mod'));
+  expect(bounds('')).toMatchObject({estimatedGeometryCount: 0, unknown: false});
+  const used = bounds('<Entity ID="4"><Boolean Type="Union" Entity1="1" Entity2="2"/></Entity>');
+  expect(used.estimatedGeometryCount).toBe(1);
+  expect(used.reasons.join(' ')).toMatch(/Wire.*preview-only/);
+});

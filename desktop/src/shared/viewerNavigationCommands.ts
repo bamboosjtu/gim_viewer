@@ -53,9 +53,11 @@ export class ViewerNavigationCommands extends EventTarget {
   revision = 0;
   evidence?: () => Record<string, unknown>;
   execute?: (action: NavigationAction) => void;
-  set(mode: NavigationMode, message = '') {
+  set(mode: NavigationMode, message = '', estimated = this.estimated) {
+    const qualityChanged = this.estimated !== estimated;
+    this.estimated = estimated;
     if (mode !== this.mode) this.revision++;
-    if (mode === this.mode && message === this.message) return;
+    if (mode === this.mode && message === this.message && !qualityChanged) return;
     this.mode = mode;
     this.message = message;
     this.dispatchEvent(new Event('change'));

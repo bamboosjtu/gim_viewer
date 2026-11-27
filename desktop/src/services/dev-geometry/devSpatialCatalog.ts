@@ -1,7 +1,12 @@
 import { GEOMETRY_CACHE_VERSION as DEV_GEOMETRY_VERSION } from '@desktop/contracts.js';
 export { DEV_GEOMETRY_VERSION };
 import * as THREE from 'three';
-import { aggregateGeometryBounds, analyzePrimitive, queryStlBounds } from '@gim/gim-sdk/geometry';
+import {
+  aggregateGeometryBounds,
+  analyzePrimitive,
+  primitiveRepresentationQuality,
+  queryStlBounds,
+} from '@gim/gim-sdk/geometry';
 import { entityIndex } from '../../gim/geometry/xmlModDocument.js';
 import { steelSection } from '../../gim/geometry/steelSection.js';
 import { primitiveName, type XmlModPrimitive } from '../../gim/geometry/ir.js';
@@ -18,6 +23,9 @@ export interface DevSourceBounds {
   boundsQuality: 'conservative' | 'unknown' | 'empty';
   primitiveCounts: Record<string, number>;
   estimatedSteelSections?: number;
+  /** Reachable declarations including Boolean operands, grouped by MOD path and reason. */
+  estimatedGeometryCount?: number;
+  approximationReasons?: Record<string, string[]>;
   unsupportedTypes: string[];
   absoluteConeCount?: number;
   diagnostic?: string;
@@ -133,10 +141,9 @@ function patrolPrimitiveRange(p: XmlModPrimitive): THREE.Box3 | null {
   }
   return null;
 }
-export function documentBounds(
-  doc: XmlModDocument,
-  patrolRange = false,
-): { box: THREE.Box3; unknown: boolean } {
+export function documentBounds(doc: XmlModDocument, patrolRange = false) {
+  let estimatedGeometryCount = 0;
+  const reasons = new Set<string>();
   const badPlacements = new Set(
     doc.diagnostics.filter((d) => d.code === 'invalid-source-matrix').map((d) => d.entityId),
   );
@@ -148,7 +155,33 @@ export function documentBounds(
       if (badPlacements.has(e.id)) return { coverage: 'unknown' };
       const p = e.primitive;
       if (p.type === 'Boolean') return { op: p.op, operands: [p.entity1, p.entity2] };
-      if (p.type === 'Standard') return analyzePrimitive(p.canonical).range;
+      if (p.type === 'Standard') {
+        const { range } = analyzePrimitive(p.canonical);
+        const quality = primitiveRepresentationQuality(p.canonical);
+        if (
+          quality !== 'standard-derived' ||
+          (range.coverage === 'conservative' && range.bounds.quality === 'estimated')
+        ) {
+          estimatedGeometryCount++;
+          reasons.add(
+            [
+              p.canonical.kind,
+              quality,
+              'approximation' in p.canonical ? p.canonical.approximation : 'estimated bounds',
+            ]
+              .filter(Boolean)
+              .join(' / '),
+          );
+        }
+        return range;
+      }
+      const estimated =
+        p.type === 'Cable' ||
+        ((p.type === 'ChannelSteel' || p.type === 'BeamChannelLike') && steelSection(p)?.estimated);
+      if (estimated) {
+        estimatedGeometryCount++;
+        reasons.add(primitiveName(p) + ' / host preview');
+      }
       const bounds = patrolRange ? patrolPrimitiveRange(p) : primitiveBounds(p);
       if (!bounds || !tupleBox(bounds)) return { coverage: 'unknown' };
       return {
@@ -172,6 +205,8 @@ export function documentBounds(
   return {
     box: box ? new THREE.Box3(v(...box.min), v(...box.max)) : new THREE.Box3(),
     unknown: range.coverage === 'unknown',
+    estimatedGeometryCount,
+    reasons: [...reasons],
   };
 }
 /** Range-only decoding shares the STL grammar and allocates no mesh buffers. */
@@ -216,6 +251,12 @@ export async function buildDevSourceBounds(
           result.stretchModes['direction-length'] =
             (result.stretchModes['direction-length'] ?? 0) + 1;
         }
+      if (bounds.estimatedGeometryCount) {
+        result.estimatedGeometryCount =
+          (result.estimatedGeometryCount ?? 0) + bounds.estimatedGeometryCount;
+        result.approximationReasons ??= {};
+        result.approximationReasons[edge.modPath] = bounds.reasons;
+      }
       unknown ||= bounds.unknown;
       if (!bounds.box.isEmpty())
         total.union(

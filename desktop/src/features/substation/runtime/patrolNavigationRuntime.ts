@@ -322,6 +322,8 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
         support: row.support,
         estimatedSteelSections: row.estimatedSteelSections,
         approximate: row.approximate,
+        estimatedGeometryCount: row.estimatedGeometryCount,
+        approximationReasons: row.approximationReasons,
         matrix: row.matrix.toArray(),
         bounds: [...row.bounds.min.toArray(), ...row.bounds.max.toArray()],
         door: row.door,
@@ -465,15 +467,13 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
       const box = sweepBounds(from, to);
       const rows = this.inBounds(box);
       const result = solvePatrolStep(rows, box, from, to);
-      if ('feet' in result) {
-        this.metrics.residentSweepSteps++;
-        if (this.hasEstimatedSources) {
-          for (const id of rows.keys()) {
-            const source = this.sourcesById.get(id);
-            if (source?.estimatedSteelSections || source?.approximate) {
-              result.estimated = true;
-              break;
-            }
+      if ('feet' in result) this.metrics.residentSweepSteps++;
+      if (this.hasEstimatedSources) {
+        for (const id of rows.keys()) {
+          const source = this.sourcesById.get(id);
+          if (source?.estimatedSteelSections || source?.approximate) {
+            result.estimated = true;
+            break;
           }
         }
       }

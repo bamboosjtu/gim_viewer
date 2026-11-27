@@ -244,7 +244,8 @@ describe('source coverage and navigation cache', () => {
           indices: new Uint32Array([0, 1, 2]),
         },
       ]);
-      member.estimatedSteelSections = 1;
+      if (support) member.estimatedSteelSections = 1;
+      else { member.approximate = true; member.estimatedGeometryCount = 1; member.approximationReasons = { 'MOD/1.mod': ['Wire / preview-only'] }; }
       const key = 'estimated-' + support;
       for (const hits of [0, 1]) {
         const rt = fixture(key, [slab(), member]);

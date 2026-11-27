@@ -21,6 +21,8 @@ export interface PatrolSource {
   support: boolean;
   estimatedSteelSections?: number;
   approximate?: boolean;
+  estimatedGeometryCount?: number;
+  approximationReasons?: Record<string, string[]>;
   door?: import('./doorMotion.js').DoorMotionDescriptor;
   doorAddress?: { path: string; expressId: number };
   load: (signal: AbortSignal) => Promise<PatrolPart[]>;
@@ -37,7 +39,8 @@ export interface PatrolPose {
   sourceId: string;
 }
 export type StepResult =
-  { feet: Vector3; sourceId: string; estimated?: boolean } | { reason: string };
+  | { feet: Vector3; sourceId: string; estimated?: boolean }
+  | { reason: string; estimated?: boolean };
 export interface NavigationQueryPort {
   step(from: Vector3, to: Vector3): StepResult;
 }

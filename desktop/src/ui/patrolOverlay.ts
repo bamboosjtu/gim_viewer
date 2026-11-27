@@ -93,14 +93,15 @@ export function mountPatrolOverlay(
     look.textContent = port.dragLook ? '按住左键拖动' : '环顾';
     backdrop.hidden = mode !== 'paused';
     const activeMessage = isWalking && port.message !== '开始巡视' ? port.message : '';
-    panel.hidden = isWalking && !activeMessage;
+    panel.hidden = isWalking && !activeMessage && !port.estimated;
     title.textContent =
       mode === 'paused' ? '巡视暂停' : mode === 'inspecting' && !port.measuring ? '检查对象' : '';
     title.hidden = !title.textContent;
     status.textContent = isWalking
       ? activeMessage
       : port.message || (mode === 'paused' ? '继续从当前位置巡视' : '');
-    if (mode === 'paused' && port.estimated) status.textContent += ' · 附近使用近似碰撞模型';
+    if ((isWalking || mode === 'paused') && port.estimated)
+      status.textContent = [status.textContent, '附近使用近似碰撞模型'].filter(Boolean).join(' · ');
     enter.setAttribute('aria-pressed', String(active));
     enter.setAttribute('aria-label', active ? '退出巡视' : '进入巡视');
     enter.dataset.tip = active ? '退出巡视，恢复自由浏览视角' : '进入第一人称巡视';

@@ -120,6 +120,17 @@ function cylinder(
   return { positions, normals, indices };
 }
 
+/** Representation quality for a successful mesh, available to range-only consumers. */
+export function primitiveRepresentationQuality(
+  primitive: CanonicalPrimitive,
+): Exclude<GeometryCompileResult["status"], "none"> {
+  return "family" in primitive && primitive.approximation
+    ? "modelEstimate" in primitive && primitive.modelEstimate
+      ? "estimated"
+      : "preview-only"
+    : "standard-derived";
+}
+
 export function compilePrimitive(
   primitive: CanonicalPrimitive,
   options: GeometryCompileOptions = {},
@@ -138,12 +149,7 @@ export function compilePrimitive(
   const mesh = buildLocal(primitive, segments, options);
   if ("code" in mesh) return failure(mesh);
   return {
-    status:
-      "family" in primitive && primitive.approximation
-        ? "modelEstimate" in primitive && primitive.modelEstimate
-          ? "estimated"
-          : "preview-only"
-        : "standard-derived",
+    status: primitiveRepresentationQuality(primitive),
     mesh,
     lod,
     compilerVersion,

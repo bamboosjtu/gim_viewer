@@ -234,14 +234,13 @@ export class FirstPersonController {
       const to = this.feet.clone().add(delta),
         result = this.nav.step(this.feet, to);
       if ('reason' in result) {
-        this.commands.set('walking', result.reason);
+        this.commands.set('walking', result.reason, !!result.estimated);
         advance = false;
       } else {
         this.feet.copy(result.feet);
         this.sourceId = result.sourceId;
-        this.commands.estimated = !!result.estimated;
         changed = true;
-        this.commands.set('walking');
+        this.commands.set('walking', '', !!result.estimated);
       }
       this.tickMs[this.ticks++ % 4096] = performance.now() - started;
     }

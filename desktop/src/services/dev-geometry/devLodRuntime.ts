@@ -314,9 +314,7 @@ export class DevLodRuntime {
       signal.throwIfAborted();
       const e = row.entry;
       if (e.boundsQuality === 'empty' && !e.diagnostic) continue;
-      const approximate = ['Table', 'RectangularFixedPlate', 'RectangularRing'].some(
-        (type) => e.primitiveCounts[type],
-      );
+      const approximate = (e.estimatedGeometryCount ?? 0) > 0;
       let bounds = e.sourceBounds ? boxTuple(e.sourceBounds) : undefined;
       if (e.boundsQuality !== 'conservative') {
         let range = ranges.get(e.devPath);
@@ -377,6 +375,8 @@ export class DevLodRuntime {
         support: this.patrolGround.has(e.rootOccurrence),
         estimatedSteelSections: e.estimatedSteelSections,
         approximate,
+        estimatedGeometryCount: e.estimatedGeometryCount,
+        approximationReasons: e.approximationReasons,
         load,
       });
     }
