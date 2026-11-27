@@ -10,6 +10,7 @@ export const architectureModules = [
   'src/ui/viewerToolbox.ts',
   'src/ui/viewerToolIcons.ts',
   'src/features/substation/presentation/patrolBinding.ts',
+  'src/features/substation/presentation/patrolDoorTarget.ts',
   'src/features/substation/presentation/patrolWorkspace.ts',
   'src/features/substation/runtime/patrolNavigationRuntime.ts',
   'src/features/substation/runtime/patrolSceneCache.ts',

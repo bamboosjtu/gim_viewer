@@ -1,3 +1,4 @@
+import { bindPatrolDoorTarget } from './patrolDoorTarget.js';
 import { Vector3 } from 'three';
 import type { OrthoPerspectiveCamera } from '@thatopen/components';
 import type { AppState } from '../../../app/state.js';
@@ -41,55 +42,16 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
     search: AbortController | undefined,
     entryRequest = 0,
     switching = false;
-  let doorTimer: ReturnType<typeof setTimeout> | undefined,
-    doorSequence = 0;
   const operations = new PatrolOperationOwner();
-  const doorHint = (on: boolean) => {
-    if (port.doorHint === on) return;
-    port.doorHint = on;
-    port.dispatchEvent(new Event('change'));
-  };
-  async function doorUnderCrosshair() {
-    if (!nav.hasDoors || !scope.isCurrent()) return;
-    const rect = canvas!.getBoundingClientRect();
-    const { devHit, near, result } = await pickVisibleRay(
-      ctx,
-      state,
-      canvas!,
-      rect.left + rect.width / 2,
-      rect.top + rect.height / 2,
-      patrol!.clip(),
-    );
-    const far = result?.rayDistance ?? result?.distance ?? Infinity;
-    const d = Math.min(far, near?.distance ?? Infinity);
-    if (d > 2.5 || (devHit?.distance ?? Infinity) < d) return;
-    let id: string | undefined;
-    if (near && near.distance <= far) id = near.runtime.sourcePath + '#' + near.object.expressId;
-    else if (result) {
-      const logical =
-        state.ifc.resolveLogicalModelId(result.fragments.modelId) ?? result.fragments.modelId;
-      const rt = state.ifc.regionalRuntimes.get(logical);
-      const [guid] = await result.fragments.getGuidsByLocalIds([result.localId]);
-      const match = rt?.index.objects.filter((o) => o.globalId === guid);
-      if (rt && match?.length === 1) id = rt.sourcePath + '#' + match[0].expressId;
-    }
-    return id && nav.canOperate(id) ? id : undefined;
-  }
-  const refreshDoor = () => {
-    ++doorSequence;
-    doorHint(false);
-    if (port.mode !== 'walking' || !nav.hasDoors || doorTimer) return;
-    doorTimer = setTimeout(() => {
-      doorTimer = undefined;
-      const seq = doorSequence;
-      void doorUnderCrosshair()
-        .then((id) => {
-          if (seq === doorSequence && port.mode === 'walking') doorHint(!!id);
-        })
-        .catch(() => {});
-    }, 180);
-  };
-  const unsubscribeDoor = hub.subscribe(refreshDoor);
+  const door = bindPatrolDoorTarget(
+    ctx,
+    state,
+    canvas,
+    patrol.clip,
+    () => nav,
+    () => scope.isCurrent(),
+  );
+  const unsubscribeDoor = hub.subscribe(door.refresh);
   hub.claim('orbit', scope.session.generation);
   let trace: ReturnType<typeof hub.startAdmissionTrace> | undefined,
     drawCount = 0,
@@ -338,8 +300,7 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
     }
     if (!acceptsNavigationAction(port.mode, action)) return;
     if (action === 'exit') {
-      ++doorSequence;
-      doorHint(false);
+      door.reset();
       await exit();
       return;
     }
@@ -451,7 +412,7 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
       const person = walker;
       const resume = () => {
         person.walk();
-        refreshDoor();
+        door.refresh();
       };
       endMeasurement();
       if (!snapshot?.needsSelectionRestore()) resume();
@@ -463,7 +424,7 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
     } else if (action === 'door' && walker) {
       const feet = walker.feet.clone();
       await operate('operatingDoor', '正在检查门扇扫掠空间', async (signal) => {
-        const id = await doorUnderCrosshair();
+        const id = await door.pick();
         signal.throwIfAborted();
         const message = id ? await nav.toggleDoor(id, feet, signal) : '准星未命中可操作的门';
         return () => port.set('paused', message);
@@ -579,9 +540,7 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
     hub.stopAdmissionTrace();
     port.evidence = undefined;
     unsubscribeDoor();
-    clearTimeout(doorTimer);
-    doorSequence++;
-    doorHint(false);
+    door.reset();
     operations.cancel();
     run?.abort();
     walker?.dispose();
