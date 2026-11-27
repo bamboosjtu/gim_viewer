@@ -29,6 +29,12 @@ globalThis.runPatrolContract = async () => {
     assert(!(await writePatrolCache('assets',keys[0]+'late',asset,keys[0])),'stale writer');
     const active=keys[4];assert((await readPatrolCache('assets',active+'mesh')).vertices.length===9,'warm read');
     await discardPatrolEntry('assets',active+'mesh',active);assert(!(await readPatrolCache('assets',active+'mesh')),'single asset invalidation');
+    const open=indexedDB.open('gim-patrol-v1'), db=await new Promise((ok,fail)=>{open.onsuccess=()=>ok(open.result);open.onerror=()=>fail(open.error);});
+    const tx=db.transaction('coverage','readwrite'), coverage=tx.objectStore('coverage'), owners=coverage.get('@patrol-projects');
+    owners.onsuccess=()=>{owners.result.find(o=>o.prefix===active).bytes=512*1024*1024; coverage.put(owners.result,'@patrol-projects');};
+    await new Promise((ok,fail)=>{tx.oncomplete=ok;tx.onabort=()=>fail(tx.error);});db.close();
+    assert(!(await writePatrolCache('assets',active+'extra',asset,active)),'quota rejects the entire write');
+    assert(!(await readPatrolCache('assets',active+'extra')),'no partial asset');
     await removePatrolProject(5);assert(!(await readPatrolCache('coverage',active+'manifest')),'project clear');
   } finally {builder.dispose();}
   const port=new ViewerNavigationCommands(),viewport=document.querySelector('#viewport');

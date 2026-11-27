@@ -27,6 +27,7 @@ async function database() {
 // All rows for a single source/contract live under one range in both stores.
 const ownersKey = '@patrol-projects';
 const maxProjects = 4;
+const maxAssetBytesPerProject = 512 * 1024 * 1024;
 type Owner = { projectId: number | null; prefix: string; bytes: number };
 export function patrolCachePrefix(sha: string, projectId: number | null, shapePolicy: string) {
   return [sha, projectId ?? 'local', shapePolicy].join('/') + '/';
@@ -120,7 +121,7 @@ async function changeEntry(
             ? 0
             : a.vertices.byteLength + a.order.byteLength + a.nodes.length * 80;
           const total = owner.bytes + size - ((previous.result as number | undefined) ?? 0);
-          if (!Number.isSafeInteger(total) || total < 0 || total > 256 * 1024 * 1024) {
+          if (!Number.isSafeInteger(total) || total < 0 || total > maxAssetBytesPerProject) {
             tx.abort();
             return;
           }
