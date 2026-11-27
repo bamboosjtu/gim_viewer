@@ -1,7 +1,7 @@
 import {
   compilePrimitive,
-  PROFILE_TAGS,
-  COMPLEX_TAGS,
+  STANDARD_PRIMITIVE_TAGS,
+  type GeometryCompileOptions,
   curveCenterline,
   interpretXmlModPrimitive,
   type CanonicalPrimitive,
@@ -20,27 +20,21 @@ export interface XmlModDocument extends Omit<LegacyDocument, 'entities' | 'diagn
   diagnostics: readonly XmlModDiagnostic[];
 }
 
-const migratedTags = new Map([
-  ...COMPLEX_TAGS.map((tag) => [tag.toLowerCase(), tag] as [string, string]),
-  ...PROFILE_TAGS.map((tag) => [tag.toLowerCase(), tag] as [string, string]),
-  ['terminalblock', 'TerminalBlock'],
-  ['rectangularfixedplate', 'RectangularFixedPlate'],
-  ['circularfixedplate', 'CircularFixedPlate'],
-  ['cuboid', 'Cuboid'],
-  ['cylinder', 'Cylinder'],
-  ['sphere', 'Sphere'],
-  ['truncatedcone', 'TruncatedCone'],
-  ['eccentrictruncatedcone', 'EccentricTruncatedCone'],
-  ['offsetrectangulartable', 'OffsetRectangularTable'],
-  ['stretchedbody', 'StretchedBody'],
-]);
+const migratedTags = new Map(STANDARD_PRIMITIVE_TAGS.map((tag) => [tag.toLowerCase(), tag]));
+const projectRules: Record<string, NonNullable<GeometryCompileOptions['compatibility']>['rule']> = {
+  ChannelSteel: 'steel-model-section-v1',
+  Wire: 'wire-fit-preview-v1',
+  Table: 'non-similar-rhombi-preview-v1',
+};
 
 const indexes = new WeakMap<XmlModEntity[], Map<number, XmlModEntity>>();
 export function compileStandardLeaf(shape: CanonicalPrimitive, lod: GeometryLod) {
   return compilePrimitive(shape, { lod });
 }
-export function standardConnectionLine(shape: CanonicalPrimitive) {
-  return 'family' in shape && shape.family === 'curve' ? curveCenterline(shape).flat() : undefined;
+export function standardConnectionLine(shape: CanonicalPrimitive, lod?: GeometryLod) {
+  return 'family' in shape && shape.family === 'curve'
+    ? curveCenterline(shape, lod).flat()
+    : undefined;
 }
 export function entityIndex(doc: XmlModDocument): ReadonlyMap<number, XmlModEntity> {
   let index = indexes.get(doc.entities);
@@ -72,6 +66,11 @@ export function projectXmlMod(raw: RawXmlModDocument): XmlModDocument {
   if (raw.status === 'failed')
     throw invalidXml(raw.sourcePath, raw.diagnostics[0]?.message ?? 'Invalid Device document');
   const diagnostics: XmlModDiagnostic[] = [...raw.diagnostics];
+  const path = raw.sourcePath.replace(/\\/g, '/');
+  const projectArchiveMod =
+    raw.matrixLayout === 'project-column-major' &&
+    /^MOD\/(?:[^/]+\/)*[^/]+\.mod$/i.test(path) &&
+    !path.split('/').some((segment) => segment === '..' || segment === '.');
   const entities: XmlModEntity[] = [];
   let colorMaxA = 0;
   for (const entity of raw.entities) {
@@ -81,33 +80,24 @@ export function projectXmlMod(raw: RawXmlModDocument): XmlModDocument {
     const unsupported = { type: 'Unsupported' as const, sourceType: sourceTag, raw: rawAttributes };
     let primitive: XmlModPrimitive;
     const migrated = migratedTags.get(sourceTag.toLowerCase());
-    const result = migrated
-      ? interpretXmlModPrimitive(
-          source.sourceTag === migrated ? source : { ...source, sourceTag: migrated },
-          migrated === 'ChannelSteel' && rawAttributes.Model
-            ? {
-                compatibility: {
-                  rule: 'steel-model-section-v1',
-                  evidence: 'project XML Model-only section convention',
-                },
-              }
-            : migrated === 'Wire'
-              ? {
-                  compatibility: {
-                    rule: 'wire-fit-preview-v1',
-                    evidence: 'existing FitCoordArray project provider',
-                  },
-                }
-              : migrated === 'Table'
-                ? {
-                    compatibility: {
-                      rule: 'non-similar-rhombi-preview-v1',
-                      evidence: 'substation01 raw Table declarations with unequal scale factors',
-                    },
-                  }
-                : {},
-        )
-      : undefined;
+    const normalized =
+      migrated && sourceTag !== migrated ? { ...source, sourceTag: migrated } : source;
+    let result = migrated ? interpretXmlModPrimitive(normalized) : undefined;
+    const rule = migrated && projectRules[migrated];
+    if (rule && result?.status === 'invalid' && projectArchiveMod) {
+      const evidence = `${raw.sourcePath}#${id} (${raw.matrixLayout}, GIM MOD archive entry)`;
+      result = interpretXmlModPrimitive(normalized, { compatibility: { rule, evidence } });
+      if (result.status === 'compatible')
+        diagnostics.push({
+          code: 'confirmed-compatibility',
+          severity: 'info',
+          message: `${rule}: ${evidence}`,
+          path: raw.sourcePath,
+          ordinal: entity.ordinal,
+          entityId: id,
+          sourceTag,
+        });
+    }
     if (result?.canonical) {
       primitive = { type: 'Standard', canonical: result.canonical };
       for (const issue of result.diagnostics)

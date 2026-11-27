@@ -182,6 +182,8 @@ DEV 模板是共享资产，不是工程实体资产：很小的 DEV 由同一 W
 - `devAllStationReady`：全部 occurrence 达到 L2 或合法空终态；不是普通浏览条件。
 - 状态栏按 occurrence 统计已处理/显示/失败，模板任务数另计。
 
+标准 XML 图元的标签注册表由 SDK 导出。Desktop 的旧 Cable（拐点语法）及 BeamChannel、LightBeamChannel、H 等提供方标签为宿主兼容接口。它们由项目词法进入旧表示，标准 CurveCable 与显式型钢走 SDK。模板缓存记录实际编译结果中的估算／预览状态，巡视目录通过同一 SDK 的分析取得保守范围与精度原因。范围查询保持无网格、无 CSG。
+
 ## 性能与边界
 
 - 冷/暖、L0/L1/L2、模板编译/缓存命中分别计量；不能把“语义命中”写成“全站几何就绪”。

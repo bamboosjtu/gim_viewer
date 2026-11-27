@@ -26,7 +26,7 @@ it('includes the real curved tube between fit points and localizes only explicit
     documentBounds(
       parseWorkerXmlMod(
         '<Device><Entities><Entity ID="1" Visible="true">' + tag + '</Entity></Entities></Device>',
-        'range.mod',
+        'MOD/range.mod',
       ),
       true,
     );

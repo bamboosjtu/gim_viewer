@@ -147,3 +147,23 @@ it("G03 uses direction times L, including an oblique extrusion of a concave poly
     });
   }
 });
+
+it("stops overlapping contour projections at the edge-work limit", () => {
+  const points = Array.from({ length: 2100 }, (_, i) =>
+    [i, 1 + (i % 2) * 50, 0].join(","),
+  );
+  points.push("2099,0,0", "0,0,0");
+  const p = shape("StretchedBody", {
+    Array: points.join(";"),
+    L: "2",
+    Normal: "0,0,1",
+  });
+  expect(compilePrimitive(p).diagnostics).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        code: "capacity-exceeded",
+        message: expect.stringContaining("edge comparison"),
+      }),
+    ]),
+  );
+});

@@ -111,18 +111,20 @@ describe("Wire terminal leads and swept section clearance", () => {
         analysis = analyzePrimitive(source);
       expect(source.startVector).toEqual(start);
       expect(source.endVector).toEqual(end);
-      const line = curveCenterline(source);
-      expect(line).toEqual(points);
+
       expect(analysis.curve?.declaredSag).toBe(1);
       for (const lod of [0, 1, 2] as const) {
         const compiled = compilePrimitive(source, { lod });
         expect(compiled.status).toBe("preview-only");
         const mesh = compiled.mesh!;
+        const line = curveCenterline(source, lod),
+          sides = [6, 12, 16][lod];
+        for (const p of points) expect(line).toContainEqual(p);
         checkSurface(mesh);
-        expect(mesh.indices!.length / 3).toBe((points.length - 1) * 12 + 12);
+        expect(mesh.indices!.length / 3).toBe(line.length * 2 * sides);
         for (let ring = 0; ring < line.length; ring++)
-          for (let j = 0; j < 6; j++) {
-            const at = 3 * (ring * 6 + j);
+          for (let j = 0; j < sides; j++) {
+            const at = 3 * (ring * sides + j);
             expect(
               Math.hypot(
                 ...line[ring].map((x, k) => x - mesh.positions[at + k]),
@@ -134,7 +136,7 @@ describe("Wire terminal leads and swept section clearance", () => {
             0,
             start,
             points[1].map((x, k) => x - points[0][k]),
-            mesh.positions.length - 24,
+            mesh.positions.length - 3 * (sides + 2),
             -1,
           ],
           [
@@ -160,6 +162,35 @@ describe("Wire terminal leads and swept section clearance", () => {
             port === 0 ? points[0] : points.at(-1),
           );
         }
+      }
+    },
+  );
+  it.each([9, 32, 128])(
+    "bounds chord error and increases radial detail for %i fit points",
+    (count) => {
+      const points = Array.from({ length: count }, (_, i): Point3 => [
+        i * 200,
+        80 * Math.sin(i * 1.2),
+        0,
+      ]);
+      const source = wire(points, [1, 0, 0], [1, 0, 0], 2);
+      let previousFaces = 0,
+        previousError = Infinity;
+      for (const lod of [0, 1, 2] as const) {
+        const result = compilePrimitive(source, { lod });
+        const mesh = result.mesh!,
+          sampling = mesh.curveSampling!;
+        expect(sampling.segments).toBeGreaterThan(count - 1);
+        expect(sampling.segments).toBeLessThanOrEqual(256);
+        expect(sampling.maxChordErrorMm).toBeLessThanOrEqual(
+          previousError + 1e-9,
+        );
+        expect(mesh.indices!.length).toBeGreaterThan(previousFaces);
+        expect(
+          result.diagnostics.some((d) => d.code === "curve-sampling-budget"),
+        ).toBe(sampling.maxChordErrorMm > sampling.targetMm);
+        previousFaces = mesh.indices!.length;
+        previousError = sampling.maxChordErrorMm;
       }
     },
   );

@@ -57,7 +57,7 @@ describe('parseStlBinary / parseStlAscii', () => {
 
   it('二进制头写 solid 但长度公式命中的文件仍走二进制分支', () => {
     // 构造一个以 "solid" 开头的合法 binary STL
-    const buffer = new ArrayBuffer(84 + 50);
+    const buffer = makeBinaryStl();
     const bytes = new Uint8Array(buffer);
     bytes.set(new TextEncoder().encode('solid'), 0);
     const dv = new DataView(buffer);

@@ -66,8 +66,6 @@ export {
   applyPhmColorOverride,
 } from './xmlModGeometry.js';
 
-const RENDERABLE_MOD_PRIMITIVE_RE =
-  /<(Cylinder|Cuboid|Sphere|TruncatedCone|Ring|CircularGasket|StretchedBody|PorcelainBushing|TerminalBlock|Wire|Cable|RotationalEllipsoid|BeamChannel|H|Boolean|OffsetRectangularTable|RectangularFixedPlate|RectangularRing|Insulator|VTypeInsulator|ConePorcelainBushing|EccentricTruncatedCone|EllipticRing|BendingCylindrical|CircularFixedPlate|SquareGasket|TableGasket)\b/i;
 const GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT = 0.001;
 
 /**
@@ -78,14 +76,18 @@ const GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT = 0.001;
  * 每条 Wire/Cable 一条 Line 会多一个 draw object；超过阈值时按颜色合并成
  * LineSegments，避免数千条线时 draw calls 线性膨胀。
  */
-function addElectricalConnectionLines(group: THREE.Group, doc: XmlModDocument): void {
+function addElectricalConnectionLines(
+  group: THREE.Group,
+  doc: XmlModDocument,
+  lod: 0 | 1 | 2,
+): void {
   const lines: THREE.Line[] = [];
   for (const entity of doc.entities) {
     if (!entity.visible) continue;
     const primitive = entity.primitive;
     const flat =
       primitive.type === 'Standard'
-        ? standardConnectionLine(primitive.canonical)
+        ? standardConnectionLine(primitive.canonical, lod)
         : primitive.type === 'Cable'
           ? primitive.inflectionPoints
           : null;
@@ -239,7 +241,7 @@ function flattenDocumentToGroup(
     }
   }
 
-  addElectricalConnectionLines(merged, doc);
+  addElectricalConnectionLines(merged, doc, byMaterial.lod ?? 2);
 
   let renderableEntityCount = 0;
   merged.traverse((object) => {
@@ -345,8 +347,7 @@ export async function loadXmlModFromFiles(
     // 空 MOD 是已知的合法占位文件；其他不含当前可渲染 primitive 的内容
     // 仍交给 XML parser 校验，不能把损坏文件静默伪装成空模型。
     if (
-      !RENDERABLE_MOD_PRIMITIVE_RE.test(text) &&
-      /<Device\b[^>]*>\s*<Entities\s*\/\s*>\s*<\/Device>\s*$/i.test(text)
+      /^\s*(?:<\?xml[^?]*\?>\s*)?<Device\b[^>]*>\s*<Entities\s*\/\s*>\s*<\/Device>\s*$/i.test(text)
     ) {
       const group = new THREE.Group();
       group.name = `xml-mod:${modPath}`;

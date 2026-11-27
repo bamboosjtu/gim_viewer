@@ -176,7 +176,7 @@ it('loads a valid wide STL template without generating or rereading source-byte 
   await expect(serializeDevToGlbDetailed('DEV/device.dev',files)).rejects.toBeInstanceOf(InvalidDevGeometryError);
 });
 
-it('retains the exported world X fallback for zero STL normals under shared reflected and sheared occurrences', async () => {
+it('transforms winding-derived unit STL normals under shared reflected and sheared occurrences', async () => {
   const bytes=triangleStl([[0,0,0],[1000,0,0],[0,1000,0]]);new DataView(bytes).setFloat32(92,0,true);
   const matrices=[new THREE.Matrix4().makeScale(-1,2,1),new THREE.Matrix4().set(1,.3,.2,0,0,1,.4,0,0,0,1,0,0,0,0,1)];
   const files=new Map([
@@ -190,7 +190,7 @@ it('retains the exported world X fallback for zero STL normals under shared refl
   expect(meshes[0].geometry.getAttribute('position')).toBe(meshes[1].geometry.getAttribute('position'));
   for(const mesh of meshes){const normal=mesh.geometry.getAttribute('normal'),matrix=new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld);
     for(let vertex=0;vertex<normal.count;vertex++)expect(new THREE.Vector3().fromBufferAttribute(normal,vertex)
-      .applyMatrix3(matrix).normalize().distanceTo(new THREE.Vector3(1,0,0))).toBeLessThan(1e-6);}
+      .applyMatrix3(matrix).normalize().distanceTo(new THREE.Vector3(0,0,1).applyMatrix3(matrix).normalize())).toBeLessThan(1e-6);}
   new DevGlbTemplate('DEV/device.dev',asset!.scene).dispose();
 });
 

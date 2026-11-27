@@ -22,6 +22,20 @@ import type {
 
 export const xmlModInterpretationPolicy = "standard-xml-mod-v1";
 export const COMPLEX_TAGS = [...BODY_TAGS, "Wire", "CurveCable"] as const;
+export const STANDARD_PRIMITIVE_TAGS = [
+  "TerminalBlock",
+  "RectangularFixedPlate",
+  "CircularFixedPlate",
+  "Cuboid",
+  "Cylinder",
+  "Sphere",
+  "TruncatedCone",
+  "EccentricTruncatedCone",
+  "OffsetRectangularTable",
+  "StretchedBody",
+  ...PROFILE_TAGS,
+  ...COMPLEX_TAGS,
+] as const;
 type ComplexTag = (typeof COMPLEX_TAGS)[number];
 const complexByTag = new Map<string, ComplexTag>(
   COMPLEX_TAGS.flatMap(
@@ -133,7 +147,15 @@ export function interpretXmlModPrimitive(
     const shape = readProfile(profile, fields, options);
     diagnostics.push(...fields.diagnostics);
     if (fields.diagnostics.length)
-      return { status: "invalid", diagnostics, policyVersion };
+      return {
+        status: fields.diagnostics.some(
+          (d) => d.code === "unsupported-section-model",
+        )
+          ? "unsupported"
+          : "invalid",
+        diagnostics,
+        policyVersion,
+      };
     if (shape.approximation)
       diagnostics.push({
         stage: "interpret",

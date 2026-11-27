@@ -56,6 +56,10 @@ export function sweepTube(
       vertices <= 65536
         ? new Uint16Array((spans * 2 + (closed ? 0 : 2)) * sides * 3)
         : new Uint32Array((spans * 2 + (closed ? 0 : 2)) * sides * 3);
+  const circle = Array.from({ length: sides }, (_, j) => {
+    const angle = (2 * Math.PI * j) / sides;
+    return [Math.cos(angle), Math.sin(angle)] as const;
+  });
   let radial: Point3 = [1, 0, 0],
     cursor = 0;
   for (let i = 0; i < rings; i++) {
@@ -71,29 +75,31 @@ export function sweepTube(
     const binormal = cross3(radial, t);
     for (let j = 0; j < sides; j++) {
       const id = i * sides + j,
-        angle = (2 * Math.PI * j) / sides,
-        c = Math.cos(angle),
-        s = Math.sin(angle);
-      const n = add3(mul3(radial, c), mul3(binormal, s));
-      const point = add3(
-        frame.center,
-        mul3(
-          add3(mul3(radial, c * (frame.radialScale ?? 1)), mul3(binormal, s)),
-          radius,
-        ),
-      );
-      if (!point.every((v) => Number.isFinite(Math.fround(v))))
-        return invalidShape("Tube exceeds Float32 coordinate range");
-      positions.set(point, id * 3);
-      normals.set(n, id * 3);
+        [c, s] = circle[j],
+        scale = frame.radialScale ?? 1;
+      const offset = 3 * id;
+      for (let axis = 0; axis < 3; axis++) {
+        const lateral = binormal[axis] * s;
+        positions[offset + axis] =
+          frame.center[axis] + (radial[axis] * (c * scale) + lateral) * radius;
+        if (!Number.isFinite(positions[offset + axis]))
+          return invalidShape("Tube exceeds Float32 coordinate range");
+        if (scale === 1) normals[offset + axis] = radial[axis] * c + lateral;
+      }
+      if (scale !== 1)
+        normals.set(
+          unit3(add3(mul3(radial, c / scale), mul3(binormal, s))),
+          offset,
+        );
       if (i < spans) {
         const next = ((i + 1) % rings) * sides,
           other = (j + 1) % sides;
-        indices.set(
-          [id, next + j, next + other, id, next + other, i * sides + other],
-          cursor,
-        );
-        cursor += 6;
+        indices[cursor++] = id;
+        indices[cursor++] = next + j;
+        indices[cursor++] = next + other;
+        indices[cursor++] = id;
+        indices[cursor++] = next + other;
+        indices[cursor++] = i * sides + other;
       }
     }
   }

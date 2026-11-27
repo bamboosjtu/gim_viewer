@@ -396,60 +396,129 @@ function evaluate(s: Piece, t: number): SweepFrame {
     ),
   };
 }
+// A twice differentiable span deviates from its chord by at most max|C''(t)| / (8 n²).
+// The cubic second derivative is linear and the circular arc has constant curvature.
+function chordBound(piece: Piece) {
+  if (piece.type === 0) return 0;
+  if (piece.type === "arc") return (length(piece.x) * piece.angle ** 2) / 8;
+  const bend = (a: Point3, b: Point3, c: Point3) =>
+    length(sub3(sub3(c, b), sub3(b, a)));
+  return (
+    0.75 *
+    Math.max(bend(piece.a, piece.b, piece.c), bend(piece.b, piece.c, piece.d))
+  );
+}
+
 function framesFor(
   p: CurvePrimitive,
   options: GeometryCompileOptions,
-): SweepFrame[] | GeometryDiagnostic {
-  const minSpans =
+  fitStationsOnly = false,
+) {
+  const lod = options.lod ?? 2;
+  const sides = [6, 12, 16][lod],
+    targetMm = [10, 4, 1][lod];
+  const limits = { ...DEFAULT_GEOMETRY_LIMITS, ...options.limits };
+  const spans =
     p.kind === "Wire"
       ? distinct([p.start, ...p.fitPoints, p.end]).length - 1
       : p.segments.reduce(
           (n, s) => n + (s.type === 2 ? s.controls.length - 1 : 1),
           0,
         );
-  const previewSamples =
-    p.kind === "Wire" && p.fitOnly
-      ? Math.min(256, Math.max(8, p.fitPoints.length))
-      : undefined;
-  const preflight = checkGeometryBudget(
-    { maxCurveSegments: previewSamples ?? Math.max(0, minSpans) },
-    options.limits,
+  const required =
+    p.kind === "Wire" && p.fitOnly && spans > limits.maxCurveSegments
+      ? Math.min(spans, DEFAULT_GEOMETRY_LIMITS.maxCurveSegments)
+      : spans;
+  const invalid = checkGeometryBudget(
+    {
+      maxCurveSegments: Math.max(0, required),
+      maxVertices: (Math.max(0, required) + 1) * sides + 2 * (sides + 1),
+    },
+    limits,
   );
-  if (preflight) return preflight;
+  if (invalid) return invalid;
   const pieces = piecesFor(p);
   if (!Array.isArray(pieces)) return pieces;
-  if (previewSamples !== undefined) {
-    const limit = checkGeometryBudget(
-      { maxVertices: (previewSamples + 1) * 6 + 14 },
-      options.limits,
+  // The project fit-only dialect already permits bounded coarsening of very long lists.
+  // Bound each omitted Bézier hull against its emitted chord in the same pass.
+  if (
+    p.kind === "Wire" &&
+    p.fitOnly &&
+    pieces.length > DEFAULT_GEOMETRY_LIMITS.maxCurveSegments &&
+    pieces.length > limits.maxCurveSegments
+  ) {
+    const segments = DEFAULT_GEOMETRY_LIMITS.maxCurveSegments;
+    const capacity = checkGeometryBudget(
+      {
+        maxCurveSegments: segments,
+        maxVertices: (segments + 1) * sides + 2 * (sides + 1),
+      },
+      limits,
     );
-    if (limit) return limit;
-    const frames: SweepFrame[] = [];
-    for (let i = 0; i <= previewSamples; i++) {
-      const at = (pieces.length * i) / previewSamples,
-        part = Math.min(pieces.length - 1, Math.floor(at));
-      const frame = evaluate(pieces[part], at - part);
-      if (!frame.tangent.every(Number.isFinite))
-        return invalidShape("Undefined curve tangent");
+    if (capacity) return capacity;
+    const frames = [evaluate(pieces[0], 0)];
+    let maxChordErrorMm = 0,
+      first = 0;
+    for (let i = 1; i <= segments; i++) {
+      const end = Math.floor((i * pieces.length) / segments);
+      const frame = evaluate(pieces[end - 1], 1),
+        a = frames[i - 1].center;
+      const chord = sub3(frame.center, a),
+        squared = dot3(chord, chord);
+      for (let k = first; k < end; k++) {
+        const s = pieces[k];
+        if (s.type !== "cubic") return invalidShape("Unexpected fit-only span");
+        for (const point of [s.a, s.b, s.c, s.d]) {
+          const delta = sub3(point, a);
+          const t = squared
+            ? Math.min(1, Math.max(0, dot3(delta, chord) / squared))
+            : 0;
+          maxChordErrorMm = Math.max(
+            maxChordErrorMm,
+            length(sub3(delta, mul3(chord, t))),
+          );
+        }
+      }
       frames.push(frame);
+      first = end;
     }
-    return frames;
+    return { frames, sampling: { segments, sides, targetMm, maxChordErrorMm } };
   }
-  const count = pieces.length,
-    desired = Math.max(8, count);
-  const steps = pieces.map((s, i) =>
-    s.type === 0
-      ? 1
-      : s.type === "arc"
-        ? Math.max(2, Math.ceil((s.angle * 8) / Math.PI))
-        : Math.floor(desired / count) + Number(i < desired % count),
+  const minimum = checkGeometryBudget(
+    {
+      maxCurveSegments: pieces.length,
+      maxVertices: (pieces.length + 1) * sides + 2 * (sides + 1),
+    },
+    limits,
   );
-  const total = steps.reduce((a, b) => a + b, 0);
-  const limit = checkGeometryBudget(
-    { maxCurveSegments: total, maxVertices: (total + 1) * 6 + 14 },
-    options.limits,
+  if (minimum) return minimum;
+  const budget = Math.min(
+    limits.maxCurveSegments,
+    Math.floor((limits.maxVertices - 2 * (sides + 1)) / sides) - 1,
   );
-  if (limit) return limit;
+  const bounds = pieces.map(chordBound);
+  if (!bounds.every(Number.isFinite))
+    return invalidShape("Unrepresentable curve curvature");
+  const stepsAt = (error: number) =>
+    bounds.map((bound) => Math.max(1, Math.ceil(Math.sqrt(bound / error))));
+  const sum = (steps: number[]) => steps.reduce((n, k) => n + k, 0);
+  let steps = fitStationsOnly ? pieces.map(() => 1) : stepsAt(targetMm);
+  if (sum(steps) > budget) {
+    let lo = targetMm,
+      hi = bounds.reduce((a, b) => Math.max(a, b), targetMm);
+    for (let i = 0; i < 40; i++) {
+      const mid = Math.sqrt(lo) * Math.sqrt(hi);
+      if (sum(stepsAt(mid)) > budget) lo = mid;
+      else hi = mid;
+    }
+    steps = stepsAt(hi);
+  }
+  const segments = sum(steps);
+  const maxChordErrorMm = bounds.reduce(
+    (max, b, i) => Math.max(max, b / steps[i] ** 2),
+    0,
+  );
+  const sampling = { segments, sides, targetMm, maxChordErrorMm };
   const frames: SweepFrame[] = [];
   for (const [i, s] of pieces.entries()) {
     if (i) {
@@ -465,30 +534,58 @@ function framesFor(
       frames.push(frame);
     }
   }
-  return frames;
+  return { frames, sampling };
 }
+function curveSweepPlan(p: CurvePrimitive, options: GeometryCompileOptions) {
+  const plan = framesFor(p, options);
+  if (
+    "code" in plan ||
+    p.kind !== "Wire" ||
+    separateWireSections(plan.frames, p.diameter / 2)
+  )
+    return plan;
+  // A short new chord at a thick bend can place two tilted disks inside one another.
+  // Retry the original fit stations and report the resulting chord error explicitly.
+  const coarse = framesFor(p, options, true);
+  if (
+    !("code" in coarse) &&
+    coarse.frames.length < plan.frames.length &&
+    separateWireSections(coarse.frames, p.diameter / 2)
+  )
+    return coarse;
+  return {
+    code: "unresolved-wire-sweep",
+    stage: "compile",
+    severity: "warning",
+    message:
+      "Wire cross-sections cannot be separated at the declared radius with these sampled centres and end planes",
+  } satisfies GeometryDiagnostic;
+}
+
 export function curveMesh(
   p: CurvePrimitive,
   options: GeometryCompileOptions,
 ): MeshBuild {
-  const frames = framesFor(p, options);
-  if (!Array.isArray(frames)) return frames;
-  if (p.kind === "Wire" && !separateWireSections(frames, p.diameter / 2)) {
-    return {
-      code: "unresolved-wire-sweep",
-      stage: "compile",
-      severity: "warning",
-      message:
-        "Wire cross-sections cannot be separated at the declared radius with these sampled centres and end planes",
-    };
-  }
+  const plan = curveSweepPlan(p, options);
+  if ("code" in plan) return plan;
+  const { frames, sampling } = plan;
   frames[0].radial =
     Math.abs(frames[0].tangent[2]) < 0.9 ? [0, 0, 1] : [0, 1, 0];
-  return sweepTube(frames, p.diameter / 2, false, 6, options.limits);
+  const mesh = sweepTube(
+    frames,
+    p.diameter / 2,
+    false,
+    sampling.sides,
+    options.limits,
+  );
+  return "code" in mesh ? mesh : { ...mesh, curveSampling: sampling };
 }
-export function curveCenterline(p: CurvePrimitive): Point3[] {
-  const frames = framesFor(p, {});
-  return Array.isArray(frames) ? frames.map((f) => f.center) : [];
+export function curveCenterline(
+  p: CurvePrimitive,
+  lod: GeometryCompileOptions["lod"] = 2,
+): Point3[] {
+  const plan = curveSweepPlan(p, { lod });
+  return "code" in plan ? [] : plan.frames.map((f) => f.center);
 }
 export function curveAnalysis(p: CurvePrimitive): AnalysisGeometry {
   const pieces = piecesFor(p);

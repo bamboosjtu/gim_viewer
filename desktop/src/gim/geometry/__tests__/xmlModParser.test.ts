@@ -149,7 +149,10 @@ describe('parseXmlMod', () => {
           <Color R="100" G="100" B="100" A="100" />
         </Entity>`,
       );
-      expect(parseXmlMod(minimal,'MOD/channel-min.mod').entities[0].primitive).toMatchObject({type:'Standard',canonical:{kind:'ChannelSteel',model:'C8',modelEstimate:true}});
+      expect(parseXmlMod(minimal,'MOD/channel-min.mod').entities[0].primitive).toMatchObject({type:'Unsupported',sourceType:'ChannelSteel'});
+      const known = minimal.replace('C8','C10');
+      expect(parseXmlMod(known,'MOD/channel-min.mod').entities[0].primitive).toMatchObject({type:'Standard',canonical:{kind:'ChannelSteel',modelEstimate:true}});
+      expect(parseXmlMod(known,'external/channel-min.mod').entities[0].primitive.type).toBe('Unsupported');
     });
 
     it('Table：H/LL1/LL2/TL1/TL2 字段', () => {

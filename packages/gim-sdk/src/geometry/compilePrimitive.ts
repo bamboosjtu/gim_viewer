@@ -18,7 +18,7 @@ import type {
   MeshData,
 } from "./primitiveContracts.js";
 
-export const xmlModCompilerVersion = "xml-mod-mesh-v1";
+export const xmlModCompilerVersion = "xml-mod-mesh-v1+adaptive-sections-v1";
 export function primitiveCompilerVersion(p: CanonicalPrimitive): string {
   return p.kind === "Wire"
     ? xmlModCompilerVersion + "+wire-sweep-clearance-v1"
@@ -148,22 +148,37 @@ export function compilePrimitive(
   });
   const mesh = buildLocal(primitive, segments, options);
   if ("code" in mesh) return failure(mesh);
+  const sampling = mesh.curveSampling;
+  const limited = sampling && sampling.maxChordErrorMm > sampling.targetMm;
   return {
-    status: primitiveRepresentationQuality(primitive),
+    status: limited
+      ? "preview-only"
+      : primitiveRepresentationQuality(primitive),
     mesh,
     lod,
     compilerVersion,
-    diagnostics:
-      "family" in primitive && primitive.approximation
+    diagnostics: [
+      ...(limited
+        ? [
+            {
+              code: "curve-sampling-budget",
+              stage: "compile" as const,
+              severity: "warning" as const,
+              message: `Curve chord error bound ${sampling.maxChordErrorMm} mm exceeds ${sampling.targetMm} mm with the feasible sweep stations`,
+            },
+          ]
+        : []),
+      ...("family" in primitive && primitive.approximation
         ? [
             {
               code: "approximated-geometry",
-              stage: "compile",
-              severity: "info",
+              stage: "compile" as const,
+              severity: "info" as const,
               message: primitive.approximation,
             },
           ]
-        : [],
+        : []),
+    ],
   };
 }
 

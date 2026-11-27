@@ -694,7 +694,7 @@ describe('Boolean CSG（P3-1，three-bvh-csg）', () => {
 
 
 describe('outline LOD contract', () => {
-  const doc = (inner: string) => parseXmlMod(`<Device><Entities>${inner}</Entities></Device>`, 'outline.mod');
+  const doc = (inner: string) => parseXmlMod(`<Device><Entities>${inner}</Entities></Device>`, 'MOD/outline.mod');
   const leaf = (id: number, size = 200, matrix = IDENTITY) => `<Entity ID="${id}" Visible="false"><Cuboid L="${size}" W="${size}" H="${size}"/><TransformMatrix Value="${matrix.join(',')}"/></Entity>`;
   const positions = (out: ReturnType<typeof collectBakedGeometriesByMaterial>) => [...out.values()].flat();
   it.each(['Union', 'Difference', 'Intersection'] as const)('%s never calls the Evaluator in L0/L1, including nested hidden operands', async (op) => {

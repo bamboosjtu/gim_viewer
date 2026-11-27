@@ -57,6 +57,27 @@ it("B.2 follows the X cut, closes the cut plane and recovers the full ellipsoid"
     expect(analyzePrimitive(p).range).toMatchObject({
       bounds: { min: [left, -300, -300], max: [600, 300, 300] },
     });
+    let faceCount = 0,
+      lastError = Infinity;
+    for (const lod of [0, 1, 2] as const) {
+      const m = compilePrimitive(p, { lod }).mesh!;
+      expect(m.indices!.length).toBeGreaterThan(faceCount);
+      faceCount = m.indices!.length;
+      let maxError = 0;
+      for (let i = 0; i < m.indices!.length; i += 3) {
+        const v = [0, 0, 0];
+        for (let j = 0; j < 3; j++)
+          for (let k = 0; k < 3; k++)
+            v[k] += m.positions[m.indices![i + j] * 3 + k] / 3;
+        if (Math.abs(v[0] - left) > 1e-5)
+          maxError = Math.max(
+            maxError,
+            1 - Math.hypot(v[0] / 600, v[1] / 300, v[2] / 300),
+          );
+      }
+      expect(maxError).toBeLessThan(lastError);
+      lastError = maxError;
+    }
     const m = compilePrimitive(p).mesh!;
     let caps = 0;
     for (let i = 0; i < m.positions.length; i += 3) {
@@ -229,3 +250,24 @@ it("G05 interprets line, virtual intersection and spline direction records separ
   });
   expect(compilePrimitive(noArc).diagnostics[0].code).toBe("unverified-arc");
 });
+
+it.each([9, 32, 128])(
+  "refines a single B.29 spline with %i controls independently of control count",
+  (count) => {
+    const coordinates = Array.from({ length: count }, (_, i) =>
+      [i * 300, 100 * Math.sin(i * 1.4), 0].join(","),
+    );
+    const p = shape("CurveCable", {
+      D: "2",
+      CurveTypeArray: "2",
+      CurveControlCoordArray: ["1,0,0", "1,0,0", ...coordinates].join(";"),
+    });
+    let faces = 0;
+    for (const lod of [0, 1, 2] as const) {
+      const mesh = compilePrimitive(p, { lod }).mesh!;
+      expect(mesh.curveSampling!.segments).toBeGreaterThan(count - 1);
+      expect(mesh.indices!.length).toBeGreaterThan(faces);
+      faces = mesh.indices!.length;
+    }
+  },
+);

@@ -143,7 +143,10 @@ function primitiveToGeometryUncached(
       onFailure?.(result.diagnostics[0]?.code ?? 'unsupported-primitive');
       return null;
     }
-    return geometryFromMeshData(result.mesh);
+    const geometry = geometryFromMeshData(result.mesh);
+    if (result.status === 'estimated' || result.status === 'preview-only')
+      geometry.userData.representationQuality = result.status;
+    return geometry;
   }
   if (p.type === 'ChannelSteel' || p.type === 'BeamChannelLike') {
     const s = steelSection(p);
@@ -438,6 +441,7 @@ export type BakedGeometries = Map<THREE.MeshStandardMaterial, THREE.BufferGeomet
   previewShapes: Set<string>;
   failures: BakedGeometryFailure[];
   simplifiedBooleans: number;
+  lod: DeviceLod;
   representationPolicy: 'outline' | 'detailed';
   approximatedBooleans: Record<'Union' | 'Difference' | 'Intersection', number>;
   omittedSmallParts: number;
@@ -454,6 +458,7 @@ function* bakeGeometrySteps(
     previewShapes: new Set<string>(),
     failures: [] as BakedGeometryFailure[],
     simplifiedBooleans: 0,
+    lod,
     representationPolicy: lod < 2 ? ('outline' as const) : ('detailed' as const),
     approximatedBooleans: { Union: 0, Difference: 0, Intersection: 0 },
     omittedSmallParts: 0,
@@ -462,16 +467,9 @@ function* bakeGeometrySteps(
   const build = (p: XmlModPrimitive, id: number) => {
     const started = performance.now();
     const geometry = primitiveToGeometry(p, lod, (reason) => failures.set(id, reason));
-    if (
-      geometry &&
-      p.type === 'Standard' &&
-      'approximation' in p.canonical &&
-      p.canonical.approximation
-    ) {
-      const quality =
-        'modelEstimate' in p.canonical && p.canonical.modelEstimate ? 'estimated' : 'preview-only';
+    const quality: unknown = geometry?.userData.representationQuality;
+    if (p.type === 'Standard' && (quality === 'estimated' || quality === 'preview-only'))
       byMaterial.previewShapes.add(p.canonical.kind + ':' + quality);
-    }
     const elapsed = timings || onStage ? performance.now() - started : 0;
     if (timings) timings.primitiveMs = (timings.primitiveMs ?? 0) + elapsed;
     onStage?.('dev.primitive', elapsed, {

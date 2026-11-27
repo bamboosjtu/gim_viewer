@@ -305,7 +305,11 @@ export function bodyMesh(
   if (p.kind === "RotationalEllipsoid") {
     const from = p.polar - p.height,
       theta = Math.acos(Math.max(-1, Math.min(1, from / p.polar)));
-    const angles = Array.from({ length: 9 }, (_, i) => theta * (1 - i / 8));
+    const axial = [4, 6, 8][options.lod ?? 2];
+    const angles = Array.from(
+      { length: axial + 1 },
+      (_, i) => theta * (1 - i / axial),
+    );
     if (
       theta > Math.PI / 2 &&
       !angles.some((a) => Math.abs(a - Math.PI / 2) < 1e-14)
@@ -323,7 +327,13 @@ export function bodyMesh(
           radialNormal: r / p.equatorial,
         };
       });
-    return revolve(stations, [0, 0, 0], [1, 0, 0], 16, options);
+    return revolve(
+      stations,
+      [0, 0, 0],
+      [1, 0, 0],
+      [8, 12, 16][options.lod ?? 2],
+      options,
+    );
   }
   const outline = options.lod === 0,
     branches =

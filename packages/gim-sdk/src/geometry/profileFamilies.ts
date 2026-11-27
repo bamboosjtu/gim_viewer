@@ -211,18 +211,19 @@ export function readProfile(
         !!model &&
         ["B", "H", "D", "T"].every((k) => f.get(k) === undefined) &&
         options.compatibility?.rule === "steel-model-section-v1";
-      const numberTen = /^(?:\[10|C10|10#)$/i.test(model?.trim() ?? "");
-      const width = modelEstimate ? (numberTen ? 48 : 50) : n("B"),
+      if (modelEstimate && !/^(?:\[10|C10|10#)$/i.test(model.trim()))
+        f.diagnostics.push({
+          code: "unsupported-section-model",
+          stage: "interpret",
+          severity: "warning",
+          message:
+            "No verified dimensions for this channel section designation",
+          location: { field: "Model", sourceTag: kind },
+        });
+      const width = modelEstimate ? 48 : n("B"),
         height = modelEstimate ? 100 : n("H"),
-        web = modelEstimate ? (numberTen ? 5.3 : 5) : n("D");
-      const flange =
-        kind === "AngleSteel"
-          ? web
-          : modelEstimate
-            ? numberTen
-              ? 8.5
-              : 8
-            : n("T");
+        web = modelEstimate ? 5.3 : n("D");
+      const flange = kind === "AngleSteel" ? web : modelEstimate ? 8.5 : n("T");
       if (
         web >= width ||
         flange *

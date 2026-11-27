@@ -54,6 +54,17 @@ it("B.7 retains both capped axes and declares the miter assumption", () => {
     Rad: String(Math.PI / 2),
   });
   expect(result.status).toBe("preview-only");
+  const mesh = result.mesh!;
+  const sides = (mesh.positions.length / 3 - 2) / 5;
+  const vertex = (j: number) =>
+    mesh.positions.subarray(3 * (sides + j), 3 * (sides + j + 1));
+  for (let j = 0; j < sides; j++) {
+    const next = vertex((j + 1) % sides),
+      prev = vertex((j + sides - 1) % sides);
+    const n = mesh.normals.subarray(3 * (sides + j), 3 * (sides + j + 1));
+    const along = next.reduce((sum, x, i) => sum + (x - prev[i]) * n[i], 0);
+    expect(along).toBeCloseTo(0, 5);
+  }
   const ports = analyzePrimitive(p).ports;
   expect(ports[0].position).toEqual([10, 0, 0]);
   expect(ports[1].position[1]).toBeCloseTo(10);

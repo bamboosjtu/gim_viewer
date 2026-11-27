@@ -59,6 +59,13 @@ export interface MeshData {
   readonly normals: Float32Array;
   readonly indices?: Uint16Array | Uint32Array;
   readonly uvs?: Float32Array;
+  /** Certified centreline-to-chord error bound for a sampled curve, in source millimetres. */
+  readonly curveSampling?: {
+    targetMm: number;
+    maxChordErrorMm: number;
+    segments: number;
+    sides: number;
+  };
 }
 
 export interface GeometryLimits {

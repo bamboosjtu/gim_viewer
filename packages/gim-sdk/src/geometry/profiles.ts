@@ -32,7 +32,9 @@ const orient = (a: P2, b: P2, c: P2) =>
   (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
 
 /** Compare only edges with overlapping projected intervals. Adjacent edges may share one endpoint. */
-function simpleRing(points: P2[]): boolean {
+function simpleRing(points: P2[]): boolean | GeometryDiagnostic {
+  const maxVisits = 1_048_576;
+  let visits = 0;
   const edges = points
     .map((a, i) => {
       const b = points[(i + 1) % points.length];
@@ -49,6 +51,15 @@ function simpleRing(points: P2[]): boolean {
     .sort((a, b) => a.x0 - b.x0);
   let active: typeof edges = [];
   for (const edge of edges) {
+    // Bound both the active-list compaction and interval comparisons on overlapping projections.
+    visits += active.length;
+    if (visits > maxVisits)
+      return {
+        code: "capacity-exceeded",
+        stage: "compile",
+        severity: "error",
+        message: "Contour edge comparison budget exceeded",
+      };
     active = active.filter((other) => other.x1 >= edge.x0);
     for (const other of active) {
       if (edge.y1 < other.y0 || other.y1 < edge.y0) continue;
@@ -142,8 +153,9 @@ export function loftRings(
       Number.EPSILON * (64 * extent * ring.length + 8 * originScale);
     if (ring.some((p) => Math.abs(dot(sub(p, origin), normal)) > tolerance))
       return invalidShape("Contour is not coplanar");
-    if (!simpleRing(ring.map(project)))
-      return invalidShape("Contour intersects itself");
+    const simple = simpleRing(ring.map(project));
+    if (typeof simple !== "boolean") return simple;
+    if (!simple) return invalidShape("Contour intersects itself");
   }
   const positions = new Float32Array(count * 6 * 3),
     normals = new Float32Array(positions.length);
