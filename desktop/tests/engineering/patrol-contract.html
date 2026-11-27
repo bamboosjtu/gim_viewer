@@ -11,6 +11,27 @@ import { mountPatrolOverlay } from '/src/ui/patrolOverlay.ts';
 import { ViewerNavigationCommands } from '/src/shared/viewerNavigationCommands.ts';
 globalThis.runPatrolContract = async () => {
   const assert = (ok, label) => { if (!ok) throw Error(label); };
+  // Simulate an old window keeping its v1 connection alive during an upgrade.
+  const openV1 = indexedDB.open('gim-patrol-v1', 1);
+  openV1.onupgradeneeded = () => {
+    for (const name of ['assets', 'coverage']) {
+      openV1.result.createObjectStore(name).put('orphaned derived payload', 'unowned-key');
+    }
+  };
+  const opened = request => new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  const legacy = await opened(openV1);
+  assert(await readPatrolCache('assets', 'unowned-key') === undefined, 'blocked upgrade can use memory');
+  assert(await readPatrolCache('coverage', 'unowned-key') === undefined, 'second read while blocked');
+  legacy.close();
+  const reset = await opened(indexedDB.open('gim-patrol-v1'));
+  assert(reset.version === 2, 'derived store upgrade completed');
+  const tx0 = reset.transaction(['assets', 'coverage']);
+  const counts = await Promise.all(['assets', 'coverage'].map(name => opened(tx0.objectStore(name).count())));
+  assert(counts.every(count => count === 0), 'v1 assets and coverage were purged');
+  reset.close();
   const client=EngineeringWorkerClient.create(()=>true);
   try { await client.init('worker-contract',[]);const rejected=await client.extractGeometry().then(()=>'',e=>String(e));assert(rejected.includes('unique project.cbm'),'worker reports unbound source'); }finally{client.close();}
   const builder=new PatrolAssetBuilder();

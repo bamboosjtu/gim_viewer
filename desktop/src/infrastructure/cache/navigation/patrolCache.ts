@@ -3,25 +3,33 @@ import type { PatrolAsset } from '../../../shared/patrolSpatialAsset.js';
 const databaseName = 'gim-patrol-v1';
 let opening: Promise<IDBDatabase> | undefined;
 async function database() {
-  if (!opening)
+  if (!opening) {
+    const req = indexedDB.open(databaseName, 2);
     opening = new Promise<IDBDatabase>((resolve, reject) => {
-      const req = indexedDB.open(databaseName, 1);
+      // While an old window holds v1 open, callers can use the in-memory scene.
+      // Keep this request until it upgrades, rather than queueing more opens behind it.
+      req.onblocked = () => reject(new Error('旧巡视窗口占用缓存'));
       req.onupgradeneeded = () => {
-        req.result.createObjectStore('assets');
-        req.result.createObjectStore('coverage');
+        for (const domain of ['assets', 'coverage']) {
+          if (req.result.objectStoreNames.contains(domain)) req.result.deleteObjectStore(domain);
+          req.result.createObjectStore(domain);
+        }
       };
-      req.onerror = () => reject(req.error ?? new Error('巡视缓存事务失败'));
+      req.onerror = () => {
+        opening = undefined;
+        reject(req.error ?? new Error('巡视缓存事务失败'));
+      };
       req.onsuccess = () => {
-        req.result.onversionchange = () => {
-          req.result.close();
+        const db = req.result;
+        db.onversionchange = () => {
+          db.close();
           opening = undefined;
         };
-        resolve(req.result);
+        opening = Promise.resolve(db);
+        resolve(db);
       };
-    }).catch((error) => {
-      opening = undefined;
-      throw error;
     });
+  }
   return opening;
 }
 // All rows for a single source/contract live under one range in both stores.
