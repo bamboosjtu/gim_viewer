@@ -19,6 +19,11 @@ import type {
 } from "./primitiveContracts.js";
 
 export const xmlModCompilerVersion = "xml-mod-mesh-v1";
+export function primitiveCompilerVersion(p: CanonicalPrimitive): string {
+  return p.kind === "Wire"
+    ? xmlModCompilerVersion + "+wire-sweep-clearance-v1"
+    : xmlModCompilerVersion;
+}
 const cylinderSegments = [6, 12, 16] as const;
 
 function cuboid(x: number, y: number, height: number): MeshData {
@@ -119,7 +124,7 @@ export function compilePrimitive(
   primitive: CanonicalPrimitive,
   options: GeometryCompileOptions = {},
 ): GeometryCompileResult {
-  const compilerVersion = xmlModCompilerVersion;
+  const compilerVersion = primitiveCompilerVersion(primitive);
   const lod = options.lod ?? 2;
   if (!Number.isInteger(lod) || lod < 0 || lod > 2)
     throw new RangeError("Invalid MOD mesh LOD");

@@ -44,6 +44,8 @@ export interface AnalysisGeometry {
     sagReference?: "unspecified";
     fitPointCount?: number;
     maxFitDistanceFromChord?: number;
+    /** Wire preview tangents in traversal order. Ports retain the signed source leads. */
+    travelTangents?: { start: Point3; end: Point3 };
   };
 }
 

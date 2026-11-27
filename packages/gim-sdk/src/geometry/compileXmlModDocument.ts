@@ -1,5 +1,8 @@
 import type { RawXmlModDocument } from "../parser/rawXmlMod.js";
-import { compilePrimitive, xmlModCompilerVersion } from "./compilePrimitive.js";
+import {
+  compilePrimitive,
+  primitiveCompilerVersion,
+} from "./compilePrimitive.js";
 import {
   interpretXmlModPrimitive,
   xmlModInterpretationPolicy,
@@ -14,7 +17,9 @@ import type {
 } from "./primitiveContracts.js";
 
 function shapeKey(p: CanonicalPrimitive, lod: number, policy: string): string {
-  return [xmlModCompilerVersion, policy, JSON.stringify(p), lod].join("/");
+  return [primitiveCompilerVersion(p), policy, JSON.stringify(p), lod].join(
+    "/",
+  );
 }
 
 /** One result per declaration; only successfully compiled local shapes become templates. */

@@ -8,6 +8,7 @@ import type {
   GeometryDiagnostic,
 } from "./primitiveContracts.js";
 import { invalidShape, type MeshBuild } from "./profiles.js";
+import { separateWireSections } from "./wireSweep.js";
 import type { StandardFields } from "./standardFields.js";
 import { xmlModNumber } from "../parser/xmlModValues.js";
 import {
@@ -326,12 +327,23 @@ function fillet(s: Arc): Piece | undefined {
 function distinct(points: Point3[]) {
   return points.filter((p, i) => !i || !close(points[i - 1], p));
 }
+
+// Wire vectors describe the lead at each terminal. Their signs are preserved
+// on the source and the reported ports. The sweep traverses first fit to last.
+function alongWire(lead: Point3 | undefined, chord: Point3) {
+  return lead && dot3(lead, chord) < 0 ? mul3(lead, -1) : lead;
+}
+
 function piecesFor(p: CurvePrimitive): Piece[] | GeometryDiagnostic {
   if (p.kind === "Wire") {
     const points = distinct([p.start, ...p.fitPoints, p.end]);
-    return points.length > 1
-      ? splinePieces(points, p.startVector, p.endVector)
-      : invalidShape("Wire fit points coincide");
+    if (points.length < 2) return invalidShape("Wire fit points coincide");
+    const last = points.length - 1;
+    return splinePieces(
+      points,
+      alongWire(p.startVector, sub3(points[1], points[0])),
+      alongWire(p.endVector, sub3(points[last], points[last - 1])),
+    );
   }
   const pieces: Piece[] = [];
   for (const s of p.segments) {
@@ -461,6 +473,15 @@ export function curveMesh(
 ): MeshBuild {
   const frames = framesFor(p, options);
   if (!Array.isArray(frames)) return frames;
+  if (p.kind === "Wire" && !separateWireSections(frames, p.diameter / 2)) {
+    return {
+      code: "unresolved-wire-sweep",
+      stage: "compile",
+      severity: "warning",
+      message:
+        "Wire cross-sections cannot be separated at the declared radius with these sampled centres and end planes",
+    };
+  }
   frames[0].radial =
     Math.abs(frames[0].tangent[2]) < 0.9 ? [0, 0, 1] : [0, 1, 0];
   return sweepTube(frames, p.diameter / 2, false, 6, options.limits);
@@ -500,10 +521,11 @@ export function curveAnalysis(p: CurvePrimitive): AnalysisGeometry {
     min[i] -= roundoff;
     max[i] += roundoff;
   }
+  const declared = p.kind === "Wire" ? [p.startVector, p.endVector] : [];
   const ports = [first, last].map((f, i) => ({
     name: i ? "end" : "start",
     position: f.center,
-    direction: f.tangent,
+    direction: declared[i] ? unit3(declared[i]) : f.tangent,
     unit: "mm" as const,
     quality: p.approximation
       ? ("estimated" as const)
@@ -535,6 +557,9 @@ export function curveAnalysis(p: CurvePrimitive): AnalysisGeometry {
       sagReference: p.kind === "Wire" ? "unspecified" : undefined,
       fitPointCount: p.kind === "Wire" ? p.fitPoints.length : undefined,
       maxFitDistanceFromChord,
+      ...(p.kind === "Wire"
+        ? { travelTangents: { start: first.tangent, end: last.tangent } }
+        : {}),
     },
   };
 }
