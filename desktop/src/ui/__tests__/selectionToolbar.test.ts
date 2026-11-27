@@ -47,3 +47,14 @@ it('updates a dragged section field in place and disposes the controls', () => {
   dispose();
   expect(field.isConnected).toBe(false);
 });
+
+it('updates tool and patrol visibility when the project changes without a DOM mutation',()=>{
+  const state=new AppState();dispose=setupSelectionToolbar(state);
+  const viewport=document.getElementById('viewport')!;
+  state.currentProjectType='substation'; expect(viewport.classList.contains('has-3d-tools')).toBe(true);
+  state.currentProjectType='transmission_line';expect(viewport.classList.contains('has-3d-tools')).toBe(false);
+  state.currentProjectType=null;
+  state.ifc.loadedModels.set('only',{modelId:'only',runtimeModelId:'only',visible:true});
+  expect(viewport.classList.contains('has-3d-tools')).toBe(true);
+  state.ifc.loadedModels.clear();expect(viewport.classList.contains('has-3d-tools')).toBe(false);
+});

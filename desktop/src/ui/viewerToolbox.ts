@@ -1,6 +1,12 @@
 import { mountDistanceResults } from './distanceResults.js';
 import { toolGlyph, installTooltips, type ToolIcon } from './viewerToolIcons.js';
-import type { AppState } from '../app/state.js';
+export interface ViewerToolContext {
+  readonly hasModel: boolean;
+  readonly lineProject: boolean;
+  readonly canIsolate: boolean;
+  readonly onlySelected: boolean;
+  readonly canGoBack: boolean;
+}
 import type {
   ViewerCommand,
   ViewerCommandPort,
@@ -11,12 +17,12 @@ import type {
 } from '../shared/viewerCommands.js';
 
 export function mountViewerToolbox(
-  state: AppState,
+  port: ViewerCommandPort,
+  readContext: () => ViewerToolContext,
   bar: HTMLElement,
   viewport: HTMLElement,
   selectionButtons: HTMLElement[],
 ) {
-  const port: ViewerCommandPort = state.viewerCommands;
   const nav = document.createElement('div'),
     panel = document.createElement('div');
   nav.className = 'viewer-tool-tabs';
@@ -244,8 +250,9 @@ export function mountViewerToolbox(
     };
   }
   function refreshSelection() {
-    hide.disabled = !port.available || !state.selection.canIsolateSelection;
-    only.disabled = hide.disabled || state.selection.onlySelected;
+    const context = readContext();
+    hide.disabled = !port.available || !context.canIsolate;
+    only.disabled = hide.disabled || context.onlySelected;
   }
   port.addEventListener('selectionchange', refreshSelection);
   function render() {
@@ -256,11 +263,8 @@ export function mountViewerToolbox(
         ?.querySelector<HTMLInputElement>('.model-checkbox');
       if (checkbox) checkbox.checked = model.visible;
     }
-    const available =
-      port.available &&
-      (state.currentProjectType === 'substation' ||
-        state.currentProjectType === 'equipment' ||
-        state.ifc.loadedModels.size > 0);
+    const context = readContext();
+    const available = port.available && context.hasModel;
     for (const [i, tab] of tabs.entries()) {
       tab.disabled = !available;
       tab.setAttribute('aria-pressed', String(s.tool === tools[i][0]));
@@ -276,7 +280,7 @@ export function mountViewerToolbox(
     results.render(s);
     bar.dataset.tool = s.tool;
     for (const b of [home, views, ...cameraButtons]) b.disabled = !available;
-    dock.hidden = !available || state.currentProjectType === 'transmission_line';
+    dock.hidden = !available || context.lineProject;
     cameraButtons[1].setAttribute('aria-pressed', String(s.cameraMode === 'orbit'));
     cameraButtons[2].setAttribute('aria-pressed', String(s.cameraMode === 'pan'));
     if (s.tool === 'view') {
@@ -287,12 +291,7 @@ export function mountViewerToolbox(
         ['iso', '轴测'],
       ] as const)
         button(panel, label, () => send({ kind: 'camera', action: act }));
-      button(
-        panel,
-        '上一视角',
-        () => send({ kind: 'camera', action: 'back' }),
-        !state.viewState.viewHistory?.canGoBack,
-      );
+      button(panel, '上一视角', () => send({ kind: 'camera', action: 'back' }), !context.canGoBack);
     }
     pointer.setAttribute('aria-pressed', String(s.tool === 'select'));
     distance.setAttribute('aria-pressed', String(s.tool === 'distance'));

@@ -46,7 +46,11 @@ export function setupSelectionToolbar(state: AppState): () => void {
       .catch((error) => logger.warn('[清除选择]', error));
   };
   clear.addEventListener('click', clearSelection);
-  const toolbox = mountViewerToolbox(state, bar, viewport, [locate, clear]);
+  const readContext = () => state.viewerToolContext;
+  const toolbox = mountViewerToolbox(state.viewerCommands, readContext, bar, viewport, [
+    locate,
+    clear,
+  ]);
   const group = bar.querySelector<HTMLElement>('[data-group="view"] .viewer-ribbon-actions');
   const patrol =
     group && state.navigation ? mountPatrolOverlay(state.navigation, group, viewport) : null;
@@ -59,10 +63,6 @@ export function setupSelectionToolbar(state: AppState): () => void {
         (!!state.currentProjectType || state.ifc.loadedModels.size > 0),
     );
   };
-  const observer = new MutationObserver(refreshVisibility);
-  observer.observe(viewport, { childList: true });
-  const badge = document.getElementById('project-type-badge');
-  if (badge) observer.observe(badge, { childList: true, subtree: true });
   state.viewerCommands.addEventListener('change', refreshVisibility);
   refreshVisibility();
   const escape = (event: KeyboardEvent) => {
@@ -87,7 +87,6 @@ export function setupSelectionToolbar(state: AppState): () => void {
   };
   document.addEventListener('keydown', escape);
   return () => {
-    observer.disconnect();
     patrol?.dispose();
     toolbox.dispose();
     state.viewerCommands.removeEventListener('change', refreshVisibility);

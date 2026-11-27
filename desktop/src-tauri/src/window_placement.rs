@@ -47,6 +47,12 @@ fn capture(w: &Window, placement: &mut Placement) {
         });
     }
 }
+fn inner_extent(saved: f64, minimum: f64, scale: f64, work_area: u32, frame: u32) -> u32 {
+    (saved.max(minimum) * scale)
+        .round()
+        .min(work_area.saturating_sub(frame) as f64) as u32
+}
+
 pub fn restore(app: &tauri::App, conn: &Connection) {
     let Some(w) = app.get_webview_window("main") else {
         return;
@@ -86,14 +92,8 @@ pub fn restore(app: &tauri::App, conn: &Connection) {
                     ),
                     _ => (0, 0),
                 };
-                let width = (b.width.max(1200.0) * d)
-                    .round()
-                    .min(area.size.width.saturating_sub(frame_w) as f64)
-                    as u32;
-                let height = (b.height.max(700.0) * d)
-                    .round()
-                    .min(area.size.height.saturating_sub(frame_h) as f64)
-                    as u32;
+                let width = inner_extent(b.width, 1200.0, d, area.size.width, frame_w);
+                let height = inner_extent(b.height, 700.0, d, area.size.height, frame_h);
                 if w.set_size(PhysicalSize::new(width, height)).is_ok() {
                     let outer = w.outer_size().unwrap_or(PhysicalSize::new(width, height));
                     let x = (b.x * d).clamp(0., area.size.width.saturating_sub(outer.width) as f64);
@@ -140,5 +140,18 @@ pub fn observe(w: &Window, event: &WindowEvent) {
                 let _=conn.execute("INSERT INTO app_setting(key,value,updated_at_ms) VALUES(?1,?2,?3) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at_ms=excluded.updated_at_ms", params![KEY,value,crate::db::now_ms() as i64]);
             };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::inner_extent;
+
+    #[test]
+    fn restore_sizes_use_target_dpi_and_fit_the_monitor_work_area() {
+        assert_eq!(inner_extent(1300.0, 1200.0, 1.5, 2560, 16), 1950);
+        assert_eq!(inner_extent(500.0, 700.0, 1.25, 1080, 48), 875);
+        assert_eq!(inner_extent(1600.0, 1200.0, 2.0, 1280, 20), 1260);
+        assert_eq!(inner_extent(900.0, 700.0, 1.0, 24, 32), 0);
     }
 }

@@ -74,6 +74,7 @@ export class AppState {
     captureSession: () => this.captureProjectSession(),
     isCurrentSession: (session) => this.isCurrentSession(session),
     entries: () => this.currentIfcEntries,
+    modelAvailabilityChanged: () => this.viewerCommands.notify(),
   });
   readonly selection = new ProjectSelectionState({
     captureSession: () => this.captureProjectSession(),
@@ -127,7 +128,27 @@ export class AppState {
   projectName: string = '';
 
   // 工程类型 + 线路图（线路工程专用；变电工程保持 null）
-  currentProjectType: GimProjectType | null = null;
+  private projectType: GimProjectType | null = null;
+  get currentProjectType() {
+    return this.projectType;
+  }
+  set currentProjectType(type: GimProjectType | null) {
+    if (type === this.projectType) return;
+    this.projectType = type;
+    this.viewerCommands.notify();
+  }
+  get viewerToolContext() {
+    return {
+      hasModel:
+        this.currentProjectType === 'substation' ||
+        this.currentProjectType === 'equipment' ||
+        this.ifc.loadedModels.size > 0,
+      lineProject: this.currentProjectType === 'transmission_line',
+      canIsolate: this.selection.canIsolateSelection,
+      onlySelected: this.selection.onlySelected,
+      canGoBack: !!this.viewState.viewHistory?.canGoBack,
+    };
+  }
   lineCachePersistence: 'idle' | 'saving' | 'saved' | 'failed' | 'not-applicable' = 'idle';
   currentGimGraph: GimGraph | null = null;
 

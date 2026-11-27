@@ -6,6 +6,7 @@ interface IfcRuntimeHost {
   captureSession(): ProjectLoadSession;
   isCurrentSession(session: ProjectLoadSession): boolean;
   entries(): readonly IfcEntry[];
+  modelAvailabilityChanged?(): void;
 }
 /** Session-owned registry; late deletion must only remove its own runtime address. */
 class RegionalSources extends Map<string, IfcRegionalRuntime> {
@@ -24,16 +25,37 @@ class RegionalSources extends Map<string, IfcRegionalRuntime> {
     super.clear();
   }
 }
+type LoadedModel = { modelId: string; runtimeModelId: string; visible: boolean };
+class LoadedModels extends Map<string, LoadedModel> {
+  constructor(private readonly notify: () => void) {
+    super();
+  }
+  override set(id: string, model: LoadedModel) {
+    const empty = !this.size;
+    super.set(id, model);
+    if (empty) this.notify();
+    return this;
+  }
+  override delete(id: string) {
+    const removed = super.delete(id);
+    if (removed && !this.size) this.notify();
+    return removed;
+  }
+  override clear() {
+    if (!this.size) return;
+    super.clear();
+    this.notify();
+  }
+}
 export class IfcRuntimeState {
   readonly runtimeModelIds = new Map<string, string>();
   readonly logicalModelIds = new Map<string, string>();
   readonly modelOwners = new Map<string, ProjectLoadSession>();
-  readonly loadedModels = new Map<
-    string,
-    { modelId: string; runtimeModelId: string; visible: boolean }
-  >();
+  readonly loadedModels: Map<string, LoadedModel>;
   readonly regionalRuntimes = new RegionalSources();
-  constructor(private readonly host: IfcRuntimeHost) {}
+  constructor(private readonly host: IfcRuntimeHost) {
+    this.loadedModels = new LoadedModels(() => host.modelAvailabilityChanged?.());
+  }
   getRuntimeModelId(
     logicalModelId: string,
     session: ProjectLoadSession = this.host.captureSession(),
