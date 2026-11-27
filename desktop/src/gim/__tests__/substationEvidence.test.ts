@@ -186,10 +186,10 @@ describe('Substation source evidence and normalized projections', () => {
     expect(doc.entities[0].primitive).toMatchObject({type:'Unsupported',raw:{FutureAttr:'value'}});
     expect(doc.status).toBe('partial');expect(loadXmlModFromText(text,'MOD/mixed.mod').children).toHaveLength(1);
   });
-  it.each(['Insulator', 'ConePorcelainBushing', 'SquareGasket', 'BendingCylindrical'])('maps %s to a browse approximation without losing sibling geometry', (type) => {
+  it.each(['Insulator', 'ConePorcelainBushing', 'SquareGasket', 'BendingCylindrical'])('preserves the source and its renderable sibling for incomplete %s', (type) => {
     const text = `<Device><Entities><Entity ID="1" Visible="TRUE"><${type} FutureAttr="value"/></Entity><Entity ID="2" Visible="True"><Cuboid L="10" W="10" H="10"/></Entity></Entities></Device>`;
     const doc = parseXmlMod(text, 'MOD/mixed.mod');
-    expect(doc.entities[0].primitive?.type).not.toBe('Unsupported');
+    expect(doc.entities[0].primitive?.type).toBe(['SquareGasket','BendingCylindrical'].includes(type)?'Unsupported':'PorcelainBushing');
     expect(doc.entities[0].visible).toBe(true);
     expect(loadXmlModFromText(text, 'MOD/mixed.mod').children.length).toBeGreaterThanOrEqual(1);
   });

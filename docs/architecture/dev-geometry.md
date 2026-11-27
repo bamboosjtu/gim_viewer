@@ -90,7 +90,7 @@ DOM 与 Worker 通过相同的 SDK Raw Parser 读取变电 XML，工程入口显
 - 球、圆台、偏心圆台、偏移矩形台与拉伸体使用 SDK Canonical 参数计算局部网格和范围。标准圆台的 TR 是顶半径，标准拉伸按单位方向乘 L。SDK 仅在调用方显式提供规则和来源依据时使用比例或完整位移的兼容解释。
 - Boolean 在 L0/L1 采用轮廓近似（Union 组合、Difference/Intersection 保留第一操作数），L2 才执行精确 CSG。
 - 远景/中景 L0/L1 跳过小于阈值的附属构件，只保留主体轮廓；全小构件 DEV 回退一个最大轮廓，不伪装成空设备。跳过只影响当前表示，不删除来源引用，也不写空几何结论。
-- 槽钢和 H 型钢使用共用的开口截面轮廓，源尺寸缺失时应用文档化的浏览估算。DEV 模板、空间目录和巡视资产的缓存键包含截面策略。`Table` 仍使用外廓盒体，弱 schema 保留 raw。见 [XML 图元](../schema/xml-primitives.md)。
+- 标准菱形台、圆管扫掠、实体垫片及 L/I/C/T 型钢复用 SDK 的放样、扫掠和带孔轮廓算法。图示未定的接缝和型号估算单列精度。DEV 模板、空间目录和巡视资产的缓存键包含截面策略。见 [XML 图元](../schema/xml-primitives.md)。
 - 未识别标签保留 `Unsupported/sourceType`，不能记作 empty。
 - Wire/Cable 使用真实管径的样条管，另叠 1px 中心线保证低档位可见；中心线不参与拾取/测量。
 

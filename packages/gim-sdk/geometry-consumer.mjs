@@ -139,7 +139,7 @@ assert.ok(raw.entities[0].rawTransformMatrix.includes("5699.9999"));
 assert.equal(raw.entities[0].transformMatrix[12], 5699.9999);
 assert.deepEqual(
   compileXmlModDocument(raw).entities.map((e) => e.interpretation.status),
-  ["standard", "standard", "unsupported", "unsupported"],
+  ["standard", "standard", "standard", "unsupported"],
 );
 const conflict = compileXmlModDocument(
   readXmlMod(example.replace('RAD="3.1416"', 'RAD="3.1416" Rad="1"'), standard),
@@ -285,3 +285,23 @@ const plates = compile(
 );
 for (let i = 0; i < 3; i++) assert.ok(meshOf(plates, i).indices.length > 36);
 console.log("Perforated plates Node consumer passed: B.25/B.26/B.27.");
+const profiles = [
+  '<Table LL1="8" LL2="6" TL1="4" TL2="3" H="6"/>',
+  '<BendingCylindrical R="2" L="15" Rad="1.5"/>',
+  '<Ring R="20" DR="2"/>',
+  '<RectangularRing L="40" W="20" R="5" DR="1"/>',
+  '<EllipticRing L="20" W="12" DR="1"/>',
+  '<CircularGasket OR="20" IR="10" H="2"/>',
+  '<TableGasket OR="20" TR="30" IR="10" H="2"/>',
+  '<SquareGasket L1="40" W1="30" L2="20" W2="10" H="2" CT="3" CL="2"/>',
+  ...["AngleSteel", "I-shapedsteel", "ChannelSteel", "T-Steels"].map(
+    (t) => `<${t} B="40" H="60" D="3" T="5" L="100"/>`,
+  ),
+];
+const profileDoc = compile(wrap(...profiles.map((p, i) => row(i + 1, p))));
+for (const [i, e] of profileDoc.entities.entries()) {
+  const result = profileDoc.templates.get(e.templateKey);
+  assert.ok(result?.mesh?.indices.length);
+  assert.equal(result.status, i === 1 ? "preview-only" : "standard-derived");
+}
+console.log("PR-4 Node consumer passed: 12 profile, sweep and section types.");

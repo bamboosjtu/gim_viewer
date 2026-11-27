@@ -315,8 +315,11 @@ export async function buildDevSourceBounds(
       for (const e of doc.entities)
         if (e.visible) {
           if (
-            (e.primitive.type === 'ChannelSteel' || e.primitive.type === 'BeamChannelLike') &&
-            steelSection(e.primitive)?.estimated
+            (e.primitive.type === 'Standard' &&
+              'modelEstimate' in e.primitive.canonical &&
+              e.primitive.canonical.modelEstimate) ||
+            ((e.primitive.type === 'ChannelSteel' || e.primitive.type === 'BeamChannelLike') &&
+              steelSection(e.primitive)?.estimated)
           )
             result.estimatedSteelSections = (result.estimatedSteelSections ?? 0) + 1;
           if (

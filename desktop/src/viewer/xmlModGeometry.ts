@@ -1092,6 +1092,8 @@ function sanitizeNum(n: number): number {
 function smallPartThresholdMm(p: XmlModPrimitive): number {
   switch (p.type === 'Standard' ? p.canonical.kind : p.type) {
     case 'CircularFixedPlate': // previously routed through Cylinder's outline threshold
+    case 'BendingCylindrical':
+    case 'EllipticRing':
     case 'Cylinder':
     case 'Sphere':
     case 'Ring':

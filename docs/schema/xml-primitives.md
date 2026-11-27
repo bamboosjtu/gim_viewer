@@ -34,54 +34,22 @@
 
 ## Primitive 总表
 
-“状态/限制”描述当前实现，不是验收结论；表中类型均已有 parser 分支与几何分支（Unsupported 除外）。
+Geometry Core 在图元局部毫米坐标中解释和编译下列来源。文档保留原始拼写、字段和诊断。可见根、放置、材质与 Boolean 求值由宿主处理。
 
-| Primitive | 来源标签与别名 | 关键字段 | 当前几何 | LOD/简化 | 状态/限制 |
-|---|---|---|---|---|---|
-| Cuboid | Cuboid（大小写不敏感） | L,W,H | Box(L,W,H)，XY 居中，底面 Z=0、顶面 Z=H | 固定 12 三角形 | 数值缺失保留 NaN，可能得到零尺寸或 NaN 顶点几何，不返回 null；不校验正负 |
-| Cylinder | Cylinder | R,H | 沿 +Z 圆柱，底面圆心为原点，含端盖 | 径向 6 / 12 / 16 | R 或 H 非正不拒绝，可能退化 |
-| Sphere | Sphere | R | 球心在原点 | 6×4 / 12×6 / 16×8 | 同 Cylinder |
-| TruncatedCone | TruncatedCone | BR,TR,H | BR 和 TR 分别为底、顶半径，沿 +Z | 径向 6 / 12 / 16 | 比例解释需要显式来源规则 |
-| Ring | Ring | R,DR,Rad | Torus(R, abs(DR), 弧 Rad)；DR 为管半径、Rad 为弧度 | 4×8 / 8×16 / 8×16 | Rad 缺失为 NaN→0，扫掠退化但不返回 null |
-| CircularGasket | CircularGasket | OR,IR,Rad（H 解析但未使用） | Torus(OR, max(0,(OR−IR)/2), 弧 Rad) | 固定 8×16 | IR≥OR 时管半径为 0；H 被忽略 |
-| StretchedBody | StretchedBody | L,Array,Normal | 截面多边形端盖（Earcut）+ 侧面，沿解释后的 Normal 位移 | 无分段 | 见专节；少于 3 点或非法 Normal 返回 null |
-| PorcelainBushing | PorcelainBushing；Insulator、VTypeInsulator、ConePorcelainBushing 映射而来 | R,R1,R2,N,H | 锥柱主体 Cylinder(R2,R,H) + N 组伞裙片 | L0 仅主体，L1/L2 加伞裙；N 上限 512 | 伞裙为浏览近似，不还原真实伞形、伞间距与瓷色 |
-| TerminalBlock | TerminalBlock | L,W,T,CL,CS,RS,R,CN,RN,BL | L 沿 Z，W 沿 X，孔沿 Y 贯穿。上方两角按 CL 切边 | 径向离散依 LOD，保持孔数及孔径 | Phase、H 原文归来源 |
-| ChannelSteel | ChannelSteel；DoubleChannelSteel | L,Model,D?,H?,B?,T? | 用宽 B、高 H、腹板厚 D、翼缘厚 T 生成开口槽形，沿局部 Y 轴拉伸 | 无 LOD 变化 | 显式有效尺寸优先，缺失或不可用截面参数按浏览策略估算 |
-| Table | Table | H,LL1,LL2,TL1,TL2 | 外廓盒 Box(LL1,LL2,H)，居中 | 无 LOD 变化 | LL1、LL2、H 非正返回 null；TL1/TL2 未使用，忽略孔洞与栏栅 |
-| RectangularFixedPlate | RectangularFixedPlate | L,W,T,CS,RS,CN,RN,MH,D | XY 阵列，中心孔由 MH 控制，D 为直径 | 分档保持贯通 | 缺少必要字段有诊断 |
-| OffsetRectangularTable | OffsetRectangularTable | raw 七字段：LL,LW,TL,TW,H,XOFF,YOFF | 8 顶点棱台：下矩形 XY 居中 Z=0，上矩形在 Z=H 并施加 XOFF/YOFF | 12 三角形 | 缺任一字段、非有限或非正尺寸返回 null；其他编码不支持 |
-| RectangularRing | RectangularRing；SquareGasket、TableGasket | raw：L1,W1,L2,W2,H 或 T | 四块板拼成的矩形框 | 无 | 内框钳制到不超过外框，缺省 0.8×；退化返回 null |
-| Boolean | Boolean | Type,Entity1,Entity2 | 引用同文件 Entity ID 求值 | L0/L1 轮廓，L2 CSG | 操作数缺失、成环或异常不伪造结果；见专节 |
-| Wire | Wire | D,FitCoordArray | 拟合点 CatmullRom 样条管，半径 D/2 | 管段 8–256，径向 6 | 有效点少于 2 个返回 null；另叠 1px 中心线 |
-| Cable | Cable | D,StartCoord,InflectionCoordArray,EndCoord | 首末点与拐点拼合后的同样条管 | 同 Wire | 非法首末点被静默丢弃 |
-| RotationalEllipsoid | RotationalEllipsoid | H,LR,WR | 半径 0.5 的单位球按 LR、WR、H 三轴缩放（当全长） | 固定 16×8 | 每轴下限 1 mm；不是精确椭球参数化 |
-| BeamChannelLike | BeamChannel、LightBeamChannel、H、H-beam | Length,Model | 槽形或 H 形截面沿源局部 Y 轴居中拉伸 | 同一截面贯穿各级 LOD | 缺尺寸走下述浏览估算；缺正长度时保留缺口 |
-| Unsupported | 其余任意标签（含非法 Boolean Type） | raw | 无 | 无 | 跳过并计入 unsupported 统计；sourceType 保留原标签，不记 empty |
-
-**型材截面浏览策略。** 单位均为 mm。显式宽、高及满足截面净空的腹板厚、翼缘厚逐项优先。`[10` 使用公称高 100、宽 48，`C10`、`10#` 在未声明系列时按相同尺寸估算，腹板、翼缘分别取 5.3 和 8.5。其他无尺寸的槽钢取高 100、宽 50，H 型钢取高 100、宽 100；腹板、翼缘默认取 5 和 8，小截面分别限至宽、高的四分之一。模型保持原始长度、放置矩阵和开口方向；无有效长度时仍标记范围未知。采用公称型号或任一默认尺寸时，巡视分块按 `estimated` 保存覆盖依据，行至该来源范围时提示截面为估算值。此约定用于模型浏览，尺寸或型号完整性留给独立 Validate CLI。[热轧槽钢公称外形参考](https://en.pipemanufactory.com/hot-rolled-steel-channel-u-channel)
-
-台型垫片按原始 `TableGasket` 的底部外半径和高度定位覆盖缺口。固定板及方形垫片须有明确外形尺寸。曲线管的保守范围取各段 Catmull-Rom 三次曲线的 Bézier 控制凸包，再扩张管半径。
+| 条款 | 标签 | 当前表示与证据 |
+|---|---|---|
+| B.1、B.3、B.6 | Sphere、Cuboid、Cylinder | 球心或底面中心为原点。L/W/H、R 为正尺寸，缺失或非法时报告字段诊断。 |
+| B.4、B.5 | Table、OffsetRectangularTable | 按顶底双对角线放样相似菱形，或按顶底长宽与有符号偏移放样矩形。工程入口将四个对角线完整但比例不等的来源标为兼容预览。 |
+| B.7–B.9 | BendingCylindrical、TruncatedCone、EccentricTruncatedCone | 弯折件的两端分别沿 +X 和 Rad 指定方向，斜接工法为浏览近似。圆台按真实顶底半径生成，偏心圆台同时保留顶心偏移。 |
+| B.10–B.12 | Ring、RectangularRing、EllipticRing | 中心线分别为圆弧、圆角矩形或椭圆，截面位于路径法平面。部分角度带端盖。B.11 的 W=2R 边界标为待核证。 |
+| B.13–B.15 | CircularGasket、TableGasket、SquareGasket | 内外环、上下盖及内孔壁均由尺寸构造。B.14 两外半径各自大于内半径即可。B.15 按 CT 选择直角、圆角或切角。 |
+| B.16 | StretchedBody | 三维轮廓沿单位方向乘长度拉伸，详见下节。 |
+| B.17–B.20 | AngleSteel、I-shapedsteel、ChannelSteel、T-Steels | 显式截面沿 +X 拉伸，图示横向为 −Y，竖向为 +Z。各自以外角、底边中点、槽背中点或顶边中点定位。Model-only 槽钢保留既有浏览坐标和估算尺寸。 |
+| B.25–B.27 | TerminalBlock、RectangularFixedPlate、CircularFixedPlate | 端子板 L 沿 Z、T 沿 Y，有上角切边和贯通孔。另两种板的孔沿 Z，MH 单独控制中心孔。圆板 L≠W 的外形待核证。 |
 
 ## 标签归一与导出器别名
 
-归一化在 parser 内完成：`trim().toLowerCase()` 查表，命中后以 canonical 名进入 switch；未命中保留原标签进 Unsupported。大小写变体自动等价，但错拼不会被猜测，也不会退回弱 schema。
-
-| 原始标签（大小写不敏感） | 归一/结果 | 字段去向 |
-|---|---|---|
-| Rectangularfixedplate | RectangularFixedPlate | 弱 schema 矩形板 |
-| H-beam | H → BeamChannelLike | Length,Model → 盒体 |
-| DoubleChannelSteel | ChannelSteel | L,D,H,B,T → 外廓盒体 |
-| Insulator、VTypeInsulator | PorcelainBushing | n=max(1,N1 或 N)；h=(H1 或 H)×n；r=r1=R1 或 R；r2=R2 或 R1 或 R；D、FL、AL、LN 忽略 |
-| ConePorcelainBushing | PorcelainBushing | r=BR2 或 BR；r1=TR2 或 TR；r2=TR1 或 TR；n=N；h=H |
-| EccentricTruncatedCone | SDK 独立参数类型 | BR/TR 为半径，顶心按 TOPXOFF/TOPYOFF 有符号偏移 |
-| SquareGasket、TableGasket | RectangularRing | 原 attrs 进 raw |
-| EllipticRing | Ring | r=(LR+WR)/2；dr=DR；rad 取 Rad>0 时的 Rad，否则 2π |
-| BendingCylindrical | Cylinder | r=R；h=L；弯曲半径与弧长忽略 |
-| CircularFixedPlate | SDK 独立参数类型 | L=W 时为圆板，首孔 +X，CS 为孔环半径，MH 控制中心孔。L≠W 保留待核证 |
-| 其他标签 | Unsupported | 原 attrs 进 raw |
-
-别名只把来源字段塞进既有槽位，不扩大支持范围；映射后的几何仍是目标类型的浏览近似。
+Desktop 按登记的标签映射到 SDK 类型，SDK 严格入口支持表内拼写和标准示例的大写拼写。H-beam、BeamChannel、LightBeamChannel、DoubleChannelSteel 和旧 Cable 的浏览映射仍由宿主兼容层提供。未知标签保留来源属性。
 
 ## StretchedBody：Array、Normal 与位移语义
 
@@ -118,61 +86,19 @@ loader 另叠一条 1px 中心线：每 Entity 一条 Line，超过 1000 条时�
 
 ## 弱 schema 与 Unsupported
 
-| 类型 | raw 字段 | 回退与判定 |
-|---|---|---|
-| RectangularFixedPlate | 标准字段见上表 | 剖面按阵列和中心开关生成真实孔壁，非法或缺失字段保留来源诊断 |
-| OffsetRectangularTable | LL,LW,TL,TW,H,XOFF,YOFF | 七字段必须齐全、非空、有限，且前五项均大于 0，否则返回 null；XOFF/YOFF 可为负 |
-| RectangularRing | L1,W1,L2,W2,H 或 T | 外框缺省 1 mm；内框缺省 0.8× 外框并钳制不超过外框；两侧厚度都为 0 或厚度非正时返回 null |
-| Unsupported | 全部 attrs | 不生成几何，保留 sourceType 与 raw；计入 unsupportedPrimitiveTypeCounts |
-
-未知标签必须记 Unsupported，不能记 empty：有 Entity 但全部不可解析时，文件状态是 unsupported，否则缓存会把“解析器不会”写成空模型。三个弱 schema 类型相反——字段不可解释时仍可能产出 1 mm 兜底几何，因此“有网格”也不代表字段被正确理解。
+标准字段不足、引用歧义、几何退化、容量超限分别保留诊断。合法空交集与未能编译的可见根在文档和缓存中分别计数。Model-only 型钢和未核证的构造细节在 SDK 结果中有估算或预览标记。
 
 ## 近似类型与明确忽略的字段
 
-| 类型 | 近似方式 | 明确忽略 |
-|---|---|---|
-| PorcelainBushing（含 Insulator/VTypeInsulator、ConePorcelainBushing） | 锥柱 + 均布伞裙片 | 真实伞形曲线、伞间距、瓷色、V 串双串几何 |
-| TerminalBlock | 两处上角切边及阵列贯通孔 | 来源未约定的接线细节 |
-| ChannelSteel、BeamChannelLike | 拉伸开口截面 | 未提供的截面参数按浏览值估算；圆角和翼缘斜度未建模 |
-| Table | 外廓盒体 | 孔洞、栏栅 |
-| RectangularRing（SquareGasket、TableGasket） | 四块板拼合 | 圆角、密封槽、螺栓分布 |
-| RectangularFixedPlate | 带阵列和可选中心孔的矩形板 | 非标准倒角、开槽 |
-| EllipticRing | 平均半径圆环 | 椭圆长短轴差异 |
-| BendingCylindrical | 直圆柱 | 弯曲半径、弧长与路径 |
-| CircularFixedPlate | 圆盘 | 螺栓孔（CS/N/MH）、W |
-| EccentricTruncatedCone | 偏心截锥 | 顶底截面及有符号偏移由标准字段推导 |
-| RotationalEllipsoid | 缩放球 | 精确椭球参数化 |
-| OffsetRectangularTable | 八顶点棱台 | 其他字段编码、孔洞 |
-| Wire、Cable | 样条管 | 真实弧垂、张力、接头与敷设细节 |
+B.7 的接缝、B.11 的表注边界及未给出型材系列的公称截面不能用作精确设计依据。参数单位、来源实例和端口位置随其证据质量输出。覆盖范围用于视域和巡视初筛。
 
 ## 分段、上限与超限行为
 
-| 对象 | LOD0 | LOD1 | LOD2 | 超限/缺失行为 |
-|---|---|---|---|---|
-| 圆柱、锥（径向段） | 6 | 12 | 16 | 固定，无截断 |
-| 球（宽×高） | 6×4 | 12×6 | 16×8 | 固定，无截断 |
-| Ring（径向×管向） | 4×8 | 8×16 | 8×16 | 固定 |
-| CircularGasket | 8×16 | 8×16 | 8×16 | 不随 LOD 变化 |
-| RotationalEllipsoid | 16×8 | 16×8 | 16×8 | 不随 LOD 变化 |
-| PorcelainBushing 伞裙 | 0 | N | N | N 取 min(512, floor(N))，超出静默截断 |
-| TerminalBlock 孔 | CN×RN | CN×RN | CN×RN | 单图元孔数和顶点预算在分配前检查 |
-| Wire/Cable 管段 | 8–256 | 8–256 | 8–256 | clamp(点数/3, 8, 256)，径向固定 6 |
-| 小构件过滤（仅烘焙/LOD 路径） | Cylinder/Sphere/Ring/CircularGasket 的最大外接尺寸≤100 mm、Cuboid≤50 mm 时丢弃 | 同 LOD0 | 不过滤 | 整文件无可渲染时回填最大的一件；计数进 omittedSmallParts |
-
-“无截断”只表示本层没有硬性上限，不代表任意参数组合都可靠。
+球和圆柱的径向分段为 6/12/16，圆环的路径分段为 8/16/16。弯管保留真实管径。编译按顶点、轮廓、孔和曲线段数预算预检。L0/L1 对 Difference/Intersection 保留第一操作数，对 Union 组合轮廓；L2 按需执行 CSG。小件按完整放置后的外接尺寸过滤，整 DEV 全小时保留最大轮廓。
 
 ## 源码入口与验证边界
 
-- parser：[xmlModParser](../../desktop/src/gim/geometry/xmlModParser.ts)；几何与 LOD：[xmlModGeometry](../../desktop/src/viewer/xmlModGeometry.ts)
-- 语义单点：[stretchedBody](../../desktop/src/gim/geometry/stretchedBody.ts)、[offsetRectangularTable](../../desktop/src/gim/geometry/offsetRectangularTable.ts)
-- 类型契约：[ir.ts](../../packages/gim-primitives/src/geometry/ir.ts)；加载、中心线与状态汇总：[xmlModLoader](../../desktop/src/viewer/xmlModLoader.ts)
-- 格式与 Entity 契约：[substation-mod](substation-mod.md)、[geometry-model](geometry-model.md)
-
-- parser 接受不等于几何支持：19 个 canonical 类型都有分支，但字段缺失、NaN、非正尺寸、退化轮廓、栅格超限会得到 null 或零尺寸几何；renderableTypes 只是诊断分类，不保证该 Entity 出图。
-- 尺寸与安装测量不可用：伞裙、端子栅格、盒体、样条管、圆环只保证浏览轮廓与位置量级，不能反推设计尺寸、装配间隙或电气参数。
-- 新增类型必须同时补字段映射（含别名）、浏览几何与 LOD/近似说明、上限与失败 reason，并同步本文与 [substation-mod](substation-mod.md) 的分工；只加 parser 分支会让文件被记成 unsupported 或 partial。
-- 型材的公称值或估算值只影响浏览几何，源尺寸字段及其缺项保持可检查。
-- 颜色、可见性与材质共享只影响显示，不能据此推断设备类别、带电状态或工程归属。
+字段、编译和范围查询见 [Geometry SDK](../../packages/gim-sdk/src/geometry/geometry.ts)。[Desktop 适配](../../desktop/src/gim/geometry/xmlModDocument.ts) 负责来源路由，[Viewer](../../desktop/src/viewer/xmlModGeometry.ts) 负责渲染对象和组合求值。真实样本、合成不变量及尚待核证的标准分支分别验收。
 
 ## 相关文档
 

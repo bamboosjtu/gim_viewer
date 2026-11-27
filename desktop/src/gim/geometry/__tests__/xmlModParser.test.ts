@@ -94,11 +94,7 @@ describe('parseXmlMod', () => {
           <Color R="100" G="100" B="100" A="100" />
         </Entity>`,
       );
-      const p = parseXmlMod(xml, 'MOD/ring.mod').entities[0].primitive as Extract<
-        XmlModPrimitive,
-        { type: 'Ring' }
-      >;
-      expect(p).toEqual({ type: 'Ring', r: 100, dr: 20, rad: 3.14 });
+      expect(parseXmlMod(xml,'MOD/ring.mod').entities[0].primitive).toMatchObject({type:'Standard',canonical:{kind:'Ring',radius:100,tube:20,angle:3.14}});
     });
 
     it('TerminalBlock：12 字段含 Phase（字符串）', () => {
@@ -146,19 +142,7 @@ describe('parseXmlMod', () => {
           <Color R="100" G="100" B="100" A="100" />
         </Entity>`,
       );
-      const p1 = parseXmlMod(full, 'MOD/channel.mod').entities[0].primitive as Extract<
-        XmlModPrimitive,
-        { type: 'ChannelSteel' }
-      >;
-      expect(p1).toEqual({
-        type: 'ChannelSteel',
-        l: 2000,
-        model: 'C5',
-        d: 50,
-        h: 100,
-        b: 40,
-        t: 8,
-      });
+      expect(parseXmlMod(full,'MOD/channel.mod').entities[0].primitive).toMatchObject({type:'Unsupported',sourceType:'ChannelSteel'}); // web D=50 exceeds width B=40
 
       // 仅必填
       const minimal = wrap(
@@ -168,15 +152,7 @@ describe('parseXmlMod', () => {
           <Color R="100" G="100" B="100" A="100" />
         </Entity>`,
       );
-      const p2 = parseXmlMod(minimal, 'MOD/channel-min.mod').entities[0].primitive as Extract<
-        XmlModPrimitive,
-        { type: 'ChannelSteel' }
-      >;
-      expect(p2.d).toBeUndefined();
-      expect(p2.h).toBeUndefined();
-      expect(p2.b).toBeUndefined();
-      expect(p2.t).toBeUndefined();
-      expect(p2.model).toBe('C8');
+      expect(parseXmlMod(minimal,'MOD/channel-min.mod').entities[0].primitive).toMatchObject({type:'Standard',canonical:{kind:'ChannelSteel',model:'C8',modelEstimate:true}});
     });
 
     it('Table：H/LL1/LL2/TL1/TL2 字段', () => {
@@ -187,11 +163,7 @@ describe('parseXmlMod', () => {
           <Color R="150" G="100" B="50" A="100" />
         </Entity>`,
       );
-      const p = parseXmlMod(xml, 'MOD/table.mod').entities[0].primitive as Extract<
-        XmlModPrimitive,
-        { type: 'Table' }
-      >;
-      expect(p).toEqual({ type: 'Table', h: 750, ll1: 800, ll2: 600, tl1: 80, tl2: 60 });
+      expect(parseXmlMod(xml,'MOD/table.mod').entities[0].primitive).toMatchObject({type:'Standard',canonical:{kind:'Table',height:750,ll1:800,ll2:600,tl1:80,tl2:60}});
     });
 
     it('CircularGasket：H/Rad/OR/IR 字段', () => {
@@ -202,11 +174,7 @@ describe('parseXmlMod', () => {
           <Color R="50" G="50" B="50" A="100" />
         </Entity>`,
       );
-      const p = parseXmlMod(xml, 'MOD/gasket.mod').entities[0].primitive as Extract<
-        XmlModPrimitive,
-        { type: 'CircularGasket' }
-      >;
-      expect(p).toEqual({ type: 'CircularGasket', h: 10, rad: 6.28, or: 100, ir: 80 });
+      expect(parseXmlMod(xml,'MOD/gasket.mod').entities[0].primitive).toMatchObject({type:'Standard',canonical:{kind:'CircularGasket',height:10,angle:6.28,outer:100,inner:80}});
     });
   });
 
@@ -255,7 +223,7 @@ describe('parseXmlMod', () => {
         XmlModPrimitive,
         { raw: Record<string, string> }
       >;
-      expect(p.type).toBe('RectangularRing');
+      expect(p.type).toBe('Unsupported');
       expect(p.raw).toEqual({ R: '100', DR: '20' });
     });
 

@@ -21,4 +21,10 @@ export { interpretXmlModPrimitive } from "./interpretXmlModPrimitive.js";
 export { compilePrimitive } from "./compilePrimitive.js";
 export { compileXmlModDocument } from "./compileXmlModDocument.js";
 export * from "./analysisGeometry.js";
-export {compileStl,queryStlBounds,type StlFormat,type StlCompileResult} from "./formats/stl.js";
+export { PROFILE_TAGS } from "./profileFamilies.js";
+export {
+  compileStl,
+  queryStlBounds,
+  type StlFormat,
+  type StlCompileResult,
+} from "./formats/stl.js";

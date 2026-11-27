@@ -1,5 +1,11 @@
 import type { RawPrimitiveSource } from "../parser/rawXmlMod.js";
 import { xmlModNumber } from "../parser/xmlModValues.js";
+import {
+  PROFILE_TAGS,
+  readProfile,
+  type ProfileTag,
+} from "./profileFamilies.js";
+import { StandardFields } from "./standardFields.js";
 import type { Point3 } from "./analysisGeometry.js";
 import {
   DEFAULT_GEOMETRY_LIMITS,
@@ -13,6 +19,15 @@ import type {
 } from "./primitiveContracts.js";
 
 export const xmlModInterpretationPolicy = "standard-xml-mod-v1";
+const profilesByTag = new Map<string, ProfileTag>(
+  PROFILE_TAGS.flatMap(
+    (tag) =>
+      [
+        [tag, tag],
+        [tag.toUpperCase(), tag],
+      ] as [string, ProfileTag][],
+  ),
+);
 
 export function interpretXmlModPrimitive(
   source: RawPrimitiveSource,
@@ -67,6 +82,32 @@ export function interpretXmlModPrimitive(
     );
   let rule: typeof dialect;
   let canonical: CanonicalPrimitive;
+  const profile = profilesByTag.get(source.sourceTag);
+  if (profile) {
+    const fields = new StandardFields(source);
+    const shape = readProfile(profile, fields, options);
+    diagnostics.push(...fields.diagnostics);
+    if (fields.diagnostics.length)
+      return { status: "invalid", diagnostics, policyVersion };
+    if (shape.approximation)
+      diagnostics.push({
+        stage: "interpret",
+        code: shape.modelEstimate
+          ? "estimated-model-section"
+          : "unverified-shape-detail",
+        severity: "info",
+        message: shape.approximation,
+        location: { sourceTag: source.sourceTag },
+      });
+    const compatible =
+      shape.modelEstimate || (shape.kind === "Table" && !!shape.approximation);
+    return {
+      status: compatible ? "compatible" : "standard",
+      canonical: shape,
+      diagnostics,
+      policyVersion: compatible ? dialect!.rule : policyVersion,
+    };
+  }
   function count(field: string): number {
     const n = signed(field);
     if (!Number.isSafeInteger(n) || n < 0)

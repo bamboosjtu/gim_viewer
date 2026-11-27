@@ -944,7 +944,7 @@ describe('outline LOD contract', () => {
   });
   it('keeps Wire/Cable, large flanges and long thin connectors; omits small rings/gaskets at inclusive boundaries', () => {
     const input=doc(`<Entity ID="1"><Ring R="30" DR="5" Rad="6.283185307"/></Entity>
-      <Entity ID="2"><CircularGasket OR="30" IR="20" Rad="6.283185307"/></Entity>
+      <Entity ID="2"><CircularGasket OR="30" IR="20" H="10"/></Entity>
       <Entity ID="3"><Cuboid L="1000" W="20" H="20"/></Entity>
       <Entity ID="4"><Ring R="200" DR="10" Rad="6.283185307"/></Entity>
       <Entity ID="5"><Wire D="1" FitCoordArray="0,0,0;20,0,0"/></Entity>

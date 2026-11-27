@@ -1,5 +1,6 @@
 import {
   compilePrimitive,
+  PROFILE_TAGS,
   interpretXmlModPrimitive,
   type CanonicalPrimitive,
   type GeometryLod,
@@ -18,7 +19,10 @@ export interface XmlModDocument extends Omit<LegacyDocument, 'entities' | 'diagn
 }
 
 const migratedTags = new Map([
-  ['terminalblock','TerminalBlock'],['rectangularfixedplate','RectangularFixedPlate'],['circularfixedplate','CircularFixedPlate'],
+  ...PROFILE_TAGS.map((tag) => [tag.toLowerCase(), tag] as [string, string]),
+  ['terminalblock', 'TerminalBlock'],
+  ['rectangularfixedplate', 'RectangularFixedPlate'],
+  ['circularfixedplate', 'CircularFixedPlate'],
   ['cuboid', 'Cuboid'],
   ['cylinder', 'Cylinder'],
   ['sphere', 'Sphere'],
@@ -74,10 +78,37 @@ export function projectXmlMod(raw: RawXmlModDocument): XmlModDocument {
     const result = migrated
       ? interpretXmlModPrimitive(
           source.sourceTag === migrated ? source : { ...source, sourceTag: migrated },
+          migrated === 'ChannelSteel' && rawAttributes.Model
+            ? {
+                compatibility: {
+                  rule: 'steel-model-section-v1',
+                  evidence: 'project XML Model-only section convention',
+                },
+              }
+            : migrated === 'Table'
+              ? {
+                  compatibility: {
+                    rule: 'non-similar-rhombi-preview-v1',
+                    evidence: 'substation01 raw Table declarations with unequal scale factors',
+                  },
+                }
+              : {},
         )
       : undefined;
-    if (result?.status === 'standard') {
+    if (result?.canonical) {
       primitive = { type: 'Standard', canonical: result.canonical };
+      for (const issue of result.diagnostics)
+        if (issue.stage !== 'parse')
+          diagnostics.push({
+            code: issue.code,
+            severity: issue.severity,
+            message: issue.message,
+            path: raw.sourcePath,
+            ordinal: entity.ordinal,
+            entityId: id,
+            sourceTag,
+            field: issue.location?.field,
+          });
     } else if (!result && !source.diagnostics.some((d) => d.code === 'conflicting-field')) {
       primitive = mapXmlModPrimitive(sourceTag, rawAttributes) ?? unsupported;
       if (primitive.type === 'Unsupported')

@@ -1,5 +1,6 @@
 import { checkGeometryBudget } from "./geometryBudget.js";
 import { plateMesh } from "./perforatedPlate.js";
+import { profileMesh } from "./profileFamilies.js";
 import {
   loftRings,
   rectangle,
@@ -130,11 +131,26 @@ export function compilePrimitive(
   const mesh = buildLocal(primitive, segments, options);
   if ("code" in mesh) return failure(mesh);
   return {
-    status: "standard-derived",
+    status:
+      "family" in primitive && primitive.approximation
+        ? primitive.modelEstimate
+          ? "estimated"
+          : "preview-only"
+        : "standard-derived",
     mesh,
     lod,
     compilerVersion,
-    diagnostics: [],
+    diagnostics:
+      "family" in primitive && primitive.approximation
+        ? [
+            {
+              code: "approximated-geometry",
+              stage: "compile",
+              severity: "info",
+              message: primitive.approximation,
+            },
+          ]
+        : [],
   };
 }
 
@@ -185,6 +201,7 @@ function buildLocal(
   segments: number,
   options: GeometryCompileOptions,
 ): MeshBuild {
+  if ("family" in p) return profileMesh(p, segments, options);
   const positive = (...dims: number[]) =>
     dims.every((n) => Math.fround(n) > 0 && Number.isFinite(Math.fround(n)));
   const extent: GeometryDiagnostic = {

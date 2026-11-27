@@ -1,6 +1,7 @@
 import type { RawXmlModDocument } from "../parser/rawXmlMod.js";
 import { isUsableAffineMatrix } from "../parser/affineMatrix.js";
 import { interpretXmlModPrimitive } from "./interpretXmlModPrimitive.js";
+import { profileAnalysis } from "./profileFamilies.js";
 import type {
   CanonicalPrimitive,
   GeometryDiagnostic,
@@ -35,6 +36,7 @@ export interface AnalysisGeometry {
 }
 
 export function analyzePrimitive(p: CanonicalPrimitive): AnalysisGeometry {
+  if ("family" in p) return profileAnalysis(p);
   let min: Point3, max: Point3;
   let base: Point3 = [0, 0, 0],
     top: Point3 | undefined;

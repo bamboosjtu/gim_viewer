@@ -5,6 +5,7 @@ import type {
 
 export type GeometryLod = 0 | 1 | 2;
 export type CanonicalPrimitive =
+  | import("./profileFamilies.js").ProfilePrimitive
   | import("./perforatedPlate.js").PlatePrimitive
   | { readonly kind: "Sphere"; readonly radius: number }
   | {
@@ -70,7 +71,11 @@ export interface GeometryCompileOptions {
   readonly limits?: Partial<GeometryLimits>;
   /** An explicitly identified source dialect, scoped to this call. */
   readonly compatibility?: {
-    rule: "cone-top-ratio-v1" | "stretch-displacement-v1";
+    rule:
+      | "cone-top-ratio-v1"
+      | "stretch-displacement-v1"
+      | "steel-model-section-v1"
+      | "non-similar-rhombi-preview-v1";
     evidence: string;
   };
 }
@@ -109,7 +114,7 @@ export type GeometryInterpretationResult = {
 );
 
 export interface GeometryCompileResult {
-  readonly status: "standard-derived" | "none";
+  readonly status: "standard-derived" | "estimated" | "preview-only" | "none";
   readonly mesh?: MeshData;
   readonly diagnostics: readonly GeometryDiagnostic[];
   readonly lod: GeometryLod;
