@@ -43,3 +43,13 @@ it('accepts Boolean references with the same integer syntax as Entity IDs in bot
   expect(worker).toEqual(parseXmlMod(text, 'valid.mod'));
   expect(worker.entities[0].primitive).toEqual({ type: 'Boolean', op: 'Union', entity1: 0, entity2: Number.MAX_SAFE_INTEGER });
 });
+
+it('reads single-string B.23 on the standard DOM and Worker paths', () => {
+  const xml = '<Device><Entities><Entity ID="17"><Insulator N="1" D="0" R="3" R1="5" R2="4" N1="4" H1="10" FL="3" AL="7" LN="2"/></Entity></Entities></Device>';
+  for (const parse of [parseXmlMod, parseWorkerXmlMod]) {
+    const { entities, diagnostics } = parse(xml, 'single.mod');
+    expect(entities[0].primitive).toMatchObject({ type: 'Standard', canonical: { kind: 'Insulator', strings: 1, spacing: 0 } });
+    expect(diagnostics.some(d => d.code === 'confirmed-compatibility')).toBe(false);
+    expect(parse(xml.replace('N="1"', 'N="2"'), 'MOD/a.mod').entities[0].primitive.type).toBe('Unsupported');
+  }
+});

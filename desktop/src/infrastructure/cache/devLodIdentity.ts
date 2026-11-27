@@ -1,6 +1,6 @@
 import { GEOMETRY_CACHE_VERSION } from '@gim/contracts-native';
 export const DEV_SHAPE_POLICY =
-  'open-steel-section-v1+sdk-basic-solids-project-column-major-v1+perforated-plates-v1+boolean-display-bounds-v1+stl-unit-normals-v1+standard-profiles-v1+assemblies-curves-v1+wire-sweep-clearance-v1+geometry-quality-v1+scoped-compat-v1+adaptive-sections-v1';
+  'open-steel-section-v1+sdk-basic-solids-project-column-major-v1+perforated-plates-v1+boolean-display-bounds-v1+stl-unit-normals-v1+standard-profiles-v1+assemblies-curves-v1+wire-sweep-clearance-v1+geometry-quality-v1+scoped-compat-v1+adaptive-sections-v1+single-insulator-spacing-v1';
 export function deviceTemplateCacheKey(
   sourceIdentity: string,
   devPath: string,

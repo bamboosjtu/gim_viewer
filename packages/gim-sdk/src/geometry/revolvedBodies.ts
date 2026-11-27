@@ -114,9 +114,12 @@ export function readBody(kind: BodyTag, f: StandardFields): BodyPrimitive {
         split: f.integer("LN"),
       };
       if (kind === "Insulator") {
-        const strings = f.integer("N"),
-          spacing = n("D");
-        if (spacing <= 2 * r1)
+        const strings = f.integer("N");
+        // Table B.23 defines D as the distance between strings. A single leg is centred at Y=0.
+        const spacing = f.number("D", false, strings === 1 ? 0 : undefined);
+        if (strings === 1 && spacing < 0)
+          f.fail("D", "Spacing cannot be negative");
+        if (strings > 1 && spacing <= 2 * r1)
           f.fail("D", "Insufficient double-string spacing");
         body = { kind, ...shared, strings, spacing };
       } else {

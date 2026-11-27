@@ -169,6 +169,31 @@ it("B.23/B.24 preserve repetition counts, end spacing, branch length and split c
   });
   expect(analyzePrimitive(unresolved).range.coverage).toBe("unknown");
 });
+it("applies B.23 inter-string clearance only when there are multiple strings", () => {
+  const one = { ...string, N: "1" };
+  const reference = shape("Insulator", { ...one, D: "16" });
+  for (const attrs of [one, { ...one, D: "0" }, { ...one, D: "1" }]) {
+    const result = read("Insulator", attrs);
+    expect(result.status).toBe("standard");
+    expect(analyzePrimitive(result.canonical!)).toEqual(
+      analyzePrimitive(reference),
+    );
+    for (const lod of [0, 1, 2] as const) {
+      const compiled = compilePrimitive(result.canonical!, { lod });
+      expect(compiled.status).toBe("preview-only");
+      expect(compiled.mesh).toEqual(compilePrimitive(reference, { lod }).mesh);
+    }
+  }
+  for (const D of ["", "-1", "invalid"])
+    expect(read("Insulator", { ...one, D }).status).toBe("invalid");
+  for (const attrs of [
+    { ...string, N: "2" },
+    { ...string, N: "2", D: "0" },
+    { ...string, N: "2", D: "10" },
+    { ...one, N1: "0", D: "0" },
+  ])
+    expect(read("Insulator", attrs).status).toBe("invalid");
+});
 it("B.28 keeps declared sag separate from fit geometry, diameter and endpoint tangents", () => {
   const p = shape("Wire", {
     D: "2",
