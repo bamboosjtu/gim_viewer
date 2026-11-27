@@ -7,7 +7,10 @@ import type { ProjectLoadSession } from '../../../../shared/projectSession.js';
 import type { PatrolPart, PatrolSource } from '../../../../viewer/patrol/navigationQueryPort.js';
 
 const records = vi.hoisted(() => new Map<string, unknown>());
-vi.mock('../../../../infrastructure/cache/navigation/patrolCache.js', () => ({
+vi.mock('../../../../infrastructure/cache/navigation/patrolCache.js', async (actual) => ({
+  ...await actual<typeof import('../../../../infrastructure/cache/navigation/patrolCache.js')>(),
+  enterPatrolCache: async () => {},
+  discardPatrolEntry: async (domain:string,key:string) => {records.delete(domain+key);},
   readPatrolCache: async (domain: string, key: string) => records.get(domain + key),
   writePatrolCache: async (domain: string, key: string, value: unknown) => {
     records.set(domain + key, value);
@@ -112,7 +115,7 @@ describe('source coverage and navigation cache', () => {
       expect(rt.step(from, to)).not.toHaveProperty('feet');
       finish();
       await preparing;
-      expect(rt.step(from, to)).toMatchObject({ sourceId: 'floor' });
+      expect(rt.step(from, to)).toMatchObject({ reason: '附近缺失碰撞几何' });
       expect(rt.metrics.unavailableSources).toBe(1);
       expect(rt.step(p(8.01, 4), p(8.04, 4))).toHaveProperty('feet');
       expect(load).toHaveBeenCalledOnce();
@@ -269,7 +272,7 @@ describe('source coverage and navigation cache', () => {
       signal = new AbortController().signal;
     await runtime.prepareScene(signal);
     expect(runtime.step(p(1, 1), p(1.2, 1))).toMatchObject({ sourceId: 'floor' });
-    expect(runtime.step(p(2.5, 3.5), p(3.1, 3.5))).toMatchObject({ sourceId: 'floor' });
+    expect(runtime.step(p(2.5, 3.5), p(3.1, 3.5))).toMatchObject({ reason: '附近缺失碰撞几何' });
     expect(runtime.step(p(7.99, 8.4), p(7.99, 8.4))).toMatchObject({ reason: '无连续落脚面' });
     const manifest = [...records].find(
       ([key]) => key.startsWith('coveragepartial') && key.endsWith('/scene-v1'),
@@ -309,6 +312,44 @@ describe('source coverage and navigation cache', () => {
     }
   });
 
+  it('retains an actual preview-only template on both entrances when the directory has no estimate',async()=>{
+    const floor=slab();
+    const load=floor.load;
+    floor.load=async signal=>(await load(signal)).map(p=>({...p,previewShapes:['CurveCable:preview-only']}));
+    for(const cached of [false,true]){
+      const rt=fixture('mesh-quality',cached?[]:[floor]);
+      await rt.prepareScene(new AbortController().signal);
+      expect(rt.metrics.fromCache).toBe(cached);
+      expect(rt.step(p(2,2),p(2,2))).toMatchObject({estimated:true,sourceId:'floor'});rt.dispose();
+    }
+  });
+  it('uses the Z-up IFC hinge with web-ifc Y-up vertices on cold and cached entry',async()=>{
+    const leaf=source('ifc#1',new Box3(p(2,3,0),p(2,3.9,2)),false,async()=>[{
+      matrix:identity.toArray(),positions:new Float32Array([2,0,-3,2,0,-3.9,2,2,-3.9]),indices:new Uint32Array([0,1,2])
+    }]);
+    leaf.matrix=new Matrix4().makeRotationX(Math.PI/2);
+    leaf.door={sourceId:'1',leafRepresentationId:'7',hingePosition:[2,3,0],hingeAxis:[0,0,1],closedTip:[2,3.9,0],radius:.9,openAngle:Math.PI/2,closedAngle:0,evidence:['IFCDOOR']};
+    leaf.doorAddress={path:'example.ifc',expressId:1};
+    for (const warm of [false,true]) {
+      const rt=fixture('door-space',warm?[]:[slab(),leaf]);await rt.prepareScene(new AbortController().signal);
+      expect(rt.metrics.fromCache).toBe(warm);expect(rt.canOperate(leaf.id)).toBe(true);
+      rt.dispose();
+    }
+  });
+  it('rebuilds invalid cached bounds and invalid BVH children from their owning sources',async()=>{
+    const floor=slab(),signal=new AbortController().signal;
+    const id='cache-repair', cold=fixture(id,[floor]); await cold.prepareScene(signal);cold.dispose();
+    const manifest=[...records].find(([key])=>key.startsWith('coverage'+id) && key.endsWith('/scene-v1'))![1] as {sources:{bounds:number[]}[]};
+    manifest.sources[0].bounds=[NaN];
+    const asset=[...records].find(([key])=>key.startsWith('assets'+id))![1] as {nodes:{left?:number}[]};
+    asset.nodes[0].left=0;
+    const repair=fixture(id,[floor]);
+    await repair.prepareScene(signal);
+    expect(repair.metrics.fromCache).toBe(false);
+    expect(repair.metrics.assetBuilds).toBe(1);
+    expect(repair.step(p(2,2),p(2,2))).toMatchObject({sourceId:'floor'});
+    repair.dispose();
+  });
   it('loads a warm scene without consulting the source directory or rebuilding the mesh', async () => {
     const signal = new AbortController().signal;
     const f = slab(),

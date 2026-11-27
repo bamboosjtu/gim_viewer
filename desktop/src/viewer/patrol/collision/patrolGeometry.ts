@@ -56,7 +56,8 @@ export function buildPatrolAsset(parts: PatrolPart[]): PatrolAsset {
     return id;
   }
   split(0, order.length);
-  return { vertices, order, nodes };
+  const previewShapes = [...new Set(parts.flatMap((p) => p.previewShapes ?? []))];
+  return { vertices, order, nodes, ...(previewShapes.length ? { previewShapes } : {}) };
 }
 
 export interface PlacedAsset {

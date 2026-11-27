@@ -21,6 +21,7 @@ export interface PatrolSource {
   support: boolean;
   estimatedSteelSections?: number;
   approximate?: boolean;
+  compiledPreviewShapes?: readonly string[];
   estimatedGeometryCount?: number;
   approximationReasons?: Record<string, string[]>;
   door?: import('./doorMotion.js').DoorMotionDescriptor;

@@ -1,3 +1,5 @@
+import { compilePatrolAssets } from './patrolSceneCompiler.js';
+import { usableAsset, usableManifest, type PatrolSceneManifest } from './patrolSceneCache.js';
 import { Box3, Matrix4, Vector3, Triangle } from 'three';
 import {
   gateApproaches,
@@ -9,6 +11,9 @@ import type { AppState } from '../../../app/state.js';
 import type { ProjectLoadSession } from '../../../shared/projectSession.js';
 import {
   readPatrolCache,
+  patrolCachePrefix,
+  enterPatrolCache,
+  discardPatrolEntry,
   writePatrolCache,
 } from '../../../infrastructure/cache/navigation/patrolCache.js';
 import { PatrolAssetBuilder } from '../../../infrastructure/workers/patrolAssetBuilder.js';
@@ -31,11 +36,7 @@ import {
 } from '../../../viewer/patrol/navigationQueryPort.js';
 import type { IfcNavigationCatalog } from '../../../viewer/patrol/ifcNavigationSource.js';
 import { isUsableAffineMatrix } from '../../../gim/geometry/affineMatrix.js';
-import {
-  beginDevGeometryWork,
-  ifcGeometryBusy,
-  onGeometryWorkAvailable,
-} from '../../../viewer/geometryWorkGate.js';
+
 import { DEV_SHAPE_POLICY } from '../../../infrastructure/cache/devLodIdentity.js';
 import { GEOMETRY_CACHE_VERSION } from '@desktop/contracts.js';
 
@@ -63,41 +64,11 @@ const toEngineering = new Matrix4().makeRotationX(Math.PI / 2);
 const abort = (signal: AbortSignal) => signal.throwIfAborted();
 
 type PreparedSource = Omit<PatrolSource, 'load'>;
-type CachedSource = Omit<PreparedSource, 'bounds' | 'matrix'> & {
-  bounds: [number, number, number, number, number, number];
-  matrix: number[];
-};
-interface PatrolSceneManifest {
-  sources: CachedSource[];
-  unknown: string[];
-  unavailable: string[];
-  approaches: { point: [number, number, number]; yaw: number }[];
-}
 type Progress = (message: string) => void;
-
-function reserveBuild(signal: AbortSignal): Promise<() => void> {
-  signal.throwIfAborted();
-  return new Promise((resolve, reject) => {
-    const cancel = () => {
-      unwatch();
-      reject(new DOMException('巡视构建已取消', 'AbortError'));
-    };
-    const admit = () => {
-      const release = beginDevGeometryWork(ifcGeometryBusy() ? 1 : 2);
-      if (release) {
-        unwatch();
-        signal.removeEventListener('abort', cancel);
-        resolve(release);
-      }
-    };
-    const unwatch = onGeometryWorkAvailable(admit);
-    signal.addEventListener('abort', cancel, { once: true });
-    admit();
-  });
-}
 
 export class PatrolNavigationRuntime implements NavigationQueryPort {
   private readonly key: string;
+  private readonly cachePrefix: string;
   private hasEstimatedSources = false;
   private unknownSources: string[] = [];
   private approaches: GateApproach[] = [];
@@ -130,7 +101,12 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
     private state: AppState,
     private session: ProjectLoadSession,
   ) {
-    this.key = [session.sourceSha256, codec].join('/');
+    this.cachePrefix = patrolCachePrefix(
+      session.sourceSha256 ?? '',
+      session.projectId ?? null,
+      DEV_SHAPE_POLICY,
+    );
+    this.key = this.cachePrefix + codec;
   }
   get unknownSourceCount() {
     return this.unknownSources.length;
@@ -165,7 +141,7 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
         try {
           directory = await runtime.patrolSource('patrol-catalog', signal);
           this.check(signal);
-          await writePatrolCache('coverage', catalogKey, directory);
+          await writePatrolCache('coverage', catalogKey, directory, this.cachePrefix);
         } catch {
           this.check(signal);
           unknown.push(entry.path);
@@ -189,6 +165,8 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
           assetKey: 'ifc:' + id,
           bounds,
           matrix: toEngineering,
+          // The descriptor comes from IFC placements in Z-up engineering metres.
+          // Only web-ifc triangulations and their bounds arrive in Y-up mesh space.
           door: product.door,
           doorAddress: product.door
             ? { path: entry.path, expressId: product.expressId }
@@ -241,25 +219,21 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
   private async compileScene(signal: AbortSignal, progress: Progress) {
     this.check(signal);
     if (!this.session.sourceSha256) throw Error('缺少工程来源身份，无法打开巡视场景');
+    await enterPatrolCache(this.session.projectId ?? null, this.cachePrefix);
+    this.check(signal);
     const key = this.key + '/scene-v1';
     const cached = await readPatrolCache<PatrolSceneManifest>('coverage', key);
     this.check(signal);
     this.metrics.fromCache = this.metrics.persisted = false;
     const assets = new Map<string, PatrolAsset>();
-    if (
-      cached &&
-      Array.isArray(cached.sources) &&
-      Array.isArray(cached.unavailable) &&
-      Array.isArray(cached.approaches) &&
-      Array.isArray(cached.unknown)
-    ) {
+    if (usableManifest(cached)) {
       progress('正在载入已编译的巡视场景…');
       const unavailable = new Set(cached.unavailable);
       for (const item of cached.sources) {
         if (assets.has(item.assetKey) || unavailable.has(item.assetKey)) continue;
         const asset = await readPatrolCache<PatrolAsset>('assets', this.key + '/' + item.assetKey);
         this.check(signal);
-        if (asset?.nodes?.length) {
+        if (usableAsset(asset)) {
           assets.set(item.assetKey, asset);
           this.metrics.assetHits++;
         }
@@ -274,54 +248,33 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
       }
     }
 
+    if (cached) {
+      await discardPatrolEntry('coverage', key, this.cachePrefix);
+      this.check(signal);
+    }
     progress('正在准备工程来源…');
     const catalog = await this.catalog(signal);
     this.check(signal);
-    const failed = new Set<string>();
-    let stored = true;
-    const templates = new Map(catalog.sources.map((row) => [row.assetKey, row]));
-    let preparedTemplates = 0;
-    for (const row of templates.values()) {
-      this.check(signal);
-      if (preparedTemplates % 10 === 0)
-        progress(`正在编译巡视场景 ${preparedTemplates}/${templates.size}…`);
-      preparedTemplates++;
-      if (assets.has(row.assetKey)) continue;
-      const assetKey = this.key + '/' + row.assetKey;
-      let asset = await readPatrolCache<PatrolAsset>('assets', assetKey);
-      this.check(signal);
-      if (asset?.nodes?.length) {
-        this.metrics.assetHits++;
-      } else {
-        try {
-          const parts = await row.load(signal);
-          this.check(signal);
-          const release = await reserveBuild(signal);
-          try {
-            this.check(signal);
-            asset = await this.builder.build(parts);
-          } finally {
-            release();
-          }
-          this.check(signal);
-          this.metrics.assetBuilds++;
-          if (!(await writePatrolCache('assets', assetKey, asset))) stored = false;
-          this.check(signal);
-        } catch {
-          this.check(signal);
-          failed.add(row.assetKey);
-          continue;
-        }
-      }
-      assets.set(row.assetKey, asset);
-    }
+    const { failed, stored } = await compilePatrolAssets(
+      catalog.sources,
+      catalog.approaches[0]?.point,
+      assets,
+      this.key,
+      this.cachePrefix,
+      this.builder,
+      this.metrics,
+      signal,
+      () => this.check(signal),
+      progress,
+    );
     const manifest: PatrolSceneManifest = {
       sources: catalog.sources.map((row) => ({
         id: row.id,
         assetKey: row.assetKey,
         support: row.support,
         estimatedSteelSections: row.estimatedSteelSections,
-        approximate: row.approximate,
+        approximate: row.approximate || !!assets.get(row.assetKey)?.previewShapes?.length,
+        compiledPreviewShapes: assets.get(row.assetKey)?.previewShapes,
         estimatedGeometryCount: row.estimatedGeometryCount,
         approximationReasons: row.approximationReasons,
         matrix: row.matrix.toArray(),
@@ -335,7 +288,8 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
     };
     if (!manifest.sources.some((row) => row.support && assets.has(row.assetKey)))
       throw Error('巡视场景缺少可用路面或楼面');
-    this.metrics.persisted = stored && (await writePatrolCache('coverage', key, manifest));
+    this.metrics.persisted =
+      stored && (await writePatrolCache('coverage', key, manifest, this.cachePrefix));
     this.check(signal);
     this.publishScene(manifest, assets);
   }
@@ -352,23 +306,11 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
       sources.push(source);
       this.sourcesById.set(row.id, source);
       const asset = assets.get(row.assetKey);
-      if (!asset) {
-        this.unavailable.add(row.id);
-        continue;
-      }
-      if (source.door && source.doorAddress) {
+      if (asset && source.door && source.doorAddress) {
         bounds.union(doorRange(source.door, bounds));
         this.doors.set(row.id, source);
         this.checkDoorShape(source, asset);
       }
-      this.placements.set(row.id, {
-        id: row.id,
-        matrix,
-        inverse: matrix.clone().invert(),
-        mirror: matrix.determinant() < 0,
-        support: row.support,
-        asset,
-      });
       const x0 = Math.floor(bounds.min.x / size),
         x1 = Math.floor(bounds.max.x / size);
       const y0 = Math.floor(bounds.min.y / size),
@@ -382,6 +324,18 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
             if (list) list.push(source);
             else this.grid.set(tile, [source]);
           }
+      if (!asset) {
+        this.unavailable.add(row.id);
+        continue;
+      }
+      this.placements.set(row.id, {
+        id: row.id,
+        matrix,
+        inverse: matrix.clone().invert(),
+        mirror: matrix.determinant() < 0,
+        support: row.support,
+        asset,
+      });
     }
     this.approaches = manifest.approaches.map((row) => ({
       point: new Vector3(...row.point),
@@ -449,14 +403,18 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
     }
   }
 
-  private inBounds(box: Box3) {
+  private inBounds(box: Box3, missing?: Set<string>) {
     const rows = new Map<string, PlacedAsset>();
+    const include = (row: PreparedSource) => {
+      if (!row.bounds.intersectsBox(box)) return;
+      const asset = this.placements.get(row.id);
+      if (asset) rows.set(row.id, asset);
+      else missing?.add(row.id);
+    };
     for (let x = Math.floor(box.min.x / size); x <= Math.floor(box.max.x / size); x++)
       for (let y = Math.floor(box.min.y / size); y <= Math.floor(box.max.y / size); y++)
-        for (const row of this.grid.get(xy(x, y)) ?? [])
-          if (row.bounds.intersectsBox(box)) rows.set(row.id, this.placements.get(row.id)!);
-    for (const row of this.large)
-      if (row.bounds.intersectsBox(box)) rows.set(row.id, this.placements.get(row.id)!);
+        for (const row of this.grid.get(xy(x, y)) ?? []) include(row);
+    for (const row of this.large) include(row);
     return rows;
   }
 
@@ -465,7 +423,12 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
     try {
       if (!this.prepared) return { reason: '请先进入已准备的巡视场景' };
       const box = sweepBounds(from, to);
-      const rows = this.inBounds(box);
+      const missing = this.unavailable.size ? new Set<string>() : undefined;
+      const rows = this.inBounds(box, missing);
+      if (missing?.size) {
+        this.metrics.missingSweepSteps++;
+        return { reason: '附近缺失碰撞几何' };
+      }
       const result = solvePatrolStep(rows, box, from, to);
       if ('feet' in result) this.metrics.residentSweepSteps++;
       if (this.hasEstimatedSources) {

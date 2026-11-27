@@ -14,6 +14,7 @@ it('requires a separate documented leaf and an oriented source sweep, including 
     'IFCAXIS2PLACEMENT2D',
     'IFCEXTRUDEDAREASOLID',
     'IFCRECTANGLEPROFILEDEF',
+    'IFCLOCALPLACEMENT','IFCAXIS2PLACEMENT3D','IFCDIRECTION',
   ];
   const ref = (value: number) => ({ value });
   const xyz = (x: number, y: number) => [ref(x), ref(y)];
@@ -55,6 +56,16 @@ it('requires a separate documented leaf and an oriented source sweep, including 
       .distanceTo(new Vector3(1, 0.9, 0)),
   ).toBeLessThan(1e-7);
   expect(readDoorMotion(api, 0, 1, 'IFCDOOR', '门框', 0.001)).toBeUndefined();
+  row(1,'IFCDOOR',{Representation:ref(2),ObjectPlacement:ref(30)});
+  row(30,'IFCLOCALPLACEMENT',{RelativePlacement:ref(31)});
+  row(31,'IFCAXIS2PLACEMENT3D',{Location:ref(32),RefDirection:ref(33)});
+  row(32,'IFCCARTESIANPOINT',{Coordinates:[ref(10000),ref(20000),ref(3000)]});
+  row(33,'IFCDIRECTION',{DirectionRatios:[ref(0),ref(1),ref(0)]});
+  const placed=readDoorMotion(api,0,1,'IFCDOOR','建筑门扇',0.001)!;
+  expect(placed.hingePosition).toEqual([10,21,3]);
+  expect(placed.closedTip).toEqual([10,21.9,3]);
+  expect(placed.hingeAxis).toEqual([0,0,1]);
+  expect(new Vector3(...placed.closedTip).applyMatrix4(doorTransform(placed,placed.openAngle)).distanceTo(new Vector3(9.1,21,3))).toBeLessThan(1e-7);
   rows.delete(5);
   expect(readDoorMotion(api, 0, 1, 'IFCDOOR', '建筑门扇', 0.001)).toBeUndefined();
 });

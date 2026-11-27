@@ -49,7 +49,7 @@ function createModal(): HTMLElement {
       <div class="cache-head">
         <div>
           <h2>缓存管理</h2>
-          <div class="cache-sub">本地 SQLite 缓存 · 删除后下次打开会重新解压</div>
+          <div class="cache-sub">工程索引与巡视缓存 · 删除后按需重建</div>
         </div>
         <button id="cache-mgr-close" class="cache-close" aria-label="关闭">×</button>
       </div>
@@ -253,7 +253,7 @@ function bindEvents(
       const projectName = target.dataset.projectName ?? '';
       if (
         !confirm(
-          `确认删除项目 "${projectName}" (ID: ${projectId}) 的全部缓存？\n\n此操作将：\n- 删除数据库中的所有索引记录\n- 尝试删除磁盘缓存文件\n\n注意：如果删除的是当前正在查看的工程，当前视图不会立即关闭；\n重新打开该 GIM 时会重新解压并重建缓存。\n\n不可恢复。`,
+          `确认删除项目 "${projectName}" (ID: ${projectId}) 的全部缓存？\n\n此操作将：\n- 删除该工程的巡视场景与碰撞缓存\n- 删除数据库中的所有索引记录\n- 尝试删除磁盘缓存文件\n\n注意：如果删除的是当前正在查看的工程，当前视图不会立即关闭；\n重新打开该 GIM 时会重新解压并重建缓存。\n\n不可恢复。`,
         )
       ) {
         return;

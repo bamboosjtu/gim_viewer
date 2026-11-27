@@ -74,6 +74,7 @@ import {
 import { ensureGeometryLayers } from './modGeometryScene.js';
 import {
   readPatrolCache,
+  patrolCachePrefix,
   writePatrolCache,
 } from '../../infrastructure/cache/navigation/patrolCache.js';
 import type {
@@ -319,7 +320,12 @@ export class DevLodRuntime {
       if (e.boundsQuality !== 'conservative') {
         let range = ranges.get(e.devPath);
         if (!range) {
-          const key = this.key(e.devPath, 2) + '/patrol-source-envelope-v1';
+          const prefix = patrolCachePrefix(
+            this.session.sourceSha256 ?? '',
+            this.session.projectId ?? null,
+            DEV_SHAPE_POLICY,
+          );
+          const key = prefix + this.key(e.devPath, 2) + '/patrol-source-envelope-v1';
           const cached = await readPatrolCache<DevSourceBounds['sourceBounds']>('coverage', key);
           signal.throwIfAborted();
           if (cached?.length === 6) range = { bounds: boxTuple(cached), unresolved: false };
@@ -332,7 +338,7 @@ export class DevLodRuntime {
                 unresolved: local.boundsQuality === 'unknown',
               };
               if (!range.unresolved && local.sourceBounds && this.session.sourceSha256)
-                await writePatrolCache('coverage', key, local.sourceBounds);
+                await writePatrolCache('coverage', key, local.sourceBounds, prefix);
             } catch {
               signal.throwIfAborted();
               range = { bounds, unresolved: true };
@@ -365,6 +371,8 @@ export class DevLodRuntime {
             : Uint32Array.from({ length: pos.count }, (_, i) => i);
           parts.push({ positions, indices, matrix: obj.matrixWorld.toArray() });
         });
+        if (parts.length && t.diagnostics.previewShapes?.length)
+          parts[0].previewShapes = t.diagnostics.previewShapes;
         return parts;
       };
       sources.push({

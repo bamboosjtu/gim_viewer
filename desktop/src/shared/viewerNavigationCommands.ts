@@ -49,6 +49,7 @@ export class ViewerNavigationCommands extends EventTarget {
   estimated = false;
   measuring = false;
   compiling = false;
+  unknownSourceCount = 0;
   doorHint = false;
   revision = 0;
   evidence?: () => Record<string, unknown>;

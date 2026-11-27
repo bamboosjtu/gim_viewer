@@ -103,6 +103,9 @@ export async function readCachedProjectReport(
 export async function removeProjectCache(projectId: number): Promise<CacheResult<void>> {
   if (!validId(projectId)) return fail('工程记录无效');
   return cacheOperation('删除缓存', async (database) => {
+    const { removePatrolProject } =
+      await import('../../infrastructure/cache/navigation/patrolCache.js');
+    await removePatrolProject(projectId);
     await database.deleteProjectCache(projectId);
   });
 }

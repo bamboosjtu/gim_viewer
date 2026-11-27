@@ -86,3 +86,15 @@ it('dispatches engineering IFC hits and rejects stale results after fetching the
   expect(port.showElement).not.toHaveBeenCalled();
   expect(port.showRegional).not.toHaveBeenCalled();
 });
+
+it('opens properties for a newly confirmed patrol inspection and ignores an unchanged pick', async()=>{
+ const {port,getViewerRuntimeWithUI}=await prepare(), state=new AppState();
+ const inspect=vi.fn(async()=>{}),restoreIfc=vi.fn();
+ mocks.selection.mockReturnValue(Object.assign(vi.fn(),{inspect,restoreIfc}));
+ state.navigation.set('pickingDevice');
+ const {patrol}=await getViewerRuntimeWithUI(state);
+ await patrol!.inspect();expect(port.openProperties).not.toHaveBeenCalled();
+ inspect.mockImplementationOnce(async()=>{state.selection.beginSelection({kind:'cbm',key:'picked'});});
+ await patrol!.inspect();expect(port.openProperties).toHaveBeenCalledOnce();
+ expect(patrol!.restoreIfc).toBe(restoreIfc);
+});

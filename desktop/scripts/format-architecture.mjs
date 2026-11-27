@@ -12,6 +12,8 @@ export const architectureModules = [
   'src/features/substation/presentation/patrolBinding.ts',
   'src/features/substation/presentation/patrolWorkspace.ts',
   'src/features/substation/runtime/patrolNavigationRuntime.ts',
+  'src/features/substation/runtime/patrolSceneCache.ts',
+  'src/features/substation/runtime/patrolSceneCompiler.ts',
   'src/features/substation/runtime/patrolGate.ts',
   'src/infrastructure/cache/navigation/patrolCache.ts',
   'src/infrastructure/workers/patrolAssetBuilder.ts',

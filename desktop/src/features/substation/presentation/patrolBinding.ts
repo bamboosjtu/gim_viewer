@@ -163,6 +163,7 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
     walker?.dispose();
     walker = undefined;
     port.measuring = port.estimated = port.compiling = false;
+    port.unknownSourceCount = 0;
     const current = () => scope.isCurrent();
     try {
       const failures = await restorePatrolContext(current, [
@@ -286,6 +287,7 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
       });
       if (!eligible()) return;
       port.compiling = false;
+      port.unknownSourceCount = nav.unknownSourceCount;
       if (last) {
         const saved = verified(last);
         if (!eligible()) return;

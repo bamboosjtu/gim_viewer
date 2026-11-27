@@ -1,5 +1,6 @@
 /** Structured-clone payloads shared by the Worker, cache and spatial query. */
 export interface PatrolPart {
+  previewShapes?: readonly string[];
   positions: Float32Array;
   indices: Uint32Array;
   matrix: number[];
@@ -13,6 +14,7 @@ export interface PatrolBranch {
   right?: number;
 }
 export interface PatrolAsset {
+  previewShapes?: readonly string[];
   vertices: Float64Array;
   order: Uint32Array;
   nodes: PatrolBranch[];
