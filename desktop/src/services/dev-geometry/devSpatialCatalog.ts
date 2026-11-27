@@ -321,7 +321,11 @@ export async function buildDevSourceBounds(
       const doc = parse(await file.text(), edge.modPath),
         bounds = documentBounds(doc, patrolRange);
       for (const e of doc.entities)
-        if (e.primitive.type === 'StretchedBody') {
+        if (e.primitive.type === 'Standard' && e.primitive.canonical.kind === 'StretchedBody') {
+          result.stretchModes ??= {};
+          result.stretchModes['direction-length'] =
+            (result.stretchModes['direction-length'] ?? 0) + 1;
+        } else if (e.primitive.type === 'StretchedBody') {
           const mode =
             stretchedBodyDisplacement(e.primitive.normal, e.primitive.l)?.mode ?? 'invalid';
           result.stretchModes ??= {};
@@ -339,7 +343,10 @@ export async function buildDevSourceBounds(
             steelSection(e.primitive)?.estimated
           )
             result.estimatedSteelSections = (result.estimatedSteelSections ?? 0) + 1;
-          if (e.primitive.type === 'TruncatedCone' && e.primitive.tr > 1)
+          if (
+            (e.primitive.type === 'TruncatedCone' && e.primitive.tr > 1) ||
+            (e.primitive.type === 'Standard' && e.primitive.canonical.kind === 'TruncatedCone')
+          )
             result.absoluteConeCount = (result.absoluteConeCount ?? 0) + 1;
           const type = primitiveName(e.primitive);
           result.primitiveCounts[type] = (result.primitiveCounts[type] ?? 0) + 1;

@@ -18,4 +18,5 @@ await build({absWorkingDir:root,entryPoints:inputs.filter(p=>p.endsWith('.ts')),
   writeFileSync(join(out,'build-manifest.json'),JSON.stringify({contract:'gim-sdk-build-v1',version:JSON.parse(readFileSync(join(root,'package.json'),'utf8')).version,entryCount:inputs.filter(p=>p.endsWith('.ts')).length,runtimeExternals:external,capabilities},null,2)+'\n');
 });
 for(const input of inputs.filter(p=>p.endsWith('.json'))){const target=join(out,relative(src,input));mkdirSync(dirname(target),{recursive:true});copyFileSync(input,target);}
+copyFileSync(join(root,'node_modules/earcut/LICENSE'),join(out,'EARCUT-LICENSE.txt'));
 console.log('Built standalone GIM SDK (no runtime external dependencies).');

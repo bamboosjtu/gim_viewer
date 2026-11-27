@@ -61,7 +61,8 @@
     "test:consumer": "node test-consumer.mjs"
   },
   "dependencies": {
-    "@gim/gim-primitives": "file:../gim-primitives"
+    "@gim/gim-primitives": "file:../gim-primitives",
+    "earcut": "3.2.3"
   },
   "devDependencies": {
     "esbuild": "0.21.5",

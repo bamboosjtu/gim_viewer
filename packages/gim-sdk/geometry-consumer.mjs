@@ -139,7 +139,7 @@ assert.ok(raw.entities[0].rawTransformMatrix.includes("5699.9999"));
 assert.equal(raw.entities[0].transformMatrix[12], 5699.9999);
 assert.deepEqual(
   compileXmlModDocument(raw).entities.map((e) => e.interpretation.status),
-  ["standard", "unsupported", "unsupported", "unsupported"],
+  ["standard", "standard", "unsupported", "unsupported"],
 );
 const conflict = compileXmlModDocument(
   readXmlMod(example.replace('RAD="3.1416"', 'RAD="3.1416" Rad="1"'), standard),
@@ -244,3 +244,26 @@ assert.equal(issue.location.ordinal, 2);
 console.log(
   "MOD Node consumer passed: B.3/B.6 at all LODs, G01, G08, G09 and G13 vertex isolation.",
 );
+
+const basicFamily = compile(
+  wrap(
+    row(1, '<SPHERE R="10"/>'),
+    row(
+      2,
+      '<OFFSETRECTANGULARTABLE LL="12" LW="8" TL="5" TW="3" H="9" XOFF="-2" YOFF="1"/>',
+    ),
+    row(3, '<TRUNCATEDCONE BR="10" TR="0.5" H="20"/>'),
+    row(
+      4,
+      '<ECCENTRICTRUNCATEDCONE BR="10" TR="0.5" H="20" TOPXOFF="2" TOPYOFF="-1"/>',
+    ),
+    row(
+      5,
+      '<STRETCHEDBODY L="5" Normal="0,0,2" Array="0,0,0;10,0,0;10,6,0;0,6,0"/>',
+    ),
+  ),
+);
+for (let i = 0; i < 5; i++)
+  assert.ok(meshOf(basicFamily, i).positions.length > 0);
+assert.equal(basicFamily.entities[2].interpretation.canonical.topRadius, 0.5);
+console.log("Basic solids Node consumer passed: B.1/B.5/B.8/B.9/B.16.");

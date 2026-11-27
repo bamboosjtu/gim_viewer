@@ -35,36 +35,101 @@ export interface AnalysisGeometry {
 }
 
 export function analyzePrimitive(p: CanonicalPrimitive): AnalysisGeometry {
-  const x = p.kind === "Cylinder" ? p.radius : p.length / 2;
-  const y = p.kind === "Cylinder" ? p.radius : p.width / 2;
-  if (![x, y, p.height].every((n) => n > 0 && Number.isFinite(n)))
+  let min: Point3, max: Point3;
+  let base: Point3 = [0, 0, 0],
+    top: Point3 | undefined;
+  switch (p.kind) {
+    case "Sphere":
+      min = [-p.radius, -p.radius, -p.radius];
+      max = [p.radius, p.radius, p.radius];
+      break;
+    case "Cylinder":
+    case "Cuboid": {
+      const x = p.kind === "Cuboid" ? p.length / 2 : p.radius,
+        y = p.kind === "Cuboid" ? p.width / 2 : p.radius;
+      min = [-x, -y, 0];
+      max = [x, y, p.height];
+      top = [0, 0, p.height];
+      break;
+    }
+    case "OffsetRectangularTable":
+    case "TruncatedCone":
+    case "EccentricTruncatedCone": {
+      const bx =
+        p.kind === "OffsetRectangularTable"
+          ? p.bottomLength / 2
+          : p.bottomRadius;
+      const by =
+        p.kind === "OffsetRectangularTable"
+          ? p.bottomWidth / 2
+          : p.bottomRadius;
+      const tx =
+        p.kind === "OffsetRectangularTable" ? p.topLength / 2 : p.topRadius;
+      const ty =
+        p.kind === "OffsetRectangularTable" ? p.topWidth / 2 : p.topRadius;
+      const dx = p.kind === "TruncatedCone" ? 0 : p.offsetX,
+        dy = p.kind === "TruncatedCone" ? 0 : p.offsetY;
+      min = [Math.min(-bx, dx - tx), Math.min(-by, dy - ty), 0];
+      max = [Math.max(bx, dx + tx), Math.max(by, dy + ty), p.height];
+      top = [dx, dy, p.height];
+      break;
+    }
+    case "StretchedBody": {
+      min = [Infinity, Infinity, Infinity];
+      max = [-Infinity, -Infinity, -Infinity];
+      for (const v of p.contour)
+        for (const i of axes) {
+          min[i] = Math.min(min[i], v[i], v[i] + p.displacement[i]);
+          max[i] = Math.max(max[i], v[i], v[i] + p.displacement[i]);
+        }
+      if (p.contour.length) {
+        base = [...p.contour[0]];
+        top = [
+          base[0] + p.displacement[0],
+          base[1] + p.displacement[1],
+          base[2] + p.displacement[2],
+        ];
+      }
+      break;
+    }
+  }
+  if (
+    !min.every(Number.isFinite) ||
+    !max.every(Number.isFinite) ||
+    axes.some((i) => min[i] > max[i])
+  )
     return { range: { coverage: "unknown" }, ports: [] };
+  const ports: GeometryPort[] = [];
+  if (top) {
+    const direction: Point3 =
+        p.kind === "StretchedBody" ? [...p.displacement] : [0, 0, 1],
+      length = Math.hypot(...direction);
+    if (length > 0)
+      ports.push(
+        {
+          name: "base",
+          position: base,
+          direction: direction.map((n) =>
+            n === 0 ? 0 : -n / length,
+          ) as Point3,
+          unit: "mm",
+          quality: "standard-derived",
+        },
+        {
+          name: "top",
+          position: top,
+          direction: direction.map((n) => n / length) as Point3,
+          unit: "mm",
+          quality: "standard-derived",
+        },
+      );
+  }
   return {
     range: {
       coverage: "conservative",
-      bounds: {
-        min: [-x, -y, 0],
-        max: [x, y, p.height],
-        unit: "mm",
-        quality: "parameter-derived",
-      },
+      bounds: { min, max, unit: "mm", quality: "parameter-derived" },
     },
-    ports: [
-      {
-        name: "base",
-        position: [0, 0, 0],
-        direction: [0, 0, -1],
-        unit: "mm",
-        quality: "standard-derived",
-      },
-      {
-        name: "top",
-        position: [0, 0, p.height],
-        direction: [0, 0, 1],
-        unit: "mm",
-        quality: "standard-derived",
-      },
-    ],
+    ports,
   };
 }
 
@@ -258,7 +323,9 @@ export function aggregateGeometryBounds<T extends BoundsNode>(
 
 export function queryXmlModBounds(
   doc: RawXmlModDocument,
-  options: { purpose: BoundsPurpose },
+  options: {
+    purpose: BoundsPurpose;
+  } & import("./primitiveContracts.js").GeometryCompileOptions,
 ): BoundsCoverage {
   const invalid = new Set(
     doc.diagnostics
@@ -288,8 +355,8 @@ export function queryXmlModBounds(
                 : undefined;
         return op ? { op, operands: e.operandIds } : { coverage: "unknown" };
       }
-      const result = interpretXmlModPrimitive(e.primitive);
-      return result.status === "standard"
+      const result = interpretXmlModPrimitive(e.primitive, options);
+      return result.canonical
         ? analyzePrimitive(result.canonical).range
         : {
             coverage: "unknown",

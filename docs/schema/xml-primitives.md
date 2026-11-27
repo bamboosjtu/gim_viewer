@@ -41,7 +41,7 @@
 | Cuboid | Cuboid（大小写不敏感） | L,W,H | Box(L,W,H)，XY 居中，底面 Z=0、顶面 Z=H | 固定 12 三角形 | 数值缺失保留 NaN，可能得到零尺寸或 NaN 顶点几何，不返回 null；不校验正负 |
 | Cylinder | Cylinder | R,H | 沿 +Z 圆柱，底面圆心为原点，含端盖 | 径向 6 / 12 / 16 | R 或 H 非正不拒绝，可能退化 |
 | Sphere | Sphere | R | 球心在原点 | 6×4 / 12×6 / 16×8 | 同 Cylinder |
-| TruncatedCone | TruncatedCone | BR,TR,H | 底半径 BR；顶半径在 TR∈[0,1] 时取 BR×TR，否则按绝对半径 | 径向 6 / 12 / 16 | 两种 TR 方言无法从字段本身区分 |
+| TruncatedCone | TruncatedCone | BR,TR,H | BR 和 TR 分别为底、顶半径，沿 +Z | 径向 6 / 12 / 16 | 比例解释需要显式来源规则 |
 | Ring | Ring | R,DR,Rad | Torus(R, abs(DR), 弧 Rad)；DR 为管半径、Rad 为弧度 | 4×8 / 8×16 / 8×16 | Rad 缺失为 NaN→0，扫掠退化但不返回 null |
 | CircularGasket | CircularGasket | OR,IR,Rad（H 解析但未使用） | Torus(OR, max(0,(OR−IR)/2), 弧 Rad) | 固定 8×16 | IR≥OR 时管半径为 0；H 被忽略 |
 | StretchedBody | StretchedBody | L,Array,Normal | 截面多边形端盖（Earcut）+ 侧面，沿解释后的 Normal 位移 | 无分段 | 见专节；少于 3 点或非法 Normal 返回 null |
@@ -74,7 +74,7 @@
 | DoubleChannelSteel | ChannelSteel | L,D,H,B,T → 外廓盒体 |
 | Insulator、VTypeInsulator | PorcelainBushing | n=max(1,N1 或 N)；h=(H1 或 H)×n；r=r1=R1 或 R；r2=R2 或 R1 或 R；D、FL、AL、LN 忽略 |
 | ConePorcelainBushing | PorcelainBushing | r=BR2 或 BR；r1=TR2 或 TR；r2=TR1 或 TR；n=N；h=H |
-| EccentricTruncatedCone | TruncatedCone | br=BR；tr=TR；h=H；偏心量忽略 |
+| EccentricTruncatedCone | SDK 独立参数类型 | BR/TR 为半径，顶心按 TOPXOFF/TOPYOFF 有符号偏移 |
 | SquareGasket、TableGasket | RectangularRing | 原 attrs 进 raw |
 | EllipticRing | Ring | r=(LR+WR)/2；dr=DR；rad 取 Rad>0 时的 Rad，否则 2π |
 | BendingCylindrical | Cylinder | r=R；h=L；弯曲半径与弧长忽略 |
@@ -85,16 +85,7 @@
 
 ## StretchedBody：Array、Normal 与位移语义
 
-| 项 | 当前实现 |
-|---|---|
-| Array | 分号分隔点序列，逗号三元组；二维点补 z=0；连续重复点与闭合尾点删除；有效点少于 3 个返回 null |
-| Normal≈1（±1e-6）或≈304.8（±1e-5） | 视为方向基矢：归一化后 ×L。304.8 mm 是一英尺的方向表达，不是固定 304.8 mm 位移 |
-| Normal 其他非零有限值 | 视为完整位移向量，原样使用，不再乘 L |
-| 无效输入 | 分量数不是 3、存在空分量、非有限、模长≈0，或方向模式下 L 非有限/为 0 → 不生成几何 |
-| 截面 | 投影到与 Normal 正交的基做 Earcut（支持凹多边形），顶点仍用原始三维点；端盖与侧面按期望法向校正绕序 |
-| 单位 | Array 与 L 均为毫米；Normal 只表达方向或位移，不单独换算单位 |
-
-位移解释由 [stretchedBody](../../desktop/src/gim/geometry/stretchedBody.ts) 单点维护，几何与设备范围计算共用，避免两处各算一套。
+SDK 严格路径读取以分号分隔的三维底面顶点和非零方向向量，位移为 `normalize(Normal) × L`。底面在自身平面中裁分，可以斜向拉伸；非共面、自交、零高度或退化截面返回局部诊断。连续重复点及重复闭合端点在建模时归一化，输入预算按原点数计。显式 `stretch-displacement-v1` 可按已确认来源把 Normal 用作完整位移。Desktop 工程入口使用标准解释。
 
 ## Boolean：引用、轮廓与 CSG
 
@@ -149,7 +140,7 @@ loader 另叠一条 1px 中心线：每 Entity 一条 Line，超过 1000 条时�
 | EllipticRing | 平均半径圆环 | 椭圆长短轴差异 |
 | BendingCylindrical | 直圆柱 | 弯曲半径、弧长与路径 |
 | CircularFixedPlate | 圆盘 | 螺栓孔（CS/N/MH）、W |
-| EccentricTruncatedCone | 同心截锥 | 偏心量 |
+| EccentricTruncatedCone | 偏心截锥 | 顶底截面及有符号偏移由标准字段推导 |
 | RotationalEllipsoid | 缩放球 | 精确椭球参数化 |
 | OffsetRectangularTable | 八顶点棱台 | 其他字段编码、孔洞 |
 | Wire、Cable | 样条管 | 真实弧垂、张力、接头与敷设细节 |

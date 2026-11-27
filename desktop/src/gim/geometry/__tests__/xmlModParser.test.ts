@@ -47,8 +47,8 @@ describe('parseXmlMod', () => {
       expect(parseXmlMod(xml, 'MOD/cuboid.mod').entities[0].primitive).toEqual({type:'Standard',canonical:{kind:'Cuboid',length:800,width:600,height:2000}});
     });
 
-    it('StretchedBody：Array/Normal 保留 string，L 数值', () => {
-      const arrayStr = '0,0;100,0;100,50;0,50';
+    it('StretchedBody：读取三维轮廓、长度与拉伸方向', () => {
+      const arrayStr = '0,0,0;100,0,0;100,50,0;0,50,0';
       const normalStr = '0,0,1';
       const xml = wrap(
         `<Entity ID="2" Type="simple" Visible="True">
@@ -57,14 +57,7 @@ describe('parseXmlMod', () => {
           <Color R="100" G="150" B="200" A="100" />
         </Entity>`,
       );
-      const p = parseXmlMod(xml, 'MOD/stretch.mod').entities[0].primitive as Extract<
-        XmlModPrimitive,
-        { type: 'StretchedBody' }
-      >;
-      expect(p.type).toBe('StretchedBody');
-      expect(p.l).toBe(200);
-      expect(p.array).toBe(arrayStr);
-      expect(p.normal).toBe(normalStr);
+      expect(parseXmlMod(xml,'MOD/stretch.mod').entities[0].primitive).toMatchObject({type:'Standard',canonical:{kind:'StretchedBody',length:200,contour:arrayStr.split(';').map(v=>v.split(',').map(Number)),normal:normalStr.split(',').map(Number)}});
     });
 
     it('PorcelainBushing：R/R1/R2/N/H 五字段', () => {
@@ -90,11 +83,7 @@ describe('parseXmlMod', () => {
           <Color R="120" G="120" B="120" A="100" />
         </Entity>`,
       );
-      const p = parseXmlMod(xml, 'MOD/cone.mod').entities[0].primitive as Extract<
-        XmlModPrimitive,
-        { type: 'TruncatedCone' }
-      >;
-      expect(p).toEqual({ type: 'TruncatedCone', br: 100, tr: 50, h: 200 });
+      expect(parseXmlMod(xml,'MOD/cone.mod').entities[0].primitive).toEqual({type:'Standard',canonical:{kind:'TruncatedCone',bottomRadius:100,topRadius:50,height:200}});
     });
 
     it('Ring：R/DR/Rad 字段', () => {
@@ -165,11 +154,7 @@ describe('parseXmlMod', () => {
           <Color R="200" G="0" B="0" A="100" />
         </Entity>`,
       );
-      const p = parseXmlMod(xml, 'MOD/sphere.mod').entities[0].primitive as Extract<
-        XmlModPrimitive,
-        { type: 'Sphere' }
-      >;
-      expect(p).toEqual({ type: 'Sphere', r: 50 });
+      expect(parseXmlMod(xml,'MOD/sphere.mod').entities[0].primitive).toEqual({type:'Standard',canonical:{kind:'Sphere',radius:50}});
     });
 
     it('ChannelSteel：L/Model 必填，D/H/B/T 可选', () => {
@@ -274,7 +259,7 @@ describe('parseXmlMod', () => {
         XmlModPrimitive,
         { raw: Record<string, string> }
       >;
-      expect(p.type).toBe('OffsetRectangularTable');
+      expect(p.type).toBe('Unsupported');
       expect(p.raw).toEqual({ H: '50', L: '200', W: '100' });
     });
 
@@ -596,12 +581,9 @@ describe('parseXmlMod', () => {
           <Color R="100" G="100" B="100" A="100" />
         </Entity>`,
       );
-      const p = parseXmlMod(xml, 'MOD/no-array.mod').entities[0].primitive as Extract<
-        XmlModPrimitive,
-        { type: 'StretchedBody' }
-      >;
-      expect(p.array).toBe('');
-      expect(p.normal).toBe('');
+      const doc=parseXmlMod(xml,'MOD/no-array.mod');
+      expect(doc.entities[0].primitive.type).toBe('Unsupported');
+      expect(doc.diagnostics).toContainEqual(expect.objectContaining({code:'invalid-field-value'}));
     });
 
     it('TerminalBlock.Phase 缺失 → 空字符串', () => {

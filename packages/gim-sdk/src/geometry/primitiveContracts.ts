@@ -5,6 +5,38 @@ import type {
 
 export type GeometryLod = 0 | 1 | 2;
 export type CanonicalPrimitive =
+  | { readonly kind: "Sphere"; readonly radius: number }
+  | {
+      readonly kind: "OffsetRectangularTable";
+      readonly bottomLength: number;
+      readonly bottomWidth: number;
+      readonly topLength: number;
+      readonly topWidth: number;
+      readonly height: number;
+      readonly offsetX: number;
+      readonly offsetY: number;
+    }
+  | {
+      readonly kind: "TruncatedCone";
+      readonly bottomRadius: number;
+      readonly topRadius: number;
+      readonly height: number;
+    }
+  | {
+      readonly kind: "EccentricTruncatedCone";
+      readonly bottomRadius: number;
+      readonly topRadius: number;
+      readonly height: number;
+      readonly offsetX: number;
+      readonly offsetY: number;
+    }
+  | {
+      readonly kind: "StretchedBody";
+      readonly contour: readonly import("./analysisGeometry.js").Point3[];
+      readonly normal: import("./analysisGeometry.js").Point3;
+      readonly length: number;
+      readonly displacement: import("./analysisGeometry.js").Point3;
+    }
   | {
       readonly kind: "Cuboid";
       readonly length: number;
@@ -35,6 +67,11 @@ export interface GeometryLimits {
 export interface GeometryCompileOptions {
   readonly lod?: GeometryLod;
   readonly limits?: Partial<GeometryLimits>;
+  /** An explicitly identified source dialect, scoped to this call. */
+  readonly compatibility?: {
+    rule: "cone-top-ratio-v1" | "stretch-displacement-v1";
+    evidence: string;
+  };
 }
 
 export interface GeometryDiagnostic {
@@ -60,7 +97,10 @@ export type GeometryInterpretationResult = {
   readonly policyVersion: string;
   readonly diagnostics: readonly GeometryDiagnostic[];
 } & (
-  | { readonly status: "standard"; readonly canonical: CanonicalPrimitive }
+  | {
+      readonly status: "standard" | "compatible";
+      readonly canonical: CanonicalPrimitive;
+    }
   | {
       readonly status: "invalid" | "ambiguous" | "unsupported";
       readonly canonical?: never;

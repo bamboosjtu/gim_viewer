@@ -20,6 +20,11 @@ export interface XmlModDocument extends Omit<LegacyDocument, 'entities' | 'diagn
 const migratedTags = new Map([
   ['cuboid', 'Cuboid'],
   ['cylinder', 'Cylinder'],
+  ['sphere', 'Sphere'],
+  ['truncatedcone', 'TruncatedCone'],
+  ['eccentrictruncatedcone', 'EccentricTruncatedCone'],
+  ['offsetrectangulartable', 'OffsetRectangularTable'],
+  ['stretchedbody', 'StretchedBody'],
 ]);
 
 const indexes = new WeakMap<XmlModEntity[], Map<number, XmlModEntity>>();

@@ -34,6 +34,7 @@ function inputRole(input) {
   if (path.startsWith("src/semantic/catalog/")) return "directory";
   if (path.startsWith("src/semantic/")) return "semantic";
   if (path.startsWith("src/geometry/")) return "geometry";
+  if (/(?:^|\/)node_modules\/earcut\/src\/earcut\.js$/.test(path)) return "triangulation";
   if (path.startsWith("src/engineering/")) return "engineering";
   if (path.startsWith("src/projection/")) return "projection";
   if (path.startsWith("src/adapters/")) return "source-adapter";
@@ -50,7 +51,7 @@ const allowed = {
   // Geometry has always consumed the shared source-document readers; the tree
   // migration renames their role from 'format' to 'source', so the allowance
   // follows the files instead of inventing a new violation.
-  geometry: ["geometry", "parser", "source", "format", "shared"],
+  geometry: ["geometry", "parser", "source", "format", "shared", "triangulation"],
   engineering: ["engineering", "geometry", "shared"],
   projection: ["projection", "directory", "shared"],
   "source-adapter": [

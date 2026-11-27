@@ -14,9 +14,7 @@ import type {
 } from "./primitiveContracts.js";
 
 function shapeKey(p: CanonicalPrimitive, lod: number, policy: string): string {
-  const dimensions =
-    p.kind === "Cuboid" ? [p.length, p.width, p.height] : [p.radius, p.height];
-  return [xmlModCompilerVersion, policy, p.kind, ...dimensions, lod].join("/");
+  return [xmlModCompilerVersion, policy, JSON.stringify(p), lod].join("/");
 }
 
 /** One result per declaration; only successfully compiled local shapes become templates. */
@@ -58,7 +56,7 @@ export function compileXmlModDocument(
       location: { ...location, ...issue.location },
     });
     const interpretation: GeometryInterpretationResult = entity.primitive
-      ? interpretXmlModPrimitive(entity.primitive)
+      ? interpretXmlModPrimitive(entity.primitive, options)
       : {
           status: "invalid",
           diagnostics: [],
@@ -69,7 +67,7 @@ export function compileXmlModDocument(
     }
     const binding = { source: entity, interpretation, diagnostics };
     if (
-      interpretation.status !== "standard" ||
+      !interpretation.canonical ||
       entity.id === undefined ||
       source.entitiesById.get(entity.id) !== entity
     )

@@ -87,7 +87,7 @@ DOM 与 Worker 通过相同的 SDK Raw Parser 读取变电 XML，工程入口显
 
 - MOD 为 `Device/Entities/Entity` XML；每个 Entity 有可选 TransformMatrix、Color 和首个子 primitive。
 - primitive 的规范化标签、字段、别名、近似和 LOD 见[XML primitive](../schema/xml-primitives.md)。
-- `StretchedBody` 的 Array/Normal 支持方向基矢和完整位移两种解释；范围与网格共用同一解释函数。
+- 球、圆台、偏心圆台、偏移矩形台与拉伸体使用 SDK Canonical 参数计算局部网格和范围。标准圆台的 TR 是顶半径，标准拉伸按单位方向乘 L。SDK 仅在调用方显式提供规则和来源依据时使用比例或完整位移的兼容解释。
 - Boolean 在 L0/L1 采用轮廓近似（Union 组合、Difference/Intersection 保留第一操作数），L2 才执行精确 CSG。
 - 远景/中景 L0/L1 跳过小于阈值的附属构件，只保留主体轮廓；全小构件 DEV 回退一个最大轮廓，不伪装成空设备。跳过只影响当前表示，不删除来源引用，也不写空几何结论。
 - 槽钢和 H 型钢使用共用的开口截面轮廓，源尺寸缺失时应用文档化的浏览估算。DEV 模板、空间目录和巡视资产的缓存键包含截面策略。`Table` 仍使用外廓盒体，弱 schema 保留 raw。见 [XML 图元](../schema/xml-primitives.md)。

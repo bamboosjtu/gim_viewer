@@ -329,6 +329,7 @@ for (const [layer, sourceRoot] of [
         if (
           sourceRoot === sdkRoot &&
           !name.startsWith('.') &&
+          !(localPath === 'geometry/profiles.ts' && name === 'earcut') &&
           !name.startsWith('@gim/gim-primitives/')
         )
           failures.push(

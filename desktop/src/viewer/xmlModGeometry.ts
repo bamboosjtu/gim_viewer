@@ -383,8 +383,17 @@ function primitiveToGeometryUncached(
  * 仅提取影响几何形状的参数（半径/高度/分段等），不包含 TransformMatrix。
  * 同 modPath + 同 primitive 类型 + 同参数 → 同一 BufferGeometry。
  */
+const standardSignatures = new WeakMap<object, string>();
 function primitiveSignature(p: XmlModPrimitive): string {
   switch (p.type) {
+    case 'Standard': {
+      let key = standardSignatures.get(p.canonical);
+      if (key === undefined) {
+        key = JSON.stringify(p.canonical);
+        standardSignatures.set(p.canonical, key);
+      }
+      return key;
+    }
     case 'Cuboid':
       return `${sanitizeNum(p.l)},${sanitizeNum(p.w)},${sanitizeNum(p.h)}`;
     case 'Cylinder':
