@@ -532,8 +532,6 @@ export async function serializeDevToGlbDetailed(
   devGroup.userData.devPath = canonicalDevPath;
   const ownedSourceGroups = new Set<THREE.Group>();
   const stlSources = new Map<string, THREE.Group>();
-  const zeroStlNormals = new Map<THREE.BufferGeometry, number[]>();
-  const stlNormalVariants = new Map<THREE.BufferGeometry, Map<string, THREE.BufferGeometry>>();
   const stlCounts = new Map<string, number>();
   for (const edge of discovered.stls)
     stlCounts.set(edge.stlPath, (stlCounts.get(edge.stlPath) ?? 0) + 1);
@@ -722,43 +720,6 @@ export async function serializeDevToGlbDetailed(
             });
             applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);
           } else {
-            // GLTFExporter substitutes X for a zero normal after baking. For
-            // matrix nodes preserve that same world fallback, sharing position
-            // buffers and only varying normals when a source actually needs it.
-            const fallback = new THREE.Vector3(1, 0, 0)
-              .applyMatrix3(new THREE.Matrix3().getNormalMatrix(placement).invert())
-              .normalize();
-            group.traverse((node) => {
-              const mesh = node as THREE.Mesh,
-                geometry = mesh.geometry;
-              const normal = geometry?.getAttribute('normal');
-              if (!normal) return;
-              let zeros = zeroStlNormals.get(geometry);
-              if (!zeros) {
-                zeros = [];
-                for (let i = 0; i < normal.count; i++)
-                  if (normal.getX(i) === 0 && normal.getY(i) === 0 && normal.getZ(i) === 0)
-                    zeros.push(i);
-                zeroStlNormals.set(geometry, zeros);
-              }
-              if (!zeros.length || fallback.equals(new THREE.Vector3(1, 0, 0))) return;
-              let variants = stlNormalVariants.get(geometry);
-              if (!variants) {
-                variants = new Map();
-                stlNormalVariants.set(geometry, variants);
-              }
-              const key = fallback.toArray().join(',');
-              let variant = variants.get(key);
-              if (!variant) {
-                variant = new THREE.BufferGeometry();
-                for (const [name, attribute] of Object.entries(geometry.attributes))
-                  variant.setAttribute(name, name === 'normal' ? attribute.clone() : attribute);
-                for (const index of zeros)
-                  variant.getAttribute('normal').setXYZ(index, fallback.x, fallback.y, fallback.z);
-                variants.set(key, variant);
-              }
-              mesh.geometry = variant;
-            });
             group.matrixAutoUpdate = false;
             group.matrix.copy(placement);
             group.matrix.elements[12] *= 0.001;

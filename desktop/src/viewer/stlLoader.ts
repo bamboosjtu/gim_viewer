@@ -4,7 +4,11 @@ import { decodeStl } from '../gim/geometry/stlSource.js';
 
 function stlGroup(buffer: ArrayBuffer, path: string, format?: 'ascii'): THREE.Group | null {
   const result = decodeStl(buffer, format ? { format } : {});
-  if (!result.mesh || (result.format === 'ascii' && result.status === 'empty')) return null;
+  if (!result.mesh) return null;
+  const group = new THREE.Group();
+  group.name = path;
+  // Auto-detection also serves DEV assembly, which distinguishes empty sources from decode errors.
+  if (result.status === 'empty') return format === 'ascii' ? null : group;
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(result.mesh.positions, 3));
   geometry.setAttribute('normal', new THREE.BufferAttribute(result.mesh.normals, 3));
@@ -15,8 +19,6 @@ function stlGroup(buffer: ArrayBuffer, path: string, format?: 'ascii'): THREE.Gr
     result.format === 'ascii'
       ? new THREE.MeshStandardMaterial(props)
       : new THREE.MeshPhongMaterial({ ...props, specular: 0x111111, shininess: 30 });
-  const group = new THREE.Group();
-  group.name = path;
   group.add(new THREE.Mesh(geometry, material));
   return group;
 }

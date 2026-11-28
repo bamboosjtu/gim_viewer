@@ -172,7 +172,7 @@ async function loadStlOccurrences(
     const buffer = await stlFile.arrayBuffer();
     if (!current()) return;
     const group = parseStlBinary(buffer, geo.stlPath);
-    if (!group) continue;
+    if (!group?.children.length) continue;
     applyPhmColorOverride(group, geo.phmColor, geo.phmColorMaxA);
 
     applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);

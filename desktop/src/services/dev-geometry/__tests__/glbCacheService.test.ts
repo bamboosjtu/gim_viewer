@@ -20,6 +20,54 @@ function triangleStl(points: number[][]): ArrayBuffer {
   return bytes;
 }
 
+it('preserves a sibling STL when one source contains only zero-area facets', async () => {
+  const { buildDevSourceBounds } = await import('../devSpatialCatalog.js');
+  const { parseWorkerXmlMod } = await import('../../../gim/geometry/xmlModWorkerParser.js');
+  const files = new Map([
+    ['device.dev', file('SOLIDMODELS.NUM=1\nSOLIDMODEL0=body.phm', 'device.dev')],
+    [
+      'body.phm',
+      file('SOLIDMODELS.NUM=2\nSOLIDMODEL0=empty.stl\nSOLIDMODEL1=visible.stl', 'body.phm'),
+    ],
+    [
+      'empty.stl',
+      new File(
+        [
+          triangleStl([
+            [9000, 0, 0],
+            [9000, 0, 0],
+            [9000, 0, 0],
+          ]),
+        ],
+        'empty.stl',
+      ),
+    ],
+    [
+      'visible.stl',
+      new File(
+        [
+          triangleStl([
+            [0, 0, 0],
+            [1000, 0, 0],
+            [0, 1000, 0],
+          ]),
+        ],
+        'visible.stl',
+      ),
+    ],
+  ]);
+  const result = await serializeDevToGlbDetailed('device.dev', files);
+  expect(result).toMatchObject({
+    status: 'partial',
+    diagnostics: { emptySourceCount: 1, renderableStlCount: 1 },
+  });
+  expect(result.bytes?.byteLength).toBeGreaterThan(0);
+  expect(await buildDevSourceBounds('device.dev', files, parseWorkerXmlMod)).toMatchObject({
+    boundsQuality: 'conservative',
+    sourceBounds: [0, 0, 0, 1, 1, 0],
+  });
+});
+
 it('carries invalid DEV placement evidence through cold compilation and warm diagnostic metadata',async()=>{
   const {diagnosticFromSerialization}=await import('../../../gim/geometry/geometryDiagnostics.js');
   const {packDevArtifact,unpackDevArtifact}=await import('@desktop/devLodCache.js');

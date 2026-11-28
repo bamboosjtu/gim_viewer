@@ -211,7 +211,8 @@ export function documentBounds(doc: XmlModDocument, patrolRange = false) {
 }
 /** Range-only decoding shares the STL grammar and allocates no mesh buffers. */
 export function stlBounds(bytes: ArrayBuffer): THREE.Box3 | null {
-  const { bounds } = queryStlBounds(bytes);
+  const { bounds, status } = queryStlBounds(bytes);
+  if (status === 'empty') return new THREE.Box3();
   return bounds ? new THREE.Box3(v(...bounds.min), v(...bounds.max)) : null;
 }
 export async function buildDevSourceBounds(

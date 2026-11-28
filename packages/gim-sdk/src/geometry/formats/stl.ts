@@ -6,6 +6,7 @@ export type StlFormat = "binary" | "ascii";
 export interface StlCompileResult {
   format: StlFormat;
   status: "ok" | "empty" | "invalid" | "capacity-exceeded";
+  /** Number of drawable facets. Input record limits also count skipped facets. */
   triangleCount: number;
   diagnostics: readonly GeometryDiagnostic[];
   mesh?: MeshData;
@@ -42,8 +43,15 @@ function meshSink(knownCount?: number): Sink {
     },
     finish() {
       const first = chunks[0];
-      if (chunks.length === 1 && first.positions.length === size)
-        return { mesh: { positions: first.positions, normals: first.normals } };
+      if (chunks.length === 1 && size > 0) {
+        // Publish the filled prefix directly when a binary source contains skipped facets.
+        return {
+          mesh: {
+            positions: first.positions.subarray(0, size),
+            normals: first.normals.subarray(0, size),
+          },
+        };
+      }
       const positions = new Float32Array(size),
         normals = new Float32Array(size);
       let offset = 0;
@@ -122,11 +130,7 @@ function decode(
     !(bytes.length >= binaryLength && bytes.subarray(0, 84).includes(0))
       ? "ascii"
       : "binary");
-  const fail = (
-    message: string,
-    capacity = false,
-    code = "invalid-stl",
-  ): StlCompileResult => ({
+  const fail = (message: string, capacity = false): StlCompileResult => ({
     format,
     status: capacity ? "capacity-exceeded" : "invalid",
     triangleCount: 0,
@@ -134,7 +138,7 @@ function decode(
       {
         stage: "parse",
         severity: "error",
-        code: capacity ? "capacity-exceeded" : code,
+        code: capacity ? "capacity-exceeded" : "invalid-stl",
         message,
       },
     ],
@@ -142,6 +146,33 @@ function decode(
   const normal: Point3 = [0, 0, 0],
     vertices = Array<number>(9).fill(0);
   let count = 0;
+  let skipped = 0;
+  let firstSkipped = 0;
+  const consume = (sink: Sink) => {
+    count++;
+    if (finishFacet(normal, vertices, mode === "mesh")) {
+      sink.put(normal, vertices);
+    } else {
+      if (skipped === 0) firstSkipped = count;
+      skipped++;
+    }
+  };
+  const finish = (sink: Sink): StlCompileResult => ({
+    format,
+    status: count > skipped ? "ok" : "empty",
+    triangleCount: count - skipped,
+    diagnostics: skipped
+      ? [
+          {
+            code: "degenerate-stl-facet",
+            stage: "parse",
+            severity: "warning",
+            message: `Skipped ${skipped} zero-area STL facets (first: ${firstSkipped})`,
+          },
+        ]
+      : [],
+    ...sink.finish(),
+  });
   if (format === "binary") {
     if (bytes.length < 84) return fail("Missing binary STL header");
     if (declared > MAX_TRIANGLES)
@@ -149,28 +180,16 @@ function decode(
     if (bytes.length < binaryLength)
       return fail("Binary STL record length mismatch");
     const sink = mode === "mesh" ? meshSink(declared) : rangeSink();
-    for (let start = 84; count < declared; count++, start += 50) {
+    for (let start = 84; start < binaryLength; start += 50) {
       for (let i = 0; i < 3; i++)
         normal[i] = view.getFloat32(start + 4 * i, true);
       for (let i = 0; i < 9; i++)
         vertices[i] = view.getFloat32(start + 12 + 4 * i, true);
       if (!normal.every(Number.isFinite) || !vertices.every(Number.isFinite))
         return fail("Nonfinite binary normal or vertex");
-      if (!finishFacet(normal, vertices, mode === "mesh"))
-        return fail(
-          `Degenerate STL facet ${count + 1}`,
-          false,
-          "degenerate-stl-facet",
-        );
-      sink.put(normal, vertices);
+      consume(sink);
     }
-    return {
-      format,
-      status: count ? "ok" : "empty",
-      triangleCount: count,
-      diagnostics: [],
-      ...sink.finish(),
-    };
+    return finish(sink);
   }
   if (!solid) return fail("Expected ASCII solid header");
   const text = new TextDecoder().decode(bytes),
@@ -209,14 +228,7 @@ function decode(
           return fail("Invalid ASCII STL vertex");
       if (token() !== "endloop" || token() !== "endfacet")
         return fail("Incomplete ASCII STL triangle");
-      if (!finishFacet(normal, vertices, mode === "mesh"))
-        return fail(
-          `Degenerate STL facet ${count + 1}`,
-          false,
-          "degenerate-stl-facet",
-        );
-      sink.put(normal, vertices);
-      count++;
+      consume(sink);
       keyword = token();
     }
     if (keyword !== "endsolid") return fail("Missing ASCII endsolid");
@@ -224,13 +236,7 @@ function decode(
     keyword = token();
   }
   if (keyword !== undefined) return fail("Unexpected ASCII STL content");
-  return {
-    format,
-    status: count ? "ok" : "empty",
-    triangleCount: count,
-    diagnostics: [],
-    ...sink.finish(),
-  };
+  return finish(sink);
 }
 export function compileStl(
   input: Input,

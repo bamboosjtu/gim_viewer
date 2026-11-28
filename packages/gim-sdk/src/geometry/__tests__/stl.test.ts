@@ -65,9 +65,71 @@ it("distinguishes capacity, incomplete records and malformed facet structure", (
     expect(
       decode(ascii(facet.replace("vertex 0 1 0", "vertex 2 0 0"))),
     ).toMatchObject({
-      status: "invalid",
-      diagnostics: [{ code: "degenerate-stl-facet" }],
+      status: "empty",
+      triangleCount: 0,
+      diagnostics: [{ code: "degenerate-stl-facet", severity: "warning" }],
     });
   }
   expect(result.mesh!.positions.byteLength).toBe(36);
 });
+
+it.each(["ascii", "binary"] as const)(
+  "retains drawable facets around degenerate records in %s STL",
+  (format) => {
+    const rows = [
+      [0, 0, 0, 1, 0, 0, 0, 1, 0],
+      [90, 90, 90, 91, 91, 91, 92, 92, 92],
+      [0, 0, 1, 1, 0, 1, 0, 1, 1],
+      [100, 0, 0, 100, 0, 0, 100, 0, 0],
+    ];
+    let input: Uint8Array;
+    if (format === "ascii") {
+      input = ascii(
+        rows
+          .map((v) =>
+            [
+              "facet normal 0 0 0",
+              "outer loop",
+              ...[0, 3, 6].map((i) => "vertex " + v.slice(i, i + 3).join(" ")),
+              "endloop",
+              "endfacet",
+            ].join("\n"),
+          )
+          .join("\n"),
+      );
+    } else {
+      input = new Uint8Array(84 + 50 * rows.length);
+      const view = new DataView(input.buffer);
+      view.setUint32(80, rows.length, true);
+      rows.forEach((v, j) =>
+        v.forEach((x, i) => view.setFloat32(96 + j * 50 + i * 4, x, true)),
+      );
+    }
+    const decoded = compileStl(input),
+      range = queryStlBounds(input);
+    for (const result of [decoded, range]) {
+      expect(result).toMatchObject({
+        format,
+        status: "ok",
+        triangleCount: 2,
+        diagnostics: [
+          {
+            code: "degenerate-stl-facet",
+            severity: "warning",
+            message: expect.stringContaining(
+              "2 zero-area STL facets (first: 2)",
+            ),
+          },
+        ],
+      });
+    }
+    expect(Array.from(decoded.mesh!.positions)).toEqual([
+      ...rows[0],
+      ...rows[2],
+    ]);
+    expect(Array.from(decoded.mesh!.normals)).toEqual([
+      0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1,
+    ]);
+    expect(range.bounds).toMatchObject({ min: [0, 0, 0], max: [1, 1, 1] });
+  },
+);
