@@ -16,5 +16,6 @@ export * from "./domain.js";
 export * from "./preview.js";
 export * from "./towerTopology.js";
 export * from "./towerAssembly.js";
+export * from "./wireGeometry.js";
 export * from "./foundationSelection.js";
 export * from "./crossingClassification.js";

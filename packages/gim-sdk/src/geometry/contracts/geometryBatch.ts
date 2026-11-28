@@ -63,6 +63,7 @@ export type NamedGeometryPort = Omit<GeometryPort, "direction"> & {
   readonly address: GeometrySourceAddress;
   readonly direction?: GeometryPort["direction"];
   readonly recordOrdinal?: number;
+  readonly referencePath?: string;
 };
 export interface GeometryObjectResult {
   /** Placement of local analysis bounds and ports, including for port-only records. */

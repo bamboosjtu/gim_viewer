@@ -55,3 +55,5 @@ export * from "./algorithms/boolean/graph.js";
 export * from "./algorithms/boolean/evaluate.js";
 export * from "./formats/line-assembly.js";
 export * from "./formats/line-foundation.js";
+export * from "./formats/line-span.js";
+export * from "./formats/line-frame.js";
