@@ -17,6 +17,8 @@ export function solvePatrolStep(
 ): StepResult {
   let floor = -Infinity,
     sourceId = '';
+  let footprintFloor = -Infinity,
+    footprintSource = '';
   const intervals: [number, number][] = [];
   const treads = new Map<string, TreadContacts>();
   const evidenceBox = box.clone().expandByVector(new Vector3(profile.radius, profile.radius, 0));
@@ -36,6 +38,10 @@ export function solvePatrolStep(
       return false;
     });
     contacts.connect();
+    if (contacts.targetFloor > footprintFloor) {
+      footprintFloor = contacts.targetFloor;
+      footprintSource = row.id;
+    }
   }
   if (!sourceId) return { reason: '无连续落脚面' };
   intervals.sort((a, b) => a[0] - b[0]);
@@ -45,18 +51,34 @@ export function solvePatrolStep(
     covered = Math.max(covered, end);
   }
   if (covered < 1 - 1e-8) return { reason: '无连续落脚面' };
-  const feet = to.clone().setZ(floor);
-  for (const row of rows.values()) {
-    const tread = treads.get(row.id);
-    if (
-      visitTriangles(
-        row,
-        box,
-        (t, index) =>
-          !tread?.faces.has(index) && bodyHits(t, from, feet) && !tread?.allowsContact(t),
+  const testBody = (feet: Vector3) => {
+    for (const row of rows.values()) {
+      const tread = treads.get(row.id);
+      let overhead = false;
+      let contactNormal: Vector3 | undefined;
+      if (
+        visitTriangles(row, box, (t, index) => {
+          if (tread?.faces.has(index) || !bodyHits(t, from, feet) || tread?.allowsContact(t))
+            return false;
+          contactNormal = t.getNormal(new Vector3());
+          overhead =
+            Math.min(t.a.z, t.b.z, t.c.z) >=
+            Math.max(from.z, feet.z) + profile.eyeHeight - profile.radius;
+          return true;
+        })
       )
-    )
-      return { reason: '前方受阻或头顶净空不足' };
+        return { reason: overhead ? '头顶净空不足' : '前方受阻', blockerId: row.id, contactNormal };
+    }
+    return undefined;
+  };
+  const feet = to.clone().setZ(floor),
+    blocked = testBody(feet);
+  if (!blocked) return { feet, sourceId };
+  // A premature lift can hit the underside of the next landing. Prefer the centre-supported route.
+  // Only retry a reached tread of the obstructing support, sweeping the full capsule again.
+  if (footprintFloor > floor && blocked.blockerId === footprintSource) {
+    const lifted = to.clone().setZ(footprintFloor);
+    if (!testBody(lifted)) return { feet: lifted, sourceId: footprintSource };
   }
-  return { feet, sourceId };
+  return blocked;
 }

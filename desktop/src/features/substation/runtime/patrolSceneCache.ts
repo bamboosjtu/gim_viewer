@@ -7,6 +7,7 @@ type CachedSource = Omit<PatrolSource, 'load' | 'bounds' | 'matrix'> & {
   matrix: number[];
 };
 export interface PatrolSceneManifest {
+  center?: Vec3;
   sources: CachedSource[];
   unknown: string[];
   unavailable: string[];
@@ -19,6 +20,7 @@ const strings = (v: unknown) => Array.isArray(v) && v.every((s) => typeof s === 
 export function usableManifest(v: PatrolSceneManifest | undefined): v is PatrolSceneManifest {
   return (
     !!v &&
+    (!v.center || vector(v.center, 3)) &&
     Array.isArray(v.sources) &&
     v.sources.every(
       (row) =>

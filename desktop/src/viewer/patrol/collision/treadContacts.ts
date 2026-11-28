@@ -47,16 +47,15 @@ export class TreadContacts {
   private readonly center = new Vector3();
   private readonly nearest = new Vector3();
 
-  private underFoot(t: Triangle, foot: Vector3) {
+  targetFloor = -Infinity;
+  private footprintHeight(t: Triangle, foot: Vector3) {
     this.projected.a.copy(t.a).setZ(0);
     this.projected.b.copy(t.b).setZ(0);
     this.projected.c.copy(t.c).setZ(0);
     this.center.copy(foot).setZ(0);
     this.projected.closestPointToPoint(this.center, this.nearest);
-    return (
-      this.nearest.distanceToSquared(this.center) <= profile.radius ** 2 &&
-      supportHeight(t, this.nearest.setZ(foot.z)) !== undefined
-    );
+    if (this.nearest.distanceToSquared(this.center) <= profile.radius ** 2)
+      return supportHeight(t, this.nearest.setZ(foot.z));
   }
 
   observe(t: Triangle, index: number, centerSupported: boolean, from: Vector3, to: Vector3) {
@@ -70,7 +69,15 @@ export class TreadContacts {
       return;
     }
     if (up < minUp) return;
-    const reached = centerSupported || this.underFoot(t, to) || this.underFoot(t, from);
+    const atTarget = this.footprintHeight(t, to);
+    if (
+      atTarget !== undefined &&
+      hi - lo <= tolerance &&
+      (this.nearest.x - to.x) * (to.x - from.x) + (this.nearest.y - to.y) * (to.y - from.y) > 0
+    )
+      this.targetFloor = Math.max(this.targetFloor, atTarget);
+    const reached =
+      centerSupported || atTarget !== undefined || this.footprintHeight(t, from) !== undefined;
     if (reached) this.faces.add(index);
     if (hi - lo > tolerance) return;
     const cap = t.clone();

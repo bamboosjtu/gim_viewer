@@ -1,3 +1,5 @@
+import { mountPatrolPreparation } from './patrolPreparation.js';
+import type { ViewerCommandPort } from '../shared/viewerCommands.js';
 import { acceptsNavigationAction } from '../shared/viewerNavigationCommands.js';
 import { toolGlyph } from './viewerToolIcons.js';
 import type {
@@ -9,6 +11,7 @@ export function mountPatrolOverlay(
   port: ViewerNavigationCommands,
   group: HTMLElement,
   viewport: HTMLElement,
+  tools?: ViewerCommandPort,
 ) {
   const button = (parent: HTMLElement, label: string, action: NavigationAction) => {
     const el = document.createElement('button');
@@ -63,6 +66,7 @@ export function mountPatrolOverlay(
   const exit = button(actions, '退出巡视', 'exit');
   start.className = resume.className = 'patrol-primary';
   hud.append(walking, backdrop, panel);
+  const preparation = mountPatrolPreparation(hud, port, tools);
   viewport.append(hud);
 
   const drawer = viewport.closest('#main')?.querySelector('#props-drawer');
@@ -87,13 +91,16 @@ export function mountPatrolOverlay(
     else if (!active) restoreDrawer();
     viewport.dataset.navigation = mode;
     viewport.toggleAttribute('data-patrol-active', immersive);
+    const compiling = mode === 'preparing' && port.compiling;
+    viewport.toggleAttribute('data-patrol-preparing', compiling);
+    preparation(compiling);
     hud.hidden = !active;
     walking.hidden = !isWalking;
     door.hidden = !port.doorHint;
     look.textContent = port.dragLook ? '按住左键拖动' : '环顾';
     backdrop.hidden = mode !== 'paused';
     const activeMessage = isWalking && port.message !== '开始巡视' ? port.message : '';
-    panel.hidden = isWalking && !activeMessage && !port.estimated;
+    panel.hidden = compiling || (isWalking && !activeMessage && !port.estimated);
     title.textContent =
       mode === 'paused' ? '巡视暂停' : mode === 'inspecting' && !port.measuring ? '检查对象' : '';
     title.hidden = !title.textContent;
@@ -150,6 +157,7 @@ export function mountPatrolOverlay(
       port.removeEventListener('change', render);
       delete viewport.dataset.navigation;
       viewport.removeAttribute('data-patrol-active');
+      viewport.removeAttribute('data-patrol-preparing');
       restoreDrawer();
       enter.remove();
       hud.remove();

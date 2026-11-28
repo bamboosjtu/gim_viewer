@@ -449,3 +449,27 @@ describe('source coverage and navigation cache', () => {
     expect(load).toHaveBeenCalledTimes(2);
   });
 });
+
+it('finishes each resident IFC before another is admitted and counts shared placements once each',async()=>{
+ const order:string[]=[];const projects=['A','B','A','B'];const rows=projects.map((model,i)=>{const row=slab(),read=row.load;return {...row,id:'part'+i,assetKey:'part'+i,residentModel:model,load:async(s:AbortSignal)=>{order.push(model);return read(s);}};});
+ rows.push({...rows[0],id:'another occurrence'});
+ const runtime=fixture('grouped-model-test',rows);const counts:number[]=[];
+ try{await runtime.prepareScene(new AbortController().signal,(_msg,done)=>{if(done!==undefined)counts.push(done);});
+ expect(order).toEqual(['A','A','B','B']);expect(counts[counts.length-1]).toBe(5);}
+ finally{runtime.dispose();}
+});
+
+it('keeps the supported centre path under a low landing when the leading footprint already overlaps the next tread',async()=>{
+ const flat=(id:string,lo:number,hi:number,z:number,support:boolean)=>source(id,new Box3(p(lo,0,z),p(hi,3,z)),support,async()=>[{positions:Float32Array.from([lo,0,z,hi,0,z,hi,3,z,lo,3,z]),indices:Uint32Array.from([0,1,2,0,2,3]),matrix:identity.toArray()}]);
+ const rt=fixture('low-landing-centre',[slab(),flat('step',1,1.4,.2,true),flat('canopy',0,.8,1.83,false)]);
+ try{await rt.prepareScene(new AbortController().signal);expect(rt.step(p(.75,1),p(.8,1))).toMatchObject({feet:p(.8,1,0),sourceId:'floor'});}
+ finally{rt.dispose();}
+});
+
+it('retains two leaf addresses when mapped parts reuse the same source geometry ID',async()=>{
+ const {appendPatrolProduct}=await import('../patrolIfcSources.js');const rows:PatrolSource[]=[];
+ const motion={sourceId:'',leafRepresentationId:'19',hingePosition:[0,0,0],closedTip:[1,0,0],hingeAxis:[0,0,1],radius:1,closedAngle:0,openAngle:1.57,evidence:['preview-swing']} as const;
+ const part={parts:[0],bounds:[0,0,0,1,.05,2],motion};
+ appendPatrolProduct(rows,{patrolSource:vi.fn()} as any,'dir/leaf/site.ifc','dir/leaf/site.ifc#5',{expressId:5,globalId:'g',type:'IFCGATE',label:'平开大门',bounds:[0,0,0,2,.05,2],allPartsMovable:true,leaves:[part,{...part,parts:[1]}]} as any,new Box3(p(0,0),p(2,1,2)),identity);
+ expect(rows.map(r=>r.id)).toEqual(['dir/leaf/site.ifc#5/leaf/0','dir/leaf/site.ifc#5/leaf/1']);expect(rows.map(r=>r.door?.sourceId)).toEqual(rows.map(r=>r.id));
+});

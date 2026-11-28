@@ -1,3 +1,4 @@
+import { canInspectDoorPanels, mappedDoorLeaves, type MappedDoorLeaf } from './mappedDoorLeaves.js';
 import { readDoorMotion, type DoorMotionDescriptor } from './doorMotion.js';
 import { IFCPRODUCT, type IfcAPI } from 'web-ifc';
 import { Box3, Matrix4, Vector3 } from 'three';
@@ -11,6 +12,8 @@ export interface NavigationProduct {
   label: string;
   bounds: number[];
   door?: DoorMotionDescriptor;
+  leaves?: MappedDoorLeaf[];
+  allPartsMovable?: boolean;
 }
 export interface IfcNavigationCatalog {
   products: NavigationProduct[];
@@ -47,9 +50,11 @@ export function navigationCatalog(
         )
           continue;
         const globalId = String(line.GlobalId?.value ?? '');
+        let evaluated: ReturnType<typeof extractIfcObjectFine> | undefined;
+        const read = () => (evaluated ??= extractIfcObjectFine(api, model, id, globalId));
         let box = bounds.get(id);
         if (!box) {
-          const mesh = extractIfcObjectFine(api, model, id, globalId),
+          const mesh = read(),
             extent = new Box3(),
             p = new Vector3();
           for (const part of mesh.parts) {
@@ -63,13 +68,29 @@ export function navigationCatalog(
         if (!globalId || box.length !== 6 || !box.every(Number.isFinite))
           throw Error('来源身份或范围未知');
         const label = [line.Name?.value, line.ObjectType?.value].filter(Boolean).join(' ');
+        const door = readDoorMotion(api, model, id, type, label, index.unitScale);
+        let leaves: MappedDoorLeaf[] | undefined,
+          allPartsMovable = false;
+        if (!door && canInspectDoorPanels(type, label)) {
+          try {
+            const result = read();
+            leaves = mappedDoorLeaves(type, label, result.parts);
+            allPartsMovable =
+              leaves.length > 0 &&
+              new Set(leaves.flatMap((l) => l.parts)).size === result.parts.length;
+          } catch {
+            /* The source still participates as static collision. */
+          }
+        }
         products.push({
           expressId: id,
           globalId,
           type,
           label,
           bounds: box,
-          door: readDoorMotion(api, model, id, type, label, index.unitScale),
+          door,
+          leaves,
+          allPartsMovable,
         });
       } catch {
         unknown.push(String(id));

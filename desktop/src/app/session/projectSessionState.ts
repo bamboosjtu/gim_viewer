@@ -1,3 +1,4 @@
+import type { GimProjectType } from '../../gim/projectType.js';
 import { isCurrentProject, type ProjectLoadSession } from '../../shared/projectSession.js';
 import { SessionScope, StaleSessionError } from '../../shared/sessionScope.js';
 import { logger } from '../../utils/logger.js';
@@ -8,6 +9,7 @@ export function reportProjectReleaseError(error: unknown): void {
 
 /** Owns the project identity, transition, scope and open-request lifetimes. */
 export class ProjectSessionState {
+  projectType: GimProjectType | null = null;
   private generation = 0;
   private geometryToken = 0;
   private projectId: number | null = null;

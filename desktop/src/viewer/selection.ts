@@ -45,6 +45,7 @@ export async function pickVisibleRay(
     distance: number;
     point?: THREE.Vector3;
     lod?: number;
+    address?: import('@gim/gim-sdk/geometry').GeometrySourceAddress;
   }> = [];
   let devHit: ReturnType<NonNullable<NonNullable<AppState['deviceLodRuntime']>['pick']>> = null;
   if (state.ifc.regionalRuntimes.size || state.deviceLodRuntime?.pick) {
@@ -120,7 +121,10 @@ export function setupSelection(
     clearHoverOutline(state);
   };
   state.selection.hoverCleanup = clearHover;
-  const ordinary = () => !navigation || navigation.mode === 'orbit';
+  const ordinary = () =>
+    !navigation ||
+    navigation.mode === 'orbit' ||
+    ((navigation.mode === 'preparing' || navigation.mode === 'ready') && !navigation.pickingStart);
   const cameraIntent = () => {
     if (!ordinary()) return;
     state.viewState.cameraNavigationVersion++;

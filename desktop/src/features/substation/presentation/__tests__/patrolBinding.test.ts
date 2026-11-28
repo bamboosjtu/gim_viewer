@@ -48,6 +48,7 @@ vi.mock('../../runtime/patrolNavigationRuntime.js', () => ({
     leave = vi.fn();
     dispose = vi.fn();
     canOperate = () => true;
+    doorReach = () => 3.4;
     stationEntrance = async () => pose();
     prepareScene = f.prepare;
     step = pose;

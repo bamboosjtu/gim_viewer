@@ -33,7 +33,7 @@ export function bindPatrolDoorTarget(
     );
     const far = result?.rayDistance ?? result?.distance ?? Infinity;
     const d = Math.min(far, near?.distance ?? Infinity);
-    if (d > 2.5 || (devHit?.distance ?? Infinity) < d) return;
+    if (d > 5 || (devHit?.distance ?? Infinity) < d) return;
     let id: string | undefined;
     if (near && near.distance <= far) id = near.runtime.sourcePath + '#' + near.object.expressId;
     else if (result) {
@@ -44,7 +44,18 @@ export function bindPatrolDoorTarget(
       const match = rt?.index.objects.filter((o) => o.globalId === guid);
       if (rt && match?.length === 1) id = rt.sourcePath + '#' + match[0].expressId;
     }
-    return id && navigation().canOperate(id) ? id : undefined;
+    const hit = near && near.distance <= far ? near : result;
+    const leaf =
+      id && navigation().canOperate(id)
+        ? id
+        : id && hit?.point
+          ? navigation().resolveDoor(
+              id,
+              hit.point,
+              near && near.distance <= far ? near.address?.partIndex : undefined,
+            )
+          : undefined;
+    return leaf && d <= navigation().doorReach(leaf) ? leaf : undefined;
   }
   const refreshDoor = () => {
     ++doorSequence;

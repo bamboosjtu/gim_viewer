@@ -60,7 +60,7 @@ export class FirstPersonController {
         return;
       e.preventDefault();
       if (e.code === 'KeyE') {
-        if (down && !e.repeat && commands.doorHint) commands.execute?.('door');
+        if (down && !e.repeat) commands.execute?.('door');
         return;
       }
       if (e.code === 'KeyF') {
@@ -231,8 +231,16 @@ export class FirstPersonController {
     while (advance && this.accumulator + 1e-10 >= 1 / 60) {
       const started = performance.now();
       this.accumulator -= 1 / 60;
-      const to = this.feet.clone().add(delta),
-        result = this.nav.step(this.feet, to);
+      const to = this.feet.clone().add(delta);
+      let result = this.nav.step(this.feet, to);
+      if ('reason' in result && result.contactNormal && Math.abs(result.contactNormal.z) < 0.2) {
+        const normal = result.contactNormal.clone().setZ(0).normalize();
+        const slide = delta.clone().addScaledVector(normal, -delta.dot(normal));
+        if (slide.lengthSq() > delta.lengthSq() * 0.01 && slide.distanceToSquared(delta) > 1e-12) {
+          const attempt = this.nav.step(this.feet, this.feet.clone().add(slide));
+          if ('feet' in attempt) result = attempt;
+        }
+      }
       if ('reason' in result) {
         this.commands.set('walking', result.reason, !!result.estimated);
         advance = false;

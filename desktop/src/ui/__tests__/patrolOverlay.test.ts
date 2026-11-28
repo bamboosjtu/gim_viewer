@@ -76,3 +76,11 @@ it('keeps the first-person HUD quiet, shows actual blockers, and restores the pr
     overlay.dispose();
   }
 });
+
+it('shows live object completion and keeps preparation cancellable and nonmodal',()=>{
+ const port=new ViewerNavigationCommands(),group=document.createElement('div'),view=document.createElement('div');port.execute=vi.fn();
+ const overlay=mountPatrolOverlay(port,group,view);port.compiling=true;port.browseReady=true;port.preparationProgress={done:80,total:3434};port.set('preparing','processing');
+ expect(view.dataset.patrolPreparing).toBe('');expect(view.querySelector('progress')!.value).toBe(80);expect(view.querySelector('progress')!.max).toBe(3434);
+ expect(view.querySelector<HTMLElement>('.patrol-backdrop')!.hidden).toBe(true);
+ view.querySelector<HTMLButtonElement>('[data-cancel]')!.click();expect(port.execute).toHaveBeenCalledWith('exit');overlay.dispose();
+});

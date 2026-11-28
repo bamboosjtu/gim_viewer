@@ -49,6 +49,8 @@ export class ViewerNavigationCommands extends EventTarget {
   estimated = false;
   measuring = false;
   compiling = false;
+  browseReady = false;
+  preparationProgress?: { done: number; total: number };
   unknownSourceCount = 0;
   doorHint = false;
   revision = 0;

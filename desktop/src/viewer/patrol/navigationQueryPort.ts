@@ -16,6 +16,8 @@ export type { PatrolPart } from '../../shared/patrolSpatialAsset.js';
 export interface PatrolSource {
   id: string;
   assetKey: string;
+  /** The IFC worker holds one open model across consecutive requests. */
+  residentModel?: string;
   bounds: Box3;
   matrix: Matrix4;
   support: boolean;
@@ -25,7 +27,7 @@ export interface PatrolSource {
   estimatedGeometryCount?: number;
   approximationReasons?: Record<string, string[]>;
   door?: import('./doorMotion.js').DoorMotionDescriptor;
-  doorAddress?: { path: string; expressId: number };
+  doorAddress?: { path: string; expressId: number; parts?: number[] };
   load: (signal: AbortSignal) => Promise<PatrolPart[]>;
 }
 export interface PatrolDirectory {
@@ -41,7 +43,7 @@ export interface PatrolPose {
 }
 export type StepResult =
   | { feet: Vector3; sourceId: string; estimated?: boolean }
-  | { reason: string; estimated?: boolean };
+  | { reason: string; blockerId?: string; contactNormal?: Vector3; estimated?: boolean };
 export interface NavigationQueryPort {
   step(from: Vector3, to: Vector3): StepResult;
 }

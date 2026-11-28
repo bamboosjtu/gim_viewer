@@ -1,3 +1,4 @@
+import { viewerToolContext } from '../services/presentation/viewerToolContext.js';
 import { mountPatrolOverlay } from './patrolOverlay.js';
 import { toolGlyph } from './viewerToolIcons.js';
 import { mountViewerToolbox } from './viewerToolbox.js';
@@ -46,14 +47,16 @@ export function setupSelectionToolbar(state: AppState): () => void {
       .catch((error) => logger.warn('[清除选择]', error));
   };
   clear.addEventListener('click', clearSelection);
-  const readContext = () => state.viewerToolContext;
+  const readContext = () => viewerToolContext(state);
   const toolbox = mountViewerToolbox(state.viewerCommands, readContext, bar, viewport, [
     locate,
     clear,
   ]);
   const group = bar.querySelector<HTMLElement>('[data-group="view"] .viewer-ribbon-actions');
   const patrol =
-    group && state.navigation ? mountPatrolOverlay(state.navigation, group, viewport) : null;
+    group && state.navigation
+      ? mountPatrolOverlay(state.navigation, group, viewport, state.viewerCommands)
+      : null;
   viewport.append(bar);
   const refreshVisibility = () => {
     if (patrol) patrol.enter.hidden = state.currentProjectType !== 'substation';

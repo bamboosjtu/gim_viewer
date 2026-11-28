@@ -1,6 +1,7 @@
+import { doorSweepObstruction } from '../../../viewer/patrol/collision/doorSweep.js';
 import { compilePatrolAssets } from './patrolSceneCompiler.js';
 import { usableAsset, usableManifest, type PatrolSceneManifest } from './patrolSceneCache.js';
-import { Box3, Matrix4, Vector3, Triangle } from 'three';
+import { Box3, Matrix4, Vector3 } from 'three';
 import {
   gateApproaches,
   stationGateRank,
@@ -16,13 +17,11 @@ import {
   discardPatrolEntry,
   writePatrolCache,
 } from '../../../infrastructure/cache/navigation/patrolCache.js';
-import { UnsupportedPatrolSourceError } from '../../../shared/patrolSpatialAsset.js';
+import { appendPatrolProduct } from './patrolIfcSources.js';
 import { PatrolAssetBuilder } from '../../../infrastructure/workers/patrolAssetBuilder.js';
 import { solvePatrolStep } from '../../../viewer/patrol/collision/patrolStep.js';
 import { doorRange, doorTransform } from '../../../viewer/patrol/doorMotion.js';
 import {
-  bodyHits,
-  triangleDistanceSquared,
   supportHeight,
   visitTriangles,
   type PatrolAsset,
@@ -48,6 +47,7 @@ const codec = [
   DEV_SHAPE_POLICY,
   'z-up-m-v1',
   'roles-v1',
+  'mapped-panels-v1',
   'bvh-v1',
   'grid-' + size,
 ].join('/');
@@ -58,14 +58,11 @@ function sweepBounds(from: Vector3, to: Vector3) {
   return box;
 }
 const xy = (a: number, b: number) => a + ',' + b;
-const groundType = /^IFC(SLAB|STAIR(FLIGHT)?|RAMP(FLIGHT)?|ROAD|PAVEMENT|SITE|GEOGRAPHICELEMENT)$/;
-const groundLabel =
-  /楼板|踏步|楼梯|台阶|坡道|路面|道路|广场|站区地面|室外地面|场坪|地坪|平台|\b(stair|floor|road|pavement|landing|ramp)\b/i;
 const toEngineering = new Matrix4().makeRotationX(Math.PI / 2);
 const abort = (signal: AbortSignal) => signal.throwIfAborted();
 
 type PreparedSource = Omit<PatrolSource, 'load'>;
-type Progress = (message: string) => void;
+type Progress = (message: string, done?: number, total?: number) => void;
 
 export class PatrolNavigationRuntime implements NavigationQueryPort {
   private readonly key: string;
@@ -73,6 +70,12 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
   private hasEstimatedSources = false;
   private unknownSources: string[] = [];
   private approaches: GateApproach[] = [];
+  private siteCenter?: Vector3;
+  inwardYaw(feet: Vector3) {
+    if (!this.siteCenter) return;
+    const d = this.siteCenter.clone().sub(feet);
+    if (Math.hypot(d.x, d.y) > 1e-6) return Math.atan2(d.x, d.y);
+  }
   private readonly doors = new Map<string, PreparedSource>();
   private readonly opened = new Map<string, () => void>();
   private readonly trustedDoors = new Set<string>();
@@ -86,6 +89,7 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
   private readonly large: PreparedSource[] = [];
   private readonly placements = new Map<string, PlacedAsset>();
   private readonly builder = new PatrolAssetBuilder();
+  lastDoorCheck?: { id: string; obstacle?: string; person: boolean };
   readonly metrics = {
     estimatedSectionOccurrences: 0,
     assetHits: 0,
@@ -131,6 +135,7 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
     if (hasDev && !base)
       unknown.push(...state.sourceGeometry.catalog.occurrences.map((row) => row.id));
     const gates: GateBounds[] = [];
+    const perimeter = new Box3();
     for (const entry of state.currentIfcEntries) {
       const runtime = state.ifc.regionalRuntimes.get(entry.modelId);
       if (!runtime) {
@@ -159,38 +164,12 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
           new Vector3().fromArray(b),
           new Vector3().fromArray(b, 3),
         ).applyMatrix4(toEngineering);
+        if (/围墙|周界围栏|\bfence\b/i.test(product.label)) perimeter.union(bounds);
         if (/^(IFCDOOR(STANDARDCASE)?|IFCGATE|IFCBUILDINGELEMENTPROXY)$/.test(product.type)) {
           const rank = stationGateRank(product.label);
           if (rank) gates.push({ rank, bounds });
         }
-        sources.push({
-          id,
-          assetKey: 'ifc:' + id,
-          bounds,
-          matrix: toEngineering,
-          // The descriptor comes from IFC placements in Z-up engineering metres.
-          // Only web-ifc triangulations and their bounds arrive in Y-up mesh space.
-          door: product.door,
-          doorAddress: product.door
-            ? { path: entry.path, expressId: product.expressId }
-            : undefined,
-          support:
-            groundType.test(product.type) ||
-            (product.type === 'IFCBUILDINGELEMENTPROXY' &&
-              groundLabel.test(product.label) &&
-              !/栏杆|扶手|墙/.test(product.label)),
-          load: async (signal) => {
-            const result = await runtime.patrolSource('patrol-mesh', signal, product);
-            if (!result.parts.some((part) => part.indices.length))
-              throw new UnsupportedPatrolSourceError(id + ': IFC source has no triangles');
-            return result.parts.map((p) => {
-              const positions = new Float32Array(p.vertices.length / 2);
-              for (let i = 0; i < positions.length; i += 3)
-                positions.set(p.vertices.subarray(i * 2, i * 2 + 3), i);
-              return { positions, indices: p.indices, matrix: p.matrix };
-            });
-          },
-        });
+        appendPatrolProduct(sources, runtime, entry.path, id, product, bounds, toEngineering);
       }
     }
     this.check(signal);
@@ -200,14 +179,29 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
       return false;
     });
     const site = new Box3();
-    for (const row of usable) site.union(row.bounds);
+    if (!perimeter.isEmpty()) site.copy(perimeter);
+    else for (const row of base?.sources.length ? base.sources : usable) site.union(row.bounds);
+    const stationCenter = site.getCenter(new Vector3());
+    for (const source of usable) {
+      const door = source.door;
+      if (!door?.evidence.includes('preview-swing')) continue;
+      const hinge = new Vector3(...door.hingePosition),
+        tip = new Vector3(...door.closedTip).sub(hinge);
+      const inside = stationCenter.clone().sub(hinge);
+      door.openAngle = ((tip.x * inside.y - tip.y * inside.x >= 0 ? 1 : -1) * Math.PI) / 2;
+    }
     const byId = new Map(usable.map((row) => [row.id, row]));
     for (const occurrence of state.sourceGeometry.catalog.occurrences) {
       const source = byId.get(occurrence.id);
       const rank = source && stationGateRank(occurrence.name);
       if (rank && source) gates.push({ rank, bounds: source.bounds });
     }
-    return { sources: usable, unknown, approaches: gateApproaches(gates, site) };
+    return {
+      sources: usable,
+      unknown,
+      center: site.isEmpty() ? undefined : stationCenter.toArray(),
+      approaches: gateApproaches(gates, site),
+    };
   }
 
   prepareScene(signal: AbortSignal, progress: Progress = () => {}): Promise<void> {
@@ -290,6 +284,7 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
       })),
       unknown: catalog.unknown,
       unavailable: [...unavailable],
+      center: catalog.center,
       approaches: catalog.approaches.map((row) => ({ point: row.point.toArray(), yaw: row.yaw })),
     };
     this.memoryRepair = needsRetry ? { assets, unavailable } : undefined;
@@ -317,7 +312,8 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
       if (asset && source.door && source.doorAddress) {
         bounds.union(doorRange(source.door, bounds));
         this.doors.set(row.id, source);
-        this.checkDoorShape(source, asset);
+        if (source.doorAddress.parts?.length) this.trustedDoors.add(row.id);
+        else this.checkDoorShape(source, asset);
       }
       const x0 = Math.floor(bounds.min.x / size),
         x1 = Math.floor(bounds.max.x / size);
@@ -345,6 +341,7 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
         asset,
       });
     }
+    this.siteCenter = manifest.center ? new Vector3(...manifest.center) : undefined;
     this.approaches = manifest.approaches.map((row) => ({
       point: new Vector3(...row.point),
       yaw: row.yaw,
@@ -459,6 +456,36 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
   canOperate(id: string) {
     return this.trustedDoors.has(id);
   }
+  doorReach(id: string) {
+    return Math.min(5, Math.max(3.4, (this.doors.get(id)?.door?.radius ?? 0) + 1));
+  }
+  resolveDoor(id: string, world: Vector3, partIndex?: number) {
+    if (this.canOperate(id)) return id;
+    const frame = this.state.projectSourceToViewerMatrix;
+    if (!frame) return;
+    const hit = world.clone().applyMatrix4(frame.clone().invert());
+    let distance = 0.2,
+      nearest: string | undefined;
+    for (const [key, row] of this.doors) {
+      if (!this.trustedDoors.has(key) || !key.startsWith(id + '/leaf/')) continue;
+      if (partIndex !== undefined) {
+        if (row.doorAddress?.parts?.includes(partIndex)) return key;
+        continue;
+      }
+      const placed = this.placements.get(key);
+      if (!placed) continue;
+      const box = new Box3(
+        new Vector3().fromArray(placed.asset.nodes[0].bounds),
+        new Vector3().fromArray(placed.asset.nodes[0].bounds, 3),
+      ).applyMatrix4(placed.matrix);
+      const d = box.distanceToPoint(hit);
+      if (d < distance) {
+        distance = d;
+        nearest = key;
+      }
+    }
+    return nearest;
+  }
   async toggleDoor(id: string, feet: Vector3, signal: AbortSignal): Promise<string> {
     const row = this.doors.get(id),
       descriptor = row?.door;
@@ -475,35 +502,46 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
     const objects = this.inBounds(box);
     const leaf = objects.get(id);
     if (!leaf) return '门扇碰撞数据不完整';
-    const angle = descriptor.openAngle,
-      segments = Math.max(1, Math.ceil((Math.abs(angle) * descriptor.radius) / 0.025));
-    const margin = ((descriptor.radius + 0.16) * Math.abs(angle)) / (2 * segments);
-    // Each intermediate triangle is expanded by a bound on its angular displacement between samples.
-    for (let k = 0; k < segments; k++) {
-      const delta = doorTransform(descriptor, (angle * (k + 0.5)) / segments).multiply(row.matrix);
-      const sampled = { ...leaf, matrix: delta, inverse: delta.clone().invert() };
-      if (
-        visitTriangles(sampled, box, (t) => {
-          if (bodyHits(t, feet, feet, margin)) return true;
-          const region = new Box3().setFromPoints([t.a, t.b, t.c]).expandByScalar(margin);
-          for (const other of objects.values()) {
-            if (other.id === id) continue;
-            if (
-              visitTriangles(other, region, (b: Triangle) => {
-                if (
-                  Math.max(b.a.z, b.b.z, b.c.z) <= box.min.z + 1e-5 ||
-                  Math.min(b.a.z, b.b.z, b.c.z) >= box.max.z - 1e-5
-                )
-                  return false;
-                return triangleDistanceSquared(t, b) <= margin * margin;
-              })
+    let angle = descriptor.openAngle;
+    this.lastDoorCheck = { id, person: false };
+    const first = await doorSweepObstruction(
+      descriptor,
+      row.matrix,
+      box,
+      leaf,
+      objects,
+      feet,
+      signal,
+    );
+    if (first) {
+      const second =
+        !closing && descriptor.evidence.includes('preview-swing')
+          ? await doorSweepObstruction(
+              { ...descriptor, openAngle: -angle },
+              row.matrix,
+              box,
+              leaf,
+              objects,
+              feet,
+              signal,
             )
-              return true;
-          }
-          return false;
-        })
-      )
-        return '门扇运动范围有人物或障碍';
+          : first;
+      if (second) {
+        this.lastDoorCheck = {
+          id,
+          person: first.kind === 'person' || second.kind === 'person',
+          obstacle:
+            second.kind === 'obstacle'
+              ? second.id
+              : first.kind === 'obstacle'
+                ? first.id
+                : undefined,
+        };
+        return this.lastDoorCheck.person
+          ? '请退到门扇扫掠范围外，再按 E 操作'
+          : '门扇开启范围内有障碍';
+      }
+      angle = -angle;
     }
     this.check(signal);
     if (closing) {
@@ -515,11 +553,13 @@ export class PatrolNavigationRuntime implements NavigationQueryPort {
         doorTransform(descriptor, angle),
         frame,
         signal,
+        address.parts,
       );
       if (signal.aborted) {
         undo();
         signal.throwIfAborted();
       }
+      descriptor.openAngle = angle;
       this.opened.set(id, undo);
     }
     const matrix = closing ? row.matrix : doorTransform(descriptor, angle).multiply(row.matrix);

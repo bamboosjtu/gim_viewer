@@ -1,3 +1,4 @@
+import { waitForBrowseScene } from './patrolPreparation.js';
 import { bindPatrolDoorTarget } from './patrolDoorTarget.js';
 import { Vector3 } from 'three';
 import type { OrthoPerspectiveCamera } from '@thatopen/components';
@@ -67,6 +68,7 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
   };
   const evidence = () => ({
     mode: port.mode,
+    door: nav.lastDoorCheck,
     coverageMs,
     startKind: planned,
     feet: walker?.feet.toArray(),
@@ -182,35 +184,6 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
     if ('feet' in hit && hit.sourceId === pose.sourceId)
       return { ...pose, ...hit, estimated: hit.estimated };
   }
-  async function waitForBrowseScene(signal: AbortSignal) {
-    while (true) {
-      signal.throwIfAborted();
-      const physical = state.sourceGeometry;
-      const dev = state.deviceLodRuntime;
-      if (
-        !state.ifcLoading?.pending &&
-        (!physical || physical.catalog) &&
-        !state.substationFineQueue?.isPreparingDevGeometry?.() &&
-        (!dev || dev.diagnostics.baseRepresentationsSettled !== false)
-      )
-        return;
-      if (physical?.ready && !(await physical.ready))
-        throw Error('工程模型未能打开，请重新打开工程');
-      await new Promise<void>((resolve, reject) => {
-        const cancel = () => {
-          clearTimeout(timer);
-          reject(new DOMException('已取消巡视准备', 'AbortError'));
-        };
-        const timer = setTimeout(() => {
-          signal.removeEventListener('abort', cancel);
-          resolve();
-        }, 150);
-        signal.addEventListener('abort', cancel, { once: true });
-        if (signal.aborted) cancel();
-      });
-    }
-  }
-
   async function prepareStart(owner: AbortController) {
     const ticket = ++entryRequest;
     const attempt = new AbortController();
@@ -225,7 +198,7 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
     };
     try {
       const started = performance.now();
-      await waitForBrowseScene(signal);
+      await waitForBrowseScene(state, signal);
       if (!current()) return;
       if (frame !== state.projectCoordinateFrame || batch !== state.geometryLoadToken) {
         home = last = undefined;
@@ -244,8 +217,13 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
         !frameValid()
       )
         throw Error('工程坐标依据尚未确认');
-      await nav.prepareScene(signal, (message) => {
-        if (current()) port.set('preparing', message);
+      port.browseReady = true;
+      await nav.prepareScene(signal, (message, done, total) => {
+        if (current()) {
+          port.preparationProgress =
+            done !== undefined && total !== undefined ? { done, total } : undefined;
+          port.set('preparing', message);
+        }
       });
       if (!eligible()) return;
       port.compiling = false;
@@ -309,6 +287,8 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
       entry = undefined;
       port.pickingStart = false;
       port.compiling = true;
+      port.browseReady = false;
+      port.preparationProgress = undefined;
       port.set('preparing', '正在准备离线巡视场景…');
       await prepareStart(run);
       return;
@@ -514,7 +494,14 @@ export async function bindPatrol(state: AppState, scope: SessionScope, show: (s:
       const direction = cam.three
         .getWorldDirection(new Vector3())
         .transformDirection(frame.matrix.clone().invert());
-      ready({ ...result, yaw: Math.atan2(direction.x, direction.y), pitch: 0 }, 'manual');
+      ready(
+        {
+          ...result,
+          yaw: nav.inwardYaw(result.feet) ?? Math.atan2(direction.x, direction.y),
+          pitch: 0,
+        },
+        'manual',
+      );
     } catch (error) {
       if (current()) port.set('preparing', error instanceof Error ? error.message : String(error));
     }

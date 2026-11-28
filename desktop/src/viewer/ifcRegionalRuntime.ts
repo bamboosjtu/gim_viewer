@@ -894,6 +894,7 @@ export class IfcRegionalRuntime {
     motion: THREE.Matrix4,
     frame: THREE.Matrix4,
     signal: AbortSignal,
+    parts?: readonly number[],
   ): Promise<() => void> {
     const object = this.index.objects.find((o) => o.expressId === id);
     if (!object || !this.permits(id) || !this.root.visible) throw Error('门扇表示不可用');
@@ -912,13 +913,27 @@ export class IfcRegionalRuntime {
         !this.root.visible
       )
         throw Error('门扇表示已变更');
-      const original = group.matrix.clone();
-      group.matrix.premultiply(frame.clone().multiply(motion).multiply(frame.clone().invert()));
+      const nodes = parts
+        ? group.children.filter((node) =>
+            parts.includes(
+              Number(
+                (node.userData.geometrySourceAddress as GeometrySourceAddress | undefined)
+                  ?.partIndex,
+              ),
+            ),
+          )
+        : [group];
+      if (!nodes.length || (parts && nodes.length !== parts.length))
+        throw Error('门扇部件表示不完整');
+      const originals = nodes.map((node) => node.matrix.clone());
+      const delta = frame.clone().multiply(motion).multiply(frame.clone().invert());
+      if (parts) delta.premultiply(group.matrix.clone().invert()).multiply(group.matrix);
+      for (const node of nodes) node.matrix.premultiply(delta);
       group.updateMatrixWorld(true);
       requestObjectRender(group);
       return () => {
         if (!this.fineOwners.get(id)?.has(owner)) return;
-        group.matrix.copy(original);
+        nodes.forEach((node, i) => node.matrix.copy(originals[i]));
         group.updateMatrixWorld(true);
         requestObjectRender(group);
         release();

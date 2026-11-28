@@ -111,7 +111,7 @@
       /* ── 按钮（全局）── */
       .btn { display: inline-flex; align-items: center; justify-content: center; padding: 8px 12px; border: none; border-radius: 5px; background: var(--primary); color: #fff; font-size: 13px; cursor: pointer; transition: background 0.2s; }
       .btn:hover { background: #2f7de6; }
-      .btn:disabled { background: #3a4553; cursor: not-allowed; }
+      .btn:disabled { background: var(--surface-3); color: var(--text-2); border-color: var(--border); cursor: not-allowed; box-shadow: none; }
       .btn-secondary { background: var(--surface-3); color: var(--text-1); margin-top: 6px; }
       .btn-secondary:hover { background: #eef3f8; }
       .btn-small { padding: 5px 9px; font-size: 12px; width: auto; }
@@ -559,6 +559,30 @@
     linear-gradient(#f5fbff,#f5fbff) right center / 6px 2px no-repeat;
   filter:drop-shadow(0 1px 1px #10212d);
 }
+
+#viewport[data-patrol-preparing] #selection-toolbar {display:none}
+.patrol-prep-bar,.patrol-prep-card {background:var(--surface-1);border:1px solid var(--border);border-radius:10px;box-shadow:0 4px 18px #22354b22;pointer-events:auto}
+.patrol-prep-bar {position:absolute;inset:10px 14px auto;min-height:54px;display:flex;align-items:center;gap:10px;padding:6px 12px}
+.patrol-prep-spacer {flex:1}
+.patrol-prep-icon {flex:0 0 36px;display:grid;place-items:center;background:#e5edff;color:var(--primary);width:36px;height:36px;border-radius:6px}
+.patrol-prep-icon svg {width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}.patrol-prep-icon .viewer-command-caption {display:none}
+.patrol-prep-badge {border-radius:20px;background:#e5edff;color:#245edb;padding:3px 10px;font-size:12px}
+.patrol-prep-card {position:absolute;left:20px;top:86px;width:min(370px,calc(100% - 40px));max-height:calc(100% - 100px);overflow:auto;box-sizing:border-box;padding:18px 20px}
+.patrol-prep-title {display:flex;align-items:center;gap:15px}
+.patrol-prep-title i {width:28px;height:28px;border:4px solid #dce7ff;border-top-color:var(--primary);border-right-color:var(--primary);border-radius:50%}
+.patrol-prep-title h2 {font-size:17px;margin:0 0 3px}.patrol-prep-card small,.patrol-prep-card footer,.patrol-prep-card li span {color:var(--text-2)}
+.patrol-prep-card ol {list-style:none;margin:18px 0;padding:0}
+.patrol-prep-card li {position:relative;padding:4px 0 13px 35px;display:grid;grid-template-columns:1fr auto;align-items:center;font-size:13px}
+.patrol-prep-card li:not(:last-child)::after {content:'';position:absolute;top:18px;bottom:-7px;left:8px;border-left:1px solid var(--border)}
+.patrol-prep-card li::before {content:'';width:13px;height:13px;border:2px solid #aab5c3;border-radius:50%;position:absolute;left:0;top:5px}
+.patrol-prep-card li[data-state=done]::before {content:'✓';color:white;text-align:center;line-height:13px;background:#118455;border-color:#118455}
+.patrol-prep-card li[data-state=active]::before {border-color:var(--primary);background:var(--primary);box-shadow:inset 0 0 0 2px white}
+.patrol-prep-card li[data-state=done] span {color:#118455}.patrol-prep-card li[data-state=active] span {color:var(--primary)}
+.patrol-prep-count {grid-column:1/-1;margin:8px 0;color:var(--text-2)}.patrol-prep-count output {float:right;font-variant-numeric:tabular-nums}.patrol-prep-count progress {display:block;width:100%;height:8px;margin-top:8px;accent-color:var(--primary)}
+.patrol-prep-card footer {border-top:1px solid var(--border);padding-top:10px;display:flex;align-items:center;justify-content:space-between;font-size:12px}
+.patrol-prep-card footer button {border:0;color:var(--primary)}
+.patrol-prep-card p {margin:10px 0 0}
+@container (max-width:570px){.patrol-prep-bar{gap:4px;flex-wrap:wrap}.patrol-prep-card{top:100px}}
 .patrol-backdrop {position:absolute;inset:0;background:#0815219e;pointer-events:auto}
 [data-navigation=paused] .patrol-panel {
   left:50%;top:50%;bottom:auto;transform:translate(-50%,-50%);width:max-content;max-width:calc(100% - 24px);padding:12px;pointer-events:auto;
@@ -680,3 +704,6 @@
 .line-model-dialog header {justify-content:space-between}.line-model-dialog select {max-width:55%}
 .line-model-dialog canvas {width:100%;height:min(55vh,480px);display:block}.line-model-dialog canvas[hidden]{display:none}
 .props-header .btn-secondary {margin-left:8px}
+
+@media (prefers-reduced-motion:no-preference){.patrol-prep-title i{animation:patrol-spin 1.2s linear infinite}}
+@keyframes patrol-spin{to{transform:rotate(360deg)}}

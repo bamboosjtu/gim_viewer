@@ -49,7 +49,7 @@ export async function compilePatrolAssets(
   metrics: { assetHits: number; assetBuilds: number },
   signal: AbortSignal,
   check: () => void,
-  progress: (message: string) => void,
+  progress: (message: string, done?: number, total?: number) => void,
 ) {
   let needsRetry = false;
   let stored = true;
@@ -59,48 +59,70 @@ export async function compilePatrolAssets(
       )
     : sources;
   const templates = new Map(ordered.map((row) => [row.assetKey, row]));
-  let preparedTemplates = 0;
-  const pending = templates.values();
-  async function compileNext() {
+  const uses = new Map<string, number>();
+  for (const row of ordered) uses.set(row.assetKey, (uses.get(row.assetKey) ?? 0) + 1);
+  let done = 0,
+    reported = 0;
+  progress('正在编译巡视场景', 0, ordered.length);
+  // The nearest template establishes model order. Finish its requests before allowing
+  // another IFC to evict it. Independent DEV assets keep their distance order and concurrency.
+  const groups = new Map<string | undefined, PatrolSource[]>();
+  for (const row of templates.values()) {
+    let group = groups.get(row.residentModel);
+    if (!group) {
+      group = [];
+      groups.set(row.residentModel, group);
+    }
+    group.push(row);
+  }
+  async function compileNext(pending: IterableIterator<PatrolSource>) {
     for (const row of pending) {
       check();
-      if (preparedTemplates % 10 === 0)
-        progress(`正在编译巡视场景 ${preparedTemplates}/${templates.size}…`);
-      preparedTemplates++;
-      if (assets.has(row.assetKey) || unavailable.has(row.assetKey)) continue;
-      const assetKey = key + '/' + row.assetKey;
-      let asset = await readPatrolCache<PatrolAsset>('assets', assetKey);
-      check();
-      if (usableAsset(asset)) {
-        metrics.assetHits++;
-      } else {
-        try {
-          if (asset) await discardPatrolEntry('assets', assetKey, prefix);
-          check();
-          const parts = await row.load(signal);
-          check();
-          const release = await reserveBuild(signal);
+      try {
+        if (assets.has(row.assetKey) || unavailable.has(row.assetKey)) continue;
+        const assetKey = key + '/' + row.assetKey;
+        let asset = await readPatrolCache<PatrolAsset>('assets', assetKey);
+        check();
+        if (usableAsset(asset)) {
+          metrics.assetHits++;
+        } else {
           try {
+            if (asset) await discardPatrolEntry('assets', assetKey, prefix);
             check();
-            asset = await builder.build(parts);
-          } finally {
-            release();
+            const parts = await row.load(signal);
+            check();
+            const release = await reserveBuild(signal);
+            try {
+              check();
+              asset = await builder.build(parts);
+            } finally {
+              release();
+            }
+            check();
+            metrics.assetBuilds++;
+            if (!(await writePatrolCache('assets', assetKey, asset, prefix))) stored = false;
+            check();
+          } catch (error) {
+            check();
+            if (error instanceof UnsupportedPatrolSourceError) unavailable.add(row.assetKey);
+            else needsRetry = true;
+            continue;
           }
-          check();
-          metrics.assetBuilds++;
-          if (!(await writePatrolCache('assets', assetKey, asset, prefix))) stored = false;
-          check();
-        } catch (error) {
-          check();
-          if (error instanceof UnsupportedPatrolSourceError) unavailable.add(row.assetKey);
-          else needsRetry = true;
-          continue;
+        }
+        assets.set(row.assetKey, asset);
+      } finally {
+        done += uses.get(row.assetKey)!;
+        if (!signal.aborted && (done === ordered.length || done - reported >= 10)) {
+          reported = done;
+          progress(`正在编译巡视场景 ${done}/${ordered.length}`, done, ordered.length);
         }
       }
-      assets.set(row.assetKey, asset);
     }
   }
-  const results = await Promise.allSettled([compileNext(), compileNext()]);
-  for (const result of results) if (result.status === 'rejected') throw result.reason;
+  for (const group of groups.values()) {
+    const pending = group.values();
+    const results = await Promise.allSettled([compileNext(pending), compileNext(pending)]);
+    for (const result of results) if (result.status === 'rejected') throw result.reason;
+  }
   return { needsRetry, stored };
 }
