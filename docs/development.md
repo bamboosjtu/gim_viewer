@@ -160,3 +160,5 @@ Markdown 文档不作为 CI 测试输入；事实正确性仍需对照源码和�
 仅核对来源按需输入的真实 Worker 协议时，可在 desktop/ 执行 `node scripts/with-workspace-temp.mjs scripts/engineering/check-worker-browser.mjs "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" 14358 source-input`。使用自有无头浏览器及内存 DTO，检查批量输入、物理/语义复用及测量控制消息，不读取工程样本或执行性能验收；结果在 output/log/source-input-browser.json。
 
 格式与 recommended type-checked ESLint 的接入列表共用 `scripts/format-architecture.mjs`，推荐规则按模块逐步接入。Git 签出和编辑器默认使用 CRLF，Prettier 使用相同约定。Tauri 会将桌面 `Cargo.toml` 重写为 LF，Android 的 `gradlew` 在 Linux 执行，这两个文件固定使用 LF。Blender 快照对归一化的源码内容计算摘要。
+
+Desktop、Android 前端与 SDK 的 TypeScript 固定为 5.9.3，Vitest 固定为 2.0.0。各可独立安装的软件包保留自己的锁文件。

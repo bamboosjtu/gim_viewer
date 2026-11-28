@@ -1,3 +1,5 @@
+import { drawTowerPreview } from "./ui/drawTowerPreview";
+import { overviewFields } from "./ui/overviewFields";
 import "./style.css";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
@@ -5,7 +7,6 @@ import {
   PREVIEW_VERSION,
   type PowerlineProject,
   type BusinessObject,
-  type TowerPreview,
 } from "@gim/powerline-core";
 import * as bridge from "./native/bridge";
 import { NativeImportSession } from "./native/importSession";
@@ -873,112 +874,6 @@ class MobileApp {
   private values(values: [string, unknown][]) {
     return `<dl class="values">${values.map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value ?? "未提供")}</dd></div>`).join("")}</dl>`;
   }
-  private overviewFields(o: BusinessObject): [string, unknown][] {
-    const coordinate = o.coordinate;
-    const location: [string, unknown][] = coordinate
-      ? [
-          ["纬度", coordinate[1].toFixed(7) + "°"],
-          ["经度", coordinate[0].toFixed(7) + "°"],
-          [
-            "高程",
-            coordinate[2] != null ? coordinate[2].toFixed(2) + " m" : undefined,
-          ],
-        ]
-      : [];
-    let fields: [string, unknown][] = [];
-    if (o.kind === "tower")
-      fields = [
-        ["塔型", o.type],
-        ["呼称高", o.height != null ? `${o.height} m` : undefined],
-        ...location,
-        [
-          "方位角",
-          Number.isFinite(o.azimuth) ? o.azimuth!.toFixed(2) + "°" : undefined,
-        ],
-        [
-          "所属线路",
-          o.lineIds.map((id) => this.objects.get(id)?.name).join(" / "),
-        ],
-        [
-          "耐张段",
-          o.strainIds.map((id) => this.objects.get(id)?.name).join(" / "),
-        ],
-      ];
-    else if (o.kind === "span")
-      fields = [
-        ["起始塔", this.objects.get(o.startTowerId ?? "")?.name],
-        ["终止塔", this.objects.get(o.endTowerId ?? "")?.name],
-        [
-          "水平档距",
-          o.horizontalMeters != null
-            ? o.horizontalMeters.toFixed(2) + " m"
-            : undefined,
-        ],
-        [
-          "三维直线距离",
-          o.spatialMeters != null
-            ? o.spatialMeters.toFixed(2) + " m"
-            : undefined,
-        ],
-        ["原始导线记录", o.rawWireIds?.length],
-        ...Object.entries(o.wireCounts ?? {}).map(
-          ([key, value]): [string, unknown] => [key, value],
-        ),
-        [
-          "耐张段",
-          o.strainIds.map((id) => this.objects.get(id)?.name).join(" / "),
-        ],
-      ];
-    else if (o.kind === "cross")
-      fields = [
-        ["跨越类型", o.crossing?.label ?? "未分类跨越物"],
-        ...(o.crossing?.details ?? []).map(
-          (a) => [a.label, a.value || "未提供"] as [string, unknown],
-        ),
-        ...(o.businessCode
-          ? [["原始业务码", o.businessCode] as [string, unknown]]
-          : []),
-        ...location,
-        ["几何点数", o.geometry?.length ?? 0],
-        [
-          "所属线路",
-          o.lineIds.map((id) => this.objects.get(id)?.name).join(" / "),
-        ],
-        [
-          "耐张段",
-          o.strainIds.map((id) => this.objects.get(id)?.name).join(" / "),
-        ],
-      ];
-    else {
-      const members =
-        o.kind === "project"
-          ? this.project!.objects
-          : this.project!.objects.filter(
-              (v) => v.lineIds.includes(o.id) || v.strainIds.includes(o.id),
-            );
-      fields = [
-        ["杆塔", members.filter((v) => v.kind === "tower").length + " 基"],
-        ["物理档", members.filter((v) => v.kind === "span").length + " 档"],
-        ["跨越物", members.filter((v) => v.kind === "cross").length + " 处"],
-        [
-          "去重档水平长度",
-          (
-            members
-              .filter((v) => v.kind === "span")
-              .reduce((s, v) => s + (v.horizontalMeters ?? 0), 0) / 1000
-          ).toFixed(3) + " km",
-        ],
-        [
-          "源线路长度",
-          o.attributes
-            .filter((a) => a.key.toUpperCase() === "LINELENGTH")
-            .map((a) => a.value + " km")
-            .join(" / ") || "参见各线路属性",
-        ],
-      ];
-    }
-    return fields;
-  }
   private renderImmersiveOverview() {
     const card = this.el("immersive-overview"),
       o = this.selected ? this.objects.get(this.selected) : undefined;
@@ -988,7 +883,7 @@ class MobileApp {
       return;
     this.immersiveRendered = o.id;
     card.dataset.objectId = o.id;
-    card.innerHTML = `<div class="immersive-overview-heading"><span class="selection-icon ${o.kind}">${icon(["tower", "span", "cross"].includes(o.kind) ? o.kind : "folder", 22)}</span><div><span class="eyebrow">${kindNames[o.kind]} · 概览</span><h2>${esc(o.name)}</h2></div><button class="icon-button" id="immersive-overview-close" aria-label="关闭地图概览">${icon("close", 19)}</button></div><div class="immersive-overview-body">${this.values(this.overviewFields(o))}</div><button class="immersive-overview-details" id="immersive-overview-details">查看详情 ${icon("chevron", 16)}</button>`;
+    card.innerHTML = `<div class="immersive-overview-heading"><span class="selection-icon ${o.kind}">${icon(["tower", "span", "cross"].includes(o.kind) ? o.kind : "folder", 22)}</span><div><span class="eyebrow">${kindNames[o.kind]} · 概览</span><h2>${esc(o.name)}</h2></div><button class="icon-button" id="immersive-overview-close" aria-label="关闭地图概览">${icon("close", 19)}</button></div><div class="immersive-overview-body">${this.values(overviewFields(o, this.objects, this.project!))}</div><button class="immersive-overview-details" id="immersive-overview-details">查看详情 ${icon("chevron", 16)}</button>`;
     this.bind("immersive-overview-close", () => {
       this.immersiveDismissed = o.id;
       this.renderImmersiveOverview();
@@ -1005,7 +900,7 @@ class MobileApp {
     );
   }
   private renderOverview(o: BusinessObject, content: HTMLElement) {
-    const fields = this.overviewFields(o);
+    const fields = overviewFields(o, this.objects, this.project!);
     const warnings = this.project!.findings.filter(
       (f) => f.objectId === o.id || o.kind === "project",
     ).slice(0, 5);
@@ -1116,89 +1011,12 @@ class MobileApp {
         await bridge.previewCache(project.id, key, preview);
       }
       if (token !== this.previewSession) return;
-      this.drawPreview(preview);
+      drawTowerPreview(this.el("preview-host"), preview);
     } catch {
       if (token === this.previewSession)
         this.el("preview-host").innerHTML =
           '<span class="muted">塔形暂不可用<br>可在来源页查看原始 MOD</span>';
     }
-  }
-  private drawPreview(preview: TowerPreview) {
-    const [minX, minZ, maxX, maxZ] = preview.bounds,
-      width = Math.max(1, maxX - minX),
-      height = Math.max(1, maxZ - minZ),
-      margin = Math.max(width, height) * 0.04;
-    const initial = [
-      minX - margin,
-      -maxZ - margin,
-      width + 2 * margin,
-      height + 2 * margin,
-    ];
-    let box = [...initial];
-    const container = this.el("preview-host");
-    container.innerHTML = `<svg viewBox="${box.join(" ")}" preserveAspectRatio="xMidYMid meet" aria-label="杆塔二维骨架" role="img"><path d="${preview.segments.map(([a, b, c, d]) => `M${a} ${-b}L${c} ${-d}`).join("")}" fill="none" stroke="#346ea2" stroke-width=".7" vector-effect="non-scaling-stroke"/></svg>`;
-    const svg = container.querySelector("svg")!;
-    const update = () => svg.setAttribute("viewBox", box.join(" "));
-    let drag: [number, number] | undefined;
-    svg.addEventListener("pointerdown", (e) => {
-      svg.setPointerCapture(e.pointerId);
-      drag = [e.clientX, e.clientY];
-    });
-    svg.addEventListener("pointermove", (e) => {
-      if (!drag) return;
-      const scale = Math.max(
-        box[2] / svg.clientWidth,
-        box[3] / svg.clientHeight,
-      );
-      box[0] -= (e.clientX - drag[0]) * scale;
-      box[1] -= (e.clientY - drag[1]) * scale;
-      drag = [e.clientX, e.clientY];
-      update();
-    });
-    svg.addEventListener("pointerup", () => {
-      drag = undefined;
-    });
-    svg.addEventListener("pointercancel", () => {
-      drag = undefined;
-    });
-    svg.addEventListener(
-      "wheel",
-      (e) => {
-        e.preventDefault();
-        const factor = e.deltaY > 0 ? 1.15 : 0.87;
-        box[0] += (box[2] - box[2] * factor) / 2;
-        box[1] += (box[3] - box[3] * factor) / 2;
-        box[2] *= factor;
-        box[3] *= factor;
-        update();
-      },
-      { passive: false },
-    );
-    const zoom = (factor: number) => {
-      if (
-        box[2] * factor < initial[2] / 20 ||
-        box[2] * factor > initial[2] * 20
-      )
-        return;
-      box[0] += (box[2] - box[2] * factor) / 2;
-      box[1] += (box[3] - box[3] * factor) / 2;
-      box[2] *= factor;
-      box[3] *= factor;
-      update();
-    };
-    const controls = document.createElement("div");
-    controls.className = "preview-zoom-controls";
-    controls.innerHTML =
-      '<button class="text-button" aria-label="放大塔形">＋</button><button class="text-button" aria-label="缩小塔形">−</button>';
-    container.after(controls);
-    const [zoomIn, zoomOut] =
-      controls.querySelectorAll<HTMLButtonElement>("button");
-    zoomIn.onclick = () => zoom(0.8);
-    zoomOut.onclick = () => zoom(1.25);
-    this.bind("preview-reset", () => {
-      box = [...initial];
-      update();
-    });
   }
   private showSettings() {
     this.modal(

@@ -2,7 +2,8 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { readProjectCaches, readRecentProjects, readCacheDatabasePath, checkProjectCache,
   readCachedProjectReport, removeProjectCache } from '../projectCacheService.js';
 
-const io = vi.hoisted(() => ({ native: true, list: vi.fn(), path: vi.fn(), validate: vi.fn(), report: vi.fn(), remove: vi.fn() }));
+const io = vi.hoisted(() => ({ native: true, patrol:vi.fn(), list: vi.fn(), path: vi.fn(), validate: vi.fn(), report: vi.fn(), remove: vi.fn() }));
+vi.mock('../../../infrastructure/cache/navigation/patrolCache.js',()=>({removePatrolProject:io.patrol}));
 vi.mock('@desktop/runtime.js', () => ({ isTauri: () => io.native }));
 vi.mock('@desktop/database.js', () => ({ listCachedProjects: io.list, getDbPath: io.path,
   validateGimCache: io.validate, getProjectDiagnostic: io.report, deleteProjectCache: io.remove }));
@@ -64,3 +65,5 @@ it('builds diagnostic payloads in the service without triggering validation or c
   expect(text.ok && text.value).toContain('工程类型：substation');
   expect(io.validate).not.toHaveBeenCalled(); expect(io.remove).not.toHaveBeenCalled();
 });
+
+it('仍然删除工程索引并报告被阻塞的巡视库',async()=>{io.patrol.mockRejectedValue(Error('blocked'));expect(await removeProjectCache(4)).toMatchObject({ok:true,value:expect.stringContaining('blocked')});expect(io.remove).toHaveBeenCalledWith(4);});

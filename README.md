@@ -124,3 +124,5 @@
 - [Windows 桌面应用](desktop/) · [Android 应用](app/) · [独立工具](tools/README.md)
 
 源码采用 [MIT License](LICENSE)。发布包中的 [7-Zip 解码器](desktop/src-tauri/third_party/7zip/License.txt)遵循其第三方许可，源码可从 [7-Zip 官方下载页](https://www.7-zip.org/download.html)取得。在线底图数据归 [OpenStreetMap 贡献者](https://www.openstreetmap.org/copyright)或天地图所有。
+
+开发协作参见[贡献指南](CONTRIBUTING.md)、[安全反馈](SECURITY.md)和[变更记录](CHANGELOG.md)。

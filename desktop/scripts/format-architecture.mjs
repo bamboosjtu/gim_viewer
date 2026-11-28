@@ -82,6 +82,8 @@ export const architectureModules = [
   'src/services/project/projectViewerLifecycle.ts',
   'src/ui/lineMapBackground.ts',
   '../app/src/main.ts',
+  '../app/src/ui/drawTowerPreview.ts',
+  '../app/src/ui/overviewFields.ts',
   '../app/src/map/workspace.ts',
   'src/measurement/benchmarkHost.ts',
   'src/measurement/engineeringEvidence.ts',

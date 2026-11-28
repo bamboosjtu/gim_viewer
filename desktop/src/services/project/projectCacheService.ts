@@ -100,12 +100,17 @@ export async function readCachedProjectReport(
       : summarizeDiagnostic({ diagnostic });
   });
 }
-export async function removeProjectCache(projectId: number): Promise<CacheResult<void>> {
+export async function removeProjectCache(projectId: number): Promise<CacheResult<void | string>> {
   if (!validId(projectId)) return fail('工程记录无效');
   return cacheOperation('删除缓存', async (database) => {
-    const { removePatrolProject } =
-      await import('../../infrastructure/cache/navigation/patrolCache.js');
-    await removePatrolProject(projectId);
-    await database.deleteProjectCache(projectId);
+    const [index, patrol] = await Promise.allSettled([
+      database.deleteProjectCache(projectId),
+      import('../../infrastructure/cache/navigation/patrolCache.js').then(
+        ({ removePatrolProject }) => removePatrolProject(projectId),
+      ),
+    ]);
+    if (index.status === 'rejected') throw index.reason;
+    if (patrol.status === 'rejected')
+      return '工程索引已删除，巡视缓存清理失败：' + String(patrol.reason);
   });
 }

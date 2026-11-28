@@ -264,6 +264,7 @@ function bindEvents(
       if (!modal.isConnected) return;
       if (result.ok) {
         target.textContent = '已删除 ✓';
+        if (result.value) alert(result.value);
         // 刷新列表
         setTimeout(() => {
           if (modal.isConnected) onRefresh();
