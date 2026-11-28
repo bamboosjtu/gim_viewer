@@ -52,3 +52,4 @@ export {
 export * from "./formats/ifc.js";
 export * from "./formats/line-mod.js";
 export * from "./algorithms/boolean/graph.js";
+export * from "./algorithms/boolean/evaluate.js";

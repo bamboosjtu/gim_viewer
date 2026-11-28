@@ -139,6 +139,8 @@ export const architectureModules = [
   '../packages/gim-sdk/src/geometry/formats/stl.ts',
   '../packages/gim-sdk/src/geometry/formats/ifc.ts',
   '../packages/gim-sdk/src/geometry/algorithms/boolean/graph.ts',
+  '../packages/gim-sdk/src/geometry/algorithms/boolean/evaluate.ts',
+  'src/viewer/meshBooleanBackend.ts',
   '../packages/gim-sdk/src/geometry/geometryBudget.ts',
   '../packages/gim-sdk/src/geometry/interpretXmlModPrimitive.ts',
   '../packages/gim-sdk/src/geometry/perforatedPlate.ts',

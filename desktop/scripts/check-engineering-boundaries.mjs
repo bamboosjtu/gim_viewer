@@ -220,6 +220,8 @@ const viewerSourceValues = new Map([
     'gim/geometry/xmlModDocument.ts',
     new Set([
       'BooleanGraph',
+      'DetailedBooleanEvaluation',
+      'booleanFailure',
       'visibleGeometryRoots',
       'outlinePartThresholdMm',
       'entityIndex',

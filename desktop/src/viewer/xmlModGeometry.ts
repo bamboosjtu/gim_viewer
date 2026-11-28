@@ -4,13 +4,15 @@ import { logger } from '../utils/logger.js';
 import * as THREE from 'three';
 import type { StageObserver } from '../measurement/core.js';
 export type DeviceLod = 0 | 1 | 2;
-import { Brush, Evaluator, ADDITION, INTERSECTION, SUBTRACTION } from 'three-bvh-csg';
+import { createMeshBooleanBackend, readBooleanMesh } from './meshBooleanBackend.js';
 import type { XmlModColor, XmlModEntity, XmlModPrimitive } from '../gim/geometry/ir.js';
 import type { XmlModDocument } from '../gim/geometry/xmlModParser.js';
 import {
   entityIndex,
   compileStandardLeaf,
   BooleanGraph,
+  DetailedBooleanEvaluation,
+  booleanFailure,
   visibleGeometryRoots,
   outlinePartThresholdMm,
 } from '../gim/geometry/xmlModDocument.js';
@@ -481,8 +483,7 @@ function* bakeGeometrySteps(
   );
 
   const entities = entityIndex(doc);
-  const memo = new Map<number, THREE.BufferGeometry | null>();
-  const visiting = new Set<number>();
+
   const owned = new Set<THREE.BufferGeometry>();
   const graph = new BooleanGraph((id) => {
     const entity = entities.get(id);
@@ -519,68 +520,33 @@ function* bakeGeometrySteps(
     failures.set(id, reason);
     return null;
   };
-  // Every cached result is in its parent's frame, including this Entity's
-  // transform. Root output therefore applies only mm -> m, never that matrix twice.
-  function* evaluate(id: number): Generator<void, THREE.BufferGeometry | null, void> {
-    const key = id;
-    if (memo.has(key)) return memo.get(key)!;
-    const entity = entities.get(id);
-    if (!entity) return fail(id, 'missing-reference');
-    if (visiting.has(id)) return fail(id, 'cycle');
-    visiting.add(id);
-    let result: THREE.BufferGeometry | null = null;
-    try {
-      const p = entity.primitive;
-      if (p.type !== 'Boolean') {
-        const base = build(p, id);
-        if (base) result = own(base.clone());
-        else return fail(id, failures.get(id) ?? `unsupported-or-invalid:${p.type}`);
-      } else {
-        const a = yield* evaluate(p.entity1);
-        const b = yield* evaluate(p.entity2);
-        if (!a || !b) return fail(id, 'operand-unavailable');
-        else if (!a.getAttribute('position').count || !b.getAttribute('position').count) {
-          result = own(
-            (p.op === 'Intersection'
-              ? !a.getAttribute('position').count
-                ? a
-                : b
-              : p.op === 'Difference'
-                ? a
-                : a.getAttribute('position').count
-                  ? a
-                  : b
-            ).clone(),
-          );
-        } else {
-          const started = performance.now();
-          try {
-            result = own(
-              getSharedCsgEvaluator().evaluate(
-                new Brush(a),
-                new Brush(b),
-                p.op === 'Union' ? ADDITION : p.op === 'Intersection' ? INTERSECTION : SUBTRACTION,
-              ).geometry,
-            );
-          } catch (error) {
-            return fail(id, `csg-failed:${String(error)}`);
-          } finally {
-            const elapsed = performance.now() - started;
-            onStage?.('dev.boolean', elapsed, { evaluations: 1 });
-            if (timings) {
-              timings.booleanMs = (timings.booleanMs ?? 0) + elapsed;
-              timings.booleanEvaluations = (timings.booleanEvaluations ?? 0) + 1;
-            }
-          }
-        }
+  const detailed = new DetailedBooleanEvaluation(
+    graph,
+    (id) => {
+      const p = entities.get(id)!.primitive,
+        geo = build(p, id);
+      if (!geo) return booleanFailure(id, failures.get(id) ?? `unsupported-or-invalid:${p.type}`);
+      if (!geo.getAttribute('position').count) return { status: 'empty', diagnostics: [] };
+      return { status: 'success', mesh: readBooleanMesh(geo), diagnostics: [] };
+    },
+    createMeshBooleanBackend((elapsed) => {
+      onStage?.('dev.boolean', elapsed, { evaluations: 1 });
+      if (timings) {
+        timings.booleanMs = (timings.booleanMs ?? 0) + elapsed;
+        timings.booleanEvaluations = (timings.booleanEvaluations ?? 0) + 1;
       }
-      if (result) transform(result, gimMatrixToMatrix4(entity.transformMatrix));
-      memo.set(key, result);
-      yield;
-      return result;
-    } finally {
-      visiting.delete(id);
+    }),
+    doc.modPath,
+    'detailed',
+  );
+  function* evaluate(id: number): Generator<void, THREE.BufferGeometry | null, void> {
+    const r = yield* detailed.steps(id);
+    if (r.status === 'failed') {
+      for (const d of r.diagnostics) fail(d.location?.entityId ?? id, d.code);
+      return null;
     }
+    if (r.status === 'empty') return null;
+    return own(geometryFromMeshData(r.mesh));
   }
   // Outline traversal never calls evaluate(): even a detailed failure fallback
   // only assembles source leaves. Matrices stay per reference, so shared leaves
@@ -686,13 +652,6 @@ function* bakeGeometrySteps(
   }
 
   return byMaterial;
-}
-
-/** 共享 CSG Evaluator（three-bvh-csg） */
-let _sharedCsgEvaluator: Evaluator | null = null;
-function getSharedCsgEvaluator(): Evaluator {
-  if (!_sharedCsgEvaluator) _sharedCsgEvaluator = new Evaluator();
-  return _sharedCsgEvaluator;
 }
 
 /** 展平坐标数组 [x,y,z,...] → THREE.Vector3[] */

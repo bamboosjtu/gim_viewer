@@ -166,3 +166,5 @@ export function projectXmlMod(raw: RawXmlModDocument): XmlModDocument {
 }
 
 export { BooleanGraph, visibleGeometryRoots, outlinePartThresholdMm } from '@gim/gim-sdk/geometry';
+
+export { DetailedBooleanEvaluation, booleanFailure } from '@gim/gim-sdk/geometry';

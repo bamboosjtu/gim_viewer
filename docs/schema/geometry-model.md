@@ -140,3 +140,5 @@ PHM 的 SOLIDS 与 SOLIDMODELS 使用各自的引用、颜色和矩阵槽。相�
 ### MOD Boolean 轮廓
 
 `BooleanGraph` 按源 ID 解析有序操作数，隐藏声明仍可被可见根引用。低档 Union 合并两个操作数的轮廓，Difference、Intersection 采用第一个操作数。父子矩阵按引用边组合，跳过的切削体仍参与来源缺失和环的诊断。Desktop 依据放置后的毫米尺寸省略小件，并保留整组最大件兜底。
+
+详细求值通过 `DetailedBooleanEvaluation` 组合叶网格与局部放置。后端收到同一局部空间下的一对有序操作数；Desktop 使用 `three-bvh-csg`，Node 可显式注入同一后端。图的成功结果与已证实的空可在该源及后端会话内复用。后端异常或引用缺失带来源诊断，可再次求值；显示端可继续展示有效轮廓。
