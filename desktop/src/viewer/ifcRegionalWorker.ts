@@ -4,7 +4,7 @@ import { IfcAPI } from 'web-ifc';
 import { createWorkerProbe, sampleWasmCapacity } from '../measurement/workerProbe.js';
 import { IfcOpeningRelationEditor } from './ifcOpeningPolicy.js';
 import { RegionalSubsetBuilder } from './ifcRegionalSubset.js';
-import { extractIfcObjectFine } from './ifcObjectFineData.js';
+import { extractIfcObjectFine, fineTransferList } from './ifcObjectFineData.js';
 import { classifyRegionalOpenings, type RegionalIndex } from './ifcRegionalData.js';
 const api = new IfcAPI();
 let model: number | null = null,
@@ -96,10 +96,7 @@ self.onmessage = createWorkerProbe().wrap<RegionalRequest>(async ({ data }, trac
         trace.reply({ id: data.id, data: navigationCatalog(api, model, index) });
       } else {
         const mesh = extractIfcObjectFine(api, model, data.expressId, data.globalId);
-        trace.reply(
-          { id: data.id, data: mesh },
-          { transfer: mesh.parts.flatMap((p) => [p.vertices.buffer, p.indices.buffer]) },
-        );
+        trace.reply({ id: data.id, data: mesh }, { transfer: fineTransferList(mesh) });
       }
     } else if (data.type === 'prepare-region') {
       if (model === null) throw Error('Regional source unavailable');

@@ -48,3 +48,5 @@ export {
   placeGeometrySource,
   geometryTransferList,
 } from "./geometryInstances.js";
+
+export * from "./formats/ifc.js";

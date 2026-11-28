@@ -16,7 +16,12 @@ export interface GeometryOccurrence {
 export interface GeometrySourceAddress {
   readonly sourceVersion: string;
   readonly sourcePath: string;
-  readonly format: "xml-mod" | "stl";
+  readonly format: "xml-mod" | "stl" | "ifc";
+  readonly modelId?: string;
+  readonly expressId?: number;
+  readonly globalId?: string;
+  readonly geometryId?: number;
+  readonly partIndex?: number;
   readonly rootOccurrence: string;
   readonly assemblyPath: string;
   readonly referencePath?: string;
@@ -45,6 +50,8 @@ export interface PlacedPart {
   readonly localToParent: readonly number[];
   readonly quality: GeometryQuality;
   readonly lod?: GeometryLod;
+  /** Backend linear RGBA, independent of the shared template. */
+  readonly rgba?: readonly number[];
   /** Original MOD colour fields; display alpha conventions belong to the host. */
   readonly sourceColor?: Readonly<Record<string, string>>;
 }

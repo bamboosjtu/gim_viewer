@@ -110,3 +110,9 @@
 - [DEV 几何运行时](dev-geometry.md)
 - [表示与绑定](representations.md)
 - [验证](../validation.md)
+
+### 单对象中立几何
+
+对象 Worker 在源坐标模式按 Express ID 取得 web-ifc 部件，复制并释放 WASM 资源。相同几何 ID 在一次提取中复用局部缓冲。SDK 的 `compileIfcObject` 接收显式坐标阶段，把 Y-up 米制局部几何及放置转换为右手 Z-up 毫米。已做归一化的后端放置只恢复一次 coordination matrix 的逆；源坐标部件可直接换基。项目长度单位用于解释源参数。
+
+每个放置保留模型、来源版本与路径、Express ID、Global ID、几何 ID 和部件序号。Desktop 使用中立模板和实例构建场景，将场景锚点施加在组上。单对象拾取可返回实际命中部件的来源地址。区域浏览和显式精细请求分别保留 L1 和 L2 的质量。

@@ -14,7 +14,7 @@ export interface GeometryBounds {
   min: Point3;
   max: Point3;
   unit: "mm";
-  quality: "parameter-derived" | "estimated";
+  quality: "parameter-derived" | "mesh-derived" | "estimated";
 }
 export type BoundsCoverage =
   | { coverage: "conservative"; bounds: GeometryBounds }
@@ -165,7 +165,20 @@ export function analyzePrimitive(p: CanonicalPrimitive): AnalysisGeometry {
 }
 
 const axes = [0, 1, 2] as const;
-function union(a: GeometryBounds, b: GeometryBounds): GeometryBounds {
+function combinedQuality(
+  a: GeometryBounds,
+  b: GeometryBounds,
+): GeometryBounds["quality"] {
+  if (a.quality === "estimated" || b.quality === "estimated")
+    return "estimated";
+  return a.quality === "mesh-derived" || b.quality === "mesh-derived"
+    ? "mesh-derived"
+    : "parameter-derived";
+}
+export function unionGeometryBounds(
+  a: GeometryBounds,
+  b: GeometryBounds,
+): GeometryBounds {
   const min: Point3 = [...a.min],
     max: Point3 = [...a.max];
   for (const i of axes) {
@@ -176,13 +189,10 @@ function union(a: GeometryBounds, b: GeometryBounds): GeometryBounds {
     min,
     max,
     unit: "mm",
-    quality:
-      a.quality === "estimated" || b.quality === "estimated"
-        ? "estimated"
-        : "parameter-derived",
+    quality: combinedQuality(a, b),
   };
 }
-function place(
+export function placeGeometryRange(
   range: BoundsCoverage,
   m: readonly number[],
   purpose: BoundsPurpose,
@@ -235,7 +245,10 @@ function combine(
   if (a.coverage === "empty") return op === "Union" ? b : a;
   if (b.coverage === "empty") return op === "Union" ? a : b;
   if (op === "Union")
-    return { coverage: "conservative", bounds: union(a.bounds, b.bounds) };
+    return {
+      coverage: "conservative",
+      bounds: unionGeometryBounds(a.bounds, b.bounds),
+    };
   const min: Point3 = [...a.bounds.min],
     max: Point3 = [...a.bounds.max];
   for (const i of axes) {
@@ -249,10 +262,7 @@ function combine(
       min,
       max,
       unit: "mm",
-      quality:
-        a.bounds.quality === "estimated" || b.bounds.quality === "estimated"
-          ? "estimated"
-          : "parameter-derived",
+      quality: combinedQuality(a.bounds, b.bounds),
     },
   };
 }
@@ -295,7 +305,7 @@ export function aggregateGeometryBounds<T extends BoundsNode>(
         const [a, b] = finish.operands;
         memo.set(
           id,
-          place(
+          placeGeometryRange(
             combine(
               finish.op,
               a === undefined ? unknown : (memo.get(a) ?? unknown),
@@ -329,7 +339,7 @@ export function aggregateGeometryBounds<T extends BoundsNode>(
       } else {
         if (shape.coverage === "unknown" && shape.diagnostics)
           diagnostics.push(...shape.diagnostics);
-        memo.set(id, place(shape, node.transformMatrix, purpose));
+        memo.set(id, placeGeometryRange(shape, node.transformMatrix, purpose));
       }
     }
     return memo.get(root.id) ?? unknown;
@@ -339,7 +349,7 @@ export function aggregateGeometryBounds<T extends BoundsNode>(
     const range = evaluate(root);
     if (range.coverage === "unknown") incomplete = true;
     if (range.coverage === "conservative")
-      total = total ? union(total, range.bounds) : range.bounds;
+      total = total ? unionGeometryBounds(total, range.bounds) : range.bounds;
   }
   if (incomplete)
     return {

@@ -1,4 +1,4 @@
-import { isUsableAffineMatrix } from "./affineMatrix.js";
+import { composePlacement, isUsableAffineMatrix } from "./affineMatrix.js";
 import type {
   CompiledGeometrySource,
   GeometryBatch,
@@ -6,23 +6,6 @@ import type {
   GeometryOccurrence,
   GeometrySourceAddress,
 } from "./contracts/geometryBatch.js";
-
-/** Column-major millimetre transforms, parent * child. Preserve shear and reflections. */
-function compose(
-  parent: readonly number[],
-  child: readonly number[],
-): number[] {
-  const out = Array<number>(16);
-  for (let col = 0; col < 4; col++) {
-    for (let row = 0; row < 4; row++) {
-      let value = 0;
-      for (let k = 0; k < 4; k++)
-        value += parent[4 * k + row] * child[4 * col + k];
-      out[4 * col + row] = value;
-    }
-  }
-  return out;
-}
 
 export function placeGeometrySource(
   source: CompiledGeometrySource,
@@ -59,7 +42,7 @@ export function placeGeometrySource(
                   address.entityId,
                   address.ordinal,
                 ]),
-                localToParent: compose(
+                localToParent: composePlacement(
                   occurrence.localToParent,
                   local.localToSource,
                 ),

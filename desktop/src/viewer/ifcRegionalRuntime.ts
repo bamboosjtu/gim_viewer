@@ -27,7 +27,8 @@ import * as THREE from 'three';
 import type { ViewerContext } from './viewerEngine.js';
 import type { RegionalIndex, RegionalObject } from './ifcRegionalData.js';
 import { queryRegionalObjects } from './ifcRegionalData.js';
-import { objectFineGroup } from './ifcObjectFineRuntime.js';
+import { objectFineGroup } from './ifcObjectGeometry.js';
+import type { GeometrySourceAddress } from '@gim/gim-sdk/geometry';
 import type { ObjectFineResult } from './ifcObjectFineData.js';
 import {
   readIfcLodArtifact,
@@ -364,14 +365,16 @@ export class IfcRegionalRuntime {
     if (this.groups.get(Number(group.userData.expressId)) === group)
       this.instances.remove(Number(group.userData.expressId));
     group.removeFromParent();
+    const geometries = new Set<THREE.BufferGeometry>();
     group.traverse((o) => {
       const mesh = o as THREE.Mesh;
       if (mesh.userData.owned === false) return;
-      mesh.geometry?.dispose();
+      if (mesh.geometry) geometries.add(mesh.geometry);
       const material = mesh.material;
       if (Array.isArray(material)) material.forEach((m) => m.dispose());
       else material?.dispose();
     });
+    for (const geometry of geometries) geometry.dispose();
   }
   private async representationChanged(
     object: RegionalObject,
@@ -541,15 +544,15 @@ export class IfcRegionalRuntime {
             ? new THREE.Group()
             : objectFineGroup(
                 result,
-                {
-                  ...object,
-                  key: `ifc:${this.modelId.toLowerCase()}:object:${object.expressId}`,
-                  modelId: this.modelId,
-                  sourcePath: this.sourcePath,
-                  provider: 'ifc-regional',
-                },
-                this.transform.clone().multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2)),
+                metadata,
+                this.transform,
+                this.index.sourceSha256 ?? this.options.cacheKey,
+                1,
               );
+          if (!instanced && !group.children.length) {
+            this.diagnostics.failed++;
+            continue;
+          }
           if (instanced) {
             group.userData = { ...metadata };
             group.matrixAutoUpdate = false;
@@ -603,7 +606,13 @@ export class IfcRegionalRuntime {
   pick(
     ray: THREE.Raycaster,
     accepts?: (point: THREE.Vector3) => boolean,
-  ): { object: RegionalObject; distance: number; point: THREE.Vector3; lod: number } | null {
+  ): {
+    object: RegionalObject;
+    distance: number;
+    point: THREE.Vector3;
+    lod: number;
+    address?: GeometrySourceAddress;
+  } | null {
     if (!this.root.visible) return null;
     this.root.updateMatrixWorld(true);
     const hit = ray.intersectObjects(this.root.children, true).find((hit) => {
@@ -621,6 +630,7 @@ export class IfcRegionalRuntime {
           object,
           distance: hit.distance,
           point: hit.point,
+          address: hit.object.userData.geometrySourceAddress as GeometrySourceAddress | undefined,
           lod: Number(this.groups.get(object.expressId)?.userData.lod ?? 1),
         }
       : null;
@@ -823,8 +833,11 @@ export class IfcRegionalRuntime {
     const group = objectFineGroup(
       result,
       identity,
-      this.transform.clone().multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2)),
+      this.transform,
+      this.index.sourceSha256 ?? this.options.cacheKey,
+      2,
     );
+    if (!group.children.length) return undefined;
     group.userData.lod = 2;
     group.userData.approximate = false;
     setRenderVisibility(group, this.permits(object.expressId));
