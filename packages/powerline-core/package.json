@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./towerTopology.js": "./src/towerTopology.ts",
     "./attributeRecords.js": "./src/attributeRecords.ts",
     "./crossingClassification.js": "./src/crossingClassification.ts",
     "./gimGraphTypes.js": "./src/gimGraphTypes.ts",

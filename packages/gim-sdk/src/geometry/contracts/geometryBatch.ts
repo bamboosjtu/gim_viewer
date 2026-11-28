@@ -16,7 +16,7 @@ export interface GeometryOccurrence {
 export interface GeometrySourceAddress {
   readonly sourceVersion: string;
   readonly sourcePath: string;
-  readonly format: "xml-mod" | "stl" | "ifc";
+  readonly format: "xml-mod" | "stl" | "ifc" | "line-mod";
   readonly modelId?: string;
   readonly expressId?: number;
   readonly globalId?: string;
@@ -39,6 +39,8 @@ export interface MeshTemplate {
 }
 export interface LineSegments3D {
   readonly kind: "line-segments";
+  /** Source R record ordinal per segment within its section. */
+  readonly recordOrdinals?: readonly number[];
   /** Consecutive pairs of XYZ endpoints in local millimetres. */
   readonly positions: Float32Array;
 }
@@ -58,6 +60,7 @@ export interface PlacedPart {
 export type NamedGeometryPort = Omit<GeometryPort, "direction"> & {
   readonly address: GeometrySourceAddress;
   readonly direction?: GeometryPort["direction"];
+  readonly recordOrdinal?: number;
 };
 export interface GeometryObjectResult {
   readonly address: GeometrySourceAddress;

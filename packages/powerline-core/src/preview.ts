@@ -1,3 +1,4 @@
+import { resolveTowerTopology } from "./towerTopology.js";
 import { parseHNumCommaRecord } from "@gim/gim-primitives/geometry/lineModParser.js";
 export interface TowerPreview {
   bounds: [number, number, number, number];
@@ -10,29 +11,14 @@ export interface TowerPreview {
 export function buildTowerPreview(text: string, path: string): TowerPreview {
   const mod = parseHNumCommaRecord(text, path);
   const segments: TowerPreview["segments"] = [];
-  const filePoints = new Map<
-    number,
-    (typeof mod.bodySections)[number]["points"][number]
-  >();
-  let uniqueFileIds = true;
-  for (const body of mod.bodySections)
-    for (const point of body.points) {
-      if (filePoints.has(point.id)) uniqueFileIds = false;
-      filePoints.set(point.id, point);
-    }
   let pointCount = 0,
     rodCount = 0,
     unknownCount = 0;
-  for (const body of mod.bodySections) {
-    const localPoints = new Map(body.points.map((p) => [p.id, p]));
-    pointCount += localPoints.size;
-    // A repeated ID makes the file scope ambiguous: never borrow a point from another Body.
-    const points = uniqueFileIds ? filePoints : localPoints;
-    for (const rod of body.rods) {
+  for (const section of resolveTowerTopology(mod)) {
+    pointCount += new Set(section.points.map((point) => point.id)).size;
+    for (const { record, start: a, end: b } of section.rods) {
       rodCount++;
-      if (rod.kind === "unknown") unknownCount++;
-      const a = rod.id1 == null ? undefined : points.get(rod.id1),
-        b = rod.id2 == null ? undefined : points.get(rod.id2);
+      if (record.kind === "unknown") unknownCount++;
       if (a && b && [a.x, a.z, b.x, b.z].every(Number.isFinite))
         segments.push([a.x, a.z, b.x, b.z]);
     }

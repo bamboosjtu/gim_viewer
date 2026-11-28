@@ -17,3 +17,7 @@ export function composePlacement(
   }
   return out;
 }
+
+export const identityPlacement = Object.freeze([
+  1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1,
+]);

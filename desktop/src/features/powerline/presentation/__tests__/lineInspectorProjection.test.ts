@@ -60,6 +60,14 @@ describe('线路塔位来源形状预览', () => {
     expect(html).not.toContain('未找到可预览');
   });
 
+  it('跨 Body 重号按各自的 P 画杆件，缺端仍保留有效兄弟杆件', () => {
+    const first=hnum.bodySections[0];
+    const other={...first,name:'Body2',points:[{id:1,x:1000,y:0,z:0},{id:2,x:0,y:0,z:1000}],rods:[...first.rods,{...first.rods[0],id2:9}]};
+    const html=renderLineTowerShapeSource(node(),[{path:'t.mod',source:{kind:'line-text-mod',format:'text-hnum-comma-record',modPath:'t.mod',records:{...hnum,bodySections:[first,other]}}}]);
+    expect(html).toMatch(/M14(?:\.0)? 266(?:\.0)?L266(?:\.0)? 14(?:\.0)?M266(?:\.0)? 266(?:\.0)?L14(?:\.0)? 14/);
+    expect(html).toContain('1 根杆件因端点/变体异常未绘制');
+  });
+
   it('大规模 HNum 不按文件前缀截断，杆件用单个 Path 且点标记覆盖全高度', () => {
     const points = Array.from({ length: 2001 }, (_, index) => ({
       id: index + 1,

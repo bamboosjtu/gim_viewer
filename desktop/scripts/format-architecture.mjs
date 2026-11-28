@@ -510,6 +510,8 @@ export const architectureModules = [
   '../packages/powerline-core/src/lineFamParser.ts',
   '../packages/powerline-core/src/lineMapData.ts',
   '../packages/powerline-core/src/preview.ts',
+  '../packages/powerline-core/src/towerTopology.ts',
+  '../packages/gim-sdk/src/geometry/formats/line-mod.ts',
   'scripts/local-tests/patrol.mjs',
   'scripts/format-architecture.mjs',
   'scripts/package-portable.mjs',

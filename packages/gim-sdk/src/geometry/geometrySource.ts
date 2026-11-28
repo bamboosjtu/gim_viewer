@@ -41,9 +41,7 @@ export type GeometryInput =
       readonly stlFormat?: StlFormat;
     };
 
-const identity = Object.freeze([
-  1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1,
-]);
+import { identityPlacement as identity } from "./affineMatrix.js";
 const empty: BoundsCoverage = { coverage: "empty" };
 const unknown: BoundsCoverage = { coverage: "unknown" };
 

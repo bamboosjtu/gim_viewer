@@ -14,4 +14,5 @@ export {
 } from "@gim/gim-primitives/geometry/lineModParser.js";
 export * from "./domain.js";
 export * from "./preview.js";
+export * from "./towerTopology.js";
 export * from "./crossingClassification.js";

@@ -50,3 +50,4 @@ export {
 } from "./geometryInstances.js";
 
 export * from "./formats/ifc.js";
+export * from "./formats/line-mod.js";

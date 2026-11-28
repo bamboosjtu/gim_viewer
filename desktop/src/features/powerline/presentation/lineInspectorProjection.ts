@@ -1,5 +1,6 @@
 /** Pure line inspector projection: no DOM, AppState or platform IO. */
 import type { GimGraphNode } from '@gim/powerline-core/gimGraphTypes.js';
+import { resolveTowerTopology } from '@gim/powerline-core/towerTopology.js';
 import { escHtml } from '../../../shared/html.js';
 import { getFileNameLower, normalizeGimPath } from '@gim/powerline-core/linePathNormalize.js';
 import {
@@ -14,7 +15,7 @@ import {
   type PropertyRow,
 } from '../../../services/presentation/propertyPresentation.js';
 import type { LineModRuntimeEntry } from './lineModSourcePort.js';
-import type { HNumModFile, RRecord, LineTextModGeometrySource } from '../../../gim/geometry/ir.js';
+import type { HNumModFile, LineTextModGeometrySource } from '../../../gim/geometry/ir.js';
 import type { LineAttributeIndex } from '@gim/powerline-core/lineAttributeTypes.js';
 import type {
   LineFamPropertyRecord,
@@ -375,7 +376,10 @@ function sampleTowerPointsByHeight(
 }
 
 function renderHNumPreview(source: HNumModFile): string {
-  const points = source.bodySections.flatMap((body) => body.points);
+  const sections = resolveTowerTopology(source);
+  const points = sections
+    .flatMap((body) => body.points)
+    .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.z));
   if (points.length === 0)
     return '<div class="props-note">MOD 未提供 P 节点，无法生成骨架预览。</div>';
   const width = 280;
@@ -383,31 +387,29 @@ function renderHNumPreview(source: HNumModFile): string {
   // 造成塔身比例失真，尤其是窄高塔型难以阅读。
   const height = 280;
   const pad = 14;
-  const xs = points.map((point) => point.x);
-  const zs = points.map((point) => point.z);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minZ = Math.min(...zs);
-  const maxZ = Math.max(...zs);
+  let minX = Infinity,
+    maxX = -Infinity,
+    minZ = Infinity,
+    maxZ = -Infinity;
+  for (const p of points) {
+    minX = Math.min(minX, p.x);
+    maxX = Math.max(maxX, p.x);
+    minZ = Math.min(minZ, p.z);
+    maxZ = Math.max(maxZ, p.z);
+  }
   const sx = Math.max(maxX - minX, 1);
   const sz = Math.max(maxZ - minZ, 1);
   const scale = Math.min((width - pad * 2) / sx, (height - pad * 2) / sz);
   const offsetX = (width - sx * scale) / 2;
   const offsetY = (height - sz * scale) / 2;
-  const pointMap = new Map<number, [number, number]>();
-  // pointMap 必须建立在全量 P 上；否则后半段 R 的端点无法连接，表现为塔身
-  // 被“截断”。点标记本身采用按高度抽样，杆件则使用一个 SVG path 全量绘制。
-  for (const point of points) {
-    const x = offsetX + (point.x - minX) * scale;
-    const y = height - offsetY - (point.z - minZ) * scale;
-    pointMap.set(point.id, [x, y]);
-  }
+  const project = (p: { x: number; z: number }) => [
+    offsetX + (p.x - minX) * scale,
+    height - offsetY - (p.z - minZ) * scale,
+  ];
   const sampledPoints = sampleTowerPointsByHeight(points, 1800);
   const pointPath = sampledPoints
     .map((point) => {
-      const projected = pointMap.get(point.id);
-      if (!projected) return '';
-      const [x, y] = projected;
+      const [x, y] = project(point);
       // 小十字比 1800 个 circle 节点更轻量，同时在缩放后仍可辨认。
       return `M${formatNumber(x - 0.7, 1)} ${formatNumber(y, 1)}h1.4M${formatNumber(x, 1)} ${formatNumber(y - 0.7, 1)}v1.4`;
     })
@@ -417,26 +419,21 @@ function renderHNumPreview(source: HNumModFile): string {
   let skippedRodCount = 0;
   let unknownRodCount = 0;
   let unknownDrawnRodCount = 0;
-  for (const rod of source.bodySections.flatMap<RRecord>((body) => body.rods)) {
-    if (rod.kind === 'unknown') unknownRodCount += 1;
-    const id1 = 'id1' in rod ? rod.id1 : undefined;
-    const id2 = 'id2' in rod ? rod.id2 : undefined;
-    if (id1 == null || id2 == null) {
-      skippedRodCount += 1;
-      continue;
+  for (const section of sections)
+    for (const { record: rod, start, end } of section.rods) {
+      if (rod.kind === 'unknown') unknownRodCount++;
+      if (!start || !end || ![start.x, start.z, end.x, end.z].every(Number.isFinite)) {
+        skippedRodCount++;
+        continue;
+      }
+      const a = project(start),
+        b = project(end);
+      rodPathParts.push(
+        `M${formatNumber(a[0], 1)} ${formatNumber(a[1], 1)}L${formatNumber(b[0], 1)} ${formatNumber(b[1], 1)}`,
+      );
+      drawnRodCount += 1;
+      if (rod.kind === 'unknown') unknownDrawnRodCount += 1;
     }
-    const a = pointMap.get(id1);
-    const b = pointMap.get(id2);
-    if (!a || !b) {
-      skippedRodCount += 1;
-      continue;
-    }
-    rodPathParts.push(
-      `M${formatNumber(a[0], 1)} ${formatNumber(a[1], 1)}L${formatNumber(b[0], 1)} ${formatNumber(b[1], 1)}`,
-    );
-    drawnRodCount += 1;
-    if (rod.kind === 'unknown') unknownDrawnRodCount += 1;
-  }
   const rodPath = rodPathParts.join('');
   const skippedNote = skippedRodCount > 0 ? `，${skippedRodCount} 根杆件因端点/变体异常未绘制` : '';
   const unknownNote =
