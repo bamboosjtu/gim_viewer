@@ -1,3 +1,4 @@
+import { ifcProductAddress, ifcLodQuality } from '../gim/geometry/ifcObject.js';
 import { setRenderVisibility, requestObjectRender } from './demandRendering.js';
 import * as THREE from 'three';
 import type { ProjectLoadSession } from '../shared/projectSession.js';
@@ -201,6 +202,17 @@ export class IfcConnectionPreviewRuntime {
         sourcePath: batch.sourcePath,
         sourceIdentity: batch.sourceIdentity,
         provider: 'ifc-connection-preview',
+        representationQuality: ifcLodQuality(0),
+        lod: 0,
+        geometrySourceAddress: {
+          ...ifcProductAddress({
+            ...chunk.object,
+            modelId: batch.modelId,
+            sourcePath: batch.sourcePath,
+            sourceVersion: batch.sourceIdentity,
+          }),
+          partIndex: chunk.part,
+        },
         part: chunk.part,
         chunk: chunk.chunk,
       };

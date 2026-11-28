@@ -1,3 +1,4 @@
+import { ifcLodQuality } from '../gim/geometry/ifcObject.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import { logger } from '../utils/logger.js';
 import type { ViewerContext } from './viewerEngine.js';
@@ -266,6 +267,8 @@ export async function loadBimIfc(
     return;
   }
   model.object.userData.ifcOpeningPolicy = 'bim-lod';
+  model.object.userData.representationQuality = ifcLodQuality(0);
+  model.object.userData.lod = 0;
   model.object.userData.ifcLodCacheHit = hit;
   options.onStage?.('far-ready', { path, source: hit ? 'lod-cache' : 'ifc' });
   if (hit) {

@@ -1,7 +1,58 @@
+import {
+  ifcLocalMetreBox,
+  includeIfcMetreBox,
+  composePlacement,
+  ifcSourceRestoration,
+} from '../gim/geometry/ifcObject.js';
 import * as THREE from 'three';
-import { IFCPROJECT, IFCRELVOIDSELEMENT, IFCMECHANICALFASTENER, IFCFASTENER, type IfcAPI } from 'web-ifc';
+import {
+  IFCPROJECT,
+  IFCRELVOIDSELEMENT,
+  IFCMECHANICALFASTENER,
+  IFCFASTENER,
+  type IfcAPI,
+} from 'web-ifc';
 import { isRegionalConnectionObject } from '../shared/ifcConnectionEvidence.js';
 import type { ConnectionEndpointEvidence } from '../gim/connectionEndpoints.js';
+// web-ifc returns dynamically shaped STEP rows. Only the fields consumed by these readers are projected.
+type Scalar = number | string | { value: number | string };
+interface IfcRow {
+  type: number;
+  GlobalId?: { value: string };
+  Name?: { value: string };
+  Prefix?: Scalar;
+  UnitType?: Scalar;
+  Operator?: Scalar;
+  RepresentationIdentifier?: Scalar;
+  RelatingBuildingElement: Scalar;
+  RelatedOpeningElement: Scalar;
+  ConversionFactor: Scalar;
+  ValueComponent: Scalar;
+  UnitComponent: Scalar;
+  UnitsInContext: Scalar;
+  Units: Scalar[];
+  Outer: Scalar;
+  CfsFaces?: Scalar[];
+  Bounds?: Scalar[];
+  Bound: Scalar;
+  Polygon?: Scalar[];
+  Coordinates: Scalar[];
+  FirstOperand: Scalar;
+  SecondOperand: Scalar;
+  SweptArea: Scalar;
+  Radius: Scalar;
+  XDim: Scalar;
+  YDim: Scalar;
+  OuterCurve: Scalar;
+  Points?: Scalar[];
+  Representation: Scalar;
+  Representations?: Scalar[];
+  Items?: Scalar[];
+}
+const scalarValue = (v: Scalar | undefined) => (typeof v === 'object' ? v.value : v);
+const ref = (v: Scalar) => Number(scalarValue(v));
+const text = (v: Scalar | undefined) => String(scalarValue(v) ?? '');
+const disposeVector = (v: unknown) => (v as { delete?: () => void }).delete?.();
 export interface RegionalObject {
   expressId: number;
   globalId: string;
@@ -31,11 +82,9 @@ export interface RegionalIndex {
 }
 export function readRegionalSemantics(
   api: IfcAPI,
-  model: number
+  model: number,
 ): Pick<RegionalIndex, 'openingRelations' | 'unitScale'> {
-  const ref = (v: any) => Number(v?.value ?? v),
-    text = (v: any) => String(v?.value ?? v ?? ''),
-    line = (v: any) => api.GetLine(model, ref(v), false);
+  const line = (v: Scalar) => api.GetLine(model, ref(v), false) as IfcRow;
   const openingRelations: OpeningRelation[] = [],
     ids = api.GetLineIDsWithType(model, IFCRELVOIDSELEMENT);
   try {
@@ -49,9 +98,9 @@ export function readRegionalSemantics(
       });
     }
   } finally {
-    (ids as any).delete?.();
+    disposeVector(ids);
   }
-  const unit = (u: any, depth = 0): number => {
+  const unit = (u: IfcRow, depth = 0): number => {
     if (depth > 8) return NaN;
     const kind = api.GetNameFromTypeCode(u.type).toUpperCase();
     if (kind === 'IFCSIUNIT' && text(u.Name) === 'METRE')
@@ -69,10 +118,7 @@ export function readRegionalSemantics(
       );
     if (kind === 'IFCCONVERSIONBASEDUNIT') {
       const conversion = line(u.ConversionFactor);
-      return (
-        ref(conversion.ValueComponent) *
-        unit(line(conversion.UnitComponent), depth + 1)
-      );
+      return ref(conversion.ValueComponent) * unit(line(conversion.UnitComponent), depth + 1);
     }
     return NaN;
   };
@@ -82,12 +128,12 @@ export function readRegionalSemantics(
     if (projects.size() === 1) {
       const p = line(projects.get(0)),
         lengths = line(p.UnitsInContext)
-          .Units.map((u: any) => line(u))
-          .filter((u: any) => text(u.UnitType) === 'LENGTHUNIT');
+          .Units.map(line)
+          .filter((u) => text(u.UnitType) === 'LENGTHUNIT');
       if (lengths.length === 1) unitScale = unit(lengths[0]);
     }
   } finally {
-    (projects as any).delete?.();
+    disposeVector(projects);
   }
   return { openingRelations, unitScale };
 }
@@ -97,8 +143,8 @@ export function readRegionalSemantics(
 export class RegionalIndexCollector {
   readonly objects: RegionalObject[] = [];
   private seen = new Set<number>();
-  private geometryBoxes = new Map<number, THREE.Box3>();
-  private sourceInverse: THREE.Matrix4 | null = null;
+  private geometryBoxes = new Map<number, number[]>();
+  private sourceInverse?: readonly number[];
   constructor(
     private api: IfcAPI,
     private model: number,
@@ -111,78 +157,73 @@ export class RegionalIndexCollector {
     const id = flat.expressID;
     if (this.seen.has(id)) return;
     this.seen.add(id);
-    const entity = this.api.GetLine(this.model, id, false),
-      bounds = new THREE.Box3();
+    const entity = this.api.GetLine(this.model, id, false) as IfcRow,
+      bounds = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
     if (!entity.GlobalId?.value) return;
     // web-ifc has already selected its origin before emitting the first mesh.
-    this.sourceInverse ??= this.normalized
-      ? new THREE.Matrix4()
-          .fromArray(this.api.GetCoordinationMatrix(this.model))
-          .invert()
-      : new THREE.Matrix4();
-    const point = new THREE.Vector3();
+    this.sourceInverse ??= ifcSourceRestoration(
+      this.normalized
+        ? {
+            kind: 'coordination-applied',
+            coordinationMatrix: this.api.GetCoordinationMatrix(this.model),
+          }
+        : { kind: 'source' },
+    );
+    if (!this.sourceInverse) return;
     for (let i = 0; i < flat.geometries.size(); i++) {
       const placed = flat.geometries.get(i);
       let box = this.geometryBoxes.get(placed.geometryExpressID);
       if (!box) {
-        const geometry = this.api.GetGeometry(
-          this.model,
-          placed.geometryExpressID
-        );
+        const geometry = this.api.GetGeometry(this.model, placed.geometryExpressID);
         try {
-          const v = this.api.GetVertexArray(
-            geometry.GetVertexData(),
-            geometry.GetVertexDataSize()
-          );
-          box = new THREE.Box3();
-          for (let j = 0; j < v.length; j += 6)
-            box.expandByPoint(point.set(v[j], v[j + 1], v[j + 2]));
+          const v = this.api.GetVertexArray(geometry.GetVertexData(), geometry.GetVertexDataSize());
+          box = ifcLocalMetreBox(v);
           this.geometryBoxes.set(placed.geometryExpressID, box);
         } finally {
           geometry.delete();
         }
       }
-      bounds.union(
-        box
-          .clone()
-          .applyMatrix4(
-            this.sourceInverse
-              .clone()
-              .multiply(
-                new THREE.Matrix4().fromArray(placed.flatTransformation)
-              )
-          )
+      includeIfcMetreBox(
+        bounds,
+        box,
+        composePlacement(this.sourceInverse, placed.flatTransformation),
       );
     }
-    if (!bounds.isEmpty()) {
+    if (bounds.every(Number.isFinite)) {
       const object: RegionalObject = {
         expressId: id,
         globalId: String(entity.GlobalId.value),
         ifcType: this.api.GetNameFromTypeCode(entity.type).toUpperCase(),
         name: String(entity.Name?.value ?? ''),
-        bounds: [...bounds.min.toArray(), ...bounds.max.toArray()],
+        bounds,
       };
       if (isRegionalConnectionObject(object)) {
         object.role = 'connection';
-        if (this.connectionEndpoints?.has(id)) object.connectionEndpoints = this.connectionEndpoints.get(id);
+        if (this.connectionEndpoints?.has(id))
+          object.connectionEndpoints = this.connectionEndpoints.get(id);
         this.onConnection?.(object);
       }
       this.objects.push(object);
     }
   };
-  finish(
-    semantics: Pick<RegionalIndex, 'openingRelations' | 'unitScale'>
-  ): RegionalIndex {
+  finish(semantics: Pick<RegionalIndex, 'openingRelations' | 'unitScale'>): RegionalIndex {
     // Include types omitted by the far importer, including all fasteners.
     // Already observed products return before any entity/vertex reads.
     if (this.api.GetLineIDsWithType && this.api.StreamMeshes) {
       const missing: number[] = [];
       for (const type of [IFCMECHANICALFASTENER, IFCFASTENER]) {
         const ids = this.api.GetLineIDsWithType(this.model, type);
-        try { for (let i = 0; i < ids.size(); i++) { const id = ids.get(i); if (!this.seen.has(id)) missing.push(id); } }
-        finally { (ids as any).delete?.(); }
+        try {
+          for (let i = 0; i < ids.size(); i++) {
+            const id = ids.get(i);
+            if (!this.seen.has(id)) missing.push(id);
+          }
+        } finally {
+          disposeVector(ids);
+        }
       }
-      for (let offset = 0; offset < missing.length; offset += 1024) this.api.StreamMeshes(this.model, missing.slice(offset,offset+1024),this.observe);
+      for (let offset = 0; offset < missing.length; offset += 1024)
+        this.api.StreamMeshes(this.model, missing.slice(offset, offset + 1024), this.observe);
     } else this.api.StreamAllMeshes(this.model, this.observe);
     this.geometryBoxes.clear();
     return { ...semantics, objects: this.objects };
@@ -193,17 +234,15 @@ export function classifyRegionalOpenings(
   api: IfcAPI,
   model: number,
   index: RegionalIndex,
-  hosts: Set<number>
+  hosts: Set<number>,
 ): { small: number[]; retained: number; unknown: number } {
-  const rows = new Map<number, any>(),
-    ref = (v: any) => Number(v?.value ?? v),
-    text = (v: any) => String(v?.value ?? v ?? ''),
-    line = (v: any) => {
+  const rows = new Map<number, IfcRow>(),
+    line = (v: Scalar) => {
       const id = ref(v);
-      if (!rows.has(id)) rows.set(id, api.GetLine(model, id, false));
-      return rows.get(id);
+      if (!rows.has(id)) rows.set(id, api.GetLine(model, id, false) as IfcRow);
+      return rows.get(id)!;
     };
-  const brepWidth = (solid: any): number | null => {
+  const brepWidth = (solid: IfcRow): number | null => {
     const polygons: { ids: number[]; points: number[][] }[] = [],
       vertices = new Map<number, number[]>(),
       parent = new Map<number, number>();
@@ -219,8 +258,7 @@ export function classifyRegionalOpenings(
         const ids = loop.Polygon.map(ref);
         for (const id of ids) {
           if (!parent.has(id)) parent.set(id, id);
-          if (!vertices.has(id))
-            vertices.set(id, line(id).Coordinates.map(ref));
+          if (!vertices.has(id)) vertices.set(id, line(id).Coordinates.map(ref));
         }
         for (const id of ids) parent.set(find(id), find(ids[0]));
         polygons.push({
@@ -229,24 +267,16 @@ export function classifyRegionalOpenings(
         });
       }
     }
-    const pieces = new Map<
-      number,
-      { points: number[][]; loops: number[][][] }
-    >();
+    const pieces = new Map<number, { points: number[][]; loops: number[][][] }>();
     for (const [id, p] of vertices) {
       const root = find(id);
       if (!pieces.has(root)) pieces.set(root, { points: [], loops: [] });
       pieces.get(root)!.points.push(p);
     }
-    for (const polygon of polygons)
-      pieces.get(find(polygon.ids[0]))!.loops.push(polygon.points);
+    for (const polygon of polygons) pieces.get(find(polygon.ids[0]))!.loops.push(polygon.points);
     let maximum = 0;
     for (const piece of pieces.values()) {
-      if (
-        piece.points.some(
-          (p) => p.length !== 3 || p.some((v) => !Number.isFinite(v))
-        )
-      )
+      if (piece.points.some((p) => p.length !== 3 || p.some((v) => !Number.isFinite(v))))
         return null;
       let width: number | null = null;
       // Rounded polygonal caps distinguish hole diameter from cutting depth.
@@ -267,14 +297,14 @@ export function classifyRegionalOpenings(
         const x = new THREE.Vector3(
             Math.abs(normal.x) < 0.8 ? 1 : 0,
             Math.abs(normal.x) < 0.8 ? 0 : 1,
-            0
+            0,
           )
             .cross(normal)
             .normalize(),
           y = new THREE.Vector3().crossVectors(normal, x);
         const points = piece.points.map((p) => {
           const v = new THREE.Vector3().fromArray(p).sub(origin);
-          return [v.dot(x), v.dot(y), v.dot(normal!)];
+          return [v.dot(x), v.dot(y), v.dot(normal)];
         });
         const lo = [0, 1, 2].map((i) => Math.min(...points.map((p) => p[i]))),
           hi = [0, 1, 2].map((i) => Math.max(...points.map((p) => p[i]))),
@@ -283,24 +313,14 @@ export function classifyRegionalOpenings(
         let valid = true;
         for (const p of points) {
           const end =
-            Math.abs(p[2] - lo[2]) <= epsilon
-              ? 0
-              : Math.abs(p[2] - hi[2]) <= epsilon
-                ? 1
-                : -1;
+            Math.abs(p[2] - lo[2]) <= epsilon ? 0 : Math.abs(p[2] - hi[2]) <= epsilon ? 1 : -1;
           if (end < 0) {
             valid = false;
             break;
           }
-          caps[end].add(
-            [0, 1].map((i) => Math.round(p[i] / epsilon)).join(',')
-          );
+          caps[end].add([0, 1].map((i) => Math.round(p[i] / epsilon)).join(','));
         }
-        if (
-          valid &&
-          caps[0].size === caps[1].size &&
-          [...caps[0]].every((p) => caps[1].has(p))
-        ) {
+        if (valid && caps[0].size === caps[1].size && [...caps[0]].every((p) => caps[1].has(p))) {
           width = Math.max(hi[0] - lo[0], hi[1] - lo[1]) * index.unitScale;
           break;
         }
@@ -310,7 +330,7 @@ export function classifyRegionalOpenings(
     }
     return maximum || null;
   };
-  const size = (item: any, seen = new Set<number>()): number | null => {
+  const size = (item: Scalar, seen = new Set<number>()): number | null => {
     const id = ref(item);
     if (!id || seen.has(id) || seen.size > 64) return null;
     seen.add(id);
@@ -325,46 +345,40 @@ export function classifyRegionalOpenings(
     if (type !== 'IFCEXTRUDEDAREASOLID') return null;
     const profile = line(solid.SweptArea),
       kind = api.GetNameFromTypeCode(profile.type).toUpperCase();
-    if (kind === 'IFCCIRCLEPROFILEDEF')
-      return 2 * ref(profile.Radius) * index.unitScale;
+    if (kind === 'IFCCIRCLEPROFILEDEF') return 2 * ref(profile.Radius) * index.unitScale;
     if (kind === 'IFCRECTANGLEPROFILEDEF')
       return Math.max(ref(profile.XDim), ref(profile.YDim)) * index.unitScale;
     if (kind !== 'IFCARBITRARYCLOSEDPROFILEDEF') return null;
     const curve = line(profile.OuterCurve);
     if (!Array.isArray(curve.Points)) return null;
-    const points = curve.Points.map((p: any) => line(p).Coordinates.map(ref));
+    const points = curve.Points.map((p) => line(p).Coordinates.map(ref));
     return (
       Math.max(
         ...[0, 1].map(
           (i) =>
             Math.max(...points.map((p: number[]) => p[i])) -
-            Math.min(...points.map((p: number[]) => p[i]))
-        )
+            Math.min(...points.map((p: number[]) => p[i])),
+        ),
       ) * index.unitScale
     );
   };
   const result = { small: [] as number[], retained: 0, unknown: 0 };
-  for (const relation of index.openingRelations.filter((r) =>
-    hosts.has(r.host)
-  )) {
+  for (const relation of index.openingRelations.filter((r) => hosts.has(r.host))) {
     try {
       const opening = line(relation.opening),
         reps = line(opening.Representation).Representations,
         sizes: number[] = [];
       let unknown = false;
-      for (const r of reps) {
+      for (const r of reps ?? []) {
         const rep = line(r);
-        if (text(rep.RepresentationIdentifier).toUpperCase() !== 'BODY')
-          continue;
+        if (text(rep.RepresentationIdentifier).toUpperCase() !== 'BODY') continue;
         for (const item of rep.Items ?? []) {
           const width = size(item);
-          if (width === null || !Number.isFinite(width) || width <= 0)
-            unknown = true;
+          if (width === null || !Number.isFinite(width) || width <= 0) unknown = true;
           else sizes.push(width);
         }
       }
-      if (!unknown && sizes.length && Math.max(...sizes) <= 0.05)
-        result.small.push(relation.id);
+      if (!unknown && sizes.length && Math.max(...sizes) <= 0.05) result.small.push(relation.id);
       else {
         result.retained++;
         if (unknown || !sizes.length) result.unknown++;
@@ -377,40 +391,73 @@ export function classifyRegionalOpenings(
   return result;
 }
 
-interface RegionalTree { box: THREE.Box3; left?: RegionalTree; right?: RegionalTree; rows?: { object: RegionalObject; box: THREE.Box3 }[] }
-const regionalQueries = new WeakMap<RegionalObject[], { matrix: THREE.Matrix4; tree: RegionalTree }>();
+interface RegionalTree {
+  box: THREE.Box3;
+  left?: RegionalTree;
+  right?: RegionalTree;
+  rows?: { object: RegionalObject; box: THREE.Box3 }[];
+}
+const regionalQueries = new WeakMap<
+  RegionalObject[],
+  { matrix: THREE.Matrix4; tree: RegionalTree }
+>();
 function buildRegionalTree(rows: { object: RegionalObject; box: THREE.Box3 }[]): RegionalTree {
-  const box = new THREE.Box3(); for (const row of rows) box.union(row.box);
+  const box = new THREE.Box3();
+  for (const row of rows) box.union(row.box);
   if (rows.length <= 16) return { box, rows };
   const size = box.getSize(new THREE.Vector3());
   const axis = size.x >= size.y && size.x >= size.z ? 'x' : size.y >= size.z ? 'y' : 'z';
-  rows.sort((a,b) => a.box.min[axis] + a.box.max[axis] - b.box.min[axis] - b.box.max[axis]);
+  rows.sort((a, b) => a.box.min[axis] + a.box.max[axis] - b.box.min[axis] - b.box.max[axis]);
   const mid = rows.length >>> 1;
-  return { box, left: buildRegionalTree(rows.slice(0,mid)), right: buildRegionalTree(rows.slice(mid)) };
+  return {
+    box,
+    left: buildRegionalTree(rows.slice(0, mid)),
+    right: buildRegionalTree(rows.slice(mid)),
+  };
 }
 /** Bounds are transformed and indexed once per immutable source frame. */
-export function queryRegionalObjects(objects: RegionalObject[], sourceToViewer: THREE.Matrix4,
-  camera: THREE.Camera, radius = 30): RegionalObject[] {
+export function queryRegionalObjects(
+  objects: RegionalObject[],
+  sourceToViewer: THREE.Matrix4,
+  camera: THREE.Camera,
+  radius = 30,
+): RegionalObject[] {
   let cached = regionalQueries.get(objects);
   if (!cached || !cached.matrix.equals(sourceToViewer)) {
-    cached = { matrix: sourceToViewer.clone(), tree: buildRegionalTree(objects.map(object => ({ object,
-      box: new THREE.Box3(new THREE.Vector3(object.bounds[0],object.bounds[1],object.bounds[2]),
-        new THREE.Vector3(object.bounds[3],object.bounds[4],object.bounds[5])).applyMatrix4(sourceToViewer) }))) };
-    regionalQueries.set(objects,cached);
+    cached = {
+      matrix: sourceToViewer.clone(),
+      tree: buildRegionalTree(
+        objects.map((object) => ({
+          object,
+          box: new THREE.Box3(
+            new THREE.Vector3(object.bounds[0], object.bounds[1], object.bounds[2]),
+            new THREE.Vector3(object.bounds[3], object.bounds[4], object.bounds[5]),
+          ).applyMatrix4(sourceToViewer),
+        })),
+      ),
+    };
+    regionalQueries.set(objects, cached);
   }
   camera.updateMatrixWorld();
   const position = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld);
-  const frustum = new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse));
+  const frustum = new THREE.Frustum().setFromProjectionMatrix(
+    new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse),
+  );
   const candidates: { object: RegionalObject; distance: number }[] = [];
   const visit = (node: RegionalTree) => {
     if (node.box.distanceToPoint(position) > radius || !frustum.intersectsBox(node.box)) return;
-    if (node.rows) for (const row of node.rows) {
-      const distance = row.box.distanceToPoint(position);
-      if (distance <= radius && frustum.intersectsBox(row.box)) candidates.push({ object: row.object, distance });
+    if (node.rows)
+      for (const row of node.rows) {
+        const distance = row.box.distanceToPoint(position);
+        if (distance <= radius && frustum.intersectsBox(row.box))
+          candidates.push({ object: row.object, distance });
+      }
+    else {
+      visit(node.left!);
+      visit(node.right!);
     }
-    else { visit(node.left!); visit(node.right!); }
   };
   visit(cached.tree);
-  candidates.sort((a,b) => a.distance-b.distance);
-  return candidates.map(row => row.object);
+  candidates.sort((a, b) => a.distance - b.distance);
+  return candidates.map((row) => row.object);
 }

@@ -1,3 +1,4 @@
+import { ifcProductAddress } from '../gim/geometry/ifcObject.js';
 import { logger } from '../utils/logger.js';
 import type { IfcVisibilityModel } from './ifcModelVisibility.js';
 interface RegionalProperties {
@@ -27,7 +28,7 @@ import * as THREE from 'three';
 import type { ViewerContext } from './viewerEngine.js';
 import type { RegionalIndex, RegionalObject } from './ifcRegionalData.js';
 import { queryRegionalObjects } from './ifcRegionalData.js';
-import { objectFineGroup } from './ifcObjectGeometry.js';
+import { objectFineGroup, ifcBoundsToViewer } from './ifcObjectGeometry.js';
 import type { GeometrySourceAddress } from '@gim/gim-sdk/geometry';
 import type { ObjectFineResult } from './ifcObjectFineData.js';
 import {
@@ -630,7 +631,16 @@ export class IfcRegionalRuntime {
           object,
           distance: hit.distance,
           point: hit.point,
-          address: hit.object.userData.geometrySourceAddress as GeometrySourceAddress | undefined,
+          address: (hit.object.userData.geometrySourceAddress as
+            GeometrySourceAddress | undefined) ?? {
+            ...ifcProductAddress({
+              ...object,
+              modelId: this.modelId,
+              sourcePath: this.sourcePath,
+              sourceVersion: this.index.sourceSha256 ?? this.options.cacheKey,
+            }),
+            ...this.instances.part(hit),
+          },
           lod: Number(this.groups.get(object.expressId)?.userData.lod ?? 1),
         }
       : null;
@@ -648,12 +658,7 @@ export class IfcRegionalRuntime {
   /** Exact source product bounds are available even before its near mesh.
    * A far Fragments item may batch several products and cannot frame a leaf. */
   worldBounds(object: RegionalObject): THREE.Box3 | undefined {
-    const b = object.bounds;
-    if (!b || b.length !== 6 || !b.every(Number.isFinite)) return;
-    return new THREE.Box3(
-      new THREE.Vector3(b[0], b[1], b[2]),
-      new THREE.Vector3(b[3], b[4], b[5]),
-    ).applyMatrix4(this.transform);
+    return ifcBoundsToViewer(object.bounds, this.transform);
   }
   clearHighlight() {
     this.instances.clearHighlight();

@@ -120,8 +120,20 @@ it("restores K exactly once; an already restored placement follows the source pa
   ).toEqual(normalized.point);
 });
 it("scopes equal Express IDs and geometry IDs by source model and isolates failed parts", () => {
+  const other = v.slice();
+  other[0] = 3;
   const a = first(source),
-    b = first({ ...source, modelId: "M2" });
+    b = first({
+      ...source,
+      modelId: "M2",
+      parts: [{ ...part, vertices: other, matrix: tr(10) }],
+    });
+  expect(a.point).toEqual([1000, -3000, 2000]);
+  expect(b.point).toEqual([13000, -3000, 2000]);
+  expect(b.batch.objects[0].range).toMatchObject({
+    coverage: "conservative",
+    bounds: { min: [11000, -3000, 2000], max: [13000, -3000, 3000] },
+  });
   expect(a.p.templateKey).not.toBe(b.p.templateKey);
   expect(a.p.instanceId).not.toBe(b.p.instanceId);
   expect(b.p.address).toMatchObject({
@@ -145,7 +157,16 @@ it("scopes equal Express IDs and geometry IDs by source model and isolates faile
       frame: { kind: "coordination-applied", coordinationMatrix: [] },
     }).objects[0].availability,
   ).toBe("unavailable");
+  expect(compileIfcObject({ ...source, parts: [] }).objects[0]).toMatchObject({
+    availability: "unknown",
+    range: { coverage: "unknown" },
+    diagnostics: [{ code: "ifc-no-evaluated-parts" }],
+  });
   expect(
-    compileIfcObject({ ...source, parts: [] }).objects[0].availability,
-  ).toBe("empty");
+    compileIfcObject({
+      ...source,
+      parts: [],
+      emptyEvidence: "no-source-representation",
+    }).objects[0],
+  ).toMatchObject({ availability: "empty", range: { coverage: "empty" } });
 });

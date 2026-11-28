@@ -1,4 +1,4 @@
-import type { IfcCoordinateFrame } from '@gim/gim-sdk/geometry';
+import type { IfcCoordinateFrame, IfcObjectInput } from '@gim/gim-sdk/geometry';
 import type { IfcAPI } from 'web-ifc';
 
 export interface ObjectFinePart {
@@ -14,6 +14,7 @@ export interface ObjectFineResult {
   ifcType: string;
   /** Cached regional results from source-coordinate workers may omit the frame. */
   frame?: IfcCoordinateFrame;
+  emptyEvidence?: IfcObjectInput['emptyEvidence'];
   parts: ObjectFinePart[];
   geometryMs: number;
   wasmHeapBytes: number;
@@ -29,7 +30,7 @@ export function extractIfcObjectFine(
   placementSpace: IfcCoordinateFrame['kind'] = 'source',
 ): ObjectFineResult {
   const entity = api.GetLine(model, expressId, false) as
-    { GlobalId?: { value?: string }; type: number } | undefined;
+    { GlobalId?: { value?: string }; type: number; Representation?: unknown } | undefined;
   if (!entity || String(entity.GlobalId?.value ?? '') !== globalId)
     throw new Error('IFC object identity mismatch');
   const started = performance.now(),
@@ -77,6 +78,9 @@ export function extractIfcObjectFine(
     expressId,
     globalId,
     frame,
+    ...(!parts.length && entity.Representation === null
+      ? { emptyEvidence: 'no-source-representation' as const }
+      : {}),
     ifcType: api.GetNameFromTypeCode(entity.type),
     parts,
     geometryMs: performance.now() - started,

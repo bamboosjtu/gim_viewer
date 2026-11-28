@@ -1,10 +1,23 @@
 import * as THREE from 'three';
-import { compileIfcParts } from '../gim/geometry/ifcObject.js';
+import { compileIfcParts, queryIfcIndexRange } from '../gim/geometry/ifcObject.js';
 import { geometryBatchToGroup } from './geometryBatch.js';
 import type { IfcObjectIdentity } from './ifcObjectIdentity.js';
 import type { ObjectFineResult } from './ifcObjectFineData.js';
 
 const neutralToBackendMetres = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
+
+/** SDK ranges are in neutral millimetres. The live Fragments anchor maps source Y-up metres to scene metres. */
+export function ifcBoundsToViewer(box: readonly number[], sourceToViewer: THREE.Matrix4) {
+  const range = queryIfcIndexRange(box);
+  if (range.coverage !== 'conservative') return;
+  const { min, max } = range.bounds;
+  return new THREE.Box3(new THREE.Vector3(...min), new THREE.Vector3(...max)).applyMatrix4(
+    sourceToViewer
+      .clone()
+      .multiply(neutralToBackendMetres)
+      .scale(new THREE.Vector3(0.001, 0.001, 0.001)),
+  );
+}
 
 /** sourceToViewer maps the regional index's Y-up metres into the viewer scene. */
 export function objectFineGroup(

@@ -1,3 +1,4 @@
+import { identityPlacement } from "../affineMatrix.js";
 import { composePlacement, isUsableAffineMatrix } from "../affineMatrix.js";
 import {
   placeGeometryRange,
@@ -29,6 +30,8 @@ export interface IfcMeshPart {
   readonly color: readonly number[];
 }
 export interface IfcObjectInput {
+  readonly emptyEvidence?:
+    "no-source-representation" | "backend-confirmed-empty";
   readonly sourceVersion: string;
   readonly sourcePath: string;
   readonly modelId: string;
@@ -143,13 +146,18 @@ function localTemplate(p: IfcMeshPart, quality: MeshTemplate["quality"]) {
   return { bounds, template };
 }
 
-/** Consume owned web-ifc part buffers. All engine calls, WASM lifetimes and the viewer anchor belong to the caller. */
-export function compileIfcObject(
-  input: IfcObjectInput,
-  lod: 1 | 2 = 2,
-): GeometryBatch {
-  const { sourceVersion, sourcePath, modelId, expressId, globalId } = input;
-  const address: GeometrySourceAddress = {
+export type IfcProductAddress = Pick<
+  IfcObjectInput,
+  "sourceVersion" | "sourcePath" | "modelId" | "expressId" | "globalId"
+>;
+export function ifcProductAddress({
+  sourceVersion,
+  sourcePath,
+  modelId,
+  expressId,
+  globalId,
+}: IfcProductAddress): GeometrySourceAddress {
+  return {
     format: "ifc",
     sourceVersion,
     sourcePath,
@@ -159,15 +167,90 @@ export function compileIfcObject(
     rootOccurrence: JSON.stringify([modelId, expressId]),
     assemblyPath: "",
   };
+}
+
+export function ifcLodQuality(lod: 0 | 1 | 2) {
+  return lod === 2 ? "source-derived" : "preview-only";
+}
+
+/** The compact regional cache stores absolute, source-restored Y-up metres (min xyz, max xyz). */
+export function queryIfcIndexRange(
+  box: readonly number[] | undefined,
+): import("../analysisGeometry.js").BoundsCoverage {
+  if (
+    box?.length !== 6 ||
+    !box.every(Number.isFinite) ||
+    box[0] > box[3] ||
+    box[1] > box[4] ||
+    box[2] > box[5]
+  )
+    return { coverage: "unknown" };
+  return {
+    coverage: "conservative",
+    bounds: {
+      min: [box[0] * 1000, -box[5] * 1000, box[1] * 1000],
+      max: [box[3] * 1000, -box[2] * 1000, box[4] * 1000],
+      quality: "mesh-derived",
+      unit: "mm",
+    },
+  };
+}
+
+/** Source metre placements used by existing interleaved streaming buffers and their cached boxes. */
+export function ifcSourceRestoration(
+  frame: IfcCoordinateFrame,
+): readonly number[] | undefined {
+  return frame.kind === "source"
+    ? identityPlacement
+    : inverseAffine(frame.coordinationMatrix);
+}
+export function ifcLocalMetreBox(v: Float32Array): number[] {
+  const box = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
+  for (let j = 0; j < v.length; j += 6)
+    for (let axis = 0; axis < 3; axis++) {
+      const x = v[j + axis];
+      box[axis] = Math.min(box[axis], x);
+      box[axis + 3] = Math.max(box[axis + 3], x);
+    }
+  return box;
+}
+/** Transform an AABB by summing its affine axis contributions directly into the aggregate. */
+export function includeIfcMetreBox(
+  total: number[],
+  box: readonly number[],
+  m: readonly number[],
+) {
+  if (box[0] > box[3]) return;
+  for (let axis = 0; axis < 3; axis++) {
+    let lo = m[12 + axis],
+      hi = lo;
+    for (let j = 0; j < 3; j++) {
+      const a = m[4 * j + axis] * box[j],
+        b = m[4 * j + axis] * box[3 + j];
+      lo += Math.min(a, b);
+      hi += Math.max(a, b);
+    }
+    total[axis] = Math.min(total[axis], lo);
+    total[axis + 3] = Math.max(total[axis + 3], hi);
+  }
+}
+
+/** Consume owned web-ifc part buffers. All engine calls, WASM lifetimes and the viewer anchor belong to the caller. */
+export function compileIfcObject(
+  input: IfcObjectInput,
+  lod: 1 | 2 = 2,
+): GeometryBatch {
+  const { sourceVersion, sourcePath, modelId, expressId } = input;
+  const address = ifcProductAddress(input);
   const templates = new Map<string, MeshTemplate>(),
     localBounds = new Map<string, GeometryBounds>();
   const parts: PlacedPart[] = [],
     diagnostics: GeometryDiagnostic[] = [];
   let total: GeometryBounds | undefined;
-  const quality = lod === 2 ? "source-derived" : "preview-only";
+  const quality = ifcLodQuality(lod);
   let toNeutral: readonly number[] | undefined = C;
   if (input.frame.kind === "coordination-applied") {
-    const restore = inverseAffine(input.frame.coordinationMatrix);
+    const restore = ifcSourceRestoration(input.frame);
     toNeutral = restore && composePlacement(C, restore);
   }
   const issue = (code: string, message: string, ordinal?: number) =>
@@ -244,6 +327,13 @@ export function compileIfcObject(
         rgba: p.color,
       });
     }
+  const unconfirmed =
+    !parts.length && !diagnostics.length && !input.emptyEvidence;
+  if (unconfirmed)
+    issue(
+      "ifc-no-evaluated-parts",
+      "Provider returned no triangles and supplied no evidence of an empty representation",
+    );
   return {
     templates,
     requestedLod: lod,
@@ -255,13 +345,15 @@ export function compileIfcObject(
         parts,
         ports: [],
         diagnostics,
-        availability: diagnostics.length
-          ? parts.length
-            ? "partial"
-            : "unavailable"
-          : parts.length
-            ? "available"
-            : "empty",
+        availability: unconfirmed
+          ? "unknown"
+          : diagnostics.length
+            ? parts.length
+              ? "partial"
+              : "unavailable"
+            : parts.length
+              ? "available"
+              : "empty",
         range: diagnostics.length
           ? { coverage: "unknown", knownBounds: total }
           : total
