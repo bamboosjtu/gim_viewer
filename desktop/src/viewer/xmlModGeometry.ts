@@ -7,7 +7,13 @@ export type DeviceLod = 0 | 1 | 2;
 import { Brush, Evaluator, ADDITION, INTERSECTION, SUBTRACTION } from 'three-bvh-csg';
 import type { XmlModColor, XmlModEntity, XmlModPrimitive } from '../gim/geometry/ir.js';
 import type { XmlModDocument } from '../gim/geometry/xmlModParser.js';
-import { entityIndex, compileStandardLeaf } from '../gim/geometry/xmlModDocument.js';
+import {
+  entityIndex,
+  compileStandardLeaf,
+  BooleanGraph,
+  visibleGeometryRoots,
+  outlinePartThresholdMm,
+} from '../gim/geometry/xmlModDocument.js';
 import { geometryFromMeshData } from './geometryBatch.js';
 export { geometryFromMeshData } from './geometryBatch.js';
 
@@ -478,7 +484,15 @@ function* bakeGeometrySteps(
   const memo = new Map<number, THREE.BufferGeometry | null>();
   const visiting = new Set<number>();
   const owned = new Set<THREE.BufferGeometry>();
-  const failures = new Map<number, string>();
+  const graph = new BooleanGraph((id) => {
+    const entity = entities.get(id);
+    if (!entity) return;
+    return {
+      localToParent: entity.transformMatrix,
+      operation: entity.primitive.type === 'Boolean' ? entity.primitive : undefined,
+    };
+  });
+  const failures = graph.failures;
   const own = (geometry: THREE.BufferGeometry) => {
     owned.add(geometry);
     return geometry;
@@ -576,68 +590,27 @@ function* bakeGeometrySteps(
     matrix: THREE.Matrix4;
     primitive: XmlModPrimitive;
   }
-  const surfaces = new Map<number, Piece[]>(),
-    surfaceStack = new Set<number>();
+  const leaves = new Map<number, { geometry: THREE.BufferGeometry; primitive: XmlModPrimitive }>();
+  const outlineLeaf = (id: number) => {
+    if (leaves.has(id)) return true;
+    const p = entities.get(id)!.primitive;
+    const geometry = build(p, id);
+    if (!geometry) {
+      fail(id, failures.get(id) ?? `unsupported-or-invalid:${p.type}`);
+      return false;
+    }
+    leaves.set(id, { geometry, primitive: p });
+    return true;
+  };
   function* surface(id: number): Generator<void, Piece[], void> {
-    const old = surfaces.get(id);
-    if (old) return old;
-    const e = entities.get(id);
-    if (!e) {
-      fail(id, 'missing-reference');
-      return [];
-    }
-    if (surfaceStack.has(id)) {
-      fail(id, 'cycle');
-      return [];
-    }
-    surfaceStack.add(id);
-    try {
-      const matrix = gimMatrixToMatrix4(e.transformMatrix),
-        p = e.primitive;
-      let pieces: Piece[];
-      if (p.type !== 'Boolean') {
-        const geometry = build(p, id);
-        if (!geometry) {
-          fail(id, failures.get(id) ?? `unsupported-or-invalid:${p.type}`);
-          return [];
-        }
-        pieces = [{ geometry, matrix, primitive: p }];
-      } else {
-        const a = yield* surface(p.entity1);
-        const b = p.op === 'Union' ? yield* surface(p.entity2) : [];
-        pieces = [...a, ...b].map((piece) => ({
-          ...piece,
-          matrix: matrix.clone().multiply(piece.matrix),
-        }));
-        byMaterial.simplifiedBooleans++;
-        byMaterial.approximatedBooleans[p.op]++;
-      }
-      surfaces.set(id, pieces);
-      yield;
-      return pieces;
-    } finally {
-      surfaceStack.delete(id);
-    }
-  }
-  // Validate skipped cutter references without generating their geometry. Source
-  // errors must remain errors, while intentional outline approximations succeed.
-  function validate(id: number, seen: Set<number>, stack = new Set<number>()): void {
-    if (stack.has(id)) {
-      fail(id, 'cycle');
-      return;
-    }
-    if (seen.has(id)) return;
-    seen.add(id);
-    const e = entities.get(id);
-    if (!e) {
-      fail(id, 'missing-reference');
-      return;
-    }
-    if (e.primitive.type !== 'Boolean') return;
-    stack.add(id);
-    validate(e.primitive.entity1, seen, stack);
-    validate(e.primitive.entity2, seen, stack);
-    stack.delete(id);
+    const plan = yield* graph.outline(id, outlineLeaf, (op) => {
+      byMaterial.simplifiedBooleans++;
+      byMaterial.approximatedBooleans[op]++;
+    });
+    return plan.map((p) => ({
+      ...leaves.get(p.id)!,
+      matrix: new THREE.Matrix4().fromArray(p.matrix),
+    }));
   }
   const placement = options?.placementMatrix
     ? new THREE.Matrix4().fromArray(options.placementMatrix)
@@ -652,18 +625,10 @@ function* bakeGeometrySteps(
   };
 
   try {
-    let visibleOrdinal = 0;
-    for (const entity of doc.entities) {
-      if (!entity.visible) continue;
-      if (
-        options?.rootSlice &&
-        visibleOrdinal++ % options.rootSlice.total !== options.rootSlice.index
-      )
-        continue;
+    for (const entity of visibleGeometryRoots(doc.entities, options?.rootSlice)) {
       let pieces = lod < 2 ? yield* surface(entity.id) : null;
       const base = lod < 2 ? null : yield* evaluate(entity.id);
-      const reachable = new Set<number>();
-      validate(entity.id, reachable);
+      const reachable = graph.dependencies(entity.id);
       const dependencies: { id: number; reason: string }[] = [];
       for (const id of reachable) {
         const reason = failures.get(id);
@@ -681,7 +646,11 @@ function* bakeGeometrySteps(
       for (const piece of pieces) {
         if (piece.geometry.getAttribute('position').count === 0) continue;
         const baked = transform(piece.geometry.clone(), piece.matrix);
-        const threshold = smallPartThresholdMm(piece.primitive);
+        const threshold = outlinePartThresholdMm(
+          piece.primitive.type === 'Standard'
+            ? piece.primitive.canonical.kind
+            : piece.primitive.type,
+        );
         if (lod < 2 && threshold) {
           baked.computeBoundingBox();
           const box = baked.boundingBox!.clone().applyMatrix4(placement);
@@ -733,22 +702,4 @@ function vec3Array(flat: number[]): THREE.Vector3[] {
     out.push(new THREE.Vector3(flat[i], flat[i + 1], flat[i + 2]));
   }
   return out;
-}
-
-/** Filtering uses the fully placed outer bounds, never wall thickness or DEV size. */
-function smallPartThresholdMm(p: XmlModPrimitive): number {
-  switch (p.type === 'Standard' ? p.canonical.kind : p.type) {
-    case 'CircularFixedPlate': // previously routed through Cylinder's outline threshold
-    case 'BendingCylindrical':
-    case 'EllipticRing':
-    case 'Cylinder':
-    case 'Sphere':
-    case 'Ring':
-    case 'CircularGasket':
-      return 100;
-    case 'Cuboid':
-      return 50;
-    default:
-      return 0; // Wire/Cable and structural members always survive.
-  }
 }

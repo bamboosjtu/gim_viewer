@@ -218,7 +218,14 @@ const viewerSourceValues = new Map([
   ],
   [
     'gim/geometry/xmlModDocument.ts',
-    new Set(['entityIndex', 'compileStandardLeaf', 'standardConnectionLine']),
+    new Set([
+      'BooleanGraph',
+      'visibleGeometryRoots',
+      'outlinePartThresholdMm',
+      'entityIndex',
+      'compileStandardLeaf',
+      'standardConnectionLine',
+    ]),
   ],
   ['gim/geometry/ir.ts', new Set(['DEFAULT_ANGULAR_SEGMENTS', 'DEFAULT_LINEAR_SEGMENTS'])],
 ]);
