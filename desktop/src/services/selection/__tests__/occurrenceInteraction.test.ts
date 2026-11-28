@@ -1,3 +1,4 @@
+import { prepareDeviceOccurrence } from '../../dev-geometry/nodeGeometryLoader.js';
 import { it, expect, vi, beforeEach } from 'vitest';
 import * as THREE from 'three';
 import { AppState } from '../../../app/state.js';
@@ -167,4 +168,65 @@ it('a project switch during IFC reset await preserves the new highlight state', 
   expect(state.selection.highlightedItems).toBe(newItems);
   expect(state.selection.highlightedModState).toBe(newHighlight);
   resetModHighlight(state);
+});
+
+it('raw STL lookup decodes a shared leaf once and places both PHM references independently', async () => {
+  const files = fixture();
+  files.set(
+    'PHM/leaf.phm',
+    new File(
+      [
+        'SOLIDMODELS.NUM=2\nSOLIDMODEL0=leaf.stl\nSOLIDMODEL1=leaf.stl\nTRANSFORMMATRIX1=1,0,0,0,0,1,0,0,0,0,1,0,500,0,0,1',
+      ],
+      'leaf.phm',
+    ),
+  );
+  const stl = new File(
+    [
+      'solid part\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid part',
+    ],
+    'leaf.stl',
+  );
+  files.set('MOD/leaf.stl', stl);
+  const read = vi.spyOn(stl, 'arrayBuffer');
+  const tree = (await buildCbmTree(files))!;
+  const state = new AppState();
+  state.currentFiles = files;
+  state.currentCbmTree = tree;
+  const root = tree.children[0];
+  const session = state.captureProjectSession();
+  read.mockRejectedValueOnce(new Error('temporary source read failure'));
+  await prepareDeviceOccurrence(state, root, session);
+  expect(state.loadedStlGroups.size).toBe(0);
+  expect(read).toHaveBeenCalledTimes(1);
+  await Promise.all(
+    [root, tree.children[1]].map((node) => prepareDeviceOccurrence(state, node, session)),
+  );
+  const groups = [...state.loadedStlGroups.values()].filter(
+    (group) => group.userData.rootOccurrence === root.path,
+  );
+  expect(groups).toHaveLength(6);
+  expect(read).toHaveBeenCalledTimes(2);
+  const meshes = groups.map((group) => group.children[0] as THREE.Mesh);
+  expect(new Set(meshes.map((mesh) => mesh.geometry)).size).toBe(1);
+  expect(new Set(meshes.map((mesh) => mesh.userData.geometryInstanceId)).size).toBe(6);
+  for (const mesh of meshes)
+    expect(mesh.userData.geometrySourceAddress).toMatchObject({
+      rootOccurrence: root.path,
+      sourcePath: 'MOD/leaf.stl',
+    });
+  expect(
+    new THREE.Vector3().setFromMatrixPosition(meshes[1].matrix).x -
+      new THREE.Vector3().setFromMatrixPosition(meshes[0].matrix).x,
+  ).toBeCloseTo(0.5);
+  await prepareDeviceOccurrence(state, root, session);
+  await prepareDeviceOccurrence(state, tree.children[1], session);
+  const bothRoots = [...state.loadedStlGroups.values()].map(
+    (group) => group.children[0] as THREE.Mesh,
+  );
+  expect(new Set(bothRoots.map((mesh) => mesh.geometry)).size).toBe(1);
+  expect(
+    new Set(bothRoots.map((mesh) => mesh.userData.geometrySourceAddress.rootOccurrence)),
+  ).toEqual(new Set([root.path, tree.children[1].path]));
+  expect(read).toHaveBeenCalledTimes(2);
 });

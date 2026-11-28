@@ -133,20 +133,15 @@ async function disposeGeometryLayers(
 
   // 遍历 STL 图层中的子 Group 并 dispose
   if (state.stlRootGroup) {
-    state.stlRootGroup.traverse((obj) => {
-      const mesh = obj as THREE.Mesh;
-      mesh.geometry?.dispose?.();
-      const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
-      if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
-      else mat?.dispose?.();
-    });
+    disposeStlGroup(state.stlRootGroup);
     scene.remove(state.stlRootGroup);
     counts.stlDisposedCount = state.loadedStlGroups.size;
   } else {
+    const disposed = new Set<THREE.BufferGeometry | THREE.Material>();
     for (const [stlPath, group] of state.loadedStlGroups) {
       try {
         scene.remove(group);
-        disposeStlGroup(group);
+        disposeStlGroup(group, disposed);
         counts.stlDisposedCount++;
       } catch (err) {
         logger.warn('[Cleanup] dispose stl group failed:', stlPath, err);

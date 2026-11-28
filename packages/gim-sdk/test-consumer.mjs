@@ -64,12 +64,17 @@ cpSync(
   join(target, "tests/profileAssemblyFixtures.mjs"),
 );
 cpSync(join(root, "stl-consumer.mjs"), join(target, "stl-consumer.mjs"));
+cpSync(
+  join(root, "neutral-geometry-consumer.mjs"),
+  join(target, "neutral-geometry-consumer.mjs"),
+);
 writeFileSync(
   join(target, "consumer.mjs"),
   `
 import assert from 'node:assert/strict';
 import './geometry-consumer.mjs';
 import './stl-consumer.mjs';
+import './neutral-geometry-consumer.mjs';
 import * as sdk from '@gim/gim-sdk';
 import * as parser from '@gim/gim-sdk/parser';
 import * as source from '@gim/gim-sdk/source';

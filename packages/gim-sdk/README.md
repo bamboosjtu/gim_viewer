@@ -54,3 +54,21 @@ Desktop 的 DOM 与 Worker 入口均选择工程列主序布局并读取同一 R
 **兼容接口。** `@gim/gim-primitives/geometry/ir.js` 的 `XmlModGeometrySource.entities` 与 `@gim/gim-sdk/parser` 的三参数 `parseXmlModRoot(root, path, mapper)` 保留旧 DTO 调用契约。标准图元的新功能只在 Raw／Canonical 接口维护。Desktop 的旧类型消费限于 Boolean、Cable、提供方型钢和 Unsupported；其余 29 类的旧标签映射和重复网格构造已移除。独立 Blender 工具维护自身的快照。
 
 各图元的参数、预览约定和实际样本覆盖见[逐项能力与证据](../../docs/schema/xml-primitives.md#逐项能力与证据)。包内测试与夹具随源码维护。可从 `desktop/` 运行 `npm run test:module -- ../packages/gim-sdk/src/semantic`，同时检查 SDK 模块和 Viewer 消费者。实体盘点器使用独立 Python 实现，通过配置与共享契约用例核对结果。
+
+## MOD / STL 中立几何输出
+
+`@gim/gim-sdk/geometry` 的 `compileGeometrySource` 接收已解析的 Raw XML MOD 或 STL 字节。输入的 `sourceVersion` 标识数据版本，例如工程源 SHA。Node 宿主可以使用 [XML 文本读取示例](node-xml-mod-consumer.mjs) 提供 Raw 文档。原有单图元、文档及 STL 编译入口继续可用。
+
+```ts
+const input = { format: 'xml-mod' as const, sourceVersion, document: raw }
+const source = geometry.compileGeometrySource(input, { lod: 2 })
+const batch = geometry.placeGeometrySource(source, [
+  { rootOccurrence: 'CBM/A', assemblyPath: 'solid:0', localToParent: matrixA },
+  { rootOccurrence: 'CBM/B', assemblyPath: 'solid:0', localToParent: matrixB },
+])
+const range = geometry.queryGeometryRange(input, { purpose: 'analytical' })
+```
+
+STL 输入使用 `{ format: 'stl', sourceVersion, sourcePath, bytes }`。模板包含只读使用的局部毫米网格；实例携带独立地址、ID 和列主序的外部放置乘声明矩阵。对象的范围及具名端口在对象局部空间，单独查询的范围在来源文档空间。声明的可见性、诊断和可用性与部件质量分列。STL 的网格独立于 LOD，退化面继续按浏览规则跳过。G0 输出 MOD 叶子的网格；尚无中立网格的 Boolean 根保留声明与诊断，Desktop 的组合仍沿用生产求值路径。
+
+使用 `port.postMessage(batch, geometry.geometryTransferList(batch, 'retain'))` 可保留发送端模板，普通 ArrayBuffer 由消息通道复制。所有调用方都已放弃发送端缓冲时使用 `'move'`，每个底层 ArrayBuffer 仅出现在转移列表中一次。移交会分离发送端该来源及其他批次引用的同一缓冲。独立消费者用例见 [Node 与 Worker 验收](neutral-geometry-consumer.mjs)。

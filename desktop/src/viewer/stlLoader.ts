@@ -1,5 +1,6 @@
 /** DEV/PHM STL adapter. The SDK owns format detection and facet decoding. */
 import * as THREE from 'three';
+import { geometryFromMeshData } from './geometryBatch.js';
 import { decodeStl } from '../gim/geometry/stlSource.js';
 
 function stlGroup(buffer: ArrayBuffer, path: string, format?: 'ascii'): THREE.Group | null {
@@ -9,18 +10,19 @@ function stlGroup(buffer: ArrayBuffer, path: string, format?: 'ascii'): THREE.Gr
   group.name = path;
   // Auto-detection also serves DEV assembly, which distinguishes empty sources from decode errors.
   if (result.status === 'empty') return format === 'ascii' ? null : group;
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(result.mesh.positions, 3));
-  geometry.setAttribute('normal', new THREE.BufferAttribute(result.mesh.normals, 3));
-  // These arrays are exclusively owned until the host registers this source template.
+  const geometry = geometryFromMeshData(result.mesh, false);
+  // This decoder transfers exclusive local buffers to the existing metre-based GLB path.
   geometry.scale(0.001, 0.001, 0.001);
-  const props = { color: 0xcccccc, side: THREE.DoubleSide, flatShading: false };
-  const material =
-    result.format === 'ascii'
-      ? new THREE.MeshStandardMaterial(props)
-      : new THREE.MeshPhongMaterial({ ...props, specular: 0x111111, shininess: 30 });
+  const material = stlMaterial(result.format);
   group.add(new THREE.Mesh(geometry, material));
   return group;
+}
+
+export function stlMaterial(format: 'ascii' | 'binary') {
+  const props = { color: 0xcccccc, side: THREE.DoubleSide, flatShading: false };
+  return format === 'ascii'
+    ? new THREE.MeshStandardMaterial(props)
+    : new THREE.MeshPhongMaterial({ ...props, specular: 0x111111, shininess: 30 });
 }
 
 export function parseStlBinary(buffer: ArrayBuffer, stlPath: string): THREE.Group | null {
@@ -36,17 +38,26 @@ export function parseStlAscii(buffer: ArrayBuffer, stlPath: string): THREE.Group
  * 由 projectCleanupService 在切换项目时调用。
  * 调用前需已从 scene 移除（scene.remove(group)）。
  */
-export function disposeStlGroup(group: THREE.Group): void {
+export function disposeStlGroup(
+  group: THREE.Group,
+  disposed = new Set<THREE.BufferGeometry | THREE.Material>(),
+): void {
+  const release = (item: THREE.BufferGeometry | THREE.Material) => {
+    if (!disposed.has(item)) {
+      disposed.add(item);
+      item.dispose();
+    }
+  };
   group.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
     if (mesh.geometry) {
-      mesh.geometry.dispose();
+      release(mesh.geometry);
     }
     const material = mesh.material as THREE.Material | THREE.Material[] | undefined;
     if (Array.isArray(material)) {
-      material.forEach((m) => m.dispose());
+      material.forEach(release);
     } else if (material) {
-      material.dispose();
+      release(material);
     }
   });
 }

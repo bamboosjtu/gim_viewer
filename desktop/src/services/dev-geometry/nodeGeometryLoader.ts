@@ -1,3 +1,4 @@
+import type { CompiledGeometrySource, GeometryTemplate } from '@gim/gim-sdk/geometry';
 import * as THREE from 'three';
 import type { AppState, ProjectLoadSession } from '../../app/state.js';
 import type { CbmNode } from '../../gim/types.js';
@@ -68,7 +69,8 @@ async function loadDeviceOccurrence(
   node: CbmNode,
   session: ProjectLoadSession,
 ): Promise<void> {
-  const current = () => state.isCurrentSession(session);
+  const current = () =>
+    state.isCurrentSession(session) && state.geometryLoadToken === session.geometryToken;
   const scope = deviceOccurrenceScope(state.currentCbmTree, node);
   if (!current() || scope.assemblyPaths?.length === 0) return;
   if (!state.currentFiles && session.projectId == null) return;
@@ -92,7 +94,7 @@ async function loadDeviceOccurrence(
   if (mods.length || stls.length) {
     await loadModOccurrences(state, scene, mods, files, current);
     if (!current()) return;
-    await loadStlOccurrences(state, scene, stls, files, current);
+    await loadStlOccurrences(state, scene, stls, files, current, session, scope.rootOccurrence);
   }
   if (current()) await publishRawGeometryDiagnostic(state, node, sources, current);
 }
@@ -147,17 +149,49 @@ async function loadModOccurrences(
   }
 }
 
+// The live layer owns its templates. Concurrent picks join the same source read;
+// releasing the layer or changing its geometry batch releases the cache scope.
+interface RawStlTemplates {
+  generation: number;
+  geometryToken: number;
+  sources: Map<string, Promise<CompiledGeometrySource | undefined>>;
+  geometries: WeakMap<GeometryTemplate, THREE.BufferGeometry>;
+}
+const rawStlLayers = new WeakMap<THREE.Group, RawStlTemplates>();
+function templatesForLayer(layer: THREE.Group, session: ProjectLoadSession): RawStlTemplates {
+  let pool = rawStlLayers.get(layer);
+  if (
+    !pool ||
+    pool.generation !== session.generation ||
+    pool.geometryToken !== session.geometryToken
+  ) {
+    pool = {
+      generation: session.generation,
+      geometryToken: session.geometryToken,
+      sources: new Map(),
+      geometries: new WeakMap(),
+    };
+    rawStlLayers.set(layer, pool);
+  }
+  return pool;
+}
+
 async function loadStlOccurrences(
   state: AppState,
   scene: THREE.Scene,
   stls: readonly DiscoveredStlGeometry[],
   discoveryFiles: Map<string, File>,
   current: Current,
+  session: ProjectLoadSession,
+  rootPath: string,
 ): Promise<void> {
-  const { applyPlacementTransformToSceneUnits } = await import('../../viewer/xmlModLoader.js');
-  const { parseStlBinary } = await import('../../viewer/stlLoader.js');
+  if (!stls.length) return;
+  const { compileGeometrySource, placeGeometrySource } = await import('@gim/gim-sdk/geometry');
+  const { geometryBatchToGroup } = await import('../../viewer/geometryBatch.js');
+  const { stlMaterial } = await import('../../viewer/stlLoader.js');
   const { applyPhmColorOverride } = await import('../../viewer/xmlModGeometry.js');
   if (!current()) return;
+  const sourceVersion = session.sourceSha256 ?? `session:${session.generation}`;
   for (const geo of stls) {
     if (state.loadedStlGroups.has(geo.instanceKey)) {
       debugLog(DEBUG_IFC_LOAD, '[xml-mod] STL 实例已加载，跳过:', geo.instanceKey);
@@ -169,23 +203,50 @@ async function loadStlOccurrences(
       logger.warn(`[xml-mod] STL 文件不存在: ${geo.stlPath}`);
       continue;
     }
-    const buffer = await stlFile.arrayBuffer();
-    if (!current()) return;
-    const group = parseStlBinary(buffer, geo.stlPath);
-    if (!group?.children.length) continue;
-    applyPhmColorOverride(group, geo.phmColor, geo.phmColorMaxA);
-
-    applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);
-    applyProjectSourceToViewer(group, state.projectSourceToViewerMatrix);
     const stlRoot = ensureGeometryLayer(state, scene, 'stl');
-    group.userData.devPath = geo.devPath;
+    const { sources, geometries } = templatesForLayer(stlRoot, session);
+    let pending = sources.get(geo.stlPath);
+    if (!pending) {
+      pending = stlFile
+        .arrayBuffer()
+        .then((bytes) =>
+          current()
+            ? compileGeometrySource({
+                format: 'stl',
+                sourcePath: geo.stlPath,
+                sourceVersion,
+                bytes,
+              })
+            : undefined,
+        )
+        .catch((error: unknown) => {
+          sources.delete(geo.stlPath);
+          throw error;
+        });
+      sources.set(geo.stlPath, pending);
+    }
+    const source = await pending;
+    if (!current() || !source) return;
     if (
       getLoadedDevOccurrenceKind(state, geo.rootOccurrence) === 'glb' ||
       state.loadedStlGroups.has(geo.instanceKey)
-    ) {
-      group.traverse((o) => (o as THREE.Mesh).geometry?.dispose?.());
+    )
       continue;
-    }
+    const batch = placeGeometrySource(source, [
+      {
+        rootOccurrence: geo.rootOccurrence ?? rootPath,
+        assemblyPath: geo.assemblyPath ?? '',
+        referencePath: geo.referencePath ?? geo.instanceKey,
+        localToParent: geo.placementTransformMatrix,
+      },
+    ]);
+    const format = source.stlFormat!;
+    const group = geometryBatchToGroup(batch, () => stlMaterial(format), geometries);
+    if (!group.children.length) continue;
+    group.name = geo.stlPath;
+    applyPhmColorOverride(group, geo.phmColor, geo.phmColorMaxA);
+    applyProjectSourceToViewer(group, state.projectSourceToViewerMatrix);
+    group.userData.devPath = geo.devPath;
     group.userData.rootOccurrence = geo.rootOccurrence;
     group.userData.assemblyPath = geo.assemblyPath;
     group.userData.referencePath = geo.referencePath;

@@ -8,7 +8,8 @@ import { Brush, Evaluator, ADDITION, INTERSECTION, SUBTRACTION } from 'three-bvh
 import type { XmlModColor, XmlModEntity, XmlModPrimitive } from '../gim/geometry/ir.js';
 import type { XmlModDocument } from '../gim/geometry/xmlModParser.js';
 import { entityIndex, compileStandardLeaf } from '../gim/geometry/xmlModDocument.js';
-import type { MeshData } from '@gim/gim-sdk/geometry';
+import { geometryFromMeshData } from './geometryBatch.js';
+export { geometryFromMeshData } from './geometryBatch.js';
 
 const MOD_MM_TO_SCENE_UNIT = 0.001;
 export { MOD_MM_TO_SCENE_UNIT };
@@ -118,20 +119,6 @@ export function disposeOwnedXmlModMaterials(group: THREE.Object3D): void {
   });
 }
 
-/** Attach the SDK's local mesh buffers to a render template. */
-export function geometryFromMeshData(mesh: MeshData): THREE.BufferGeometry {
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
-  geometry.setAttribute('normal', new THREE.BufferAttribute(mesh.normals, 3));
-  // Mesh merge and CSG share a material layout with UV-bearing legacy leaves.
-  geometry.setAttribute(
-    'uv',
-    new THREE.BufferAttribute(mesh.uvs ?? new Float32Array((mesh.positions.length / 3) * 2), 2),
-  );
-  if (mesh.indices) geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
-  return geometry;
-}
-
 function primitiveToGeometryUncached(
   p: XmlModPrimitive,
   lod: DeviceLod,
@@ -139,13 +126,13 @@ function primitiveToGeometryUncached(
 ): THREE.BufferGeometry | null {
   if (p.type === 'Standard') {
     const result = compileStandardLeaf(p.canonical, lod);
-    if (!result.mesh) {
+    if (!result.template) {
       onFailure?.(result.diagnostics[0]?.code ?? 'unsupported-primitive');
       return null;
     }
-    const geometry = geometryFromMeshData(result.mesh);
-    if (result.status === 'estimated' || result.status === 'preview-only')
-      geometry.userData.representationQuality = result.status;
+    const geometry = geometryFromMeshData(result.template.mesh);
+    if (result.template.quality === 'estimated' || result.template.quality === 'preview-only')
+      geometry.userData.representationQuality = result.template.quality;
     return geometry;
   }
   if (p.type === 'ChannelSteel' || p.type === 'BeamChannelLike') {
@@ -166,7 +153,7 @@ function primitiveToGeometryUncached(
       },
       lod,
     );
-    return result.mesh ? geometryFromMeshData(result.mesh) : null;
+    return result.template ? geometryFromMeshData(result.template.mesh) : null;
   }
   if (p.type === 'Cable') {
     const points = vec3Array(p.inflectionPoints);

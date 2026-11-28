@@ -101,7 +101,7 @@ function finishFacet(normal: Point3, v: number[], mesh: boolean) {
 
 function decode(
   input: Input,
-  mode: "mesh" | "bounds",
+  mode: "mesh" | "bounds" | "mesh-and-bounds",
   expected?: StlFormat,
 ): StlCompileResult {
   const bytes = ArrayBuffer.isView(input)
@@ -138,13 +138,16 @@ function decode(
   });
   const normal: Point3 = [0, 0, 0],
     vertices = Array<number>(9).fill(0);
+  const meshRequested = mode !== "bounds";
+  const localRange = mode === "mesh-and-bounds" ? rangeSink() : undefined;
   let count = 0;
   let skipped = 0;
   let firstSkipped = 0;
   const consume = (sink: Sink) => {
     count++;
-    if (finishFacet(normal, vertices, mode === "mesh")) {
+    if (finishFacet(normal, vertices, meshRequested)) {
       sink.put(normal, vertices);
+      localRange?.put(normal, vertices);
     } else {
       if (skipped === 0) firstSkipped = count;
       skipped++;
@@ -165,6 +168,7 @@ function decode(
         ]
       : [],
     ...sink.finish(),
+    ...localRange?.finish(),
   });
   if (format === "binary") {
     if (bytes.length < 84) return fail("Missing binary STL header");
@@ -172,7 +176,7 @@ function decode(
       return fail("STL exceeds five million triangles", true);
     if (bytes.length < binaryLength)
       return fail("Binary STL record length mismatch");
-    const sink = mode === "mesh" ? meshSink(declared) : rangeSink();
+    const sink = meshRequested ? meshSink(declared) : rangeSink();
     for (let start = 84; start < binaryLength; start += 50) {
       for (let i = 0; i < 3; i++)
         normal[i] = view.getFloat32(start + 4 * i, true);
@@ -200,7 +204,7 @@ function decode(
     }
     return true;
   };
-  const sink = mode === "mesh" ? meshSink() : rangeSink();
+  const sink = meshRequested ? meshSink() : rangeSink();
   let keyword = token();
   if (keyword !== "solid") return fail("Invalid ASCII header");
   while (keyword === "solid") {
@@ -233,10 +237,17 @@ function decode(
 }
 export function compileStl(
   input: Input,
-  options: { format?: StlFormat } = {},
+  options: { format?: StlFormat; includeBounds?: boolean } = {},
 ): StlCompileResult {
-  return decode(input, "mesh", options.format);
+  return decode(
+    input,
+    options.includeBounds ? "mesh-and-bounds" : "mesh",
+    options.format,
+  );
 }
-export function queryStlBounds(input: Input): StlCompileResult {
-  return decode(input, "bounds");
+export function queryStlBounds(
+  input: Input,
+  format?: StlFormat,
+): StlCompileResult {
+  return decode(input, "bounds", format);
 }

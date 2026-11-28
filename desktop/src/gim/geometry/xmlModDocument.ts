@@ -1,5 +1,6 @@
 import {
   compilePrimitive,
+  modMeshTemplate,
   STANDARD_PRIMITIVE_TAGS,
   type GeometryCompileOptions,
   curveCenterline,
@@ -29,7 +30,8 @@ const projectRules: Record<string, NonNullable<GeometryCompileOptions['compatibi
 
 const indexes = new WeakMap<XmlModEntity[], Map<number, XmlModEntity>>();
 export function compileStandardLeaf(shape: CanonicalPrimitive, lod: GeometryLod) {
-  return compilePrimitive(shape, { lod });
+  const result = compilePrimitive(shape, { lod });
+  return { template: modMeshTemplate(result), diagnostics: result.diagnostics };
 }
 export function standardConnectionLine(shape: CanonicalPrimitive, lod?: GeometryLod) {
   return 'family' in shape && shape.family === 'curve'

@@ -36,3 +36,15 @@ export {
   type StlFormat,
   type StlCompileResult,
 } from "./formats/stl.js";
+
+export type * from "./contracts/geometryBatch.js";
+export {
+  compileGeometrySource,
+  queryGeometryRange,
+  modMeshTemplate,
+  type GeometryInput,
+} from "./geometrySource.js";
+export {
+  placeGeometrySource,
+  geometryTransferList,
+} from "./geometryInstances.js";
