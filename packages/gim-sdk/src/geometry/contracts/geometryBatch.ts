@@ -14,6 +14,8 @@ export interface GeometryOccurrence {
   readonly localToParent: readonly number[];
 }
 export interface GeometrySourceAddress {
+  readonly variantKey?: string;
+  readonly componentKey?: string;
   readonly sourceVersion: string;
   readonly sourcePath: string;
   readonly format: "xml-mod" | "stl" | "ifc" | "line-mod";
@@ -63,6 +65,8 @@ export type NamedGeometryPort = Omit<GeometryPort, "direction"> & {
   readonly recordOrdinal?: number;
 };
 export interface GeometryObjectResult {
+  /** Placement of local analysis bounds and ports, including for port-only records. */
+  readonly analysisToParent?: readonly number[];
   readonly address: GeometrySourceAddress;
   readonly visible: boolean;
   readonly availability: GeometryAvailability;
@@ -80,6 +84,7 @@ export interface GeometryBatch {
 }
 
 export interface LocalGeometryObject {
+  readonly componentKey?: string;
   readonly entityId?: number;
   readonly ordinal?: number;
   readonly visible: boolean;
@@ -94,6 +99,7 @@ export interface LocalGeometryObject {
   readonly diagnostics: readonly GeometryDiagnostic[];
 }
 export interface CompiledGeometrySource {
+  readonly variantKey?: string;
   readonly requestedLod?: GeometryLod;
   readonly sourceVersion: string;
   readonly sourcePath: string;

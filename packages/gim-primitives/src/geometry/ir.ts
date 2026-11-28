@@ -355,16 +355,25 @@ export interface HSubLegRecord {
   offset: number;
 }
 
-/** HLeg 记录：腿顶坐标（X/Y 平面投影） */
+/** Two vertical lengths in mm, common and non-common portions (Q/GDW 11810.2 A.3). */
 export interface HLegRecord {
-  /** 腿序号（1..N） */
   index: number;
-  x: number;
-  y: number;
+  commonHeight: number;
+  nonCommonHeight: number;
+}
+/** Start offsets in the containing Body's source arrays; the next part delimits the range. */
+export interface TowerPartStart {
+  kind: "body" | "leg" | "subleg";
+  leg?: number;
+  subleg?: number;
+  point: number;
+  rod: number;
+  port: number;
 }
 
 /** Body 段：含参考标高 + P/R/G 记录组 */
 export interface BodySection {
+  partStarts?: TowerPartStart[];
   /** 体段标识（"Body1".."BodyN"） */
   name: string;
   /** 体段参考标高（mm，来自 HBodyN 行；缺失为 undefined） */

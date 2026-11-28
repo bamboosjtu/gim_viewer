@@ -17,6 +17,12 @@ export function placeGeometrySource(
     for (const local of source.objects) {
       const address: GeometrySourceAddress = {
         format: source.format,
+        ...(source.variantKey !== undefined
+          ? { variantKey: source.variantKey }
+          : {}),
+        ...(local.componentKey !== undefined
+          ? { componentKey: local.componentKey }
+          : {}),
         sourceVersion: source.sourceVersion,
         sourcePath: source.sourcePath,
         rootOccurrence: occurrence.rootOccurrence,
@@ -26,6 +32,9 @@ export function placeGeometrySource(
         ordinal: local.ordinal,
       };
       const geometry = local.geometry;
+      const analysisToParent = usable
+        ? composePlacement(occurrence.localToParent, local.localToSource)
+        : undefined;
       const parts =
         usable && geometry
           ? [
@@ -41,11 +50,11 @@ export function placeGeometrySource(
                   address.referencePath,
                   address.entityId,
                   address.ordinal,
+                  ...(address.componentKey === undefined
+                    ? []
+                    : [address.variantKey, address.componentKey]),
                 ]),
-                localToParent: composePlacement(
-                  occurrence.localToParent,
-                  local.localToSource,
-                ),
+                localToParent: analysisToParent!,
               },
             ]
           : [];
@@ -53,6 +62,7 @@ export function placeGeometrySource(
         address,
         parts,
         visible: local.visible,
+        analysisToParent,
         availability: usable ? local.availability : "unavailable",
         range: local.range,
         ports: local.ports.map((port) => ({ ...port, address })),

@@ -1,5 +1,11 @@
 export type SourceRepresentation =
   | {
+      kind: "line";
+      sourceId: string;
+      rootOccurrence: string;
+      assemblyPath: string;
+    }
+  | {
       kind: "dev";
       sourceId: string;
       rootOccurrence: string;
@@ -38,6 +44,7 @@ export class RepresentationAddressIndex {
   >();
   private readonly ifcObjects = new Map<string, string[]>();
   private readonly ifcGuids = new Map<string, string[]>();
+  private readonly lineOccurrences = new Map<string, string[]>();
   private readonly devAssembly = new Map<string, Map<string, string[]>>();
   private readonly devFiles = new Map<string, Map<string, string[]>>();
   constructor(bindings: readonly SourceRepresentation[]) {
@@ -46,6 +53,14 @@ export class RepresentationAddressIndex {
       const addresses = bySource.get(binding.sourceId) ?? [];
       addresses.push(binding);
       bySource.set(binding.sourceId, addresses);
+      if (binding.kind === "line") {
+        append(
+          this.lineOccurrences,
+          JSON.stringify([binding.rootOccurrence, binding.assemblyPath]),
+          binding.sourceId,
+        );
+        continue;
+      }
       if (binding.kind === "dev") {
         const rows = this.devRoots.get(binding.rootOccurrence) ?? [];
         rows.push(binding);
@@ -74,6 +89,13 @@ export class RepresentationAddressIndex {
       }
     }
     this.bySource = bySource;
+  }
+  sourcesForLine(rootOccurrence: string, assemblyPath: string) {
+    return (
+      this.lineOccurrences.get(
+        JSON.stringify([rootOccurrence, assemblyPath]),
+      ) ?? []
+    );
   }
   sourcesForIfc(modelId: string, expressId: number): readonly string[] {
     return this.ifcObjects.get(JSON.stringify([modelId, expressId])) ?? [];

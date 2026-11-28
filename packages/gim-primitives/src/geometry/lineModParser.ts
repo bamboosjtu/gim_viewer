@@ -133,7 +133,7 @@ const RE_BODY_HEADER = /^(Body\d+)$/i;
 const RE_HBODY = /^HBody(\d+)\s*,\s*(-?[\d.]+)\s*$/i;
 /** P 记录正则：P,<id>,<X>,<Y>,<Z> */
 const RE_P_RECORD =
-  /^P\s*,\s*(\d+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*$/i;
+  /^P\s*,\s*(\d+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)(?:\s*,\s*[^,]+)?\s*$/i;
 /** G 记录正则：G,<type>,<name>,<X>,<Y>,<Z> */
 const RE_G_RECORD =
   /^G\s*,\s*([^,]+)\s*,\s*([^,]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*$/i;
@@ -213,6 +213,23 @@ export function parseHNumCommaRecord(
         rods: [],
         groundPoints: [],
       };
+      continue;
+    }
+    const partHeader = /^(SubLeg|Leg)(\d+)$/i.exec(line);
+    if (partHeader && currentBody) {
+      const starts = (currentBody.partStarts ??= [
+        { kind: "body", point: 0, rod: 0, port: 0 },
+      ]);
+      const sub = partHeader[1].toLowerCase() === "subleg",
+        index = Number(partHeader[2]);
+      starts.push({
+        kind: sub ? "subleg" : "leg",
+        leg: sub ? starts[starts.length - 1].leg : index,
+        subleg: sub ? index : undefined,
+        point: currentBody.points.length,
+        rod: currentBody.rods.length,
+        port: currentBody.groundPoints.length,
+      });
       continue;
     }
     // HBody1,26720.401
@@ -318,8 +335,8 @@ export function parseHNumCommaRecord(
         );
       hLegs.push({
         index: parseInt(m[1], 10),
-        x: parseFloat(m[2]),
-        y: parseFloat(m[3]),
+        commonHeight: parseFloat(m[2]),
+        nonCommonHeight: parseFloat(m[3]),
       });
       continue;
     }

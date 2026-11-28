@@ -90,6 +90,14 @@ export class EngineeringRepresentationIndex extends RepresentationAddressIndex {
       ...(unknownSourceIds.length ? { unknownSourceIds } : {}),
     };
   }
+  resolveLine(
+    rootOccurrence: string,
+    assemblyPath: string,
+  ): RepresentationResolution {
+    return this.resolveSources(
+      this.sourcesForLine(rootOccurrence, assemblyPath),
+    );
+  }
   resolveIfc(modelId: string, expressId: number): RepresentationResolution {
     return this.resolveSources(this.sourcesForIfc(modelId, expressId));
   }

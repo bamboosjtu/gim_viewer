@@ -44,7 +44,7 @@ HLeg1,1000,0
 | R 的其他长度 | raw，合法端点可保留 | unknown，不猜测其余字段 |
 | G,type,name,x,y,z | 含 G 共 6 token | 局部挂点，不是地理塔位 |
 | HSubLegN,offset | 附腿偏移记录 | 依 body/leg 关系解释 |
-| HLegN,x,y | 腿位置来源 | 不等于全局经纬度 |
+| HLegN,commonHeight,nonCommonHeight | 接腿共用及非共用部分的高度（mm） | 分段归属按 Body、Leg、SubLeg 的出现顺序确定 |
 
 骨架预览连接 P/R，不能宣称完整钢材实体或施工级模型。
 `resolveTowerTopology` 为 Desktop 与 Android 提供同一组已解析 R 端点。全文件点号唯一时允许文件尾 R 跨 Body 引用；点号复用时在声明 R 的 Body 内解析，同一作用域重号的端点保留未解析状态。SDK 的 `compileTowerSkeleton` 消费结构化段，保留每根可用杆件的记录序号、G 挂点和孤立 P 的范围。二维预览使用 X/Z，三维骨架使用完整的毫米 XYZ。
@@ -120,3 +120,9 @@ KVALUE、导线材料与局部矩阵的完整工程含义尚未形成可验收�
 - [几何模型](geometry-model.md)
 - [样本台账](sample-corpus.md)
 - [桌面软件规格](../software-spec.md)
+
+### 已选装配
+
+`selectTowerParts` 接受已确认的呼高和子腿编号，按源文件的 Body、Leg、SubLeg 顺序选择接身链与其接腿。尾部 R 块按已选端点归属，G 表保留模板及原声明作用域。节点坐标以最高呼高、最长接腿基础平面为基准；选用短腿时保留原坐标。分段来源不足时可继续浏览骨架。见 Q/GDW 11810.2—2023 附录 A.3、表 B.25 与条文说明。
+
+`compileSelectedLineAssembly` 接收上述结构化输入、显式部件放置和尺寸。可识别的角钢与等径钢管使用局部截面模板，未解释的规格保留杆件线段。模型页可将同一已选装配置于不同塔位，Engineering 按 occurrence 和装配路径绑定。单桩支持表 B.28 的直段、扩底过渡及底缘；正值圆弧趾深而弧形未确定时上报缺项。承台、偏心柱和螺栓由给定中心与放置确定；公称螺栓外包络记录为预览。
