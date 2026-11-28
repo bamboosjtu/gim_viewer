@@ -32,6 +32,7 @@ export const architectureModules = [
   'src/services/dev-geometry/rawModOccurrence.ts',
   'src/viewer/patrol/collision/doorSweep.ts',
   'src/viewer/patrol/mappedDoorLeaves.ts',
+  'src/ui/fileDevView.ts',
   'src/viewer/cameraPoseHub.ts',
   'src/viewer/ifcOpeningPolicy.ts',
   'src/viewer/ifcRegionalWorker.ts',

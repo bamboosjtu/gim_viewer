@@ -15,6 +15,7 @@ const mergedThresholds = {
   semantic: { statements: 95, lines: 95, functions: 95, branches: 90 },
   source: domainThreshold,
   geometry: domainThreshold,
+  powerlineGeometry: { lines: 85, branches: 70, functions: 85, statements: 85 },
   engineering: domainThreshold,
   shared: domainThreshold,
   projection: domainThreshold,
@@ -60,7 +61,12 @@ if (!process.exitCode) {
     const coverage = combined.fileCoverageFor(file),
       path = relative(repo, file).replaceAll('\\', '/');
     summaries[file] = coverage.toSummary().toJSON();
-    const group = /^packages\/gim-sdk\/src\/([^/]+)\//.exec(path)?.[1];
+    const group =
+      /^packages\/powerline-core\/src\/(towerAssembly|towerTopology|wireGeometry|foundationSelection|preview)\.ts$/.test(
+        path,
+      )
+        ? 'powerlineGeometry'
+        : /^packages\/gim-sdk\/src\/([^/]+)\//.exec(path)?.[1];
     if (group && Object.hasOwn(mergedThresholds, group)) {
       groups[group] ??= createCoverageMap({});
       groups[group].addFileCoverage(coverage);

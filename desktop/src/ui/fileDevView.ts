@@ -4,7 +4,11 @@ import { fileDevPanel } from './dom.js';
 import { getNodeDisplayName } from '../shared/displayName.js';
 
 const ENTITY_ICONS: Record<string, string> = {
-  F1System: '🏗️', F2System: '🏢', F3System: '⚡', F4System: '🔧', PARTINDEX: '🔩',
+  F1System: '🏗️',
+  F2System: '🏢',
+  F3System: '⚡',
+  F4System: '🔧',
+  PARTINDEX: '🔩',
 };
 
 /**
@@ -15,9 +19,7 @@ const ENTITY_ICONS: Record<string, string> = {
  * 自身无 SUBDEVICE 局部矩阵，由根 DEV 递归覆盖）。
  */
 function isModDeviceNode(node: CbmNode): boolean {
-  return !!node.devPath
-    && node.entityName !== 'DEV_SUBDEVICE'
-    && node.entityName !== 'PARTINDEX';
+  return !!node.devPath && node.entityName !== 'DEV_SUBDEVICE' && node.entityName !== 'PARTINDEX';
 }
 
 /**
@@ -68,7 +70,9 @@ function createCollapsibleNode(
   const label = document.createElement('span');
   label.className = 'tree-label';
   label.textContent = labelText;
-  row.appendChild(toggle); row.appendChild(icon); row.appendChild(label);
+  row.appendChild(toggle);
+  row.appendChild(icon);
+  row.appendChild(label);
   nodeEl.appendChild(row);
   const childrenEl = document.createElement('div');
   childrenEl.className = 'tree-children';
@@ -91,23 +95,36 @@ function createDeviceRow(
   devRow.style.paddingLeft = paddingLeft;
   const devIcon = document.createElement('span');
   devIcon.className = 'tree-icon';
-  devIcon.textContent = devNode ? (ENTITY_ICONS[devNode.entityName] || '📁') : '🔩';
+  devIcon.textContent = devNode ? ENTITY_ICONS[devNode.entityName] || '📁' : '🔩';
   const devLabel = document.createElement('span');
   devLabel.className = 'tree-label';
-  devLabel.textContent = devNode ? getNodeDisplayName(devNode, state.ifcGuidToName, state.currentIfcEntries) : fallbackName;
-  devRow.appendChild(devIcon); devRow.appendChild(devLabel);
+  devLabel.textContent = devNode
+    ? getNodeDisplayName(devNode, state.ifcGuidToName, state.currentIfcEntries)
+    : fallbackName;
+  devRow.appendChild(devIcon);
+  devRow.appendChild(devLabel);
   devRow.addEventListener('click', (e) => {
     e.stopPropagation();
-    document.querySelectorAll('.tree-row.selected').forEach(r => r.classList.remove('selected'));
+    document.querySelectorAll('.tree-row.selected').forEach((r) => r.classList.remove('selected'));
     devRow.classList.add('selected');
     if (devNode) {
       onNodeClick(devNode);
     } else {
       const tempNode: CbmNode = {
-        path: '', name: fallbackName,
-        entityName: '', children: [], famPath: '', devPath: '',
-        ifcFile: '', ifcGuid: '', classifyName: '', transformMatrix: '',
-        systemNames: [], devSymbolName: '', devType: '', devExpanded: false,
+        path: '',
+        name: fallbackName,
+        entityName: '',
+        children: [],
+        famPath: '',
+        devPath: '',
+        ifcFile: '',
+        ifcGuid: '',
+        classifyName: '',
+        transformMatrix: '',
+        systemNames: [],
+        devSymbolName: '',
+        devType: '',
+        devExpanded: false,
       };
       onNodeClick(tempNode);
     }
@@ -126,16 +143,14 @@ function createDeviceRow(
  *
  * @param onNodeClick 设备节点点击回调（由交互层提供）
  */
-export function renderFileDevPanelUI(
-  state: AppState,
-  onNodeClick: (node: CbmNode) => void,
-): void {
+export function renderFileDevPanelUI(state: AppState, onNodeClick: (node: CbmNode) => void): void {
   fileDevPanel.innerHTML = '';
 
   // FileDevRelation 的设备引用在真实样本中同时存在 `foo.cbm`、`CBM/foo.cbm`、
   // 反斜杠和大小写变体。构建一次路径/文件名索引，避免展开面板时因直接
   // state.cbmNodeIndex.get(rawValue) 失败而显示成不可点击的“幽灵设备”。
-  const cbmReferenceIndex = buildCbmReferenceIndex(state.currentCbmTree);
+  const root = state.currentCbmTree;
+  let cbmReferenceIndex: Map<string, CbmNode> | undefined;
 
   const modDeviceNodes = collectModDeviceNodes(state.currentCbmTree);
   const hasDesignEntries = state.fileDevRelations.length > 0;
@@ -151,7 +166,7 @@ export function renderFileDevPanelUI(
     const isIfcSource = /\.ifc$/i.test(entry.ifcFile);
     const { nodeEl, row, childrenEl } = createCollapsibleNode(
       isIfcSource ? '📄' : '🗺️',
-      `${entry.ifcName || entry.ifcFile || '未命名来源'} (${entry.deviceCount})${entry.sourceDiagnostics?.length?' · 来源字段有歧义':isIfcSource ? '' : ' · 来源图纸'}`,
+      `${entry.ifcName || entry.ifcFile || '未命名来源'} (${entry.deviceCount})${entry.sourceDiagnostics?.length ? ' · 来源字段有歧义' : isIfcSource ? '' : ' · 来源图纸'}`,
       '0px',
     );
 
@@ -163,7 +178,10 @@ export function renderFileDevPanelUI(
       childrenEl.classList.toggle('expanded', expanded);
       if (expanded && !childrenRendered) {
         for (const devCbm of entry.deviceCbms) {
-          const devNode = resolveCbmReference(cbmReferenceIndex, devCbm);
+          const devNode = resolveCbmReference(
+            (cbmReferenceIndex ??= buildCbmReferenceIndex(root)),
+            devCbm,
+          );
           const devRow = createDeviceRow(
             devNode,
             devCbm.replace(/\.cbm$/i, ''),
@@ -197,13 +215,7 @@ export function renderFileDevPanelUI(
       childrenEl.classList.toggle('expanded', expanded);
       if (expanded && !childrenRendered) {
         for (const devNode of modDeviceNodes) {
-          const devRow = createDeviceRow(
-            devNode,
-            devNode.name,
-            state,
-            onNodeClick,
-            '24px',
-          );
+          const devRow = createDeviceRow(devNode, devNode.name, state, onNodeClick, '24px');
           childrenEl.appendChild(devRow);
         }
         childrenRendered = true;
@@ -237,7 +249,11 @@ function resolveCbmReference(index: Map<string, CbmNode>, reference: string): Cb
 }
 
 function cbmReferenceKeys(value: string): string[] {
-  const normalized = value.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '').toLowerCase();
+  const normalized = value
+    .replace(/\\/g, '/')
+    .replace(/^\.\//, '')
+    .replace(/^\/+/, '')
+    .toLowerCase();
   if (!normalized) return [];
   const withoutRoot = normalized.replace(/^cbm\//, '');
   const basename = withoutRoot.split('/').pop() || withoutRoot;
@@ -248,9 +264,6 @@ function cbmReferenceKeys(value: string): string[] {
  * 渲染文件-设备面板。
  * 统一入口：无论首次打开还是缓存命中，都使用 onNodeClick 回调处理交互。
  */
-export function renderFileDevPanel(
-  state: AppState,
-  onNodeClick: (node: CbmNode) => void,
-): void {
+export function renderFileDevPanel(state: AppState, onNodeClick: (node: CbmNode) => void): void {
   renderFileDevPanelUI(state, onNodeClick);
 }

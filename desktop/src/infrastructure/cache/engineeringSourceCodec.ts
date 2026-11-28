@@ -148,7 +148,7 @@ function* unpackSourceNodes(
     )
       return fail();
   const values: unknown[] = [];
-  const objectEntries = new Array<Array<[string, unknown]> | undefined>(shapes.length);
+
   let i = 0;
   const reference = (id: unknown): unknown => {
     if (typeof id !== 'number' || !Number.isSafeInteger(id) || id < 0 || id >= i) return fail();
@@ -194,16 +194,20 @@ function* unpackSourceNodes(
           )
             return fail();
           const keys = shapes[shape] as string[];
-          // Reuse the synchronous constructor's input, never its output. Native
-          // construction keeps wide records compact and treats __proto__ as
-          // data; per-shape pairs avoid per-record tuple arrays and closures.
-          const entries = (objectEntries[shape] ??= keys.map((key): [string, unknown] => [
-            key,
-            undefined,
-          ]));
-          for (let index = 0; index < keys.length; index++)
-            entries[index][1] = reference(row[index + 2]);
-          values.push(Object.fromEntries(entries));
+          const result: Record<string, unknown> = {};
+          for (let index = 0; index < keys.length; index++) {
+            const key = keys[index],
+              value = reference(row[index + 2]);
+            if (key === '__proto__')
+              Object.defineProperty(result, key, {
+                value,
+                enumerable: true,
+                writable: true,
+                configurable: true,
+              });
+            else result[key] = value;
+          }
+          values.push(result);
           break;
         }
         default:

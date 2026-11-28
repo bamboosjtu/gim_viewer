@@ -49,17 +49,23 @@ export default defineConfig({
       reporter: ['text-summary', 'json-summary', 'json', 'html'],
       reportsDirectory: '../output/coverage/desktop',
       // 仅统计 src/ 下源码，排除测试文件、类型声明、入口装配
-      include: ['src/**/*.ts', ...(process.env.GIM_SDK_COVERAGE_OWNED ? ['../packages/gim-sdk/src/**/*.ts'] : [])].map(pattern=>resolve(__dirname,pattern).replaceAll('\\','/')),
+      include: ['src/**/*.ts','../packages/powerline-core/src/**/*.ts', ...(process.env.GIM_SDK_COVERAGE_OWNED ? ['../packages/gim-sdk/src/**/*.ts'] : [])].map(pattern=>resolve(__dirname,pattern).replaceAll('\\','/')),
       exclude: [
         'src/**/*.test.ts',
         'src/**/__tests__/**',
         '../packages/gim-sdk/src/**/__tests__/**',
+        '../packages/powerline-core/src/**/__tests__/**',
         'src/**/*.d.ts',
         'src/main.ts',
         'src/vite-env.d.ts',
       ].map(pattern=>resolve(__dirname,pattern).replaceAll('\\','/')),
       // Pure-layer gates are enforced by the normal unit suite, without GIM samples.
       thresholds: {
+        '../packages/powerline-core/src/{towerAssembly,towerTopology,wireGeometry,foundationSelection,preview}.ts':{lines:85,branches:70,functions:85,statements:85},
+        'src/features/powerline/presentation/{lineInspectorProjection,lineTowerProjection}.ts':{lines:80,branches:70,functions:85,statements:80},
+        'src/viewer/xmlModGeometry.ts':{lines:85,branches:80,functions:85,statements:85},
+        'src/features/substation/presentation/patrolBinding.ts':{lines:60,branches:50,functions:70,statements:60},
+        'src/ui/viewerToolbox.ts':{lines:70,branches:70,functions:55,statements:70},
         'src/gim/**': { statements:90, lines:90, functions:90, branches:80 },
         'src/app/session/{openProject,projectSourceAcquisition}.ts': {statements:70,lines:70,functions:80,branches:50},
         'src/features/substation/application/{substationRuntime,substationOpenStages,substationColdPersistence,substationColdSource}.ts': {statements:70,lines:70,functions:45,branches:70},
