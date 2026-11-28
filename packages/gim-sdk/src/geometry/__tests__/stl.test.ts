@@ -123,6 +123,12 @@ it.each(["ascii", "binary"] as const)(
         ],
       });
     }
+    expect(decoded.mesh!.positions.buffer.byteLength).toBe(
+      2 * 9 * Float32Array.BYTES_PER_ELEMENT,
+    );
+    expect(decoded.mesh!.normals.buffer.byteLength).toBe(
+      decoded.mesh!.positions.buffer.byteLength,
+    );
     expect(Array.from(decoded.mesh!.positions)).toEqual([
       ...rows[0],
       ...rows[2],

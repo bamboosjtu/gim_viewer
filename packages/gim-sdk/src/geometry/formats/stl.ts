@@ -43,15 +43,8 @@ function meshSink(knownCount?: number): Sink {
     },
     finish() {
       const first = chunks[0];
-      if (chunks.length === 1 && size > 0) {
-        // Publish the filled prefix directly when a binary source contains skipped facets.
-        return {
-          mesh: {
-            positions: first.positions.subarray(0, size),
-            normals: first.normals.subarray(0, size),
-          },
-        };
-      }
+      if (chunks.length === 1 && first.positions.length === size)
+        return { mesh: { positions: first.positions, normals: first.normals } };
       const positions = new Float32Array(size),
         normals = new Float32Array(size);
       let offset = 0;
