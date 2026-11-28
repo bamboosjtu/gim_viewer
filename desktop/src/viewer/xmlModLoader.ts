@@ -180,7 +180,7 @@ function mergeElectricalConnectionLines(group: THREE.Group, lines: THREE.Line[])
  *
  * 内部步骤：
  * 1. parseXmlMod → XmlModDocument
- * 2. xmlModDocumentToGroup → THREE.Group（Entity 内部 TransformMatrix 已应用，单位已缩放）
+ * 2. collectBakedGeometriesByMaterial → THREE.Group（Entity 内部 TransformMatrix 已应用，单位已缩放）
  *
  * @param modText MOD 文件 XML 文本
  * @param modPath MOD 文件路径（如 "MOD/abc.mod"），用于 Group.name 与错误消息
@@ -325,6 +325,7 @@ export async function loadXmlModFromFiles(
   phmColorMaxA?: number,
   options?: {
     strict?: boolean;
+    document?: XmlModDocument;
     parseXml?: typeof parseXmlMod;
     lod?: import('./xmlModGeometry.js').DeviceLod;
     timings?: Record<string, number>;
@@ -342,8 +343,8 @@ export async function loadXmlModFromFiles(
     return null;
   }
   // 使用 arrayBuffer + TextDecoder 而非 file.text()，确保跨运行时（浏览器/jsdom）兼容
-  const text = await file.text();
   try {
+    const text = options?.document ? '' : await file.text();
     // 空 MOD 是已知的合法占位文件；其他不含当前可渲染 primitive 的内容
     // 仍交给 XML parser 校验，不能把损坏文件静默伪装成空模型。
     if (
@@ -362,7 +363,7 @@ export async function loadXmlModFromFiles(
       applyPhmColorOverride(group, phmColor, phmColorMaxA);
       return group;
     }
-    const doc = (options?.parseXml ?? parseXmlMod)(text, modPath);
+    const doc = options?.document ?? (options?.parseXml ?? parseXmlMod)(text, modPath);
     const baked = await collectBakedGeometriesByMaterialAsync(
       doc,
       options?.lod,
@@ -394,21 +395,6 @@ export async function loadXmlModFromFiles(
 }
 
 /**
- * GIM DEV/PHM 变换矩阵 → Three.js Matrix4。
- *
- * 样本研究结论：GIM 矩阵实际为列主序展开，平移在 m[12]/m[13]/m[14]，
- * 等同于 Three.js Matrix4.elements 数组布局。使用 fromArray 直接加载。
- *
- * 长度不为 16 时返回单位矩阵。
- */
-export function columnMajorToMatrix4(arr: number[]): THREE.Matrix4 {
-  const m = new THREE.Matrix4();
-  if (!Array.isArray(arr) || arr.length !== 16) return m;
-  m.fromArray(arr);
-  return m;
-}
-
-/**
  * 应用已累积的 CBM/DEV/SUBDEVICE/PHM 放置矩阵（顶点烘焙版）。
  *
  * 关键修复：改为遍历 group 的 mesh，直接对 geometry.applyMatrix4(matrix)
@@ -430,7 +416,7 @@ export function applyPlacementTransformToSceneUnits(
   transformMatrix: number[] | null | undefined,
 ): void {
   if (!Array.isArray(transformMatrix) || transformMatrix.length !== 16) return;
-  const matrix = columnMajorToMatrix4(transformMatrix);
+  const matrix = gimMatrixToMatrix4(transformMatrix);
   matrix.elements[12] *= GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT;
   matrix.elements[13] *= GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT;
   matrix.elements[14] *= GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT;

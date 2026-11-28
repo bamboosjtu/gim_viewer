@@ -446,7 +446,7 @@ const LINE_HNUM_DEFINITIONS: PropertyDefinition[] = [
   def('rods', '杆件', 'P 节点之间的 R 杆件数量', '杆塔骨架', 0, 'number', '根'),
   def('groundPoints', '挂点', '导线/地线挂点 G 数量', '杆塔骨架', 0, 'number', '个'),
   def('hSubLegs', '子腿偏移', '塔腿高度偏移记录数量', '杆塔骨架', 1, 'number', '个'),
-  def('hLegs', '腿顶坐标', '塔腿顶点平面坐标记录数量', '杆塔骨架', 1, 'number', '个'),
+  def('hLegs', '接腿高度记录', '接腿共用及非共用部分的高度记录数量', '杆塔骨架', 1, 'number', '个'),
 ];
 
 const LINE_BOLT_DEFINITIONS: PropertyDefinition[] = [

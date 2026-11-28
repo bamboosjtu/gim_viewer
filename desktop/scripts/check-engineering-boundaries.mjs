@@ -169,6 +169,7 @@ const linePresentationReads = new Set(
   ].map((name) => `features/powerline/presentation/${name}`),
 );
 // This optional UI export consumes read-only graph and map projections.
+linePresentationReads.add('features/powerline/presentation/lineModelDialog.js');
 linePresentationReads.add('features/powerline/diagnostics/lineCatenaryAuditExportService.js');
 // Views may use explicit presentation selectors/formatters, never parsers or business classifiers.
 const uiPresentationValues = new Map([

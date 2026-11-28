@@ -38,12 +38,19 @@ export function representationEvidenceState(
   return { sourceUsage, availability, bindingStatus: binding.status };
 }
 /** Semantic membership joins an independently usable geometry address index. */
-export class EngineeringRepresentationIndex extends RepresentationAddressIndex {
+export interface RepresentationMembership {
+  readonly entities: readonly { id: string }[];
+  readonly pending: readonly { id: string }[];
+  readonly memberships: readonly { sourceId: string; ownerId: string | null }[];
+}
+export class EngineeringRepresentationIndex<
+  T extends RepresentationMembership = EngineeringSnapshot,
+> extends RepresentationAddressIndex {
   readonly ownerBySource = new Map<string, string | null>();
   private readonly sourcesByOwner = new Map<string, string[]>();
   private readonly pendingBySource = new Map<string, string>();
   constructor(
-    readonly snapshot: EngineeringSnapshot,
+    readonly snapshot: T,
     bindings: readonly SourceRepresentation[],
   ) {
     super(bindings);

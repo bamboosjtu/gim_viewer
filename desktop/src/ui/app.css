@@ -673,3 +673,10 @@
 .line-map-layers input { margin: 0; cursor: pointer; }
 .line-map-layers label span { color: #334155; }
 .line-map-overlay { pointer-events: none; }
+
+.line-model-dialog {width:min(820px,90vw);padding:14px;border:1px solid var(--border);border-radius:12px;color:var(--text-1)}
+.line-model-dialog::backdrop {background:#192c3e55}
+.line-model-dialog header,.line-model-dialog section {display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.line-model-dialog header {justify-content:space-between}.line-model-dialog select {max-width:55%}
+.line-model-dialog canvas {width:100%;height:min(55vh,480px);display:block}.line-model-dialog canvas[hidden]{display:none}
+.props-header .btn-secondary {margin-left:8px}

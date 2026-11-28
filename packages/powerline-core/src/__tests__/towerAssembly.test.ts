@@ -18,3 +18,9 @@ it("keeps common Body prefix, explicit leg/subleg, and trailing cross-section ro
     "unspecified-subleg",
   );
 });
+
+it('retains an indeterminate declaration when both P references are missing or repeated',()=>{
+ const d=parseHNumCommaRecord('HNum,1\nH,1000,Body1\nBody1\nP,1,1,2,3\nP,1,4,5,6\nR,1,99','a.mod');
+ const selected=selectTowerParts(d,{heightMm:1000});expect(selected.sections[0].rods).toHaveLength(1);expect(selected.missing).toContain('unresolved-rod:0:0');
+ expect(selected.sections[0].rods[0]).toMatchObject({ordinal:0,start:undefined,end:undefined});
+});

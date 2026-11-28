@@ -92,7 +92,7 @@ async function loadDeviceOccurrence(
 
   const { files, mods, stls } = sources;
   if (mods.length || stls.length) {
-    await loadModOccurrences(state, scene, mods, files, current);
+    await loadModOccurrences(state, scene, mods, files, current, scope.rootOccurrence);
     if (!current()) return;
     await loadStlOccurrences(state, scene, stls, files, current, session, scope.rootOccurrence);
   }
@@ -108,9 +108,14 @@ async function loadModOccurrences(
   mods: readonly DiscoveredModGeometry[],
   discoveryFiles: Map<string, File>,
   current: Current,
+  rootPath: string,
 ): Promise<void> {
   const { loadXmlModFromFiles, applyPlacementTransformToSceneUnits } =
     await import('../../viewer/xmlModLoader.js');
+  const { readStandardMod } = await import('./rawModOccurrence.js');
+  const sources = new Map<string, ReturnType<typeof readStandardMod>>();
+  const sourceVersion =
+    state.captureProjectSession().sourceSha256 ?? String(state.projectGeneration);
   if (!current()) return;
   for (const geo of mods) {
     if (state.loadedXmlModGroups.has(geo.instanceKey)) {
@@ -118,19 +123,38 @@ async function loadModOccurrences(
       continue;
     }
 
-    const group = await loadXmlModFromFiles(
-      geo.modPath,
-      discoveryFiles,
-      geo.phmColor,
-      geo.phmColorMaxA,
-    );
+    let prepared: Awaited<ReturnType<typeof readStandardMod>> | undefined;
+    const file = getFileByPath(discoveryFiles, geo.modPath);
+    if (file) {
+      let pending = sources.get(geo.modPath);
+      if (!pending) {
+        pending = readStandardMod(file, geo.modPath, sourceVersion);
+        sources.set(geo.modPath, pending);
+      }
+      try {
+        prepared = await pending;
+      } catch (error) {
+        logger.warn('[MOD source]', geo.modPath, error);
+        continue;
+      }
+    }
+    if (!current()) return;
+    const group = prepared?.place
+      ? prepared.place(geo, rootPath)
+      : await loadXmlModFromFiles(
+          geo.modPath,
+          discoveryFiles,
+          geo.phmColor,
+          geo.phmColorMaxA,
+          prepared ? { document: prepared.doc } : undefined,
+        );
     if (!current()) {
       group?.traverse((object) => (object as THREE.Mesh).geometry?.dispose?.());
       return;
     }
     if (!group) continue;
 
-    applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);
+    if (!prepared?.place) applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);
     applyProjectSourceToViewer(group, state.projectSourceToViewerMatrix);
     const modRoot = ensureGeometryLayer(state, scene, 'mod');
     group.userData.devPath = geo.devPath;

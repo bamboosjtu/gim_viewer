@@ -50,7 +50,10 @@ import type { LineMapBaseLayerHandle } from './lineMapBaseLayer.js';
 import type { LineMapProjection, GeoBBox } from './lineMapProjection.js';
 import { createMapLibreProjection } from './lineMapProjection.js';
 import { renderLineMap } from './lineMapView.js';
-import { buildLineAttributeIndex } from '../features/powerline/presentation/lineAttributeIndex.js';
+import {
+  buildLineAttributeIndex,
+  lineBundleSpacing,
+} from '../features/powerline/presentation/lineAttributeIndex.js';
 import { buildWireSemanticInfo } from '../features/powerline/presentation/lineWireSemanticService.js';
 import type { WireSemanticInfo } from '../features/powerline/presentation/lineWireSemanticService.js';
 import type { LineCatenaryAuditExportPayload } from '../features/powerline/diagnostics/lineCatenaryAuditExportService.js';
@@ -84,7 +87,10 @@ import {
   type PropertyReferenceDetail,
 } from './propertyDictionary.js';
 import { renderInspectorTabs } from './propsDrawer.js';
-import { loadLineModSourcesForNode } from '../features/powerline/presentation/lineModSourcePort.js';
+import {
+  loadLineModSourcesForNode,
+  type LineModRuntimeEntry,
+} from '../features/powerline/presentation/lineModSourcePort.js';
 
 import { perfBegin, perfCurrentSession } from '../utils/perfTimings.js';
 
@@ -218,6 +224,43 @@ function renderMapStats(mapData: LineMapData): void {
   fileDevPanel.appendChild(wrap);
 }
 
+let closeLineModel: (() => void) | undefined;
+function attachLineModelButton(
+  node: GimGraphNode,
+  entries: LineModRuntimeEntry[],
+  state: AppState,
+  generation: number,
+) {
+  if (
+    !entries.some((e) => {
+      const r = e.source?.records;
+      return r && ('hNum' in r || 'H1' in r || 'OUTSIDEDIAMETER' in r);
+    })
+  )
+    return;
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'btn btn-secondary';
+  button.textContent = '查看三维模型';
+  propsDrawerBody.querySelector('.props-header')?.append(button);
+  button.onclick = () => {
+    void import('../features/powerline/presentation/lineModelDialog.js')
+      .then(({ showLineModel }) => {
+        if (generation !== lineInspectorGeneration || currentLineState !== state) return;
+        closeLineModel?.();
+        const spacing = entries.some((e) => e.source && 'OUTSIDEDIAMETER' in e.source.records)
+          ? lineBundleSpacing(buildLineAttributeIndex(state), node.refs.famFiles, node.path)
+          : undefined;
+        closeLineModel = showLineModel(
+          node,
+          entries,
+          state.captureProjectSession().sourceSha256 ?? String(state.projectGeneration),
+          spacing,
+        );
+      })
+      .catch((e) => currentShowMessage?.(String(e)));
+  };
+}
 function showLineInspector(
   title: string,
   buckets: { overview: string; params: string; relations: string; source: string },
@@ -388,6 +431,7 @@ export function showLineNodeProperties(
       for (const entry of entries) currentLineInspectorSourcePaths.add(entry.path);
       const buckets = buildLineNodeBuckets(node, buildLineAttributeIndex(state), entries);
       showLineInspector(title, buckets, activeInspectorTab());
+      attachLineModelButton(node, entries, state, generation);
     })
     .catch((error) => {
       if (generation !== lineInspectorGeneration || currentLineState !== state) return;
@@ -474,6 +518,7 @@ function showWireProperties(wire: WireSegment, state: AppState | null = currentL
           },
           activeInspectorTab(),
         );
+        attachLineModelButton(node, entries, state, generation);
       })
       .catch(() => {
         /* 基础属性已可用，解析失败由来源按钮继续排查 */
@@ -595,6 +640,8 @@ export function destroyLineMapView(): void {
   lineNavigationHandle = null;
   // 使仍在读取线路 MOD 的异步检查器结果失效，避免旧工程覆盖新工程面板。
   lineInspectorGeneration++;
+  closeLineModel?.();
+  closeLineModel = undefined;
   currentLineState = null;
   destroyLineMapResources();
   lineMapData = null;

@@ -3,37 +3,20 @@ import * as THREE from 'three';
 import { Evaluator } from 'three-bvh-csg';
 import {
   primitiveToGeometry,
-  entityToMesh,
+  colorToMaterial,
   collectBakedGeometriesByMaterial,
   collectBakedGeometriesByMaterialAsync,
-  xmlModDocumentToGroup,
   applyPhmColorOverride,
   disposeSharedXmlModGeometries,
   disposeSharedXmlModMaterials,
 } from '../xmlModGeometry.js';
 import { parseXmlMod } from '../../gim/geometry/xmlModParser.js';
 import type {
-  XmlModEntity,
   XmlModPrimitive,
   XmlModColor,
 } from '../../gim/geometry/ir.js';
 
 const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
-
-/** 构造一个最小 Entity 用于测试 */
-function makeEntity(
-  primitive: XmlModPrimitive,
-  opts: { id?: number; visible?: boolean; matrix?: number[]; color?: XmlModColor } = {},
-): XmlModEntity {
-  return {
-    id: opts.id ?? 0,
-    type: 'simple',
-    visible: opts.visible ?? true,
-    primitive,
-    transformMatrix: opts.matrix ?? IDENTITY,
-    color: opts.color,
-  };
-}
 
 describe('LOD small-part policy', () => {
   const xml = `<Device><Entities>
@@ -104,216 +87,6 @@ describe('production leaf routing',()=>{
     expect(doc.status).toBe('partial');expect(primitiveToGeometry(doc.entities[0].primitive)).toBeNull();
   });
 });
-describe('entityToMesh', () => {
-  describe('primitive → mesh', () => {
-    it('Cuboid → mesh geometry 为 BoxGeometry', () => {
-      const e = makeEntity({ type: 'Standard', canonical: {kind:'Cuboid', length:100, width:200, height:300} });
-      const mesh = entityToMesh(e)!;
-      expect(mesh.geometry).toBeInstanceOf(THREE.BufferGeometry);
-    });
-
-    it('Cylinder → mesh geometry 为 CylinderGeometry', () => {
-      const e = makeEntity({ type: 'Standard', canonical: {kind:'Cylinder', radius:50, height:300} });
-      const mesh = entityToMesh(e)!;
-      expect(mesh.geometry).toBeInstanceOf(THREE.BufferGeometry);
-    });
-  });
-
-  describe('TransformMatrix 应用', () => {
-    it('单位矩阵 → mesh.position = (0,0,0)，mesh.quaternion = identity', () => {
-      const e = makeEntity(
-        { type: 'Standard', canonical: {kind:'Cuboid', length:100, width:100, height:100} },
-        { matrix: IDENTITY },
-      );
-      const mesh = entityToMesh(e)!;
-      expect(mesh.position.x).toBe(0);
-      expect(mesh.position.y).toBe(0);
-      expect(mesh.position.z).toBe(0);
-      expect(mesh.quaternion.x).toBe(0);
-      expect(mesh.quaternion.y).toBe(0);
-      expect(mesh.quaternion.z).toBe(0);
-      expect(mesh.quaternion.w).toBe(1);
-    });
-
-    it('平移矩阵 → mesh.position 正确', () => {
-      // GIM 列主序平移矩阵：translation (100, 200, 50) 在 [12]/[13]/[14]
-      const matrix = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 100, 200, 50, 1];
-      const e = makeEntity(
-        { type: 'Standard', canonical: {kind:'Cuboid', length:100, width:100, height:100} },
-        { matrix },
-      );
-      const mesh = entityToMesh(e)!;
-      expect(mesh.position.x).toBe(100);
-      expect(mesh.position.y).toBe(200);
-      expect(mesh.position.z).toBe(50);
-    });
-
-    it('非 16 长度矩阵 → 不应用变换（mesh.position 保持原点）', () => {
-      const e = makeEntity(
-        { type: 'Standard', canonical: {kind:'Cuboid', length:100, width:100, height:100} },
-        { matrix: [1, 0, 0, 0] }, // 长度 4
-      );
-      const mesh = entityToMesh(e)!;
-      expect(mesh.position.x).toBe(0);
-      expect(mesh.position.y).toBe(0);
-      expect(mesh.position.z).toBe(0);
-    });
-  });
-
-  describe('Color 应用', () => {
-    it('缺失 color → 默认灰色不透明材质', () => {
-      const e = makeEntity({ type: 'Standard', canonical: {kind:'Cuboid', length:100, width:100, height:100} });
-      const mesh = entityToMesh(e)!;
-      const mat = mesh.material as THREE.MeshStandardMaterial;
-      expect(mat).toBeInstanceOf(THREE.MeshStandardMaterial);
-      // 默认灰色 0x888888（sRGB hex，避开 ColorManagement 的 sRGB↔linear 转换）
-      expect(mat.color.getHex()).toBe(0x888888);
-      expect(mat.transparent).toBe(false);
-      expect(mat.opacity).toBe(1);
-    });
-
-    it('R/G/B/A 全值 → material.color 与 opacity 正确', () => {
-      const color: XmlModColor = { r: 200, g: 50, b: 50, a: 80 };
-      const e = makeEntity({ type: 'Standard', canonical: {kind:'Cuboid', length:100, width:100, height:100} }, { color });
-      const mesh = entityToMesh(e)!;
-      const mat = mesh.material as THREE.MeshStandardMaterial;
-      // 实现按 (r<<16)|(g<<8)|b 拼成 sRGB hex，由 THREE.Color 按 sRGB 解释
-      // getHex() 在 ColorManagement 开启时返回 sRGB hex，可无损回环比较
-      expect(mat.color.getHex()).toBe((200 << 16) | (50 << 8) | 50);
-      expect(mat.transparent).toBe(true);
-      expect(mat.opacity).toBeCloseTo(0.8, 4);
-    });
-
-    it('A=100 → 不透明材质', () => {
-      const color: XmlModColor = { r: 128, g: 128, b: 128, a: 100 };
-      const e = makeEntity({ type: 'Standard', canonical: {kind:'Cuboid', length:100, width:100, height:100} }, { color });
-      const mesh = entityToMesh(e)!;
-      const mat = mesh.material as THREE.MeshStandardMaterial;
-      expect(mat.transparent).toBe(false);
-      expect(mat.opacity).toBe(1);
-    });
-
-    it('A=0 → 不透明哨兵（Bentley/BIMBase 实测语义，docs/schema/substation-mod.md）', () => {
-      const color: XmlModColor = { r: 0, g: 0, b: 0, a: 0 };
-      const e = makeEntity({ type: 'Standard', canonical: {kind:'Cuboid', length:100, width:100, height:100} }, { color });
-      const mesh = entityToMesh(e)!;
-      const mat = mesh.material as THREE.MeshStandardMaterial;
-      expect(mat.transparent).toBe(false);
-      expect(mat.opacity).toBe(1);
-    });
-  });
-
-  describe('Visible 属性', () => {
-    it('Visible=True → mesh.visible = true', () => {
-      const e = makeEntity(
-        { type: 'Standard', canonical: {kind:'Cuboid', length:100, width:100, height:100} },
-        { visible: true },
-      );
-      const mesh = entityToMesh(e)!;
-      expect(mesh.visible).toBe(true);
-    });
-
-    it('Visible=False → mesh.visible = false（不在 entityToMesh 中处理，由 xmlModDocumentToGroup 控制）', () => {
-      // entityToMesh 不读 visible，由 xmlModDocumentToGroup 设置
-      const e = makeEntity(
-        { type: 'Standard', canonical: {kind:'Cuboid', length:100, width:100, height:100} },
-        { visible: false },
-      );
-      const mesh = entityToMesh(e)!;
-      // entityToMesh 不感知 visible，由调用方决定
-      expect(mesh.visible).toBe(true); // 默认 true
-    });
-  });
-});
-
-describe('xmlModDocumentToGroup', () => {
-  it('EMPTY_DEVICE_XML → Group 为空', () => {
-    const xml = '<?xml version="1.0"?><Device><Entities /></Device>';
-    const doc = parseXmlMod(xml, 'MOD/empty.mod');
-    const group = xmlModDocumentToGroup(doc);
-    expect(group.children.length).toBe(0);
-    expect(group.name).toBe('xml-mod:MOD/empty.mod');
-  });
-
-  it('单 Entity → Group 含 1 个 mesh', () => {
-    const xml = `<?xml version="1.0"?>
-<Device>
-  <Entities>
-    <Entity ID="0" Type="simple" Visible="True">
-      <Cylinder R="50" H="300" />
-      <TransformMatrix Value="1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1" />
-      <Color R="200" G="50" B="50" A="100" />
-    </Entity>
-  </Entities>
-</Device>`;
-    const doc = parseXmlMod(xml, 'MOD/cyl.mod');
-    const group = xmlModDocumentToGroup(doc);
-    expect(group.children.length).toBe(1);
-    const mesh = group.children[0] as THREE.Mesh;
-    expect(mesh).toBeInstanceOf(THREE.Mesh);
-    expect(mesh.geometry).toBeInstanceOf(THREE.BufferGeometry);
-    expect(mesh.geometry.getAttribute('position').count).toBe(4 * 16 + 2);
-  });
-
-  it('多 Entity（含 Visible=False）→ Visible=False 的 mesh.visible=false', () => {
-    const xml = `<?xml version="1.0"?>
-<Device>
-  <Entities>
-    <Entity ID="0" Type="simple" Visible="True">
-      <Cuboid L="100" W="100" H="100" />
-      <TransformMatrix Value="1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1" />
-      <Color R="128" G="128" B="128" A="100" />
-    </Entity>
-    <Entity ID="1" Type="simple" Visible="False">
-      <Cuboid L="200" W="200" H="200" />
-      <TransformMatrix Value="1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1" />
-      <Color R="0" G="0" B="0" A="0" />
-    </Entity>
-  </Entities>
-</Device>`;
-    const doc = parseXmlMod(xml, 'MOD/multi.mod');
-    const group = xmlModDocumentToGroup(doc);
-    expect(group.children.length).toBe(2);
-    expect((group.children[0] as THREE.Mesh).visible).toBe(true);
-    expect((group.children[1] as THREE.Mesh).visible).toBe(false);
-  });
-
-  it('TransformMatrix 平移保留到 group 内 mesh.position', () => {
-    const xml = `<?xml version="1.0"?>
-<Device>
-  <Entities>
-    <Entity ID="0" Type="simple" Visible="True">
-      <Cuboid L="100" W="100" H="100" />
-      <TransformMatrix Value="1,0,0,0,0,1,0,0,0,0,1,0,100,200,50,1" />
-      <Color R="100" G="100" B="100" A="100" />
-    </Entity>
-  </Entities>
-</Device>`;
-    const doc = parseXmlMod(xml, 'MOD/translate.mod');
-    const group = xmlModDocumentToGroup(doc);
-    const mesh = group.children[0] as THREE.Mesh;
-    expect(mesh.position.x).toBe(100);
-    expect(mesh.position.y).toBe(200);
-    expect(mesh.position.z).toBe(50);
-  });
-
-  it('Group.name 包含 modPath', () => {
-    const xml = `<?xml version="1.0"?>
-<Device>
-  <Entities>
-    <Entity ID="0" Type="simple" Visible="True">
-      <Cuboid L="100" W="100" H="100" />
-      <TransformMatrix Value="1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1" />
-      <Color R="100" G="100" B="100" A="100" />
-    </Entity>
-  </Entities>
-</Device>`;
-    const doc = parseXmlMod(xml, 'MOD/abc-123.mod');
-    const group = xmlModDocumentToGroup(doc);
-    expect(group.name).toBe('xml-mod:MOD/abc-123.mod');
-  });
-});
-
 describe('方案 A：Geometry 共享缓存', () => {
   // 每个测试前后清理共享缓存，避免跨用例污染
   beforeEach(() => {
@@ -340,20 +113,7 @@ describe('方案 A：Geometry 共享缓存', () => {
     expect(g1).not.toBe(g2);
   });
 
-  it('Entity.TransformMatrix 不影响缓存键 → 同 primitive 不同 TransformMatrix 仍共享', () => {
-    const primitive: XmlModPrimitive = { type: 'Standard', canonical: {kind:'Cuboid', length:100, width:100, height:100} };
-    const matrixA = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 100, 200, 50, 1];
-    const matrixB = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 999, 999, 999, 1];
-    const e1 = makeEntity(primitive, { matrix: matrixA });
-    const e2 = makeEntity(primitive, { matrix: matrixB });
-    const mesh1 = entityToMesh(e1)!;
-    const mesh2 = entityToMesh(e2)!;
-    // geometry 共享
-    expect(mesh1.geometry).toBe(mesh2.geometry);
-    // TransformMatrix 烘焙到 mesh.position（不同）
-    expect(mesh1.position.x).toBe(100);
-    expect(mesh2.position.x).toBe(999);
-  });
+
 
   it('disposeSharedXmlModGeometries 后再次请求 → 新建实例', () => {
     const p: XmlModPrimitive = { type: 'Standard', canonical: {kind:'Cylinder', radius:50, height:300} };
@@ -365,12 +125,9 @@ describe('方案 A：Geometry 共享缓存', () => {
 });
 
 describe('Color A 刻度规则（P3-2，docs/schema/substation-mod.md）', () => {
-  const cyl: XmlModPrimitive = { type: 'Standard', canonical: {kind:'Cylinder', radius:100, height:200} };
 
   function meshOpacity(color: XmlModColor | undefined, maxA = 100): number {
-    const mesh = entityToMesh(makeEntity(cyl, { color }), maxA);
-    if (!mesh) throw new Error('mesh is null');
-    const mat = mesh.material as THREE.MeshStandardMaterial;
+    const mat=colorToMaterial(color,maxA);
     return mat.opacity;
   }
 

@@ -272,3 +272,5 @@ describe('线路螺栓表格', () => {
     expect(html).not.toContain('data-prop-ref');
   });
 });
+
+it('labels the count of HLeg as common/non-common height records',()=>{const html=renderLineModSource({path:'t.mod',source:{kind:'line-text-mod',format:'text-hnum-comma-record',modPath:'t.mod',records:hnum}});expect(html).toContain('接腿高度记录');expect(html).not.toContain('腿顶坐标');});

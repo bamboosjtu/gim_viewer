@@ -4,7 +4,8 @@ import {makeLineFixture} from '../../features/powerline/presentation/__tests__/l
 import { buildLineProjectProjection } from '../../features/powerline/presentation/lineProjectProjection.js';
 import { perfCurrentSession } from '../../utils/perfTimings.js';
 import type { LineRenderOptions } from '../../features/powerline/presentation/linePresentationPort.js';
-const m=vi.hoisted(()=>({render:vi.fn(),probe:vi.fn(),mod:vi.fn(),projection:vi.fn()}));
+const m=vi.hoisted(()=>({render:vi.fn(),probe:vi.fn(),mod:vi.fn(),model:vi.fn(),projection:vi.fn()}));
+vi.mock('../../viewer/lineModelPreview.js',()=>({lineModelPreview:()=>({show:m.model,dispose:()=>{}})}));
 vi.mock('../lineMapView.js',()=>({renderLineMap:m.render}));
 vi.mock('../lineMapBaseLayer.js',()=>({createMapLibreProbe:m.probe}));
 vi.mock('../../features/powerline/runtime/lineModRuntimeService.js',()=>({loadLineModSourcesForNode:m.mod}));
@@ -89,4 +90,15 @@ it('releases overlay bridges and forwards map interactions only through the acti
   expect(handles[1].handlePointerMove).toHaveBeenCalledWith(1,2);expect(handles[1].handlePointerClick).toHaveBeenCalledWith(3,4);expect(handles[1].handlePointerLeave).toHaveBeenCalledOnce();
   expect(m.probe.mock.calls[0][1].onMapCreated).toBe(observeMapFrames);
   state.activateProject(2, 'line-b');expect(destroy).toHaveBeenCalledOnce();offs.forEach(off=>expect(off).toHaveBeenCalledOnce());
+});
+
+it('opens the referenced tower from the real inspector and places the chosen height for its owner',async()=>{
+ const {nodes}=await fixture(); const {parseLineMod}=await import('@gim/powerline-core');
+ const path='Mod/tower.mod';m.mod.mockResolvedValue([{path,source:parseLineMod('HNum,1\nH,1000,Body1\nBody1\nP,1,0,0,0\nP,2,0,0,1000\nR,1,2,φ100X5,Q235',path)}]);
+ HTMLDialogElement.prototype.showModal=function(){this.open=true;};HTMLDialogElement.prototype.close=function(){this.open=false;this.dispatchEvent(new Event('close'));};
+ m.render.mock.calls[0][2](nodes.tower0);
+ const button=await vi.waitFor(()=>{const b=document.querySelector<HTMLButtonElement>('.props-header button');expect(b).not.toBeNull();return b!;});button.click();
+ await vi.waitFor(()=>expect(m.model).toHaveBeenCalled());const h=document.querySelector<HTMLSelectElement>('dialog select[aria-label="呼高"]')!;h.value='1000';h.dispatchEvent(new Event('change'));
+ const batch=m.model.mock.lastCall![0];expect(batch.objects[0].address.rootOccurrence).toBe(nodes.tower0.path);expect([...batch.templates.values()].some((x:any)=>x.kind==='mesh')).toBe(true);
+ document.querySelector('dialog')!.close();
 });

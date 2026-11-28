@@ -127,59 +127,11 @@ export function horizontalDistance(a: Coordinate, b: Coordinate): number {
   return 12742000 * Math.asin(Math.sqrt(Math.min(1, v)));
 }
 
-/** Shared projection: source records, unique business objects and occurrence tree are separate. */
-export function buildPowerlineProject(
-  files: LineParserTextFile[],
-  identity: ProjectIdentity,
-  progress?: (stage: string, done: number, total: number) => void,
-): PowerlineProject {
-  const cache = new LineParserTextCache(files);
-  progress?.("解析工程结构", 0, files.length);
-  const graph = buildLineGimGraphFromTexts(files, cache);
-  if (!graph.root) throw new Error("工程没有可达的 project.cbm 入口");
-  const nodes = [...graph.nodesByPath.values()];
-  const resolveNode = (ref: string, owner?: string) => {
-    const path = cache.resolveOriginalPath(ref, owner);
-    return path ? graph.nodesByPath.get(path) : undefined;
-  };
-  const findings: Finding[] = [];
-  const missing = new Set<string>();
-  const resolveFile = (
-    ref: string,
-    sourcePath?: string,
-  ): string | undefined => {
-    const path = cache.resolveOriginalPath(ref, sourcePath);
-    if (!path && !missing.has(ref)) {
-      missing.add(ref);
-      findings.push({
-        severity: "WARNING",
-        code: "missing-reference",
-        message: "引用文件缺失或存在歧义",
-        source: ref,
-      });
-    }
-    return path ?? undefined;
-  };
-  for (const node of nodes) {
-    for (const ref of node.refs.unresolvedFiles ?? []) {
-      if (/\.cbm$/i.test(ref)) {
-        findings.push({
-          severity: "WARNING",
-          code: "missing-cbm-reference",
-          message: "结构引用目标缺失或存在歧义",
-          source: node.path,
-        });
-      } else if (/\.(fam|dev|phm|mod)$/i.test(ref) && !missing.has(ref)) {
-        missing.add(ref);
-        findings.push({
-          severity: "WARNING",
-          code: "missing-reference",
-          message: "引用文件缺失或存在歧义",
-          source: ref,
-        });
-      }
-    }
-  }
+/** Source traversal is local to one project and memoized per declaring node. */
+function createEvidenceReader(
+  cache: LineParserTextCache,
+  resolveFile: (ref: string, owner?: string) => string | undefined,
+) {
   const attrMemo = new Map<
     string,
     { attrs: Attribute[]; refs: string[]; mods: string[] }
@@ -254,6 +206,63 @@ export function buildPowerlineProject(
     attrMemo.set(n.path, result);
     return result;
   }
+  return evidence;
+}
+
+/** Shared projection: source records, unique business objects and occurrence tree are separate. */
+export function buildPowerlineProject(
+  files: LineParserTextFile[],
+  identity: ProjectIdentity,
+  progress?: (stage: string, done: number, total: number) => void,
+): PowerlineProject {
+  const cache = new LineParserTextCache(files);
+  progress?.("解析工程结构", 0, files.length);
+  const graph = buildLineGimGraphFromTexts(files, cache);
+  if (!graph.root) throw new Error("工程没有可达的 project.cbm 入口");
+  const nodes = [...graph.nodesByPath.values()];
+  const resolveNode = (ref: string, owner?: string) => {
+    const path = cache.resolveOriginalPath(ref, owner);
+    return path ? graph.nodesByPath.get(path) : undefined;
+  };
+  const findings: Finding[] = [];
+  const missing = new Set<string>();
+  const resolveFile = (
+    ref: string,
+    sourcePath?: string,
+  ): string | undefined => {
+    const path = cache.resolveOriginalPath(ref, sourcePath);
+    if (!path && !missing.has(ref)) {
+      missing.add(ref);
+      findings.push({
+        severity: "WARNING",
+        code: "missing-reference",
+        message: "引用文件缺失或存在歧义",
+        source: ref,
+      });
+    }
+    return path ?? undefined;
+  };
+  for (const node of nodes) {
+    for (const ref of node.refs.unresolvedFiles ?? []) {
+      if (/\.cbm$/i.test(ref)) {
+        findings.push({
+          severity: "WARNING",
+          code: "missing-cbm-reference",
+          message: "结构引用目标缺失或存在歧义",
+          source: node.path,
+        });
+      } else if (/\.(fam|dev|phm|mod)$/i.test(ref) && !missing.has(ref)) {
+        missing.add(ref);
+        findings.push({
+          severity: "WARNING",
+          code: "missing-reference",
+          message: "引用文件缺失或存在歧义",
+          source: ref,
+        });
+      }
+    }
+  }
+  const evidence = createEvidenceReader(cache, resolveFile);
   const pick = (attrs: Attribute[], keys: string[]) => {
     for (const key of keys) {
       const a = attrs.find(

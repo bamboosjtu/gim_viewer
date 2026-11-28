@@ -89,3 +89,28 @@ export function buildLineAttributeIndex(state: LinePropertyState): LineAttribute
 
   return { famBySourcePath, famByFileNameLower, devBySourcePath, devByFileNameLower };
 }
+
+/** Only use spacing evidence belonging to this node's referenced FAM. A bare duplicate is ambiguous. */
+export function lineBundleSpacing(
+  index: LineAttributeIndex,
+  refs: readonly string[],
+  ownerPath: string,
+) {
+  const found = new Map<string, { mm: number; path: string }>();
+  for (const ref of refs) {
+    const path = ref.replace(/\\/g, '/').toLowerCase(),
+      dir = ownerPath.replace(/\\/g, '/').toLowerCase().split('/').slice(0, -1).join('/');
+    const exact = index.famBySourcePath.get(path) ?? index.famBySourcePath.get(dir + '/' + path);
+    const bucket = exact ?? (!path.includes('/') ? index.famByFileNameLower.get(path) : undefined);
+    if (!bucket) continue;
+    const records = [...bucket.values()].flat();
+    if (!exact && new Set(records.map((r) => r.normalized_path)).size !== 1) continue;
+    for (const r of records)
+      if (r.prop_key.toUpperCase() === 'BUNDLESPACING' && Number(r.prop_value) > 0)
+        found.set(r.normalized_path + '|' + r.prop_value, {
+          mm: Number(r.prop_value),
+          path: r.source_path,
+        });
+  }
+  return found.size === 1 ? [...found.values()][0] : undefined;
+}

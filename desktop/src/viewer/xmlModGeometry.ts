@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import type { StageObserver } from '../measurement/core.js';
 export type DeviceLod = 0 | 1 | 2;
 import { createMeshBooleanBackend, readBooleanMesh } from './meshBooleanBackend.js';
-import type { XmlModColor, XmlModEntity, XmlModPrimitive } from '../gim/geometry/ir.js';
+import type { XmlModColor, XmlModPrimitive } from '../gim/geometry/ir.js';
 import type { XmlModDocument } from '../gim/geometry/xmlModParser.js';
 import {
   entityIndex,
@@ -218,30 +218,6 @@ export function gimMatrixToMatrix4(arr: number[]): THREE.Matrix4 {
 }
 
 /**
- * 将 Entity 转换为 Three.Mesh。
- *
- * - primitive → geometry（按图元参数共享缓存）
- * - color → material（共享缓存）
- * - transformMatrix → fromArray（列主序，与 GIM 实测布局一致）
- *
- * @param e entity 描述
- * @param colorMaxA 当前文件的颜色 A 刻度上限
- */
-export function entityToMesh(e: XmlModEntity, colorMaxA = 100): THREE.Mesh | null {
-  const geometry = primitiveToGeometry(e.primitive);
-  if (!geometry) return null;
-
-  const material = colorToMaterial(e.color, colorMaxA);
-  const mesh = new THREE.Mesh(geometry, material);
-
-  if (e.transformMatrix.length === 16) {
-    mesh.applyMatrix4(gimMatrixToMatrix4(e.transformMatrix));
-  }
-
-  return mesh;
-}
-
-/**
  * A 原始值 → 不透明度。
  *
  * 规则（docs/schema/substation-mod.md 实测四工具）：
@@ -263,7 +239,7 @@ export function resolveOpacity(a: number, maxA: number): { opacity: number; tran
  * - Material 不可在 disposeXmlModGroup 中 dispose（共享）
  * - 项目切换时由 disposeSharedXmlModMaterials 统一释放
  */
-function colorToMaterial(
+export function colorToMaterial(
   color: XmlModColor | undefined,
   colorMaxA = 100,
 ): THREE.MeshStandardMaterial {
@@ -351,22 +327,6 @@ export function applyPhmColorOverride(
 function clamp255(n: number): number {
   if (Number.isNaN(n)) return 0;
   return Math.max(0, Math.min(255, Math.round(n)));
-}
-
-/** 将整个 XmlModDocument 转换为 THREE.Group */
-export function xmlModDocumentToGroup(doc: XmlModDocument): THREE.Group {
-  const group = new THREE.Group();
-  group.name = `xml-mod:${doc.modPath}`;
-  if (doc.isEmpty) return group;
-
-  for (const entity of doc.entities) {
-    const mesh = entityToMesh(entity, doc.colorMaxA);
-    if (!mesh) continue; // 跳过暂停渲染的 primitive
-    mesh.visible = entity.visible;
-    group.add(mesh);
-  }
-  group.scale.setScalar(MOD_MM_TO_SCENE_UNIT);
-  return group;
 }
 
 /**

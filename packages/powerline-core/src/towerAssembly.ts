@@ -55,15 +55,21 @@ export function selectTowerParts(
           selected.add(b.points[j]);
     }
   }
+  const confirmed = missing.length === 0;
   const sections = topology.map((s) => ({
     ...s,
     points: s.points.filter((p) => selected.has(p)),
     // A file-wide R block may physically follow the last SubLeg. Membership follows its resolved endpoints.
-    rods: s.rods.filter((r) =>
-      r.start && r.end
-        ? selected.has(r.start) && selected.has(r.end)
-        : (r.start && selected.has(r.start)) || (r.end && selected.has(r.end)),
-    ),
+    rods: s.rods.filter((r) => {
+      if (r.start && r.end) return selected.has(r.start) && selected.has(r.end);
+      // A trailing reference block can describe any Body. With no resolved endpoint
+      // its membership is indeterminate; retain the declaration for the skeleton diagnostic.
+      if (!r.start && !r.end) {
+        missing.push(`unresolved-rod:${s.sectionIndex}:${r.ordinal}`);
+        return true;
+      }
+      return selected.has((r.start ?? r.end)!);
+    }),
     // Section headers scope P nodes. Exporters may put the template G table after all rods.
     ports: s.ports,
   }));
@@ -75,7 +81,7 @@ export function selectTowerParts(
       [...subLegs].sort((a, b) => a - b),
     ]),
     sections,
-    confirmed: missing.length === 0,
+    confirmed,
     missing,
   };
 }
